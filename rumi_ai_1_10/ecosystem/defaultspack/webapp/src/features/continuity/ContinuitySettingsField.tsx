@@ -280,8 +280,12 @@ export function ContinuitySettingsField({
         </div>
       )}
 
+      <div className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+        Handoff is planning-only in this build. The source remains primary; Rumi records a portable checkpoint plan but does not switch devices automatically.
+      </div>
+
       <div className="grid gap-1.5 sm:grid-cols-3 lg:grid-cols-7">
-        {["Source", "Destination", "Provider", "Preflight", "Transfer", "Verify", "Switch primary"].map((step, index) => (
+        {["Source", "Destination", "Provider", "Preflight", "Plan", "Checkpoint", "Source primary"].map((step, index) => (
           <div
             key={step}
             className={cn(
@@ -337,7 +341,7 @@ export function ContinuitySettingsField({
             }}
             className="h-9 w-full rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-200 outline-none focus:border-zinc-600"
           >
-            <option value="move">Move primary</option>
+            <option value="move">Plan primary move</option>
             <option value="checkpoint">Checkpoint only</option>
             <option value="shadow">Shadow resume</option>
           </select>
@@ -494,7 +498,7 @@ export function ContinuitySettingsField({
             ))}
             {!probe && !plan && (
               <div className="rounded border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] text-zinc-500">
-                Destination, route, credential envelope, and primary lease will be checked before cutover.
+                Destination, route, credential envelope, and source lease will be checked before creating a handoff plan.
               </div>
             )}
           </div>
@@ -503,7 +507,7 @@ export function ContinuitySettingsField({
         <div className="space-y-2">
           <div className="rounded-md border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-[11px] text-zinc-400">
             <div className="flex items-center justify-between gap-2">
-              <span>Transfer</span>
+              <span>Estimated package</span>
               <span className="text-zinc-200">{formatBytes(estimate.total_bytes ?? estimate.bytes)}</span>
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
@@ -512,7 +516,7 @@ export function ContinuitySettingsField({
             </div>
             <div className="mt-1 flex items-center justify-between gap-2">
               <span>Source</span>
-              <span className="text-zinc-200">{mode === "move" ? "Kept until verify" : "Remains primary"}</span>
+              <span className="text-zinc-200">Remains primary</span>
             </div>
           </div>
           <button
@@ -522,7 +526,7 @@ export function ContinuitySettingsField({
             className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-md border border-zinc-800 bg-zinc-950 px-3 text-xs text-zinc-200 hover:border-zinc-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
             {action === "plan" ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
-            Review move
+            Review plan
           </button>
         </div>
       </div>

@@ -1153,13 +1153,16 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
-            "sandbox_workspace_shared": False,
+            "sandbox_workspace_shared": True,
             "sandbox_process_namespace_shared": True,
             "sandbox_network_namespace_shared": True,
             "sandbox_cgroup_scope": "not_claimed",
             "sandbox_operation_binding": "provider_instance_id",
-            "summary": "macOS provider uses a Rumi-owned Lima Ubuntu VM with per-instance workspaces and process cleanup; guest kernel namespaces are not claimed.",
-            "warnings": ["Sandbox instances share the managed guest kernel namespaces; use Docker for container-level isolation."],
+            "summary": "macOS provider uses one Rumi-owned Lima Ubuntu VM. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces.",
+            "warnings": [
+                "Managed Ubuntu does not claim cross-sandbox filesystem isolation or read-only mount enforcement.",
+                "Use Docker for container-level workspace, process, and network isolation.",
+            ],
         }
     if provider_id == "windows_wsl":
         return {
@@ -1169,13 +1172,16 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
-            "sandbox_workspace_shared": False,
+            "sandbox_workspace_shared": True,
             "sandbox_process_namespace_shared": True,
             "sandbox_network_namespace_shared": True,
             "sandbox_cgroup_scope": "not_claimed",
             "sandbox_operation_binding": "provider_instance_id",
-            "summary": "Windows provider uses a Rumi-owned WSL2 Ubuntu distribution with per-instance workspaces and process cleanup; guest kernel namespaces are not claimed.",
-            "warnings": ["Sandbox instances share the managed guest kernel namespaces; use Docker for container-level isolation."],
+            "summary": "Windows provider uses one Rumi-owned WSL2 Ubuntu distribution. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces.",
+            "warnings": [
+                "Managed Ubuntu does not claim cross-sandbox filesystem isolation or read-only mount enforcement.",
+                "Use Docker for container-level workspace, process, and network isolation.",
+            ],
         }
     return {"mode": "unavailable", "summary": "Runtime isolation is unavailable until a provider is ready."}
 

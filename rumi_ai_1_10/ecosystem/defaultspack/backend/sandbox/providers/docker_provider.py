@@ -191,6 +191,7 @@ class DockerProvider:
                 "desktop_rules": spec.metadata.get("desktop_rules") or {},
                 "assigned_agent_id": spec.metadata.get("assigned_agent_id"),
                 "startup": spec.metadata.get("startup") or {},
+                "requires_port_forward": _requires_port_forward(spec),
             },
         )
         self._instances[instance.provider_instance_id] = instance
@@ -206,6 +207,8 @@ class DockerProvider:
             result = self._run([docker_path, "start", name], timeout=30)
             if result.returncode != 0:
                 raise _docker_error("DOCKER_START_FAILED", "Docker sandbox container did not start.", result, status_code=503)
+            if _requires_port_forward_from_state(instance.opaque_state):
+                self._ensure_port_forward_helper(docker_path, name)
             return self._started(instance)
 
         command = _docker_run_command(docker_path, name, instance.opaque_state)
@@ -213,6 +216,8 @@ class DockerProvider:
         if result.returncode != 0:
             raise _docker_error("DOCKER_START_FAILED", "Docker sandbox container did not start.", result, status_code=503)
         self._seed_overlay_workspace(docker_path, name, instance.opaque_state)
+        if _requires_port_forward_from_state(instance.opaque_state):
+            self._ensure_port_forward_helper(docker_path, name)
         return self._started(instance)
 
     def stop(self, instance: ProviderInstance, *, force: bool = False) -> None:
@@ -330,6 +335,16 @@ class DockerProvider:
             )
         return docker_path
 
+    def _ensure_port_forward_helper(self, docker_path: str, name: str) -> None:
+        result = self._run(_docker_port_helper_check_command(docker_path, name), timeout=10)
+        if result.returncode != 0:
+            raise _docker_error(
+                "DOCKER_PORT_FORWARD_HELPER_UNAVAILABLE",
+                "Docker sandbox port forwarding requires python3 in the container image.",
+                result,
+                status_code=503,
+            )
+
     def _docker_path(self) -> str | None:
         if self._configured_docker_path:
             return self._configured_docker_path
@@ -437,6 +452,15 @@ class DockerGuestAgent:
         protocol = str(payload.get("protocol") or "http").strip().lower()
         if protocol not in {"http", "https", "tcp"}:
             raise SandboxContractError("INVALID_SANDBOX_PORT", "Sandbox port protocol must be http, https, or tcp.", status_code=400)
+        helper = self._probe_port_helper()
+        if helper.returncode != 0:
+            return _guest_operation_error(
+                sandbox_id,
+                "DOCKER_PORT_FORWARD_HELPER_UNAVAILABLE",
+                "Docker sandbox port forwarding requires python3 in the container image.",
+                helper,
+                status_code=503,
+            )
         probe = self._probe_container_loopback(port)
         if probe.returncode != 0:
             return _guest_operation_error(
@@ -451,6 +475,21 @@ class DockerGuestAgent:
         if forwarder is None:
             forwarder = self._port_forwarder_factory(self._docker_path, self._container_name, port)
             self._port_forwarders[key] = forwarder
+        if not _forwarder_host_probe(forwarder):
+            forwarder.stop()
+            self._port_forwarders.pop(key, None)
+            return {
+                "ok": False,
+                "sandbox_id": sandbox_id,
+                "port": port,
+                "protocol": protocol,
+                "code": "DOCKER_PORT_FORWARD_UNREACHABLE",
+                "error": "Docker sandbox port forwarding could not be reached from the host.",
+                "status_code": 502,
+                "host_reachable": False,
+                "forwarding": "docker_exec_proxy",
+                "provider_runtime": "docker",
+            }
         scheme = "http" if protocol == "tcp" else protocol
         url = f"{scheme}://{forwarder.host}:{forwarder.host_port}"
         container_url = f"{scheme}://127.0.0.1:{port}"
@@ -489,6 +528,9 @@ class DockerGuestAgent:
             None,
             10,
         )
+
+    def _probe_port_helper(self) -> DockerCommandResult:
+        return self._runner(_docker_port_helper_check_command(self._docker_path, self._container_name), None, 10)
 
     def capture_frame(self, sandbox_id: str, seat_id: str) -> dict[str, object]:
         return {
@@ -557,6 +599,13 @@ class DockerPortForwarder:
             self._listener.close()
         except OSError:
             pass
+
+    def verify_host_reachable(self, *, timeout: float = 2.0) -> bool:
+        try:
+            with socket.create_connection((self.host, self.host_port), timeout=timeout):
+                return True
+        except OSError:
+            return False
 
     def _serve(self) -> None:
         while not self._closed.is_set():
@@ -700,6 +749,36 @@ def _docker_run_command(docker_path: str, name: str, opaque_state: Mapping[str, 
     return command
 
 
+def _docker_port_helper_check_command(docker_path: str, name: str) -> tuple[str, ...]:
+    return (
+        docker_path,
+        "exec",
+        name,
+        "python3",
+        "-c",
+        "import select, socket, sys",
+    )
+
+
+def _forwarder_host_probe(forwarder: "DockerPortForwarder") -> bool:
+    verify = getattr(forwarder, "verify_host_reachable", None)
+    if callable(verify):
+        return bool(verify(timeout=2.0))
+    try:
+        with socket.create_connection((str(forwarder.host), int(forwarder.host_port)), timeout=2.0):
+            return True
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def _requires_port_forward(spec: SandboxCreateSpec) -> bool:
+    return "sandbox.port_forward" in spec.template.provider_requirements or "sandbox.port.expose" in spec.template.allowed_operations
+
+
+def _requires_port_forward_from_state(opaque_state: Mapping[str, object]) -> bool:
+    return opaque_state.get("requires_port_forward") is True
+
+
 def _workspace_binding(opaque_state: Mapping[str, object]) -> Mapping[str, object]:
     workspace = opaque_state.get("workspace_binding")
     return workspace if isinstance(workspace, Mapping) else {}
@@ -827,13 +906,15 @@ def _guest_operation_error(
     code: str,
     message: str,
     result: DockerCommandResult,
+    *,
+    status_code: int = 502,
 ) -> dict[str, object]:
     return {
         "ok": False,
         "sandbox_id": sandbox_id,
         "code": code,
         "error": message,
-        "status_code": 502,
+        "status_code": status_code,
         "details": {"exit_code": result.returncode, "stderr": result.stderr.strip()[:1000]},
     }
 

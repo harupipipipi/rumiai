@@ -119,10 +119,10 @@ class FakeManagedUbuntuCli:
                 env[key] = value
                 index += 1
             command = argv[index:]
-            if command[:2] == ["bash", "-lc"] and "rumi-cd" in command:
-                marker_index = command.index("rumi-cd")
+            if command[:2] == ["bash", "-lc"] and "rumi-exec" in command:
+                marker_index = command.index("rumi-exec")
                 cwd = command[marker_index + 1]
-                return self._guest_exec(command[marker_index + 2 :], cwd=cwd, env=env)
+                return self._guest_exec(command[marker_index + 3 :], cwd=cwd, env=env)
             return self._guest_exec(command, cwd="", env=env)
         if argv[:2] == ["bash", "-lc"]:
             script = argv[2]
@@ -448,9 +448,64 @@ def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkey
     assert ambient["exit_code"] == 1
     assert "env" in exec_call[0]
     assert "-i" in exec_call[0]
+    assert "rumi-exec" in exec_call[0]
+    assert f"/tmp/rumi-managed-runtime/{started.provider_instance_id}" in exec_call[0]
     assert f"RUMI_SANDBOX_INSTANCE={started.provider_instance_id}" in exec_call[0]
     assert f"RUMI_SANDBOX_WORKSPACE={started.opaque_state['guest_workspace']}" in exec_call[0]
     assert all(not part.startswith("HOST_SECRET=") for part in exec_call[0])
+
+
+def test_managed_ubuntu_exec_rejects_reserved_env_override(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"})),
+        ),
+        NullProgressSink(),
+    )
+    started = provider.start(provider.create(_create_spec(_template(desktop=False))))
+    agent = provider.connect_agent(started)
+
+    with pytest.raises(SandboxContractError) as excinfo:
+        agent.exec(
+            started.sandbox_id,
+            {
+                "argv": ["true"],
+                "cwd": ".",
+                "env": {"RUMI_SANDBOX_INSTANCE": "spoofed"},
+                "client_request_id": "exec-reserved-env",
+            },
+        )
+
+    assert excinfo.value.code == "INVALID_EXEC_REQUEST"
+    assert excinfo.value.details["reserved_env"] == ["RUMI_SANDBOX_INSTANCE"]
+
+
+def test_managed_ubuntu_non_desktop_reconcile_keeps_instance_ready_for_cleanup(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="mac_lima",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"})),
+        ),
+        NullProgressSink(),
+    )
+    started = provider.start(provider.create(_create_spec(_template(desktop=False))))
+
+    reconciled = provider.reconcile(started)
+    provider.stop(reconciled.instance)
+    stop_script = fake.guest_scripts[-1]
+
+    assert reconciled.instance.state == "ready"
+    assert f"{started.opaque_state['guest_workspace']}" in fake.guest_scripts[-2]
+    assert f"{started.provider_instance_id}" in stop_script
+    assert "/procs/*.pid" in stop_script
+    assert 'kill -"$signal" -- "-$pid"' in stop_script
 
 
 def test_managed_ubuntu_instances_bind_agent_operations_to_distinct_workspaces(monkeypatch, tmp_path) -> None:

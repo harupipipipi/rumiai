@@ -1,9 +1,24 @@
-# Managed Sandbox Runtime Acceptance Contract
+# Managed Sandbox Runtime Scope Snapshot
 
 This repo-local document is adapted from the handoff plan at
 `/tmp/rumiai-handoff.aM5MrE/rumiai-managed-runtime-handoff/IMPLEMENTATION_PLAN.md`.
-Treat it as the acceptance contract for the managed sandbox runtime, desktop
-seat, template, diagnostics, and support-tooling work.
+It is no longer the acceptance contract for PR #369. The current PR scope is a
+foundation: defaultspack runtime/provider wiring, Linux native desktop seats,
+optional Docker-backed non-desktop sandboxes, and managed Ubuntu providers that
+can create/provision a guest only after the platform launcher is already
+available.
+
+Out of scope for this PR and tracked as follow-up implementation work:
+
+- bundling or silently installing Lima on macOS,
+- enabling WSL, handling Windows elevation/reboot resume, or installing WSL when
+  `wsl.exe` is absent,
+- claiming per-sandbox filesystem/process isolation inside a shared Lima/WSL
+  Ubuntu guest,
+- automatic primary-device cutover in Continuity handoff flows.
+
+Where the historical plan below describes stronger end-state behavior, the
+runtime UI, provider diagnostics, and overview docs take precedence for PR #369.
 
 # Rumi Managed Sandbox Runtime + Desktop Seats - Single PR Implementation Plan
 
@@ -12,7 +27,9 @@ seat, template, diagnostics, and support-tooling work.
 - **Branch:** `feature/managed-sandbox-runtime`
 - **PR title:** `[runtime] Add cross-platform managed sandboxes and desktop seats`
 - **Base:** current `master`
-- **Delivery rule:** one draft PR, multiple reviewable commits, no follow-up implementation PR.
+- **Delivery rule:** one PR for the current foundation scope; bundled launcher
+  bootstrap, stronger guest isolation, and full cross-platform setup remain
+  follow-up implementation work.
 - **Primary user surface:** defaultspack Rumi DP. Add **Desktops** directly below **Kanban** in both the full history sidebar and compact rail.
 
 This PR turns the current sandbox placeholders into a single managed execution platform used by:
@@ -23,7 +40,12 @@ This PR turns the current sandbox placeholders into a single managed execution p
 4. browser sandboxes,
 5. future ephemeral tool sandboxes.
 
-The user must not be instructed to manually install Docker Desktop, Ubuntu, Lima, Colima, or a WSL distribution. Rumi performs setup from its own UI. OS-owned consent cannot be bypassed: Windows may require one administrator approval and a reboot to enable WSL2; macOS may display virtualization/security approval; third-party license acceptance must remain explicit.
+For PR #369, Rumi does not install Docker Desktop and does not silently install
+or bundle host launchers. If Lima or `wsl.exe` is unavailable, provider doctor
+fails closed and gives an explicit launcher requirement. Once the launcher is
+available, Rumi can create/provision the managed Ubuntu guest from its runtime UI.
+OS-owned consent cannot be bypassed; later Windows/macOS launcher bootstrap and
+reboot-resume flows must keep those prompts explicit.
 
 ---
 
@@ -124,33 +146,38 @@ Rumi DP / AI functions / pack runner / coding runner
 
 #### Windows
 
-1. `windows_wsl` using the Rumi-managed `RumiUbuntu` WSL2 distribution.
+1. `windows_wsl` using the Rumi-managed `RumiUbuntu` WSL2 distribution when
+   `wsl.exe` is already available.
 2. existing Docker-compatible context only when explicitly selected or a template requires it.
-3. guided WSL2 enablement when WSL2 is unavailable.
+3. unavailable with actionable diagnostics when WSL2 is unavailable.
 
 #### macOS
 
-1. `mac_lima` using Rumi-managed Lima and an Ubuntu guest.
+1. `mac_lima` using an Ubuntu guest when `limactl` is already available.
 2. existing Docker/Colima/Podman context only when explicitly selected or required.
 3. unavailable with virtualization diagnostics.
 
 Docker Desktop is never silently installed and never the default prerequisite.
 
-### 2.3 User installation promise
+### 2.3 User installation promise for this PR
+
+This PR only provisions guests after the required host launcher is present.
+Bundled Lima installation, WSL feature enablement, Windows reboot resume, and
+strong per-instance guest isolation are follow-up work.
 
 Allowed user experience:
 
 - Click **Set up Rumi Managed Runtime**.
-- Approve an OS elevation prompt if Windows must enable WSL2.
-- Reboot if Windows reports it is required.
-- Resume setup automatically after Rumi starts again.
+- See a fail-closed diagnostic when `limactl` or `wsl.exe` is missing.
+- Create/provision the Rumi Ubuntu guest after the launcher is available.
 - Approve any macOS security/virtualization prompt shown by the OS.
 
 Disallowed user experience:
 
 - “Open PowerShell and run these seven commands.”
 - “Install Docker Desktop first.”
-- “Install Homebrew, Lima, Ubuntu, Xvfb, or Openbox yourself.”
+- representing launcher installation or guest isolation as completed when it is
+  still follow-up work,
 - silently accepting a Docker/Desktop third-party license,
 - silently enabling OS features without a clear Rumi confirmation screen.
 
@@ -1379,23 +1406,28 @@ git diff --check
 14. `test(runtime): add provider, security, integration, and UI coverage`
 15. `docs(runtime): finalize operations, troubleshooting, and release evidence`
 
-Commits may be reordered to preserve green intermediate states, but no implementation is deferred to a second PR.
+Commits may be reordered to preserve green intermediate states. Items marked as
+future below are intentionally deferred beyond the PR #369 foundation scope.
 
 ---
 
 ## 19. Definition of Done
 
-The PR is not ready until every checked item is true:
+For PR #369, this checklist records foundation readiness plus explicit future
+work. Future items are not claimed as complete by this PR.
 
 ### Product
 
 - [ ] Desktops is directly below Kanban in full and compact Rumi DP.
 - [ ] Linux creates and controls at least three hidden desktop seats without Docker.
-- [ ] Windows performs guided WSL2 setup/import and runs RumiUbuntu without Docker Desktop.
-- [ ] macOS creates a Rumi-managed Lima Ubuntu VM without Docker Desktop/Homebrew.
+- [ ] Windows creates/provisions RumiUbuntu when `wsl.exe` is available.
+- [ ] Future: Windows performs guided WSL2 enablement/elevation/reboot resume.
+- [ ] macOS creates/provisions a Lima Ubuntu VM when `limactl` is available.
+- [ ] Future: Rumi bundles or installs the Lima launcher without Homebrew.
 - [ ] Existing Docker-compatible runtimes are optional providers.
-- [ ] User is not told to manually install Ubuntu/Docker/Lima/Colima/WSL distro.
-- [ ] Required OS consent/reboot is explicit and resumable.
+- [ ] User is not told to install Docker Desktop as a prerequisite.
+- [ ] Missing Lima/WSL launchers fail closed with explicit diagnostics.
+- [ ] Future: required OS consent/reboot is explicit and resumable.
 - [ ] Pack isolation uses managed sandbox templates.
 - [ ] Coding execution uses managed sandbox templates.
 - [ ] Desktop Monitor uses the same manager/provider/agent stack.

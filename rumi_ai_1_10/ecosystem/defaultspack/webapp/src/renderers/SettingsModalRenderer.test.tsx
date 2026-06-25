@@ -519,8 +519,13 @@ test("SettingsModalRenderer renders continuity handoff controls", () => {
   assert.match(html, /Current primary/);
   assert.match(html, /Source/);
   assert.match(html, /Destination/);
+  assert.match(html, /planning-only/);
+  assert.match(html, /Source primary/);
+  assert.match(html, /Review plan/);
   assert.match(html, /Completed/);
   assert.doesNotMatch(html, /Return to this device/);
+  assert.doesNotMatch(html, /Switch primary/);
+  assert.doesNotMatch(html, /Move primary/);
   assert.match(html, /Advanced routing details/);
   assert.doesNotMatch(html, /COMPLETED/);
 });

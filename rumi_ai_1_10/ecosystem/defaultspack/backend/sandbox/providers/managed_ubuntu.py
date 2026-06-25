@@ -63,6 +63,15 @@ WSL_ROOTFS_CACHE_DIR_ENV = "RUMI_WSL_ROOTFS_CACHE_DIR"
 WSL_ROOTFS_URL_ENV = "RUMI_WSL_ROOTFS_URL"
 MAX_FILE_PATCH_BYTES = 2 * 1024 * 1024
 MAX_WORKSPACE_SEED_BYTES = 64 * 1024 * 1024
+RESERVED_EXEC_ENV_KEYS = frozenset(
+    {
+        "HOME",
+        "PATH",
+        "RUMI_SANDBOX_ID",
+        "RUMI_SANDBOX_INSTANCE",
+        "RUMI_SANDBOX_WORKSPACE",
+    }
+)
 DEFAULT_WSL_ROOTFS_URLS = {
     "amd64": "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-amd64-wsl.rootfs.tar.gz",
     "arm64": "https://cloud-images.ubuntu.com/wsl/releases/22.04/current/ubuntu-jammy-wsl-arm64-wsl.rootfs.tar.gz",
@@ -374,7 +383,10 @@ class ManagedUbuntuProvider:
 
     def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
         command_path = str(persisted.opaque_state.get("command_path") or self._command_path() or self._launcher_command)
-        running = self._desktop_running(command_path, persisted.provider_instance_id)
+        if persisted.opaque_state.get("desktop_enabled") is True:
+            running = self._desktop_running(command_path, persisted.provider_instance_id)
+        else:
+            running = self._instance_exists(command_path, persisted.provider_instance_id, _instance_workspace_dir_for(persisted))
         state = "ready" if running else "stopped"
         current = ProviderInstance(
             provider_id=persisted.provider_id,
@@ -526,6 +538,10 @@ class ManagedUbuntuProvider:
 
     def _desktop_running(self, command_path: str, provider_instance_id: str) -> bool:
         result = self._guest_shell(command_path, _desktop_running_script(provider_instance_id), timeout=10, check=False)
+        return result.returncode == 0
+
+    def _instance_exists(self, command_path: str, provider_instance_id: str, workspace_dir: str) -> bool:
+        result = self._guest_shell(command_path, _instance_exists_script(provider_instance_id, workspace_dir), timeout=10, check=False)
         return result.returncode == 0
 
     def _allocate_guest_display(self) -> str:
@@ -1241,17 +1257,17 @@ def _desktop_start_script(
         "}\n"
         "if [ \"$RUMI_NETWORK_DISABLED\" = '1' ]; then rumi_run true; fi\n"
         f"if [ ! -f {runtime_dir}/xvfb.pid ] || ! kill -0 $(cat {runtime_dir}/xvfb.pid) >/dev/null 2>&1; then\n"
-        f"  rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" Xvfb {display} -screen 0 {width}x{height}x24 -nolisten tcp >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
+        f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" Xvfb {display} -screen 0 {width}x{height}x24 -nolisten tcp >{runtime_dir}/xvfb.log 2>&1 & echo $! > {runtime_dir}/xvfb.pid\n"
         "  sleep 0.5\n"
         "fi\n"
         f"if [ ! -f {runtime_dir}/openbox.pid ] || ! kill -0 $(cat {runtime_dir}/openbox.pid) >/dev/null 2>&1; then\n"
-        f"  rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
+        f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} openbox >{runtime_dir}/openbox.log 2>&1 & echo $! > {runtime_dir}/openbox.pid\n"
         "fi\n"
     )
     if starter == "terminal":
         script += (
             f"if command -v xterm >/dev/null 2>&1; then\n"
-            f"  rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd \"$1\"; exec bash' rumi-terminal {quoted_workspace} >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
+            f"  rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} xterm -title 'Rumi Desktop' -e bash -lc 'cd \"$1\"; exec bash' rumi-terminal {quoted_workspace} >{runtime_dir}/starter-terminal.log 2>&1 & echo $! > {runtime_dir}/starter-terminal.pid\n"
             "else\n"
             f"  echo 'xterm is not installed; terminal starter skipped' >{runtime_dir}/starter-terminal.log\n"
             "fi\n"
@@ -1272,11 +1288,11 @@ def _desktop_start_script(
                 "if [ -n \"$BROWSER_BIN\" ]; then\n"
                 "  mkdir -p " + runtime_dir + "/browser-profile\n"
                 "  if [ \"$BROWSER_BIN\" = 'xdg-open' ]; then\n"
-                f"    rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
                 "  elif [ -n \"$BROWSER_URL\" ]; then\n"
-                f"    rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile \"$BROWSER_URL\" >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
                 "  else\n"
-                f"    rumi_run env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
+                f"    rumi_run setsid env RUMI_SANDBOX_INSTANCE=\"$RUMI_SANDBOX_INSTANCE\" RUMI_SANDBOX_WORKSPACE=\"$RUMI_SANDBOX_WORKSPACE\" DISPLAY={display} \"$BROWSER_BIN\" --no-first-run --disable-dev-shm-usage --user-data-dir={runtime_dir}/browser-profile >{runtime_dir}/starter-browser.log 2>&1 & echo $! > {runtime_dir}/starter-browser.pid\n"
                 "  fi\n"
                 "else\n"
                 f"  echo 'No browser executable found; browser starter skipped' >{runtime_dir}/starter-browser.log\n"
@@ -1396,8 +1412,21 @@ def _desktop_stop_script(provider_instance_id: str) -> str:
     instance = shlex.quote(provider_instance_id)
     return (
         "set +e\n"
-        f"for pidfile in {runtime_dir}/starter-browser.pid {runtime_dir}/starter-terminal.pid {runtime_dir}/openbox.pid {runtime_dir}/xvfb.pid; do\n"
-        "  if [ -f \"$pidfile\" ]; then kill $(cat \"$pidfile\") >/dev/null 2>&1 || true; rm -f \"$pidfile\"; fi\n"
+        "rumi_kill_pidfile() {\n"
+        "  signal=\"$1\"\n"
+        "  pidfile=\"$2\"\n"
+        "  [ -f \"$pidfile\" ] || return 0\n"
+        "  pid=\"$(cat \"$pidfile\" 2>/dev/null || true)\"\n"
+        "  case \"$pid\" in ''|*[!0-9]*) rm -f \"$pidfile\"; return 0;; esac\n"
+        "  kill -\"$signal\" -- \"-$pid\" >/dev/null 2>&1 || kill -\"$signal\" \"$pid\" >/dev/null 2>&1 || true\n"
+        "  rm -f \"$pidfile\"\n"
+        "}\n"
+        f"for pidfile in {runtime_dir}/starter-browser.pid {runtime_dir}/starter-terminal.pid {runtime_dir}/openbox.pid {runtime_dir}/xvfb.pid {runtime_dir}/procs/*.pid; do\n"
+        "  rumi_kill_pidfile TERM \"$pidfile\"\n"
+        "done\n"
+        "sleep 0.2\n"
+        f"for pidfile in {runtime_dir}/starter-browser.pid {runtime_dir}/starter-terminal.pid {runtime_dir}/openbox.pid {runtime_dir}/xvfb.pid {runtime_dir}/procs/*.pid; do\n"
+        "  rumi_kill_pidfile KILL \"$pidfile\"\n"
         "done\n"
         f"RUMI_SANDBOX_INSTANCE={instance}\n"
         "rumi_kill_instance_processes() {\n"
@@ -1429,6 +1458,10 @@ def _desktop_running_script(provider_instance_id: str) -> str:
     return f"test -f {runtime_dir}/xvfb.pid && kill -0 $(cat {runtime_dir}/xvfb.pid)"
 
 
+def _instance_exists_script(provider_instance_id: str, workspace_dir: str) -> str:
+    return f"test -d {shlex.quote(_runtime_dir(provider_instance_id))} || test -d {shlex.quote(workspace_dir)}"
+
+
 def _runtime_dir(provider_instance_id: str) -> str:
     return f"/tmp/rumi-managed-runtime/{_safe_instance_name(provider_instance_id)}"
 
@@ -1458,6 +1491,7 @@ def _exec_argv(
     provider_instance_id: str,
 ) -> tuple[str, ...]:
     cwd_path = _container_path(workspace_dir, cwd)
+    runtime_dir = _runtime_dir(provider_instance_id)
     env_pairs = _exec_env_pairs(
         env,
         workspace_dir=workspace_dir,
@@ -1470,9 +1504,14 @@ def _exec_argv(
         *env_pairs,
         "bash",
         "-lc",
-        'cd "$1" && shift && exec "$@"',
-        "rumi-cd",
+        (
+            'cd "$1" || exit; shift; runtime_dir="$1"; shift; mkdir -p "$runtime_dir/procs" || exit; '
+            'pidfile="$runtime_dir/procs/exec-$$.pid"; setsid "$@" & child=$!; '
+            'echo "$child" > "$pidfile"; wait "$child"; status=$?; rm -f "$pidfile"; exit "$status"'
+        ),
+        "rumi-exec",
         cwd_path,
+        runtime_dir,
         *argv,
     )
 
@@ -1484,6 +1523,14 @@ def _exec_env_pairs(
     sandbox_id: str,
     provider_instance_id: str,
 ) -> tuple[str, ...]:
+    reserved = sorted(str(key) for key in env if str(key) in RESERVED_EXEC_ENV_KEYS)
+    if reserved:
+        raise SandboxContractError(
+            "INVALID_EXEC_REQUEST",
+            "Sandbox exec env cannot override reserved runtime variables.",
+            status_code=400,
+            details={"reserved_env": reserved},
+        )
     base = {
         "HOME": f"{_runtime_dir(provider_instance_id)}/home",
         "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",

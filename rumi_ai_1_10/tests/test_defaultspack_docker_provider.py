@@ -17,6 +17,8 @@ class FakeDockerCli:
         self.states: dict[str, str] = {}
         self.networks: dict[str, str] = {}
         self.exec_stdout = "hello\n"
+        self.python_available = True
+        self.forwarder_probe_success = True
         self.forwarders: list[FakeDockerPortForwarder] = []
 
     def __call__(
@@ -58,6 +60,10 @@ class FakeDockerCli:
         if cmd[1] == "cp":
             return DockerCommandResult(returncode=0)
         if cmd[1] == "exec":
+            if "python3" in cmd:
+                if not self.python_available:
+                    return DockerCommandResult(returncode=127, stderr="python3: not found")
+                return DockerCommandResult(returncode=0, stdout=self.exec_stdout)
             if cmd[-3:] == ["mkdir", "-p", "/workspace/src"]:
                 return DockerCommandResult(returncode=0)
             return DockerCommandResult(returncode=0, stdout=self.exec_stdout)
@@ -73,20 +79,31 @@ class FakeDockerCli:
 class FakeDockerPortForwarder:
     host = "127.0.0.1"
 
-    def __init__(self, docker_path: str, container_name: str, target_port: int, *, host_port: int) -> None:
+    def __init__(self, docker_path: str, container_name: str, target_port: int, *, host_port: int, probe_success: bool = True) -> None:
         self.docker_path = docker_path
         self.container_name = container_name
         self.target_port = target_port
         self.host_port = host_port
+        self.probe_success = probe_success
         self.stopped = False
 
     def stop(self) -> None:
         self.stopped = True
 
+    def verify_host_reachable(self, *, timeout: float = 2.0) -> bool:
+        del timeout
+        return self.probe_success
+
 
 def _manager(tmp_path, fake: FakeDockerCli) -> SandboxManager:
     def forwarder_factory(docker_path: str, container_name: str, target_port: int) -> FakeDockerPortForwarder:
-        forwarder = FakeDockerPortForwarder(docker_path, container_name, target_port, host_port=49152 + len(fake.forwarders))
+        forwarder = FakeDockerPortForwarder(
+            docker_path,
+            container_name,
+            target_port,
+            host_port=49152 + len(fake.forwarders),
+            probe_success=fake.forwarder_probe_success,
+        )
         fake.forwarders.append(forwarder)
         return forwarder
 
@@ -189,6 +206,17 @@ def test_docker_provider_uses_node_image_for_node_template(tmp_path) -> None:
     assert "node:20-bookworm-slim" in docker_run
 
 
+def test_docker_provider_rejects_port_forward_template_when_helper_missing(tmp_path) -> None:
+    fake = FakeDockerCli()
+    fake.python_available = False
+    manager = _manager(tmp_path, fake)
+
+    created = manager.create(display=False, provider_id="docker", template_id="coding.node")
+
+    assert created["ok"] is False
+    assert created["code"] == "DOCKER_PORT_FORWARD_HELPER_UNAVAILABLE"
+
+
 def test_docker_provider_mounts_trusted_workspace_read_only(tmp_path, monkeypatch) -> None:
     workspace_root = _trusted_workspace(tmp_path, monkeypatch)
     fake = FakeDockerCli()
@@ -259,7 +287,7 @@ def test_docker_provider_applies_file_patch_inside_container(tmp_path) -> None:
 
     assert result["ok"] is True
     assert result["files_written"] == 1
-    mkdir = fake.command_with("exec")
+    mkdir = next(command for command, _input, _timeout in fake.calls if command[-3:] == ["mkdir", "-p", "/workspace/src"])
     copy = fake.command_with("cp")
     assert mkdir[-3:] == ["mkdir", "-p", "/workspace/src"]
     assert copy[-1].endswith(":/workspace/src/app.py")
@@ -307,6 +335,35 @@ def test_docker_provider_exposes_container_port_metadata(tmp_path) -> None:
     assert fake.forwarders[0].container_name == f"rumi-sandbox-{created['sandbox_id']}"
     assert fake.forwarders[0].target_port == 3000
     assert destroyed["ok"] is True
+    assert fake.forwarders[0].stopped is True
+
+
+def test_docker_provider_port_exposure_requires_python_helper(tmp_path) -> None:
+    fake = FakeDockerCli()
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+    fake.python_available = False
+
+    result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+
+    assert result["ok"] is False
+    assert result["code"] == "DOCKER_PORT_FORWARD_HELPER_UNAVAILABLE"
+    assert result["status_code"] == 503
+    assert fake.forwarders == []
+
+
+def test_docker_provider_port_exposure_requires_host_probe(tmp_path) -> None:
+    fake = FakeDockerCli()
+    fake.forwarder_probe_success = False
+    manager = _manager(tmp_path, fake)
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
+
+    result = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+
+    assert result["ok"] is False
+    assert result["code"] == "DOCKER_PORT_FORWARD_UNREACHABLE"
+    assert result["host_reachable"] is False
+    assert len(fake.forwarders) == 1
     assert fake.forwarders[0].stopped is True
 
 
