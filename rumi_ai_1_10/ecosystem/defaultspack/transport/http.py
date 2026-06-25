@@ -1147,8 +1147,10 @@ class DefaultsHttpServer:
             "config": config,
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
-            "actor_principal": request_data.get("_authenticated_principal"),
         }
+        actor_principal = request_data.get("_authenticated_principal")
+        if actor_principal is not None:
+            approval_kwargs["actor_principal"] = actor_principal
         attestation = request_data.get("attestation")
         if isinstance(attestation, dict):
             approval_kwargs["attestation"] = attestation
