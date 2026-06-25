@@ -214,6 +214,7 @@ class AdaptiveService:
         return compiled
 
     def onboarding_apply(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_not_frozen("onboarding.apply")
         plan = args.get("plan") if isinstance(args.get("plan"), dict) else None
         if plan is None:
             compiled_preview = self.onboarding_compile(args, ctx)
@@ -494,6 +495,7 @@ class AdaptiveService:
 
     def prepared_action_prepare(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("prepared_action.prepare")
         action_type = str(args.get("action_type") or args.get("type") or args.get("operation") or "").strip()
         if not action_type:
             raise AdaptiveError("INVALID_INPUT", "action_type is required")
@@ -525,6 +527,7 @@ class AdaptiveService:
 
     def prepared_action_commit(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("prepared_action.commit")
         action, actions = self._find_action(args)
         if action.get("status") == "revoked":
             raise AdaptiveError("ACTION_REVOKED", "revoked prepared action cannot be committed")
@@ -537,6 +540,7 @@ class AdaptiveService:
 
     def prepared_action_revoke(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("prepared_action.revoke")
         action, actions = self._find_action(args)
         action["status"] = "revoked"
         action["revoked_at"] = now_iso()
@@ -642,6 +646,7 @@ class AdaptiveService:
     # Leases
 
     def orchestration_lease_acquire(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_not_frozen("orchestration.lease.acquire")
         key = str(args.get("key") or args.get("lease_key") or args.get("resource") or "").strip()
         if not key:
             raise AdaptiveError("INVALID_INPUT", "lease key is required")
@@ -741,6 +746,7 @@ class AdaptiveService:
 
     def operating_profile_activate(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("operating_profile.activate")
         target = str(args.get("target_profile_id") or args.get("profile_id") or self.profile_id)
         try:
             from core_runtime.startup_profiles import StartupProfileManager
@@ -770,6 +776,7 @@ class AdaptiveService:
 
     def skill_candidate_promote(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("skill_candidate.promote")
         candidate_id = str(args.get("candidate_id") or "").strip()
         if not candidate_id:
             raise AdaptiveError("INVALID_INPUT", "candidate_id is required")
@@ -777,6 +784,7 @@ class AdaptiveService:
 
     def skill_candidate_rollback(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
+        self._ensure_not_frozen("skill_candidate.rollback")
         candidate_id = str(args.get("candidate_id") or "").strip()
         if not candidate_id:
             raise AdaptiveError("INVALID_INPUT", "candidate_id is required")
@@ -866,6 +874,15 @@ class AdaptiveService:
             {"profile_id": self.profile_id, "frozen": False, "reason": None, "updated_at": None},
         )
         return state if isinstance(state, dict) else {"profile_id": self.profile_id, "frozen": False}
+
+    def _ensure_not_frozen(self, operation: str) -> None:
+        state = self._freeze_state()
+        if bool(state.get("frozen")):
+            raise AdaptiveError(
+                "ADAPTIVE_FROZEN",
+                "adaptive runtime is frozen",
+                details={"operation": operation, "reason": state.get("reason")},
+            )
 
     def _normalize_onboarding_profile(self, args: dict[str, Any]) -> dict[str, Any]:
         draft = args.get("profile")

@@ -36,6 +36,9 @@ def test_adaptive_dispatch_compile_apply_and_activity(tmp_path, monkeypatch: pyt
     snapshot = AdaptiveRuntimeService(profile_id="coding").activity_snapshot()
     assert snapshot["freeze"]["frozen"] is True
     assert snapshot["events"]
+    blocked = dispatch("lease_acquire", {"profile_id": "coding", "resource": "src/App.tsx"}, {})
+    assert blocked["status"] == "error"
+    assert blocked["code"] == "ADAPTIVE_FROZEN"
 
 
 def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
