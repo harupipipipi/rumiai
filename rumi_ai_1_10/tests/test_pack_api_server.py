@@ -228,6 +228,64 @@ class TestClientDisconnectHandling:
 
 
 class TestCheckAuth:
+    def test_scoped_bearer_sets_authenticated_principal(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="scoped-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        issued = manager.issue_token(
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=["kernel_api"],
+        )
+        handler = _make_handler(
+            headers=_make_headers(Authorization=f"Bearer {issued.access_token}"),
+        )
+
+        try:
+            assert handler._check_auth("GET", "/api/packs") is True
+            assert handler._request_auth_mode == "bearer"
+            assert handler._authenticated_principal.profile_id == "work"
+            assert handler._authenticated_principal.principal_id == "profile:work__surface:mobile__device:phone-1"
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
+    def test_scoped_bearer_requires_kernel_api_audience(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="scoped-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        issued = manager.issue_token(
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=["browser_companion"],
+        )
+        handler = _make_handler(
+            headers=_make_headers(Authorization=f"Bearer {issued.access_token}"),
+        )
+
+        try:
+            assert handler._check_auth("GET", "/api/packs") is False
+            assert getattr(handler, "_authenticated_principal", None) is None
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
     def test_auth_success_hmac_manager(self) -> None:
         """HMACKeyManager.verify_token が True を返す → 認証成功"""
         mock_mgr = MagicMock()
@@ -238,6 +296,136 @@ class TestCheckAuth:
         )
         assert handler._check_auth("GET", "/api/packs") is True
         mock_mgr.verify_token.assert_called_once_with("my-secret-token")
+        assert handler._authenticated_principal.core_role is True
+
+    def test_legacy_bearer_from_lan_is_rejected_by_default(self, monkeypatch) -> None:
+        mock_mgr = MagicMock()
+        mock_mgr.verify_token.return_value = True
+        handler = _make_handler(
+            headers=_make_headers(Authorization="Bearer legacy-root-token"),
+            _hmac_key_manager=mock_mgr,
+            client_address=("192.168.1.30", 54321),
+        )
+        monkeypatch.delenv("RUMI_ALLOW_LEGACY_REMOTE_BEARER", raising=False)
+
+        assert handler._check_auth("GET", "/api/packs") is False
+        mock_mgr.verify_token.assert_not_called()
+
+    def test_legacy_bearer_remote_compat_flag_allows_lan(self, monkeypatch) -> None:
+        mock_mgr = MagicMock()
+        mock_mgr.verify_token.return_value = True
+        handler = _make_handler(
+            headers=_make_headers(Authorization="Bearer legacy-root-token"),
+            _hmac_key_manager=mock_mgr,
+            client_address=("192.168.1.30", 54321),
+        )
+        monkeypatch.setenv("RUMI_ALLOW_LEGACY_REMOTE_BEARER", "1")
+
+        assert handler._check_auth("GET", "/api/packs") is True
+        assert handler._authenticated_principal.core_role is True
+
+    def test_scoped_route_authorization_uses_server_principal(self, tmp_path, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("r" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        grants.grant_permission("profile:work", "pack.read", {})
+        grants.grant_permission("profile:work__surface:mobile", "pack.read", {})
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route("GET", "/api/packs") is True
+
+    def test_scoped_route_authorization_rejects_client_claimed_profile(self, tmp_path, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("s" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route("GET", "/api/packs") is False
+        handler._send_response.assert_called_once()
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
+
+    def test_mobile_client_cannot_approve_authority_request(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="phone-1",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route(
+            "POST",
+            "/api/authority/requests/req-1/approve",
+        ) is False
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
+
+    def test_mobile_approver_is_limited_to_authority_request_routes(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_approver",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        approve_handler = _make_handler(_authenticated_principal=principal)
+        packs_handler = _make_handler(_authenticated_principal=principal)
+
+        assert approve_handler._authorize_authenticated_route(
+            "POST",
+            "/api/authority/requests/req-1/approve",
+        ) is True
+        assert packs_handler._authorize_authenticated_route("GET", "/api/packs") is False
+        response, status = packs_handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
 
     def test_auth_failure_no_header(self) -> None:
         """Authorization ヘッダーなし → 認証失敗"""
@@ -393,6 +581,21 @@ class TestCheckAuth:
         assert "[REDACTED]" in logged_message
         assert "secret-code" not in logged_message
         assert "secret-token" not in logged_message
+
+    def test_defaultspack_request_data_strips_credentials_from_forwarded_headers(self) -> None:
+        handler = _make_handler(
+            path="/api/ai/provider-key",
+            headers=_make_headers(
+                Authorization="Bearer root-token",
+                Cookie="rumi_panel_session=session",
+                X_Rumi_Csrf="csrf-token",
+                X_Test="kept",
+            ),
+        )
+
+        request_data = handler._defaultspack_request_data("GET")
+
+        assert request_data["_headers"] == {"X-Test": "kept"}
 
 
 # ---------------------------------------------------------------------------

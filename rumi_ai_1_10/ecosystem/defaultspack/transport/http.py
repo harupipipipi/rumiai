@@ -16,6 +16,8 @@ import http.server
 import urllib.parse
 from pathlib import Path
 
+from core_runtime.api.safe_headers import sanitized_forwarded_headers
+
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
     METHOD_SENSITIVE_CODING_PATHS,
@@ -1497,7 +1499,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 ).items()
                 if values
             }
-            request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
+            request_data["_headers"] = sanitized_forwarded_headers(self.headers)
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:

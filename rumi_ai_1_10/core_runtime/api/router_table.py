@@ -8,6 +8,7 @@ from urllib.parse import unquote
 
 from ._helpers import _SAFE_ERROR_MSG, _log_internal_error
 from .api_response import APIResponse
+from .request_authorizer import authorize_route
 from .route_errors import api_route_function_error_status, api_route_function_public_error
 from .route_handlers import _compile_template_path, _is_safe_path_param
 from ..validation import HANDLER_NAME_RE
@@ -111,6 +112,11 @@ class APIRouteTableMixin:
                 "handler": handler_name,
                 "function_id": function_id,
                 "pack_id": pack_id,
+                "owner_pack_id": str(route.get("owner_pack_id") or pack_id),
+                "permission_id": str(route.get("permission_id") or ""),
+                "audience": str(route.get("audience") or "kernel_api"),
+                "core_only": bool(route.get("core_only", False)),
+                "resource_template": dict(route.get("resource_template") or {}),
                 "pass_body": route.get("pass_body", False),
                 "pass_query": route.get("pass_query", False),
                 "response_mode": route.get("response_mode", "result"),
@@ -211,6 +217,24 @@ class APIRouteTableMixin:
 
         if entry is None:
             return False
+
+        principal = getattr(self, "_authenticated_principal", None)
+        if principal is not None:
+            if entry.get("core_only") and not principal.core_role:
+                self._send_response(APIResponse(False, error="Forbidden"), 403)
+                return True
+            authorization = authorize_route(
+                principal=principal,
+                method=method_upper,
+                path=path,
+                route_entry=entry,
+            )
+            if not authorization.allowed:
+                self._send_response(
+                    APIResponse(False, error=authorization.reason or "Forbidden"),
+                    authorization.status_code,
+                )
+                return True
 
         pack_id = entry.get("pack_id", "")
         if not self._is_pack_approved_for_runtime_routes(pack_id):

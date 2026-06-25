@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -132,6 +134,103 @@ def test_authority_empty_config_lists_do_not_grant_everything(tmp_path, monkeypa
         permission_id="model.invoke",
         resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
         profile_id="work",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_config_lattice_empty_child_inherits_parent_facets():
+    from core_runtime.authority.config_lattice import meet_authority_configs
+
+    assert meet_authority_configs({"provider_ids": ["openai"]}, {}) == {"provider_ids": ["openai"]}
+
+
+def test_authority_config_lattice_child_provider_must_be_subset_of_parent():
+    from core_runtime.authority.config_lattice import is_authority_config_subset, meet_authority_configs
+
+    parent = {"provider_ids": ["openai"]}
+    child = {"provider_ids": ["anthropic"]}
+
+    assert is_authority_config_subset(child, parent) is False
+    assert meet_authority_configs(parent, child) == {"provider_ids": []}
+
+
+def test_authority_config_lattice_empty_list_is_deny_all():
+    from core_runtime.authority.config_lattice import meet_authority_configs
+
+    assert meet_authority_configs({"provider_ids": ["openai"]}, {"provider_ids": []}) == {"provider_ids": []}
+
+
+def test_authority_config_lattice_rejects_unknown_keys():
+    from core_runtime.authority.config_lattice import AuthorityConfigError, validate_authority_config
+
+    with pytest.raises(AuthorityConfigError):
+        validate_authority_config({"provider_ids": ["openai"], "unexpected": ["anthropic"]})
+
+
+def test_authority_profile_child_empty_config_inherits_parent_constraints(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission(child_principal, "model.invoke", {})
+
+    allowed = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+    denied = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert allowed.allowed is True
+    assert allowed.grant_config == {"provider_ids": ["openai"]}
+    assert denied.allowed is False
+    assert denied.approval_required is True
+
+
+def test_authority_profile_child_cannot_widen_parent_provider(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission(child_principal, "model.invoke", {"provider_ids": ["anthropic"]})
+
+    decision = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_profile_child_disabled_permission_blocks_parent_grant(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission(child_principal, "model.invoke", {})
+    assert grants.revoke_permission(child_principal, "model.invoke") is True
+
+    decision = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
     )
 
     assert decision.allowed is False

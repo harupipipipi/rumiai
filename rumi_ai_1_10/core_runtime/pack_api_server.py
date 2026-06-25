@@ -38,6 +38,7 @@ from .validation import (
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
+from .api.safe_headers import sanitized_forwarded_headers
 from .api.route_errors import (
     APIRouteFunctionError,
     api_route_function_error_status,
@@ -235,6 +236,7 @@ class PackAPIHandler(
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _request_auth_mode: Optional[str] = None
+    _authenticated_principal: Optional[Any] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
@@ -796,9 +798,10 @@ class PackAPIHandler(
             for key, values in parse_qs(parsed_url.query, keep_blank_values=True).items()
             if values
         }
-        request_data["_headers"] = {
-            str(key): str(value) for key, value in self.headers.items()
-        }
+        request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+        principal = getattr(self, "_authenticated_principal", None)
+        if principal is not None:
+            request_data["_authenticated_principal"] = principal.to_dict()
         if body:
             request_data.update(body)
         for url_param, data_key in (path_inject or {}).items():
@@ -816,6 +819,11 @@ class PackAPIHandler(
             "owner_pack": "defaultspack",
             "inputs": {},
             "_facade": facade,
+            "_authenticated_principal": (
+                principal.to_dict()
+                if (principal := getattr(self, "_authenticated_principal", None)) is not None
+                else None
+            ),
         }
 
     def _dispatch_defaultspack_http_route(
@@ -1055,6 +1063,73 @@ class PackAPIHandler(
 
         self._request_auth_mode = None
         return False
+
+    def _current_principal(self):
+        return getattr(self, "_authenticated_principal", None)
+
+    def _require_core_principal(self) -> bool:
+        principal = self._current_principal()
+        if principal is not None and getattr(principal, "core_role", False):
+            return True
+        self._send_response(APIResponse(False, error="Forbidden"), 403)
+        return False
+
+    def _auth_whoami(self) -> None:
+        principal = self._current_principal()
+        if principal is None:
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        self._send_response(APIResponse(True, data=principal.whoami_dict()))
+
+    def _auth_list_access_tokens(self, query: dict[str, Any]) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import get_scoped_access_token_manager
+
+        profile_id = str(query.get("profile_id") or "").strip() or None
+        include_revoked = str(query.get("include_revoked") or "").strip().lower() in {"1", "true", "yes"}
+        rows = get_scoped_access_token_manager().list_tokens(
+            profile_id=profile_id,
+            include_revoked=include_revoked,
+            include_hash=False,
+        )
+        self._send_response(APIResponse(True, data={"tokens": rows, "count": len(rows)}))
+
+    def _auth_issue_access_token(self, body: dict[str, Any]) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import DEFAULT_ACCESS_TOKEN_TTL_SECONDS, get_scoped_access_token_manager
+
+        audiences = body.get("audiences")
+        if audiences is None:
+            audiences = ["kernel_api"]
+        expires_in_seconds = body.get("expires_in_seconds")
+        if expires_in_seconds is None:
+            expires_in_seconds = DEFAULT_ACCESS_TOKEN_TTL_SECONDS
+        try:
+            issued = get_scoped_access_token_manager().issue_token(
+                profile_id=str(body.get("profile_id") or "main"),
+                surface_id=str(body.get("surface_id") or ""),
+                device_id=str(body.get("device_id") or ""),
+                role=str(body.get("role") or "mobile_client"),
+                audiences=audiences,
+                expires_in_seconds=expires_in_seconds,
+            )
+        except (TypeError, ValueError) as exc:
+            self._send_response(APIResponse(False, error=str(exc)), 400)
+            return
+        payload = issued.metadata.to_dict(include_hash=False)
+        payload["access_token"] = issued.access_token
+        payload["token"] = issued.access_token
+        self._send_response(APIResponse(True, data=payload))
+
+    def _auth_revoke_access_token(self, token_id: str) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import get_scoped_access_token_manager
+
+        revoked = get_scoped_access_token_manager().revoke_token(token_id=token_id)
+        self._send_response(APIResponse(True, data={"token_id": token_id, "revoked": revoked}))
 
     @staticmethod
     def _allows_public_bootstrap_page(request_path: str, web_mount: dict[str, Any]) -> bool:
@@ -1529,6 +1604,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(path):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
 
@@ -1551,7 +1627,16 @@ class PackAPIHandler(
         query = self._parse_query()
 
         try:
+            if path == "/api/auth/whoami":
+                self._auth_whoami()
+                return
+            if path == "/api/auth/access-tokens":
+                self._auth_list_access_tokens(query)
+                return
+
             if self._dispatch_api_route("GET", path, query=query):
+                return
+            if not self._authorize_authenticated_route("GET", path):
                 return
             if self._dispatch_defaultspack_http_route("GET", path):
                 return
@@ -1653,6 +1738,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(_pre_auth_path_post):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
         result: Any = None
@@ -1719,8 +1805,14 @@ class PackAPIHandler(
                 if values
             }
 
+            if path == "/api/auth/access-tokens":
+                self._auth_issue_access_token(body)
+                return
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body, query=query):
+                return
+            if not self._authorize_authenticated_route("POST", path):
                 return
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
@@ -2160,6 +2252,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(_pre_auth_path_put):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
         # --- テーブル駆動: 認証チェック ---
@@ -2183,6 +2276,8 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("PUT", path, body, query=query):
                 return
+            if not self._authorize_authenticated_route("PUT", path):
+                return
             if self._dispatch_defaultspack_http_route("PUT", path, body):
                 return
 
@@ -2205,6 +2300,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(_pre_auth_path_del):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
         result: Any = None
@@ -2223,8 +2319,18 @@ class PackAPIHandler(
                 for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
                 if values
             }
+            if path.startswith("/api/auth/access-tokens/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    self._auth_revoke_access_token(unquote(parts[3]))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+                return
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("DELETE", path, query=query):
+                return
+            if not self._authorize_authenticated_route("DELETE", path):
                 return
             if self._dispatch_defaultspack_http_route("DELETE", path):
                 return
@@ -2341,6 +2447,7 @@ _PACK_API_HANDLER_METHOD_MIXINS = (
     (AuthGateMixin, "_check_panel_session"),
     (AuthGateMixin, "_check_auth"),
     (AuthGateMixin, "_check_web_mount_auth"),
+    (AuthGateMixin, "_authorize_authenticated_route"),
     (RequestBodyMixin, "_read_raw_body"),
     (RequestBodyMixin, "_parse_body"),
     (RequestBodyMixin, "_discard_request_body"),
