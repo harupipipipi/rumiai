@@ -4,6 +4,13 @@
 !/.github/
 !/AGENTS.md
 !/justfile
+!/package.json
+!/.agents/
+!/.agents/**
+!/.rumi/
+!/.rumi/**
+!/packages/
+!/packages/**
 !/rumi_ai_1_10/
 !/rumi_viewer/
 !/pack-shell/

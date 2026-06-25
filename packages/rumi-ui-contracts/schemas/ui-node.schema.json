@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/ui-node.schema.json",
+  "title": "Rumi UI Node",
+  "type": "object",
+  "required": ["id"],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "purpose": { "type": "string", "minLength": 1 },
+    "density": { "enum": ["comfortable", "compact", "dataDense"] },
+    "importance": {
+      "enum": ["pageFrame", "primaryRegion", "repeatedCoreComponent", "secondaryRegion"]
+    },
+    "metrics": { "$ref": "#/$defs/complexityMetrics" },
+    "children": {
+      "type": "array",
+      "items": { "$ref": "#" }
+    }
+  },
+  "$defs": {
+    "complexityMetrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uniqueVisualRoles": { "type": "number", "minimum": 0 },
+        "interactiveControls": { "type": "number", "minimum": 0 },
+        "meaningfulStates": { "type": "number", "minimum": 0 },
+        "asyncMutations": { "type": "number", "minimum": 0 },
+        "responsiveTopologies": { "type": "number", "minimum": 0 },
+        "specialLayoutAlgorithms": { "type": "number", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/design-intent.schema.json",
+  "title": "Rumi Leaf Design Intent",
+  "type": "object",
+  "required": [
+    "firstVisualFocus",
+    "readingOrder",
+    "visibleAtRest",
+    "progressivelyDisclosed",
+    "typographyRoles",
+    "colorRoles",
+    "spacingRelationships",
+    "overflowStrategy",
+    "mobileTransformation"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "firstVisualFocus": { "type": "string", "minLength": 1 },
+    "readingOrder": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "visibleAtRest": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "progressivelyDisclosed": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "typographyRoles": { "type": "object" },
+    "colorRoles": { "type": "object" },
+    "spacingRelationships": { "type": "array" },
+    "overflowStrategy": { "type": "string", "minLength": 1 },
+    "mobileTransformation": { "type": "string", "minLength": 1 }
+  }
+}

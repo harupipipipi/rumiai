@@ -1,0 +1,127 @@
+{
+  "id": "inbox",
+  "purpose": "Process unresolved conversations quickly",
+  "density": "compact",
+  "metrics": {
+    "uniqueVisualRoles": 24,
+    "interactiveControls": 9,
+    "meaningfulStates": 6,
+    "asyncMutations": 1,
+    "responsiveTopologies": 3,
+    "specialLayoutAlgorithms": 0
+  },
+  "children": [
+    {
+      "id": "inbox-page-frame",
+      "purpose": "Define list, thread, and context slots across responsive topologies",
+      "importance": "pageFrame",
+      "density": "compact",
+      "metrics": {
+        "uniqueVisualRoles": 8,
+        "interactiveControls": 1,
+        "meaningfulStates": 2,
+        "asyncMutations": 0,
+        "responsiveTopologies": 2,
+        "specialLayoutAlgorithms": 0
+      },
+      "slots": {
+        "navigation": { "width": 240, "collapseBelow": 768 },
+        "list": { "min": 300, "preferred": 360, "max": 440 },
+        "thread": { "min": 420, "grow": 1 },
+        "context": { "width": 300, "hideBelow": 1100, "replacement": "drawer" }
+      }
+    },
+    {
+      "id": "inbox-toolbar",
+      "purpose": "Filter the target conversations",
+      "importance": "secondaryRegion",
+      "metrics": {
+        "uniqueVisualRoles": 7,
+        "interactiveControls": 4,
+        "meaningfulStates": 2,
+        "asyncMutations": 0,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "conversation-list",
+      "purpose": "Find and select work items",
+      "importance": "primaryRegion",
+      "metrics": {
+        "uniqueVisualRoles": 10,
+        "interactiveControls": 2,
+        "meaningfulStates": 3,
+        "asyncMutations": 0,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "conversation-item",
+      "purpose": "Scan one conversation summary and select it",
+      "importance": "repeatedCoreComponent",
+      "metrics": {
+        "uniqueVisualRoles": 8,
+        "interactiveControls": 1,
+        "meaningfulStates": 3,
+        "asyncMutations": 0,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "thread-header",
+      "purpose": "Understand active conversation identity and status",
+      "importance": "secondaryRegion",
+      "metrics": {
+        "uniqueVisualRoles": 7,
+        "interactiveControls": 2,
+        "meaningfulStates": 2,
+        "asyncMutations": 0,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "message-timeline",
+      "purpose": "Read conversation history",
+      "importance": "primaryRegion",
+      "metrics": {
+        "uniqueVisualRoles": 11,
+        "interactiveControls": 2,
+        "meaningfulStates": 3,
+        "asyncMutations": 0,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "reply-composer",
+      "purpose": "Reply safely to the current conversation",
+      "importance": "primaryRegion",
+      "density": "comfortable",
+      "metrics": {
+        "uniqueVisualRoles": 8,
+        "interactiveControls": 3,
+        "meaningfulStates": 3,
+        "asyncMutations": 1,
+        "responsiveTopologies": 1,
+        "specialLayoutAlgorithms": 0
+      }
+    },
+    {
+      "id": "customer-context",
+      "purpose": "Provide supporting customer facts without competing with the thread",
+      "importance": "secondaryRegion",
+      "metrics": {
+        "uniqueVisualRoles": 9,
+        "interactiveControls": 2,
+        "meaningfulStates": 3,
+        "asyncMutations": 0,
+        "responsiveTopologies": 2,
+        "specialLayoutAlgorithms": 0
+      }
+    }
+  ]
+}

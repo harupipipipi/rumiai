@@ -1,0 +1,18 @@
+{
+  "id": "reply-composer",
+  "purpose": "Reply safely to the current conversation",
+  "primaryPerceptualTask": "Understand draft state and whether sending is safe",
+  "density": "comfortable",
+  "layoutEnvelope": {
+    "minWidth": 280,
+    "preferredWidth": 560,
+    "maxWidth": 760,
+    "heightBehavior": "content",
+    "mobileBehavior": "sticky-bottom"
+  },
+  "inputs": ["draft", "isSending", "error"],
+  "events": ["onDraftChange", "onSend", "onRetry"],
+  "requiredStates": ["empty", "editing", "sending", "error", "sent"],
+  "allowedPrimitives": ["Button", "TextArea", "InlineAlert", "IconButton"],
+  "visibleActionBudget": 3
+}

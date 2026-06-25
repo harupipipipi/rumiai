@@ -1,0 +1,43 @@
+{
+  "generation": {
+    "mode": "recursive-zero-to-one",
+    "rootMayWriteUi": false,
+    "regenerateInsteadOfPatch": true,
+    "isolateAgents": "worktree"
+  },
+  "leafBudget": {
+    "maxComplexity": 28,
+    "maxVisualRoles": 18,
+    "maxInteractiveControls": 5,
+    "maxMutations": 1,
+    "maxResponsiveTopologies": 2,
+    "maxSpecialLayoutAlgorithms": 1,
+    "minVisualRoles": 2
+  },
+  "candidates": {
+    "foundation": 3,
+    "pageFrame": 2,
+    "primaryRegion": 2,
+    "repeatedCoreComponent": 2,
+    "secondaryRegion": 1
+  },
+  "quality": {
+    "rejectUnverified": true,
+    "rejectPrimaryTruncation": true,
+    "rejectHorizontalOverflow": true,
+    "rejectArbitraryTokens": true,
+    "maxCompressionScore": 0.35
+  },
+  "viewports": [390, 768, 1024, 1440],
+  "textScales": [1, 1.25, 2],
+  "scenarios": ["default", "long", "empty", "loading", "error"],
+  "artifactLayout": {
+    "foundation": ".rumi/ui/foundation",
+    "blueprints": ".rumi/ui/blueprints",
+    "contracts": ".rumi/ui/contracts",
+    "candidates": ".rumi/ui/candidates",
+    "accepted": ".rumi/ui/accepted",
+    "renders": ".rumi/ui/renders",
+    "reports": ".rumi/ui/reports"
+  }
+}

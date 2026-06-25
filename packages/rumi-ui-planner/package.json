@@ -1,0 +1,8 @@
+{
+  "name": "@rumi/rumi-ui-planner",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.mjs"
+  }
+}

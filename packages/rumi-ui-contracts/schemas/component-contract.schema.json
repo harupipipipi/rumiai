@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/component-contract.schema.json",
+  "title": "Rumi Component Contract",
+  "type": "object",
+  "required": [
+    "id",
+    "purpose",
+    "primaryPerceptualTask",
+    "density",
+    "layoutEnvelope",
+    "inputs",
+    "events",
+    "requiredStates",
+    "allowedPrimitives",
+    "visibleActionBudget"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "id": { "type": "string", "minLength": 1 },
+    "purpose": { "type": "string", "minLength": 1 },
+    "primaryPerceptualTask": { "type": "string", "minLength": 1 },
+    "density": { "enum": ["comfortable", "compact", "dataDense"] },
+    "layoutEnvelope": {
+      "type": "object",
+      "required": ["minWidth", "preferredWidth", "maxWidth", "heightBehavior"],
+      "properties": {
+        "minWidth": { "type": "number", "exclusiveMinimum": 0 },
+        "preferredWidth": { "type": "number", "exclusiveMinimum": 0 },
+        "maxWidth": { "type": "number", "exclusiveMinimum": 0 },
+        "heightBehavior": { "type": "string", "minLength": 1 },
+        "mobileBehavior": { "type": "string", "minLength": 1 }
+      }
+    },
+    "inputs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "events": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "requiredStates": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "allowedPrimitives": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "visibleActionBudget": { "type": "integer", "minimum": 0 }
+  }
+}
