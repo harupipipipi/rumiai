@@ -3,11 +3,14 @@ from __future__ import annotations
 import os
 
 from blocks._common import error, ok
+from domain.webhook.url_providers.cloudflare_pages_mobile import CloudflarePagesMobileProvider
 from domain.webhook.url_providers.cloudflare_quick_tunnel import CloudflareQuickTunnelProvider
 from domain.webhook.url_providers.static import StaticWebhookUrlProvider
 
 
 def _provider(provider_id: str):
+    if provider_id == "cloudflare_pages_mobile":
+        return CloudflarePagesMobileProvider()
     if provider_id == "cloudflare_quick_tunnel":
         return CloudflareQuickTunnelProvider()
     return StaticWebhookUrlProvider()
@@ -28,6 +31,7 @@ def run(input_data, context):
         return ok(
             {
                 "providers": [
+                    {"provider_id": "cloudflare_pages_mobile", "label": "Cloudflare Pages Mobile", "temporary": False},
                     {"provider_id": "cloudflare_quick_tunnel", "label": "Cloudflare Quick Tunnel", "temporary": True},
                     {"provider_id": "static", "label": "Static URL", "temporary": False},
                 ],
@@ -39,7 +43,7 @@ def run(input_data, context):
             local_url=str(data.get("local_url") or _default_local_url()),
             route_path=str(data.get("route_path") or "/"),
             ttl_seconds=int(data.get("ttl_seconds") or 0),
-            context=context or {},
+            context={**(context or {}), "request_data": data},
         )
         return ok(result)
     if method == "DELETE":

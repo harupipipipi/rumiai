@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, KanbanSquare, Monitor, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, KanbanSquare, Monitor, PanelLeftOpen, PanelLeftClose, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -42,7 +42,7 @@ function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-function SidebarCloseIcon({ size = 15 }: { size?: number }) {
+function SidebarIcon({ size = 18 }: { size?: number }) {
   return (
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width={size} height={size} aria-hidden="true" focusable="false">
       <rect width="100" height="100" fill="#000000" />
@@ -1918,7 +1918,7 @@ export function HistoryBoard({
               title="サイドバーを開く"
               aria-label="サイドバーを開く"
             >
-              <PanelLeftOpen size={14} />
+              <SidebarIcon size={18} />
             </button>
           )}
           {!selectionMode && (
@@ -2075,7 +2075,7 @@ export function HistoryBoard({
                 title="サイドバーを閉じる"
                 aria-label="サイドバーを閉じる"
               >
-                <SidebarCloseIcon size={15} />
+                <SidebarIcon size={18} />
               </button>
             )}
           </div>

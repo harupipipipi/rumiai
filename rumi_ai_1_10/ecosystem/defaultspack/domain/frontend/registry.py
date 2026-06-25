@@ -1460,7 +1460,7 @@ class FrontendRegistry:
                         "id": "public_url_summary",
                         "label": "Temporary Public URLs",
                         "type": "readonly",
-                        "default": "Providers: static, cloudflare_quick_tunnel",
+                        "default": "Providers: static, cloudflare_quick_tunnel, cloudflare_pages_mobile",
                     },
                 ],
             },
@@ -2645,7 +2645,7 @@ class FrontendRegistry:
                 "output_profile_summary": "",
                 "response_summary": "Prompt decisions create action plans; tools/adapters execute after policy checks.",
                 "response_prompt_preset": "same_source_reply",
-                "public_url_summary": "Providers: static, cloudflare_quick_tunnel",
+                "public_url_summary": "Providers: static, cloudflare_quick_tunnel, cloudflare_pages_mobile",
             },
             "external_custom": {
                 "custom_template_path": "user_data/shared/external_io_templates",
@@ -3248,7 +3248,7 @@ class FrontendRegistry:
         external_output["output_profile_summary"] = ", ".join(profile.id for profile in output_profiles) or "No output profiles"
         external_output.setdefault("response_summary", "Prompt decisions create action plans; tools/adapters execute after policy checks.")
         external_output.setdefault("response_prompt_preset", "same_source_reply")
-        external_output.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
+        external_output.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel, cloudflare_pages_mobile")
         extension_paths = external_template_catalog.get("extension_paths") if isinstance(external_template_catalog.get("extension_paths"), dict) else {}
         external_custom["custom_template_path"] = str(extension_paths.get("templates") or external_custom.get("custom_template_path") or "")
         external_custom["custom_profile_paths"] = ", ".join(

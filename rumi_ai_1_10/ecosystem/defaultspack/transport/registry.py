@@ -387,9 +387,39 @@ def require_legacy_route_allowlisted(spec: HttpRouteSpec) -> None:
     )
     if key in load_legacy_http_route_allowlist():
         return
+    if _legacy_route_matches_mobile_contract(spec, legacy_block_module):
+        return
     raise ValueError(
         f"legacy HTTP route is not allowlisted: {key[0]} {key[1]} -> {legacy_block_module}"
     )
+
+
+def _legacy_route_matches_mobile_contract(
+    spec: HttpRouteSpec,
+    legacy_block_module: str,
+) -> bool:
+    """Treat the mobile route contract as the allowlist for mobile facade routes."""
+    try:
+        from ecosystem.defaultspack.domain.mobile.contract import iter_mobile_route_contracts
+    except Exception:
+        return False
+
+    method = str(spec.method or "").strip().upper()
+    pattern = str(spec.pattern or "").strip()
+    legacy_block_module = str(legacy_block_module or "").strip()
+    if not method or not pattern or not legacy_block_module:
+        return False
+    for route in iter_mobile_route_contracts():
+        if method != str(route.method or "").strip().upper():
+            continue
+        if pattern != str(route.pattern or "").strip():
+            continue
+        allowed_modules = {
+            str(route.block_module or "").strip(),
+            str(route.fallback_block_module or "").strip(),
+        }
+        return legacy_block_module in allowed_modules
+    return False
 
 
 def flow_http_route_specs() -> List[HttpRouteSpec]:
@@ -492,6 +522,23 @@ def flow_http_output_is_compatible(
             return True
         return False
     return True
+
+
+def _mobile_http_route_specs() -> list[HttpRouteSpec]:
+    from ecosystem.defaultspack.domain.mobile.contract import iter_mobile_route_contracts
+
+    return [
+        HttpRouteSpec(
+            route.method,
+            route.pattern,
+            block_module=route.block_module,
+            flow_id=route.flow_id,
+            fallback_block_module=route.fallback_block_module or route.block_module,
+            path_inject=dict(route.path_inject),
+            defaults=dict(route.defaults),
+        )
+        for route in iter_mobile_route_contracts()
+    ]
 
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
@@ -748,6 +795,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/p2p/pairing/reject", block_module="blocks.p2p.pairing_reject"),
     HttpRouteSpec("POST", "/api/p2p/messages/inbound", block_module="blocks.p2p.messages_inbound"),
     HttpRouteSpec("POST", "/api/p2p/messages/send", block_module="blocks.p2p.messages_send"),
+    *_mobile_http_route_specs(),
     HttpRouteSpec("POST", "/api/agent/execute", block_module="blocks.agent.execute"),
     HttpRouteSpec(
         "POST",

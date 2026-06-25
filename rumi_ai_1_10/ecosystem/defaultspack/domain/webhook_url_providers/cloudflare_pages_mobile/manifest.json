@@ -1,0 +1,24 @@
+{
+  "id": "cloudflare_pages_mobile",
+  "category": "webhook_url_providers",
+  "kind": "public_url_provider",
+  "version": "1",
+  "status": "experimental",
+  "display_name": "Cloudflare Pages Mobile Relay",
+  "entrypoints": {
+    "provider": "provider.py"
+  },
+  "security": {
+    "external_process": "wrangler",
+    "network": "cloudflare_pages",
+    "operator_action_required": true
+  },
+  "aliases": {
+    "provider_ids": ["cloudflare_pages_mobile"]
+  },
+  "compatibility": {
+    "legacy_imports": ["domain.webhook.url_providers.cloudflare_pages_mobile"],
+    "legacy_ids": ["cloudflare_pages_mobile"]
+  },
+  "source_pack_id": "defaultspack"
+}

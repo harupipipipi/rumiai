@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hmac
 import secrets
 import time
 import uuid
@@ -14,6 +15,8 @@ from .settings import P2PSettings, default_store_path
 
 PAIRING_PENDING = "pending"
 PAIRING_ACCEPTED = "accepted"
+PAIRING_CLAIMED = "claimed"
+PAIRING_APPROVED = "approved"
 PAIRING_REJECTED = "rejected"
 PAIRING_EXPIRED = "expired"
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -36,6 +39,13 @@ def _string_list(values: Any) -> list[str]:
     return sorted({str(value).strip() for value in values if str(value).strip()})
 
 
+def hmac_compare_code(left: str, right: str) -> bool:
+    return hmac.compare_digest(
+        str(left or "").strip().upper(),
+        str(right or "").strip().upper(),
+    )
+
+
 @dataclass
 class PairingSession:
     pairing_id: str
@@ -51,6 +61,12 @@ class PairingSession:
     accepted_at: int = 0
     rejected_at: int = 0
     reason: str = ""
+    # v2 claim fields
+    claimed_device_id: str = ""
+    claimed_device_label: str = ""
+    claimed_device_public_key: str = ""
+    claimed_capabilities: list[str] = field(default_factory=list)
+    claimed_at: int = 0
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "PairingSession":
@@ -68,6 +84,11 @@ class PairingSession:
             accepted_at=int(value.get("accepted_at") or 0),
             rejected_at=int(value.get("rejected_at") or 0),
             reason=str(value.get("reason") or ""),
+            claimed_device_id=str(value.get("claimed_device_id") or ""),
+            claimed_device_label=str(value.get("claimed_device_label") or ""),
+            claimed_device_public_key=str(value.get("claimed_device_public_key") or ""),
+            claimed_capabilities=_string_list(value.get("claimed_capabilities")),
+            claimed_at=int(value.get("claimed_at") or 0),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -83,8 +104,14 @@ class PairingSession:
             "capabilities": list(self.capabilities),
             "allowed_company_ids": list(self.allowed_company_ids),
             "accepted_at": int(self.accepted_at),
+            "approved_at": int(self.accepted_at),
             "rejected_at": int(self.rejected_at),
             "reason": self.reason,
+            "claimed_device_id": self.claimed_device_id,
+            "claimed_device_label": self.claimed_device_label,
+            "claimed_capabilities": list(self.claimed_capabilities),
+            "requested_scopes": list(self.claimed_capabilities),
+            "claimed_at": int(self.claimed_at),
         }
 
     def expired(self, now: int | None = None) -> bool:
@@ -186,13 +213,97 @@ class PairingManager:
         session = self._find_by_code(code)
         if session is None:
             return {"ok": False, "reason": "pairing code not found", "code": "PAIRING_NOT_FOUND"}
-        if session.status != PAIRING_PENDING:
+        if session.status not in {PAIRING_PENDING, PAIRING_CLAIMED}:
             return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
         session.status = PAIRING_REJECTED
         session.rejected_at = int(now_ms if now_ms is not None else _now_ms())
         session.reason = str(reason or "rejected")
         self._replace(session)
         return {"ok": True, "pairing": session.as_dict()}
+
+    def claim_pairing(
+        self,
+        pairing_id: str,
+        *,
+        code: str = "",
+        device_id: str,
+        device_label: str = "",
+        device_public_key: str = "",
+        requested_capabilities: list[str] | None = None,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Record a mobile device's claim against a pending pairing session.
+
+        The PC operator must still approve before a device token is issued.
+        """
+        sessions = self._sessions()
+        session = sessions.get(str(pairing_id or "").strip())
+        if session is None:
+            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+        now = int(now_ms if now_ms is not None else _now_ms())
+        if session.status != PAIRING_PENDING:
+            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
+        if not str(code or "").strip() or not hmac_compare_code(code, session.code):
+            return {"ok": False, "reason": "pairing code does not match", "code": "PAIRING_CODE_MISMATCH"}
+        if session.expired(now):
+            session.status = PAIRING_EXPIRED
+            session.reason = "expired"
+            self._replace(session)
+            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+        session.claimed_device_id = str(device_id or "").strip()
+        session.claimed_device_label = str(device_label or "").strip()
+        session.claimed_device_public_key = str(device_public_key or "").strip()
+        session.claimed_capabilities = _string_list(requested_capabilities) or session.capabilities
+        session.claimed_at = now
+        session.status = PAIRING_CLAIMED
+        self._replace(session)
+        return {"ok": True, "pairing": session.as_dict()}
+
+    def get_pairing(self, pairing_id: str) -> PairingSession | None:
+        return self._sessions().get(str(pairing_id or "").strip())
+
+    def approve_pairing_v2(
+        self,
+        pairing_id: str,
+        *,
+        scopes: list[str] | None = None,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        """Approve a claimed pairing and mark it accepted (v2 flow).
+
+        The actual device token is issued by the caller (DeviceStore) since
+        PairingManager should not depend on crypto. This method just flips
+        the session status and returns claim info for token issuance.
+        """
+        sessions = self._sessions()
+        session = sessions.get(str(pairing_id or "").strip())
+        if session is None:
+            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+        now = int(now_ms if now_ms is not None else _now_ms())
+        if session.status != PAIRING_CLAIMED:
+            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_CLAIMED"}
+        if not session.claimed_device_id:
+            return {"ok": False, "reason": "pairing has not been claimed", "code": "NOT_CLAIMED"}
+        if session.expired(now):
+            session.status = PAIRING_EXPIRED
+            session.reason = "expired"
+            self._replace(session)
+            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+        resolved_scopes = _string_list(scopes) or session.claimed_capabilities or ["chat.read", "chat.write", "tools.observe"]
+        session.status = PAIRING_APPROVED
+        session.accepted_at = now
+        session.peer_id = session.claimed_device_id
+        session.peer_label = session.claimed_device_label
+        session.capabilities = resolved_scopes
+        self._replace(session)
+        return {
+            "ok": True,
+            "pairing": session.as_dict(),
+            "device_id": session.claimed_device_id,
+            "device_label": session.claimed_device_label,
+            "device_public_key": session.claimed_device_public_key,
+            "scopes": resolved_scopes,
+        }
 
     def list_pairings(self) -> list[dict[str, Any]]:
         self.cleanup_expired()
@@ -203,7 +314,7 @@ class PairingManager:
         sessions = self._sessions()
         changed = False
         for session in sessions.values():
-            if session.status == PAIRING_PENDING and session.expired(now):
+            if session.status in {PAIRING_PENDING, PAIRING_CLAIMED} and session.expired(now):
                 session.status = PAIRING_EXPIRED
                 session.reason = "expired"
                 changed = True

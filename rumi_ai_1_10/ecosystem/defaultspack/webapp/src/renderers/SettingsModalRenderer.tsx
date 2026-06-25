@@ -6,6 +6,8 @@ import { cn } from "../lib/cn";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
+import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
+import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -1209,6 +1211,7 @@ function PublicUrlField({
     { value: "/api/webhooks/inbound/{webhook_id}", label: "Generic webhook" },
   ];
   const providerOptions = [
+    { value: "cloudflare_pages_mobile", label: "Cloudflare Pages Mobile" },
     { value: "cloudflare_quick_tunnel", label: "Cloudflare Quick Tunnel" },
     { value: "static", label: "Static URL" },
   ];
@@ -1287,7 +1290,11 @@ function PublicUrlField({
           )}
         >
           {busy ? <Loader2 size={15} className="animate-spin" /> : <span className="h-2 w-2 rounded-full bg-cyan-300" />}
-          {providerId === "cloudflare_quick_tunnel" ? "Cloudflare URLを発行" : "Webhook URLを作成"}
+          {providerId === "cloudflare_pages_mobile"
+            ? "Pages URLを発行"
+            : providerId === "cloudflare_quick_tunnel"
+              ? "Cloudflare URLを発行"
+              : "Webhook URLを作成"}
         </button>
         {publicUrl && (
           <button
@@ -1809,6 +1816,14 @@ function SettingsField({
   const [apiSaveState, setApiSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [apiSaveError, setApiSaveError] = useState("");
   const [apiAvailability, setApiAvailability] = useState<ModelAvailabilityAfterKeySave | null>(null);
+  const [credentialTransfer, setCredentialTransfer] = useState<{
+    providerId: string;
+    providerLabel?: string;
+    apiKey?: string;
+    apiId?: string;
+    baseUrl?: string;
+    defaultModel?: string;
+  } | null>(null);
   const [tokenProvider, setTokenProvider] = useState("line");
   const [tokenName, setTokenName] = useState("main");
   const [tokenKind, setTokenKind] = useState("channel_access_token");
@@ -2092,6 +2107,10 @@ function SettingsField({
             candidate_models: [],
             reason: "Saved, but the backend did not confirm model availability. Choose a model route before using this key.",
           });
+          const savedProviderId = apiProvider;
+          const savedApiId = apiName;
+          const savedBaseUrl = apiBaseUrl.trim();
+          const savedDefaultModel = apiDefaultModel.trim();
           setApiSecret("");
           setApiBaseUrl("");
           setApiAllowedModels("");
@@ -2101,6 +2120,14 @@ function SettingsField({
           setApiSaveState("saved");
           onChange(sectionId, field.id, {
             action: "oauth_refresh",
+          });
+          setCredentialTransfer({
+            providerId: savedProviderId,
+            providerLabel: selectedProviderOption?.label,
+            apiKey: apiSecret,
+            apiId: savedApiId,
+            baseUrl: savedBaseUrl || undefined,
+            defaultModel: savedDefaultModel || undefined,
           });
         } catch (saveError) {
           setApiSaveState("idle");
@@ -2837,6 +2864,17 @@ function SettingsField({
         {control}
       </div>
       {field.help && <p className="text-[11px] text-zinc-500">{field.help}</p>}
+      {credentialTransfer && (
+        <CredentialTransferModal
+          providerId={credentialTransfer.providerId}
+          providerLabel={credentialTransfer.providerLabel}
+          apiKey={credentialTransfer.apiKey}
+          apiId={credentialTransfer.apiId}
+          baseUrl={credentialTransfer.baseUrl}
+          defaultModel={credentialTransfer.defaultModel}
+          onClose={() => setCredentialTransfer(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2863,14 +2901,29 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const mobileAppsSection = useMemo<SettingsSection>(
+    () => ({
+      id: "apps",
+      label: "アプリ",
+      description: "Rumi Mobileアプリの入手と、スマホ接続QR。",
+      fields: [],
+    }),
+    [],
+  );
+  const settingsSectionsWithApps = useMemo(
+    () => [mobileAppsSection, ...settingsSections],
+    [mobileAppsSection, settingsSections],
+  );
+  const kernelBaseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8765` : "http://127.0.0.1:8765";
+  const cloudflarePagesUrl = String(settingsValues.apps?.cloudflare_pages_url ?? "").trim();
   const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
   const [settingsSearch, setSettingsSearch] = useState("");
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const placementManifestMap = useMemo(
-    () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
-    [settingsSections],
+    () => new Map(buildBuiltinPlacementManifests(settingsSectionsWithApps).map((manifest) => [manifest.id, manifest])),
+    [settingsSectionsWithApps],
   );
   const pinnedPlacements = useMemo(
     () => normalizePinnedPlacements(sidebarSettings.ui_placements),
@@ -2893,20 +2946,20 @@ export function SettingsModalRenderer({
     )))
   ), [pinnedPlacements, placementManifestMap]);
   const visibleSections = normalizedSearch
-    ? settingsSections.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
-    : settingsSections;
+    ? settingsSectionsWithApps.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
+    : settingsSectionsWithApps;
   useEffect(() => {
     if (!requestedSectionId) return;
-    if (settingsSections.some((section) => section.id === requestedSectionId)) {
+    if (settingsSectionsWithApps.some((section) => section.id === requestedSectionId)) {
       setActiveSectionId(requestedSectionId);
     }
-  }, [requestedSectionId, settingsSections]);
+  }, [requestedSectionId, settingsSectionsWithApps]);
   useEffect(() => {
     if (!normalizedSearch) return;
     if (!visibleSections.some((section) => section.id === activeSectionId)) {
-      setActiveSectionId(visibleSections[0]?.id ?? settingsSections[0]?.id ?? "system");
+      setActiveSectionId(visibleSections[0]?.id ?? settingsSectionsWithApps[0]?.id ?? "system");
     }
-  }, [activeSectionId, normalizedSearch, settingsSections, visibleSections]);
+  }, [activeSectionId, normalizedSearch, settingsSectionsWithApps, visibleSections]);
   useEffect(() => {
     if (!placementMenuOpen) return;
     const handlePointerDown = () => setPlacementMenuOpen(false);
@@ -2922,7 +2975,7 @@ export function SettingsModalRenderer({
   }, [placementMenuOpen]);
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
-    ?? settingsSections[0];
+    ?? settingsSectionsWithApps[0];
   const activeSectionValues = settingsValues[activeSection?.id ?? ""] ?? {};
   const primaryFields = activeSection?.fields.filter((field) => !field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
   const advancedFields = activeSection?.fields.filter((field) => field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
@@ -3174,6 +3227,13 @@ export function SettingsModalRenderer({
                     )}
                     {activeSection.id === "system_info" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
+                    )}
+                    {activeSection.id === "apps" && (
+                      <AppsSettingsPanel
+                        kernelBaseUrl={kernelBaseUrl}
+                        cloudflarePagesUrl={cloudflarePagesUrl}
+                        onSettingChange={onSettingChange}
+                      />
                     )}
                     <div className="grid gap-4 lg:grid-cols-2">
                       {visiblePrimaryFields.map(renderField)}
