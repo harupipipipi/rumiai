@@ -831,7 +831,9 @@ test("composer approval menu opens action permissions while selection modes live
   await expect(page.getByText("自動で選ぶ")).toBeVisible();
 
   await page.getByRole("button", { name: "権限", exact: true }).click();
-  await expect(page.getByText("読む・検索する")).toBeVisible();
+  for (const label of ["読む", "検索する", "作る", "更新する", "送信する", "実行する", "コンピュータ操作", "削除・push・reset"]) {
+    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
+  }
   await expect(page.getByText("自動で許可").first()).toBeVisible();
   await expect(page.getByText("確認する").first()).toBeVisible();
   await expect(page.getByText("使わない").first()).toBeVisible();
@@ -1195,15 +1197,15 @@ test("coding slash command toggles coding mode off again", async ({ page }) => {
 test("tool timeline shows streamed activity details", async ({ page }) => {
   await openDefaultspack(page);
 
-  await expect(page.locator(".rumi-tool-activity")).toHaveCount(0);
-  const toggle = page.getByRole("button", { name: /toolログを開く: .*作業しました/ });
+  await expect(page.locator(".rumi-tool-activity")).toHaveCount(1);
+  const toggle = page.getByRole("button", { name: /作業状況を開く:/ });
   await expect(toggle).toBeVisible();
-  await expect(toggle).toContainText("開く");
+  await expect(toggle).toContainText("詳細");
 
   await toggle.click();
-  const expandedToggle = page.getByRole("button", { name: /toolログを閉じる: .*作業しました/ });
+  const expandedToggle = page.getByRole("button", { name: /作業状況を閉じる:/ });
   await expect(expandedToggle).toBeVisible();
-  await expect(expandedToggle).not.toContainText("閉じる");
+  await expect(expandedToggle).toContainText("閉じる");
   const timeline = page.locator(".rumi-tool-activity");
   await expect(timeline).toBeVisible();
   await expect(timeline).toContainText("ファイル");
