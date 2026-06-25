@@ -15,6 +15,7 @@ import '../domain/conversation_backend.dart';
 import '../domain/conversation_locator.dart';
 import '../domain/space.dart';
 import '../features/chat/connection_chip.dart';
+import '../platform/platform_services.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
 import '../app_theme.dart';
@@ -66,6 +67,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String _pcMode = 'chat';
   bool _pcYoloMode = false;
   bool _pcUltraYoloMode = false;
+  MobileNotificationSettings _notificationSettings =
+      MobileNotificationSettings.defaults;
 
   @override
   void initState() {
@@ -93,6 +96,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await widget.store.load();
       _apiConfig = await widget.configStore.loadApi();
+      _notificationSettings =
+          await widget.configStore.loadNotificationSettings();
       final active = widget.store.active;
       if (active == null) {
         await widget.store.createAndPersist();
@@ -469,9 +474,16 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
     final refreshed = await widget.configStore.loadApi();
+    final notificationSettings =
+        await widget.configStore.loadNotificationSettings();
     await _loadPcConnection();
     await _loadSpaces();
-    if (mounted) setState(() => _apiConfig = refreshed);
+    if (mounted) {
+      setState(() {
+        _apiConfig = refreshed;
+        _notificationSettings = notificationSettings;
+      });
+    }
   }
 
   Future<void> _send(String text) async {
@@ -574,6 +586,8 @@ class _ChatScreenState extends State<ChatScreen> {
     });
     _scrollToBottom();
 
+    var completed = false;
+    var finalAssistantText = '';
     try {
       await for (final event in backend.sendMessage(
         locator: locator,
@@ -586,6 +600,11 @@ class _ChatScreenState extends State<ChatScreen> {
       )) {
         if (!mounted) break;
         _applyPcEvent(event);
+        if (event is ChatMessageCommitted && !event.error) {
+          finalAssistantText = event.content;
+        } else if (event is ChatRunCompleted) {
+          completed = true;
+        }
         _scrollToBottom(animate: false);
       }
       try {
@@ -595,6 +614,9 @@ class _ChatScreenState extends State<ChatScreen> {
       } catch (_) {
         // Keep optimistic snapshot if refresh fails.
       }
+      if (completed) {
+        unawaited(_notifyPcTaskFinished(finalAssistantText));
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -603,6 +625,24 @@ class _ChatScreenState extends State<ChatScreen> {
         });
       }
     }
+  }
+
+  Future<void> _notifyPcTaskFinished(String assistantText) async {
+    if (!_notificationSettings.pcTaskFinishedEnabled) return;
+    final space = _activeSpace();
+    final pcLabel = space?.label ?? _pairedDevice?.displayPcLabel ?? 'PC';
+    final preview = _compactNotificationPreview(assistantText);
+    final body = preview.isEmpty ? '$pcLabel のタスクが完了しました' : preview;
+    await const PlatformNotifications().showPcTaskFinished(
+      title: 'PCタスクが完了しました',
+      body: body,
+    );
+  }
+
+  String _compactNotificationPreview(String value) {
+    final normalized = value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (normalized.length <= 96) return normalized;
+    return '${normalized.substring(0, 96)}...';
   }
 
   void _appendPcMessage(ChatMessage message) {

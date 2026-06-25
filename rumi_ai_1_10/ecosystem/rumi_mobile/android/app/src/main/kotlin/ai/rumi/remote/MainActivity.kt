@@ -1,8 +1,15 @@
 package ai.rumi.remote
 
+import android.Manifest
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
@@ -17,11 +24,14 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : FlutterActivity() {
+    private var pendingNotificationPermissionResult: ((Boolean) -> Unit)? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         registerSecureStorageChannel(flutterEngine)
         registerPreferencesChannel(flutterEngine)
         registerUrlLauncherChannel(flutterEngine)
+        registerNotificationsChannel(flutterEngine)
     }
 
     private fun registerSecureStorageChannel(flutterEngine: FlutterEngine) {
@@ -116,6 +126,123 @@ class MainActivity : FlutterActivity() {
                 result.success(false)
             }
         }
+    }
+
+    private fun registerNotificationsChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "ai.rumi.remote/notifications",
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "requestAuthorization" -> {
+                    requestNotificationAuthorization { granted ->
+                        result.success(granted)
+                    }
+                }
+                "showPcTaskFinished" -> {
+                    val args = call.arguments as? Map<*, *>
+                    val title = (args?.get("title") as? String)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: "PCタスクが完了しました"
+                    val body = (args?.get("body") as? String)
+                        ?.trim()
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: "PCのタスクが完了しました"
+                    requestNotificationAuthorization { granted ->
+                        if (!granted) {
+                            result.success(false)
+                        } else {
+                            showPcTaskFinishedNotification(title, body)
+                            result.success(true)
+                        }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    private fun requestNotificationAuthorization(callback: (Boolean) -> Unit) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+            callback(true)
+            return
+        }
+        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) {
+            callback(true)
+            return
+        }
+        if (pendingNotificationPermissionResult != null) {
+            callback(false)
+            return
+        }
+        pendingNotificationPermissionResult = callback
+        requestPermissions(
+            arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+            REQUEST_POST_NOTIFICATIONS,
+        )
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQUEST_POST_NOTIFICATIONS) return
+        val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+        val callback = pendingNotificationPermissionResult
+        pendingNotificationPermissionResult = null
+        callback?.invoke(granted)
+    }
+
+    private fun showPcTaskFinishedNotification(title: String, body: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Rumi PC Tasks",
+                NotificationManager.IMPORTANCE_DEFAULT,
+            )
+            manager.createNotificationChannel(channel)
+        }
+
+        val intent = packageManager.getLaunchIntentForPackage(packageName)
+            ?: Intent(this, MainActivity::class.java)
+        intent.flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or immutablePendingIntentFlag(),
+        )
+        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
+        } else {
+            Notification.Builder(this)
+        }
+        val notification = builder
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(Notification.BigTextStyle().bigText(body))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
+    }
+
+    private fun immutablePendingIntentFlag(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_IMMUTABLE
+        } else {
+            0
+        }
+    }
+
+    private companion object {
+        const val REQUEST_POST_NOTIFICATIONS = 7401
+        const val NOTIFICATION_CHANNEL_ID = "rumi_pc_tasks"
     }
 }
 

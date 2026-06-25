@@ -88,6 +88,7 @@ void main() {
 
     expect(find.text('AI API (ローカル動作)'), findsOneWidget);
     expect(find.text('PC接続'), findsOneWidget);
+    expect(find.text('PCタスク完了通知'), findsOneWidget);
   });
 
   testWidgets('drawer shows space selector with local space', (tester) async {

@@ -87,6 +87,37 @@ class PcConnection {
       );
 }
 
+class MobileNotificationSettings {
+  const MobileNotificationSettings({
+    this.pcTaskFinishedEnabled = true,
+  });
+
+  static const defaults = MobileNotificationSettings();
+
+  final bool pcTaskFinishedEnabled;
+
+  MobileNotificationSettings copyWith({
+    bool? pcTaskFinishedEnabled,
+  }) {
+    return MobileNotificationSettings(
+      pcTaskFinishedEnabled:
+          pcTaskFinishedEnabled ?? this.pcTaskFinishedEnabled,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'pcTaskFinishedEnabled': pcTaskFinishedEnabled,
+      };
+
+  factory MobileNotificationSettings.fromJson(Map<String, dynamic> json) {
+    return MobileNotificationSettings(
+      pcTaskFinishedEnabled: json['pcTaskFinishedEnabled'] as bool? ??
+          json['notifyPcTaskFinished'] as bool? ??
+          true,
+    );
+  }
+}
+
 abstract class SecureKeyValueStorage {
   Future<String?> read(String key);
   Future<void> write(String key, String? value);
@@ -127,6 +158,7 @@ class ApiConfigStore {
 
   static const _apiKey = 'rumi.api_config.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
+  static const _notificationKey = 'rumi.mobile_notifications.v1';
 
   final SecureKeyValueStorage _storage;
 
@@ -165,6 +197,30 @@ class ApiConfigStore {
         return;
       }
       await _storage.write(_pcKey, jsonEncode(pc.toJson()));
+    } catch (_) {
+      // ignore secure storage failures
+    }
+  }
+
+  Future<MobileNotificationSettings> loadNotificationSettings() async {
+    try {
+      final raw = await _storage.read(_notificationKey);
+      if (raw == null || raw.trim().isEmpty) {
+        return MobileNotificationSettings.defaults;
+      }
+      return MobileNotificationSettings.fromJson(
+        jsonDecode(raw) as Map<String, dynamic>,
+      );
+    } catch (_) {
+      return MobileNotificationSettings.defaults;
+    }
+  }
+
+  Future<void> saveNotificationSettings(
+    MobileNotificationSettings settings,
+  ) async {
+    try {
+      await _storage.write(_notificationKey, jsonEncode(settings.toJson()));
     } catch (_) {
       // ignore secure storage failures
     }

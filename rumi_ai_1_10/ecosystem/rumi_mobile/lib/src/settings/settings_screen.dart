@@ -32,6 +32,8 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late ApiConfig _config;
   late PcConnection? _pc;
+  MobileNotificationSettings _notificationSettings =
+      MobileNotificationSettings.defaults;
   PairedDevice? _pairedDevice;
   DeviceIdentity? _deviceIdentity;
   bool _loading = true;
@@ -78,12 +80,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final api = await widget.configStore.loadApi();
     final pc = await widget.configStore.loadPc();
+    final notificationSettings =
+        await widget.configStore.loadNotificationSettings();
     final paired = await widget.deviceStore.loadPairedDevice();
     final identity = await widget.deviceStore.loadOrCreateIdentity();
     if (!mounted) return;
     setState(() {
       _config = api;
       _pc = pc;
+      _notificationSettings = notificationSettings;
       _pairedDevice = paired;
       _deviceIdentity = identity;
       _syncControllers();
@@ -384,6 +389,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _setPcTaskFinishedNotifications(bool enabled) async {
+    final next = _notificationSettings.copyWith(
+      pcTaskFinishedEnabled: enabled,
+    );
+    setState(() => _notificationSettings = next);
+    await widget.configStore.saveNotificationSettings(next);
+    if (enabled) {
+      unawaited(const PlatformNotifications().requestAuthorization());
+    }
+  }
+
   Future<void> _pickModelFromCatalog() async {
     final catalog = _pcCatalog;
     if (catalog == null) {
@@ -496,6 +512,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.desktop_windows_outlined,
               title: 'PC接続',
               subtitle: 'PCのdefaultspack Kernel APIへ接続する情報。',
+            ),
+            const SizedBox(height: 12),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.notifications_active_outlined),
+              title: const Text('PCタスク完了通知'),
+              subtitle: const Text('PCで実行したチャット/タスクが終わったら通知します。'),
+              value: _notificationSettings.pcTaskFinishedEnabled,
+              onChanged: (value) {
+                unawaited(_setPcTaskFinishedNotifications(value));
+              },
             ),
             const SizedBox(height: 12),
             if (_pairedDevice != null) ...[
