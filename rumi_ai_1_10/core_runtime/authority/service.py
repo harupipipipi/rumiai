@@ -861,10 +861,20 @@ class AuthorityService:
             token=token,
         )
 
-    def list_grants(self, principal_id: str = "") -> dict[str, Any]:
+    def list_grants(self, principal_id: str = "", *, actor_principal: Any = None) -> dict[str, Any]:
         manager = self._capability_grant_manager
         if manager is None:
             return {"grants": {}, "count": 0}
+        principal_id = str(principal_id or "").strip()
+        actor_profile_id = self._actor_profile_id(actor_principal)
+        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+            profile_prefix = f"profile:{actor_profile_id}"
+            if not actor_profile_id:
+                return {"success": False, "error": "Forbidden", "status_code": 403}
+            if not principal_id:
+                principal_id = profile_prefix
+            if principal_id != profile_prefix and not principal_id.startswith(f"{profile_prefix}__"):
+                return {"success": False, "error": "Authority grants not found", "status_code": 404}
         if principal_id:
             grant = manager.get_grant(principal_id) if callable(getattr(manager, "get_grant", None)) else None
             return {
@@ -887,7 +897,9 @@ class AuthorityService:
         )
         return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": revoked}
 
-    def events(self, limit: int = 200) -> dict[str, Any]:
+    def events(self, limit: int = 200, *, actor_principal: Any = None) -> dict[str, Any]:
+        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+            return {"success": False, "error": "Forbidden", "status_code": 403}
         return {"_sse": True, "events": self._request_store.list_events(limit)}
 
     def _matching_capability_grant(
@@ -930,6 +942,8 @@ class AuthorityService:
             if permission_state == "disabled":
                 return None, True
             if permission_state != "enabled":
+                if self._profile_chain_segment_optional(principal_id):
+                    continue
                 return None, True
             configs.append(config)
             matched_principal = principal_id
@@ -978,6 +992,12 @@ class AuthorityService:
             return []
         parts = [part for part in principal_id.split("__") if part]
         return ["__".join(parts[:index]) for index in range(1, len(parts) + 1)]
+
+    @staticmethod
+    def _profile_chain_segment_optional(principal_id: str) -> bool:
+        segment = str(principal_id or "").split("__")[-1]
+        key = segment.split(":", 1)[0] if ":" in segment else ""
+        return key in {"graph", "node"}
 
     @staticmethod
     def _normalize_resource(resource: dict[str, Any]) -> dict[str, Any]:

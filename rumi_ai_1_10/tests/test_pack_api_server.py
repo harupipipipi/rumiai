@@ -537,6 +537,75 @@ class TestCheckAuth:
         assert captured["node_id"] is None
         assert captured["graph_id"] is None
 
+    def test_scoped_authority_grants_handler_passes_actor_principal(self, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.api.security import authority_handlers
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        captured = {}
+
+        class FakeAuthorityService:
+            def list_grants(self, principal_id="", **kwargs):
+                captured["principal_id"] = principal_id
+                captured.update(kwargs)
+                return {"grants": {}, "count": 0}
+
+        monkeypatch.setattr(
+            authority_handlers,
+            "_authority_service",
+            lambda: FakeAuthorityService(),
+        )
+        handler = _make_handler(_authenticated_principal=principal)
+
+        result = handler._authority_grants("profile:other")
+
+        assert result == {"grants": {}, "count": 0}
+        assert captured["principal_id"] == "profile:other"
+        assert captured["actor_principal"] is principal
+
+    def test_scoped_authority_events_route_is_core_only(self, tmp_path, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("e" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        for principal_id in (
+            "profile:work",
+            "profile:work__surface:mobile",
+            "profile:work__surface:mobile__device:phone-1",
+        ):
+            grants.grant_permission(principal_id, "authority.request.list", {})
+
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="phone-1",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route("GET", "/api/authority/events") is False
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
+
     def test_mobile_approver_requires_grant_for_authority_request_routes(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal
         from core_runtime import capability_grant_manager as cgm

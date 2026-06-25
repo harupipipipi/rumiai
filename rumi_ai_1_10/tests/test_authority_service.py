@@ -185,18 +185,44 @@ def test_authority_config_lattice_ignores_persisted_metadata_keys():
     }
 
 
-def test_authority_profile_child_requires_explicit_child_grant(tmp_path, monkeypatch):
+def test_authority_profile_child_graph_node_inherits_parent_grant_when_missing(tmp_path, monkeypatch):
     service, grants, _ = _service(tmp_path, monkeypatch)
     child_principal = "profile:work__graph:startup__node:agent.ai"
     grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
 
-    decision = service.check(
+    allowed = service.check(
         principal_id=child_principal,
         permission_id="model.invoke",
         resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
         profile_id="work",
         graph_id="startup",
         node_id="agent.ai",
+    )
+    denied = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert allowed.allowed is True
+    assert allowed.grant_config == {"provider_ids": ["openai"]}
+    assert denied.allowed is False
+    assert denied.approval_required is True
+
+
+def test_authority_profile_surface_child_still_requires_explicit_grant(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    surface_principal = "profile:work__surface:mobile__device:phone-1"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+
+    decision = service.check(
+        principal_id=surface_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
     )
 
     assert decision.allowed is False
@@ -954,6 +980,61 @@ def test_authority_mobile_approver_is_profile_scoped(tmp_path, monkeypatch):
     assert cross_profile_approval["status_code"] == 404
     assert persistent["success"] is False
     assert persistent["status_code"] == 403
+
+
+def test_authority_scoped_grants_are_profile_filtered(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "model.invoke", {"model_ids": ["gpt-5.4"]})
+    grants.grant_permission("profile:personal", "model.invoke", {"provider_ids": ["anthropic"]})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    own_default = service.list_grants(actor_principal=actor)
+    own_child = service.list_grants("profile:work__graph:startup", actor_principal=actor)
+    other = service.list_grants("profile:personal", actor_principal=actor)
+    core_all = service.list_grants(actor_principal=AuthenticatedPrincipal.legacy_root())
+
+    assert set(own_default["grants"]) == {"profile:work"}
+    assert set(own_child["grants"]) == {"profile:work__graph:startup"}
+    assert other["success"] is False
+    assert other["status_code"] == 404
+    assert set(core_all["grants"]) >= {"profile:work", "profile:personal"}
+
+
+def test_authority_events_are_core_only(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, _, store = _service(tmp_path, monkeypatch)
+    store.audit("authority_request_denied", {"principal_id": "profile:personal"})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    scoped = service.events(actor_principal=actor)
+    core = service.events(actor_principal=AuthenticatedPrincipal.legacy_root())
+
+    assert scoped["success"] is False
+    assert scoped["status_code"] == 403
+    assert core["_sse"] is True
+    assert core["events"]
 
 
 def test_authority_request_resource_redacts_secret_like_keys(tmp_path, monkeypatch):

@@ -111,6 +111,89 @@ class TestDockerFallbackBlocked:
         assert resp.output["execution_boundary"] == "managed_sandbox"
 
 
+def test_managed_sandbox_context_seals_server_values_and_timeout(monkeypatch):
+    executor = _make_test_executor()
+    captured: Dict[str, Any] = {}
+
+    class FakeSupervisor:
+        def execute_capability(self, request):
+            captured.update(request)
+            return {"success": True, "output": {"ok": True}}
+
+    executor._entry_requires_managed_sandbox = MagicMock(return_value=True)
+    executor._development_host_boundary_allowed = MagicMock(return_value=False)
+    executor._managed_sandbox_supervisor = MagicMock(return_value=FakeSupervisor())
+    entry = _MockFunctionEntry(
+        pack_id="third_party_pack",
+        function_id="run",
+        qualified_name="third_party_pack:run",
+        calling_convention="subprocess",
+    )
+
+    response = executor._managed_sandbox_response_if_required(
+        entry=entry,
+        principal_id="profile:work__graph:g__node:n",
+        args={"value": "hello"},
+        request_id="req-sandbox",
+        start_time=time.time(),
+        request_context={
+            "safe": "kept",
+            "principal_id": "profile:evil",
+            "pack_id": "evil_pack",
+            "function_id": "evil_func",
+            "request_id": "evil-request",
+            "grant_config": {"provider_ids": ["evil"]},
+        },
+        calling_convention="subprocess",
+        timeout_seconds=7,
+        grant_config={"provider_ids": ["openai"]},
+    )
+
+    assert response.success is True
+    assert captured["timeout_seconds"] == 7.0
+    context = captured["context"]
+    assert context["safe"] == "kept"
+    assert context["principal_id"] == "profile:work__graph:g__node:n"
+    assert context["pack_id"] == "third_party_pack"
+    assert context["function_id"] == "run"
+    assert context["request_id"] == "req-sandbox"
+    assert context["grant_config"] == {"provider_ids": ["openai"]}
+
+
+def test_permission_fallback_passes_context_timeout_and_grant_to_sandbox():
+    executor = _make_test_executor()
+    captured: Dict[str, Any] = {}
+
+    def fake_sandbox(**kwargs):
+        captured.update(kwargs)
+        return CapabilityResponse(success=False, error="sandbox blocked", error_type="blocked")
+
+    executor._managed_sandbox_response_if_required = fake_sandbox
+    entry = _MockFunctionEntry(
+        pack_id="third_party_pack",
+        function_id="run",
+        qualified_name="third_party_pack:run",
+        calling_convention="",
+    )
+
+    response = executor._dispatch_by_permission_id(
+        entry=entry,
+        principal_id="profile:work",
+        effective_permission_id="model.invoke",
+        grant_config={"provider_ids": ["openai"]},
+        args={"value": 1},
+        timeout_seconds=9,
+        request_id="req-fallback",
+        start_time=time.time(),
+        request_context={"trace": "ctx"},
+    )
+
+    assert response.success is False
+    assert captured["request_context"] == {"trace": "ctx"}
+    assert captured["timeout_seconds"] == 9
+    assert captured["grant_config"] == {"provider_ids": ["openai"]}
+
+
 class TestDockerFallbackAllowed:
     """RUMI_ALLOW_HOST_FALLBACK=true 時にフォールバックが許可されること"""
 

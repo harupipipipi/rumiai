@@ -55,7 +55,7 @@ def route_permission(method: str, path: str, route_entry: dict[str, Any] | None 
     if path == "/api/authority/grants":
         return "authority.grant.read" if method == "GET" else "authority.grant.manage"
     if path == "/api/authority/events" and method == "GET":
-        return "authority.request.list"
+        return ""
     if path == "/api/packs" or path.startswith("/api/packs/"):
         return "pack.read" if method == "GET" else "pack.manage"
     if path.startswith("/api/network/"):

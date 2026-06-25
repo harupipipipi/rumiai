@@ -36,7 +36,10 @@ class AuthorityHandlersMixin:
 
     def _authority_grants(self, principal_id: str = "") -> dict:
         try:
-            return _authority_service().list_grants(principal_id)
+            return _authority_service().list_grants(
+                principal_id,
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
         except Exception as exc:
             _log_internal_error("authority_grants", exc)
             return {"error": _SAFE_ERROR_MSG}
@@ -126,7 +129,10 @@ class AuthorityHandlersMixin:
 
     def _authority_events(self, limit: int = 200) -> dict:
         try:
-            return _authority_service().events(limit)
+            return _authority_service().events(
+                limit,
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
         except Exception as exc:
             _log_internal_error("authority_events", exc)
             return {"error": _SAFE_ERROR_MSG}
