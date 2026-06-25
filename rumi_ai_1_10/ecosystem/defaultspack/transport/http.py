@@ -1195,6 +1195,16 @@ def _bearer_token(headers):
     return auth_header[7:].strip()
 
 
+def _allow_local_pairing_start_without_token(method, path, headers):
+    if str(method or "").upper() != "POST" or path != "/api/p2p/pairing/start":
+        return False
+    origin = _header_value(headers, "Origin")
+    if not origin or not _is_allowed_sensitive_origin(origin):
+        return False
+    csrf = _header_value(headers, "X-Rumi-CSRF")
+    return bool(csrf.strip())
+
+
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
@@ -1404,6 +1414,15 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         expected = _configured_local_auth_token()
         provided = _bearer_token(self.headers)
         if not expected:
+            if _allow_local_pairing_start_without_token(method, path, self.headers):
+                return None
+            if (
+                method.upper() in {"POST", "PUT", "DELETE"}
+                and origin
+                and not self.headers.get("X-Rumi-CSRF", "").strip()
+                and path == "/api/p2p/pairing/start"
+            ):
+                return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
         if not provided or not hmac.compare_digest(provided, expected):
             return (401, "local auth token required", "AUTH_REQUIRED")

@@ -38,6 +38,25 @@ def test_p2p_http_routes_require_sensitive_auth(monkeypatch):
         "ORIGIN_DENIED",
     )
 
+    for env_key in ("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "RUMI_API_TOKEN", "RUMI_TOKEN"):
+        monkeypatch.delenv(env_key, raising=False)
+
+    handler.headers = {"Origin": "http://localhost:8766"}
+    assert handler._sensitive_request_error("POST", "/api/p2p/pairing/start") == (
+        403,
+        "CSRF header required for sensitive integration mutation",
+        "CSRF_REQUIRED",
+    )
+
+    handler.headers = {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"}
+    assert handler._sensitive_request_error("POST", "/api/p2p/pairing/start") is None
+
+    assert handler._sensitive_request_error("POST", "/api/p2p/messages/send") == (
+        403,
+        "local auth token is not configured",
+        "AUTH_REQUIRED",
+    )
+
     monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "local-secret")
     handler.headers = {"Origin": "http://localhost:8766", "Authorization": "Bearer local-secret"}
     assert handler._sensitive_request_error("POST", "/api/integrations/p2p/events") == (
