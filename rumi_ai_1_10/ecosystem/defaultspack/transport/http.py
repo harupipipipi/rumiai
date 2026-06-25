@@ -1824,6 +1824,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
             return None
         if not _configured_local_auth_tokens():
+            if str(method or "").upper() == "POST" and path == "/api/p2p/pairing/start":
+                if not self.headers.get("X-Rumi-CSRF", "").strip():
+                    return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
+                return None
             if _allow_local_pairing_start_without_token(method, path, self.headers):
                 return None
             return (403, "local auth token is not configured", "AUTH_REQUIRED")

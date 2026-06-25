@@ -632,7 +632,7 @@ def _mobile_http_route_specs() -> list[HttpRouteSpec]:
             route.pattern,
             block_module=route.block_module,
             flow_id=route.flow_id,
-            fallback_block_module=route.fallback_block_module,
+            fallback_block_module=route.fallback_block_module or route.block_module,
             path_inject=dict(route.path_inject),
             defaults=dict(route.defaults),
         )

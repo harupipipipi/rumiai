@@ -2913,7 +2913,7 @@ export function ComposerRenderer({
                       handleInputChange(event.currentTarget.value);
                     }}
                     placeholder={effectiveComposerPlaceholder}
-                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
+                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
                       input ? "caret-transparent" : "caret-zinc-100"
                     }`}
                     onFocus={() => {
