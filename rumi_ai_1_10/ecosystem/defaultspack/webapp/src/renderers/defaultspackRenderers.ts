@@ -1,8 +1,8 @@
 import type { UICatalog } from "../lib/api";
 import { shellRendererForRegion } from "../lib/uiShell";
 import { ChatHeaderRenderer } from "./ChatHeaderRenderer";
-import { ChatExperienceRenderer } from "./ChatExperienceRenderer";
-import { ComposerExperienceRenderer } from "./ComposerExperienceRenderer";
+import { ChatMessagesRenderer } from "./ChatMessagesRenderer";
+import { ComposerRenderer } from "./ComposerRenderer";
 import { HistoryBoardRenderer } from "./HistoryBoardRenderer";
 import { RightSidebarRenderer } from "./RightSidebarRenderer";
 import { SettingsModalRenderer } from "./SettingsModalRenderer";
@@ -27,8 +27,8 @@ export const defaultspackRenderers = {
   titleBar: TitleBarRenderer,
   historyBoard: HistoryBoardRenderer,
   chatHeader: ChatHeaderRenderer,
-  chatMessages: ChatExperienceRenderer,
-  composer: ComposerExperienceRenderer,
+  chatMessages: ChatMessagesRenderer,
+  composer: ComposerRenderer,
   toolPreviewPanel: ToolPreviewPanelRenderer,
   rightSidebar: RightSidebarRenderer,
   settingsModal: SettingsModalRenderer,
@@ -39,8 +39,8 @@ export function resolveDefaultspackRenderers(catalog: UICatalog | null | undefin
     titleBar: loadTrustedRenderer(shellRendererForRegion(catalog, "title_bar"), TitleBarRenderer),
     historyBoard: loadTrustedRenderer(shellRendererForRegion(catalog, "history"), HistoryBoardRenderer),
     chatHeader: loadTrustedRenderer(shellRendererForRegion(catalog, "chat_header"), ChatHeaderRenderer),
-    chatMessages: loadTrustedRenderer(shellRendererForRegion(catalog, "chat_messages"), ChatExperienceRenderer),
-    composer: loadTrustedRenderer(shellRendererForRegion(catalog, "composer"), ComposerExperienceRenderer),
+    chatMessages: loadTrustedRenderer(shellRendererForRegion(catalog, "chat_messages"), ChatMessagesRenderer),
+    composer: loadTrustedRenderer(shellRendererForRegion(catalog, "composer"), ComposerRenderer),
     toolPreviewPanel: loadTrustedRenderer(shellRendererForRegion(catalog, "activity_preview"), ToolPreviewPanelRenderer),
     rightSidebar: loadTrustedRenderer(shellRendererForRegion(catalog, "right_sidebar"), RightSidebarRenderer),
     settingsModal: loadTrustedRenderer(shellRendererForRegion(catalog, "settings_modal"), SettingsModalRenderer),

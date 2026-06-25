@@ -85,6 +85,31 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
 });
 
+test("loading activity renders semantic track without bounce dots", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: true,
+    isNewConversation: false,
+    isGenerating: true,
+    pendingStatus: "応答を準備しています",
+    pendingToolNames: [],
+    pendingStartedAt: Date.now() - 2_000,
+    messages: [],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-label="応答を準備しています"/);
+  assert.match(html, /rumi-loading-bars/);
+  assert.match(html, /aria-hidden="true" class="shrink-0 font-mono/);
+  assert.doesNotMatch(html, /animate-bounce/);
+});
+
 test("completed tool activity summary uses elapsed work span", () => {
   const summary = summarizeToolActivityGroups([
     {
