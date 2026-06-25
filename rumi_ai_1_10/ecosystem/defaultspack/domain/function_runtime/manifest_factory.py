@@ -659,6 +659,49 @@ EXTERNAL_INPUT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+ADAPTIVE_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    _spec(function_id, description, tags, risk=risk, block="blocks.adaptive", default_args={"operation": operation})
+    for function_id, operation, description, tags, risk in (
+        ("adaptive_onboarding_status", "onboarding_status", "Get adaptive onboarding status.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_schema", "onboarding_schema", "Get adaptive onboarding schema.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_normalize", "onboarding_normalize", "Normalize onboarding answers.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_compile", "onboarding_compile", "Compile an Operating Profile preview.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_simulate", "onboarding_simulate", "Simulate an Operating Profile.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_apply", "onboarding_apply", "Apply a signed Operating Profile plan.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_undo", "onboarding_undo", "Undo the last Operating Profile apply.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_history", "onboarding_history", "List onboarding history.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_rediagnose", "onboarding_rediagnose", "Preview a re-diagnosis.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_operating_profiles_list", "operating_profiles_list", "List Operating Profiles.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_get", "operating_profiles_get", "Get an Operating Profile.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_create", "operating_profiles_create", "Create an Operating Profile preview.", ("adaptive", "profile"), "medium"),
+        ("adaptive_operating_profiles_update", "operating_profiles_update", "Update an Operating Profile preview.", ("adaptive", "profile"), "medium"),
+        ("adaptive_operating_profiles_preview", "operating_profiles_preview", "Preview an Operating Profile update.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_activate", "operating_profiles_activate", "Activate an Operating Profile.", ("adaptive", "profile"), "medium"),
+        ("adaptive_pack_recommendations_list", "pack_recommendations_list", "List Pack onboarding recommendations.", ("adaptive", "pack"), "low"),
+        ("adaptive_pack_recommendations_preview", "pack_recommendations_preview", "Preview Pack onboarding recommendations.", ("adaptive", "pack"), "low"),
+        ("adaptive_activity_snapshot", "activity_snapshot", "Get Activity Center snapshot.", ("adaptive", "activity"), "low"),
+        ("adaptive_freeze_set", "freeze_set", "Set adaptive emergency freeze.", ("adaptive", "activity"), "high"),
+        ("adaptive_context_file_read", "context_file_read", "Read a bounded file window.", ("adaptive", "context"), "low"),
+        ("adaptive_context_code_search", "context_code_search", "Run bounded contextual code search.", ("adaptive", "context"), "low"),
+        ("adaptive_context_repository_map", "context_repository_map", "Build a bounded repository map.", ("adaptive", "context"), "low"),
+        ("adaptive_context_evidence", "context_evidence", "Build an evidence bundle.", ("adaptive", "context"), "low"),
+        ("adaptive_prepared_action_prepare", "prepared_action_prepare", "Prepare an exact-plan action.", ("adaptive", "prepared_action"), "medium"),
+        ("adaptive_prepared_action_commit", "prepared_action_commit", "Commit a prepared action marker.", ("adaptive", "prepared_action"), "high"),
+        ("adaptive_prepared_action_revoke", "prepared_action_revoke", "Revoke a prepared action.", ("adaptive", "prepared_action"), "medium"),
+        ("adaptive_event_append", "event_append", "Append a durable adaptive event.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_list", "event_list", "List durable adaptive events.", ("adaptive", "event"), "low"),
+        ("adaptive_event_replay", "event_replay", "Replay durable adaptive events.", ("adaptive", "event"), "medium"),
+        ("adaptive_skill_candidates_list", "skill_candidates_list", "List adaptive Skill candidates.", ("adaptive", "skill"), "low"),
+        ("adaptive_skill_candidate_promote", "skill_candidate_promote", "Promote a Skill candidate.", ("adaptive", "skill"), "high"),
+        ("adaptive_skill_candidate_rollback", "skill_candidate_rollback", "Rollback a Skill candidate.", ("adaptive", "skill"), "high"),
+        ("adaptive_memory_conflicts_list", "memory_conflicts_list", "List memory conflicts.", ("adaptive", "memory"), "low"),
+        ("adaptive_memory_conflict_resolve", "memory_conflict_resolve", "Resolve a memory conflict.", ("adaptive", "memory"), "medium"),
+        ("adaptive_lease_acquire", "lease_acquire", "Acquire an adaptive path or resource lease.", ("adaptive", "orchestration"), "medium"),
+        ("adaptive_lease_release", "lease_release", "Release an adaptive path or resource lease.", ("adaptive", "orchestration"), "medium"),
+    )
+)
+
+
 FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
@@ -676,6 +719,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
     + EXTERNAL_INPUT_FUNCTIONS
+    + ADAPTIVE_FUNCTIONS
 )
 
 
