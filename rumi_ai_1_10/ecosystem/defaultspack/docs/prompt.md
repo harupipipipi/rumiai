@@ -20,6 +20,20 @@ user-owned and wins over snapshots. Every effective prompt response includes
 `source_type`, `source`, `source_chain`, `content`, and `final_content` so flow
 steps can audit which layer produced the final text.
 
+## Pack Trust Boundary
+
+Pack-provided prompts are model-visible only when their source pack is approved
+and hash-verified by the host approval manager. Untrusted pack prompts are
+skipped by prompt listing/resolution. The AI Input Graph also fails closed:
+if a pack-sourced prompt reaches runtime from an older path or test hook, its
+edge is inactive and the disabled segment records
+`prompt_source_pack_untrusted`.
+
+User-owned profile overrides remain editable prompt text, but they do not grant
+permissions, attach tools, call providers, or mutate chat state. Trusting a pack
+allows its prompt text to be considered as passive model input; it still does
+not grant execution authority.
+
 ## Functions
 
 - `defaults.prompt.load_effective` returns the selected prompt text and source
