@@ -34,8 +34,10 @@ class PairedDevice {
   const PairedDevice({
     required this.deviceId,
     required this.deviceToken,
+    this.approvalToken = '',
     required this.label,
     required this.scopes,
+    this.approvalScopes = const [],
     required this.pcBaseUrl,
     required this.pcLabel,
     required this.pairingId,
@@ -43,8 +45,10 @@ class PairedDevice {
 
   final String deviceId;
   final String deviceToken;
+  final String approvalToken;
   final String label;
   final List<String> scopes;
+  final List<String> approvalScopes;
   final String pcBaseUrl;
   final String pcLabel;
   final String pairingId;
@@ -52,20 +56,27 @@ class PairedDevice {
   bool get canReadPcConversations => scopes.contains('chat.read');
   bool get canWritePcConversations => scopes.contains('chat.write');
   bool get canObservePcTools => scopes.contains('tools.observe');
-  bool get canApprovePcTools => scopes.contains('tools.approve');
+  bool get canApprovePcTools =>
+      approvalToken.trim().isNotEmpty &&
+      approvalScopes.contains('tools.approve');
   bool get canRequestCredentialCopy => scopes.contains('credentials.request');
   bool get isConfigured =>
       deviceToken.trim().isNotEmpty && pcBaseUrl.trim().isNotEmpty;
   String get displayPcLabel => friendlyPcLabel(pcLabel, pcBaseUrl);
 
-  PcConnection toPcConnection() =>
-      PcConnection(baseUrl: pcBaseUrl, token: deviceToken);
+  PcConnection toPcConnection() => PcConnection(
+        baseUrl: pcBaseUrl,
+        token: deviceToken,
+        approvalToken: approvalToken,
+      );
 
   Map<String, dynamic> toJson() => {
         'deviceId': deviceId,
         'deviceToken': deviceToken,
+        'approvalToken': approvalToken,
         'label': label,
         'scopes': scopes,
+        'approvalScopes': approvalScopes,
         'pcBaseUrl': pcBaseUrl,
         'pcLabel': pcLabel,
         'pairingId': pairingId,
@@ -75,8 +86,12 @@ class PairedDevice {
     return PairedDevice(
       deviceId: json['deviceId'] as String? ?? '',
       deviceToken: json['deviceToken'] as String? ?? '',
+      approvalToken: json['approvalToken'] as String? ?? '',
       label: json['label'] as String? ?? '',
       scopes: (json['scopes'] as List? ?? []).map((e) => e.toString()).toList(),
+      approvalScopes: (json['approvalScopes'] as List? ?? [])
+          .map((e) => e.toString())
+          .toList(),
       pcBaseUrl: json['pcBaseUrl'] as String? ?? '',
       pcLabel: json['pcLabel'] as String? ?? '',
       pairingId: json['pairingId'] as String? ?? '',
@@ -214,8 +229,9 @@ class MobileDeviceStore {
     try {
       final raw = await _storage.read(_pairedKey);
       if (raw != null && raw.trim().isNotEmpty) {
-        final device =
-            PairedDevice.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        final device = PairedDevice.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
         if (device.isConfigured) return device;
       }
     } catch (_) {

@@ -11,8 +11,11 @@ import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 const _pc = PcConnection(baseUrl: 'http://192.168.1.10:8765', token: 'tok');
 
 http.Response _ok(Map<String, dynamic> data) {
-  return http.Response(jsonEncode({'status': 'ok', 'data': data}), 200,
-      headers: {'content-type': 'application/json'});
+  return http.Response(
+    jsonEncode({'status': 'ok', 'data': data}),
+    200,
+    headers: {'content-type': 'application/json'},
+  );
 }
 
 const _identity = DeviceIdentity(
@@ -26,7 +29,9 @@ void main() {
     test('does not display raw http URL labels', () {
       expect(
         friendlyPcLabel(
-            'http://192.168.11.25:8765', 'http://192.168.11.25:8765'),
+          'http://192.168.11.25:8765',
+          'http://192.168.11.25:8765',
+        ),
         'PC',
       );
       expect(
@@ -91,15 +96,20 @@ void main() {
       final resp = PairingStatusResponse.fromJson({
         'pairing': {'pairing_id': 'p1', 'status': 'approved'},
         'device_token': 'dtk-123',
+        'approval_token': 'dtk-approve',
         'scopes': ['chat.read'],
+        'approval_scopes': ['tools.approve'],
         'pc_label': 'Haru MacBook',
       });
 
       expect(resp.isAccepted, isTrue);
       expect(resp.isReady, isTrue);
       expect(resp.deviceToken, 'dtk-123');
+      expect(resp.approvalToken, 'dtk-approve');
+      expect(resp.hasApprovalToken, isTrue);
       expect(resp.pcLabel, 'Haru MacBook');
       expect(resp.scopes, ['chat.read']);
+      expect(resp.approvalScopes, ['tools.approve']);
     });
   });
 
@@ -135,38 +145,41 @@ void main() {
       expect(body['requested_capabilities'], ['chat.read', 'chat.write']);
     });
 
-    test('pollStatus sends GET to /api/mobile/v1/pairings/{id}/status',
-        () async {
-      String? requestedPath;
-      final client = MockClient((request) async {
-        requestedPath = request.url.path;
-        return _ok({
-          'pairing': {
-            'pairing_id': 'p1',
-            'status': 'accepted',
-            'device_token': 'dt-123',
-            'scopes': ['chat.read'],
-          },
+    test(
+      'pollStatus sends GET to /api/mobile/v1/pairings/{id}/status',
+      () async {
+        String? requestedPath;
+        final client = MockClient((request) async {
+          requestedPath = request.url.path;
+          return _ok({
+            'pairing': {
+              'pairing_id': 'p1',
+              'status': 'accepted',
+              'device_token': 'dt-123',
+              'scopes': ['chat.read'],
+            },
+          });
         });
-      });
 
-      final pairingClient = PcPairingClient(client: client);
-      final resp = await pairingClient.pollStatus(_pc, pairingId: 'p1');
-      pairingClient.close();
+        final pairingClient = PcPairingClient(client: client);
+        final resp = await pairingClient.pollStatus(_pc, pairingId: 'p1');
+        pairingClient.close();
 
-      expect(requestedPath, '/api/mobile/v1/pairings/p1/status');
-      expect(resp.isAccepted, isTrue);
-      expect(resp.deviceToken, 'dt-123');
-    });
+        expect(requestedPath, '/api/mobile/v1/pairings/p1/status');
+        expect(resp.isAccepted, isTrue);
+        expect(resp.deviceToken, 'dt-123');
+      },
+    );
 
     test('throws PcPairingException on non-ok response', () async {
       final client = MockClient((request) async {
         return http.Response(
-            jsonEncode({
-              'status': 'error',
-              'error': {'message': 'not found'}
-            }),
-            404);
+          jsonEncode({
+            'status': 'error',
+            'error': {'message': 'not found'},
+          }),
+          404,
+        );
       });
 
       final pairingClient = PcPairingClient(client: client);

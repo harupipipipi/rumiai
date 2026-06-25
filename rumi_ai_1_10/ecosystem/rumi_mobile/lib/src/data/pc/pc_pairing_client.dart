@@ -31,18 +31,23 @@ class PairingStatusResponse {
     required this.pairingId,
     required this.status,
     this.deviceToken,
+    this.approvalToken,
     this.scopes = const [],
+    this.approvalScopes = const [],
     this.pcLabel,
   });
 
   final String pairingId;
   final String status;
   final String? deviceToken;
+  final String? approvalToken;
   final List<String> scopes;
+  final List<String> approvalScopes;
   final String? pcLabel;
 
   bool get isAccepted => status == 'approved' || status == 'accepted';
   bool get hasDeviceToken => deviceToken?.trim().isNotEmpty ?? false;
+  bool get hasApprovalToken => approvalToken?.trim().isNotEmpty ?? false;
   bool get isReady => isAccepted && hasDeviceToken;
 
   factory PairingStatusResponse.fromJson(Map<String, dynamic> json) {
@@ -54,12 +59,18 @@ class PairingStatusResponse {
         (pairing['scopes'] as List?) ??
         (pairing['capabilities'] as List?) ??
         const [];
+    final rawApprovalScopes = (json['approval_scopes'] as List?) ??
+        (device?['approval_scopes'] as List?) ??
+        const [];
     return PairingStatusResponse(
       pairingId: pairing['pairing_id'] as String? ?? '',
       status: pairing['status'] as String? ?? '',
       deviceToken:
           json['device_token'] as String? ?? pairing['device_token'] as String?,
+      approvalToken: json['approval_token'] as String? ??
+          pairing['approval_token'] as String?,
       scopes: rawScopes.map((e) => e.toString()).toList(),
+      approvalScopes: rawApprovalScopes.map((e) => e.toString()).toList(),
       pcLabel: json['pc_label'] as String? ??
           pairing['pc_label'] as String? ??
           server?['label'] as String?,

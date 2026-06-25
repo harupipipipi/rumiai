@@ -11,7 +11,7 @@ import hashlib
 import json
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +21,8 @@ DEVICE_ACTIVE = "active"
 DEVICE_REVOKED = "revoked"
 
 DEFAULT_SCOPES = ["chat.read", "chat.write", "tools.observe"]
-ALL_SCOPES = DEFAULT_SCOPES + ["tools.approve", "credentials.request"]
+APPROVER_SCOPES = ["tools.approve"]
+ALL_SCOPES = DEFAULT_SCOPES + APPROVER_SCOPES + ["credentials.request"]
 
 
 def _now_ms() -> int:
@@ -62,6 +63,8 @@ class DeviceRecord:
     fingerprint: str = ""
     token_hash: str = ""
     scopes: list[str] = field(default_factory=lambda: list(DEFAULT_SCOPES))
+    approval_token_hash: str = ""
+    approval_scopes: list[str] = field(default_factory=list)
     status: str = DEVICE_ACTIVE
     pairing_id: str = ""
     confirmation_code: str = ""
@@ -71,13 +74,20 @@ class DeviceRecord:
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "DeviceRecord":
+        raw_scopes = _string_list(value.get("scopes")) or list(DEFAULT_SCOPES)
+        approval_token_hash = str(value.get("approval_token_hash") or "")
+        approval_scopes = _string_list(value.get("approval_scopes"))
+        if approval_token_hash and not approval_scopes:
+            approval_scopes = list(APPROVER_SCOPES)
         return cls(
             device_id=str(value.get("device_id") or value.get("id") or ""),
             label=str(value.get("label") or ""),
             public_key=str(value.get("public_key") or value.get("device_public_key") or ""),
             fingerprint=str(value.get("fingerprint") or ""),
             token_hash=str(value.get("token_hash") or ""),
-            scopes=_string_list(value.get("scopes")) or list(DEFAULT_SCOPES),
+            scopes=[scope for scope in raw_scopes if scope not in set(APPROVER_SCOPES)],
+            approval_token_hash=approval_token_hash,
+            approval_scopes=approval_scopes,
             status=str(value.get("status") or DEVICE_ACTIVE),
             pairing_id=str(value.get("pairing_id") or ""),
             confirmation_code=str(value.get("confirmation_code") or ""),
@@ -93,6 +103,8 @@ class DeviceRecord:
             "public_key": self.public_key[:16] + "…" if len(self.public_key) > 16 else self.public_key,
             "fingerprint": self.fingerprint,
             "scopes": list(self.scopes),
+            "approval_scopes": list(self.approval_scopes),
+            "has_approval_token": bool(self.approval_token_hash),
             "status": self.status,
             "pairing_id": self.pairing_id,
             "confirmation_code": self.confirmation_code,
@@ -123,7 +135,65 @@ class DeviceStore:
         for device in self._devices().values():
             if device.token_hash == token_hash and device.active:
                 return device
+            if device.approval_token_hash == token_hash and device.active:
+                return replace(
+                    device,
+                    token_hash=device.approval_token_hash,
+                    scopes=list(device.approval_scopes or APPROVER_SCOPES),
+                )
         return None
+
+    def issue_tokens(
+        self,
+        device_id: str,
+        *,
+        label: str = "",
+        public_key: str = "",
+        fingerprint: str = "",
+        scopes: list[str] | None = None,
+        pairing_id: str = "",
+    ) -> tuple[DeviceRecord, str, str]:
+        """Create or refresh split device tokens.
+
+        Returns ``(record, device_token, approval_token)``. The approval token is
+        only issued when the requested scopes include an approver scope. Plaintext
+        tokens are returned ONLY here and never stored.
+        """
+        clean_id = str(device_id or "").strip()
+        if not clean_id:
+            raise ValueError("device_id is required")
+        devices = self._devices()
+        now = _now_ms()
+        plaintext = _generate_token()
+        requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
+        allowed_scopes = set(ALL_SCOPES)
+        resolved = [scope for scope in requested_scopes if scope in allowed_scopes]
+        if not resolved and not scopes:
+            resolved = list(DEFAULT_SCOPES)
+        resolved_scopes = [scope for scope in resolved if scope not in set(APPROVER_SCOPES)]
+        approval_scopes = [scope for scope in resolved if scope in set(APPROVER_SCOPES)]
+        if not resolved_scopes and not scopes:
+            resolved_scopes = list(DEFAULT_SCOPES)
+        approval_plaintext = _generate_token() if approval_scopes else ""
+        code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
+        device = DeviceRecord(
+            device_id=clean_id,
+            label=label,
+            public_key=public_key,
+            fingerprint=fingerprint,
+            token_hash=_hash_token(plaintext),
+            scopes=resolved_scopes,
+            approval_token_hash=_hash_token(approval_plaintext) if approval_plaintext else "",
+            approval_scopes=approval_scopes,
+            status=DEVICE_ACTIVE,
+            pairing_id=pairing_id,
+            confirmation_code=code,
+            created_at=devices[clean_id].created_at if clean_id in devices else now,
+            updated_at=now,
+        )
+        devices[clean_id] = device
+        self._save_devices(devices)
+        return device, plaintext, approval_plaintext
 
     def issue_token(
         self,
@@ -135,37 +205,20 @@ class DeviceStore:
         scopes: list[str] | None = None,
         pairing_id: str = "",
     ) -> tuple[DeviceRecord, str]:
-        """Create or refresh a device token. Returns (record, plaintext_token).
+        """Create or refresh the normal device token.
 
-        The plaintext token is returned ONLY here and never stored.
+        Backwards-compatible wrapper around ``issue_tokens``. If approver scopes
+        are requested, their token is stored and can be returned by callers that
+        use ``issue_tokens`` directly.
         """
-        clean_id = str(device_id or "").strip()
-        if not clean_id:
-            raise ValueError("device_id is required")
-        devices = self._devices()
-        now = _now_ms()
-        plaintext = _generate_token()
-        requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
-        allowed_scopes = set(ALL_SCOPES)
-        resolved_scopes = [scope for scope in requested_scopes if scope in allowed_scopes]
-        if not resolved_scopes:
-            resolved_scopes = list(DEFAULT_SCOPES)
-        code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
-        device = DeviceRecord(
-            device_id=clean_id,
+        device, plaintext, _approval_plaintext = self.issue_tokens(
+            device_id,
             label=label,
             public_key=public_key,
             fingerprint=fingerprint,
-            token_hash=_hash_token(plaintext),
-            scopes=resolved_scopes,
-            status=DEVICE_ACTIVE,
+            scopes=scopes,
             pairing_id=pairing_id,
-            confirmation_code=code,
-            created_at=devices[clean_id].created_at if clean_id in devices else now,
-            updated_at=now,
         )
-        devices[clean_id] = device
-        self._save_devices(devices)
         return device, plaintext
 
     def revoke_device(self, device_id: str) -> DeviceRecord | None:
@@ -229,6 +282,7 @@ class DeviceStore:
         # Store token_hash separately (as_dict doesn't include it for safety)
         for did, d in devices.items():
             self._data["devices"][did]["token_hash"] = d.token_hash
+            self._data["devices"][did]["approval_token_hash"] = d.approval_token_hash
             self._data["devices"][did]["public_key"] = d.public_key
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(
