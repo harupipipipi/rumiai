@@ -10,11 +10,13 @@ import yaml
 from ..capability.catalog import CapabilityCatalog
 from .renderer import render
 from .resolver import PromptResolver
+from .trust import is_trusted_prompt_pack
 
 
 _VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
 _BRACED_PATTERN = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 _VALID_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_SAFE_PROMPT_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 def _read_mapping(path: Path | None) -> dict[str, Any]:
@@ -28,7 +30,23 @@ def _read_mapping(path: Path | None) -> dict[str, Any]:
 
 
 def _clean_id(value: Any) -> str:
-    return str(value or "").strip().rsplit(".", 1)[-1]
+    prompt_id = str(value or "").strip()
+    if not prompt_id or not _SAFE_PROMPT_ID.match(prompt_id):
+        return ""
+    if prompt_id in {".", ".."} or not prompt_id.strip("."):
+        return ""
+    return prompt_id
+
+
+def _prompt_id_aliases(value: Any) -> list[str]:
+    prompt_id = _clean_id(value)
+    if not prompt_id:
+        return []
+    aliases = [prompt_id]
+    suffix = prompt_id.rsplit(".", 1)[-1]
+    if "." in prompt_id and suffix and suffix != prompt_id and _SAFE_PROMPT_ID.match(suffix):
+        aliases.append(suffix)
+    return aliases
 
 
 def _path_from_workspace(workspace: dict[str, Any], key: str) -> Path | None:
@@ -48,10 +66,10 @@ def _prompt_ids(data: dict[str, Any], profile: dict[str, Any]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for item in ids:
-        prompt_id = _clean_id(item)
-        if prompt_id and prompt_id not in seen:
-            seen.add(prompt_id)
-            result.append(prompt_id)
+        for prompt_id in _prompt_id_aliases(item):
+            if prompt_id and prompt_id not in seen:
+                seen.add(prompt_id)
+                result.append(prompt_id)
     return result
 
 
@@ -204,7 +222,18 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
             )
         )
         content = snapshot_candidate.read_text(encoding="utf-8")
-        return _effective_payload(data, prompt_ids[0], "profile_snapshot", str(snapshot_candidate), content, source_chain)
+        trusted, trust_reason = is_trusted_prompt_pack(base_pack)
+        return _effective_payload(
+            data,
+            prompt_ids[0],
+            "profile_snapshot",
+            str(snapshot_candidate),
+            content if trusted else "",
+            source_chain,
+            source_pack_id=base_pack,
+            source_pack_trusted=trusted,
+            source_pack_trust_reason=trust_reason,
+        )
     source_chain.append(
         _chain_entry(
             source_type="profile_snapshot",
@@ -219,7 +248,9 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
     for prompt_id in prompt_ids:
         content, resolved_pack_id = resolver.resolve_prompt(prompt_id, source_pack_id=source_pack_id or None)
         if content is not None:
-            source = f"{(resolved_pack_id or source_pack_id or base_pack)}.{prompt_id}"
+            prompt_source_pack_id = resolved_pack_id or source_pack_id or base_pack
+            trusted, trust_reason = is_trusted_prompt_pack(prompt_source_pack_id)
+            source = f"{prompt_source_pack_id}.{prompt_id}"
             source_chain.append(
                 _chain_entry(
                     source_type="pack_default",
@@ -229,7 +260,18 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
                     prompt_id=prompt_id,
                 )
             )
-            return _effective_payload(data, prompt_id, "pack_default", source, content, source_chain)
+            return _effective_payload(
+                data,
+                prompt_id,
+                "pack_default",
+                source,
+                content if trusted else "",
+                source_chain,
+                metadata=_prompt_manifest_metadata(resolver.get_manifest(prompt_id)),
+                source_pack_id=prompt_source_pack_id,
+                source_pack_trusted=trusted,
+                source_pack_trust_reason=trust_reason,
+            )
 
     source_chain.append(
         _chain_entry(
@@ -249,8 +291,13 @@ def _effective_payload(
     source: str,
     content: str,
     source_chain: list[dict[str, Any]],
+    *,
+    metadata: dict[str, Any] | None = None,
+    source_pack_id: str = "",
+    source_pack_trusted: bool | None = None,
+    source_pack_trust_reason: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "profile_id": data.get("profile_id"),
         "conversation_id": data.get("conversation_id"),
         "prompt_id": prompt_id,
@@ -259,7 +306,30 @@ def _effective_payload(
         "source_chain": list(source_chain),
         "content": content,
         "final_content": content,
+        "metadata": dict(metadata or {}),
     }
+    if source_pack_id:
+        payload["source_pack_id"] = source_pack_id
+        payload["source_pack_trusted"] = bool(source_pack_trusted)
+        if source_pack_trust_reason:
+            payload["source_pack_trust_reason"] = source_pack_trust_reason
+    return payload
+
+
+def _prompt_manifest_metadata(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(manifest, dict):
+        return {}
+    config = manifest.get("config") if isinstance(manifest.get("config"), dict) else {}
+    metadata = manifest.get("metadata") if isinstance(manifest.get("metadata"), dict) else {}
+    output = dict(metadata)
+    for key in ("allow_disable", "safety_boundary", "owner", "source_path"):
+        if key in manifest:
+            output[key] = manifest.get(key)
+        if key in config:
+            output[key] = config.get(key)
+    if "allow_disable" not in output and manifest.get("read_only") is True:
+        output["allow_disable"] = False
+    return output
 
 
 def resolve_prompt_for_conversation(

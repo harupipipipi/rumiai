@@ -189,7 +189,40 @@ The frontend sends IDs, not authority fields:
 }
 ```
 
-## 11. Collision And Override
+## 11. Prompt Workspace Template
+
+`rumi.prompt_workspace.default` declares the visible prompt management surface.
+It projects Prompt Studio, the Prompt Command Center, sidebar/shell metadata,
+prompt trace functions, prompt toggle/save/override/version/rollback
+functions, and machine-readable route contracts.
+
+The Prompt Workspace template depends optionally on:
+
+- `rumi.model_selector.default` for the Studio model selector surface
+- `rumi.backend.prompt_compaction.default` for prompt compaction capability
+
+Prompt Studio sends template source IDs into its Test Bench:
+
+```json
+{
+  "template_policy": {
+    "template_ai_input_ids": ["default_ai_input"],
+    "template_tool_policy_ids": ["default_tools"]
+  }
+}
+```
+
+The backend resolves those IDs with `resolve_template_tool_policy()`. Missing
+or conflicting template tool policy IDs fail closed, and the result is returned
+as `template_tool_policy_resolution` so the UI can show requested IDs, resolved
+IDs, projected IDs, diagnostics, allow/deny rules, and the effective
+`tool_choice`.
+
+Prompt text remains passive. A prompt can make a tool look relevant in Studio,
+but only the tool registry, model/provider support, profile policy, template
+tool policy, and approval path can make that tool callable.
+
+## 12. Collision And Override
 
 Every projected item has an internal `projected_id` in the form:
 
@@ -217,7 +250,7 @@ Explicit replace is allowed:
 The replacer must have trust rank greater than or equal to the target. USER and
 UNTRUSTED templates cannot replace BUILTIN or LOCAL executable contributions.
 
-## 12. Ordering
+## 13. Ordering
 
 `order` is a stable sort hint. `insert_before` and `insert_after` are explicit
 merge anchors and take precedence over `order`.
@@ -229,7 +262,7 @@ an insert-after anchor and emit `template.piece.legacy_slot_anchor`.
 Unknown anchors warn. Ordering cycles error and block the affected template from
 runtime projection.
 
-## 13. Cache Generation And Reload
+## 14. Cache Generation And Reload
 
 `domain/templates/catalog_runtime.py` exposes:
 
@@ -244,7 +277,7 @@ Tool policy resolution and template function/route specs read from this
 provider so template edits do not leave stale function, route, or policy cache.
 Malformed edits drop the previous runtime contribution and return diagnostics.
 
-## 14. Lifecycle
+## 15. Lifecycle
 
 Lifecycle is declarative and data-only. State is stored at:
 
@@ -264,7 +297,7 @@ The lifecycle API plans and applies idempotent operations with rollback:
 Secret-looking fields, path escape, arbitrary Python, shell, network, and pack
 install/remove are rejected.
 
-## 15. Backend Service Lifecycle
+## 16. Backend Service Lifecycle
 
 `backend_service` pieces are executable only from BUILTIN templates. The service
 registry validates that entrypoints are allowlisted modules under the
@@ -284,7 +317,7 @@ Compatibility aliases:
 Service start order follows declared dependencies. Cycles are errors. A failed
 service does not stop the OS; dependents are marked blocked.
 
-## 16. Test Contract
+## 17. Test Contract
 
 `test_contract` pieces use data-only assertion objects. Legacy strings are
 accepted as documentation-only warnings.
@@ -310,7 +343,7 @@ Run shipped contracts with:
 python scripts/quality/check_template_contracts.py
 ```
 
-## 17. Frontend Renderer Security
+## 18. Frontend Renderer Security
 
 Templates reference renderer IDs. They do not introduce arbitrary React module
 URLs. Builtin settings renderer IDs such as `model_select`, `provider_select`,
@@ -322,7 +355,7 @@ Approved frontend extension packs remain a separate mechanism with pack
 approval, local containment, integrity data, same-origin loading, CSP, lazy load
 error boundaries, and builtin fallback.
 
-## 18. Source Adapters
+## 19. Source Adapters
 
 Source adapters expose legacy harnesses in the template catalog without moving
 their source of truth:
@@ -337,14 +370,14 @@ Adapter contributions include authoritative `source_kind`, `source_id`,
 `source_path`, `source_pack_id`, and `trust_level`. They are metadata-only and
 do not double-register commands, routes, functions, or handlers.
 
-## 19. Legacy Relationships
+## 20. Legacy Relationships
 
 Existing manifests, flows, profiles, components, and external IO YAML remain
 valid. Native RumiTemplate files own the new composable pieces. Source adapters
 make legacy material visible to diagnostics and catalog UIs while preserving
 the original runtime paths.
 
-## 20. Security Anti-Patterns
+## 21. Security Anti-Patterns
 
 Do not:
 
@@ -357,7 +390,7 @@ Do not:
 - load React modules from template JSON
 - run arbitrary migration or test code from templates
 
-## 21. Complete Sample
+## 22. Complete Sample
 
 ```json
 {
@@ -424,7 +457,7 @@ Do not:
 }
 ```
 
-## 22. Migration Guide
+## 23. Migration Guide
 
 For metadata-only composition, add a template under `templates/<area>/<name>/`.
 Keep existing blocks, flows, manifests, and stores in place until a native
@@ -439,7 +472,7 @@ When converting legacy declarations:
 5. Run focused template tests and `check_template_contracts.py`.
 6. Use source adapters to inspect legacy manifests without double execution.
 
-## 23. Diagnostics
+## 24. Diagnostics
 
 Common diagnostic codes:
 

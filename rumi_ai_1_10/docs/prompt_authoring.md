@@ -30,6 +30,10 @@ when no profile-specific prompt exists.
 uses the same priority and then renders conversation variables into the final
 content.
 
+Prompt usage can be inspected from chat history through `metadata.prompt_usage`,
+`defaults.prompt.trace_get`, and the `/prompts` Prompt Studio workspace. See
+[prompt_workspace.md](prompt_workspace.md).
+
 Do not author tools with `execution.type="prompt"`. Prompts remain passive; use
 `defaults.prompt.render` from a flow/function when rendered prompt text is needed.
 

@@ -20,6 +20,7 @@ from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
     METHOD_SENSITIVE_CODING_PATHS,
     SENSITIVE_CODING_PATHS,
+    is_loopback_request as _local_is_loopback_request,
     is_sensitive_coding_path as _local_is_sensitive_coding_path,
     origin_allowed as _local_origin_allowed,
     require_local_guard,
@@ -140,8 +141,14 @@ class DefaultsHttpServer:
                             entry.get("fallback_block_module") or ""
                         ).strip()
                         path_inject = entry.get("path_inject", {})
+                        route_sensitive = bool(entry.get("sensitive"))
+                        route_pre_auth = bool(entry.get("pre_auth"))
+                        route_local_only = bool(entry.get("local_only"))
                         method_key = str(method or "").upper()
                         pattern_key = str(pattern or "")
+                        if pattern_key.startswith("/api/prompts"):
+                            route_sensitive = True
+                            route_local_only = True
                         mapped_flow = _CHAT_TURN_HTTP_FALLBACKS.get((method_key, pattern_key))
                         if mapped_flow and not flow_id:
                             flow_id, fallback_block_module = mapped_flow
@@ -169,10 +176,43 @@ class DefaultsHttpServer:
                                 )
 
                             _flow_handler._defaultspack_flow_route_handler = True
+                            try:
+                                setattr(_flow_handler, "__rumi_route_sensitive__", route_sensitive)
+                                setattr(_flow_handler, "__rumi_route_pre_auth__", route_pre_auth)
+                                setattr(_flow_handler, "__rumi_route_local_only__", route_local_only)
+                            except Exception:
+                                pass
                             route_entries.append(
                                 (method, pattern, _flow_handler, path_inject, index)
                             )
                         elif method and pattern and callable(handler):
+                            try:
+                                setattr(
+                                    handler,
+                                    "__rumi_route_sensitive__",
+                                    bool(
+                                        route_sensitive
+                                        or getattr(handler, "__rumi_route_sensitive__", False)
+                                    ),
+                                )
+                                setattr(
+                                    handler,
+                                    "__rumi_route_pre_auth__",
+                                    bool(
+                                        route_pre_auth
+                                        or getattr(handler, "__rumi_route_pre_auth__", False)
+                                    ),
+                                )
+                                setattr(
+                                    handler,
+                                    "__rumi_route_local_only__",
+                                    bool(
+                                        route_local_only
+                                        or getattr(handler, "__rumi_route_local_only__", False)
+                                    ),
+                                )
+                            except Exception:
+                                pass
                             route_entries.append((method, pattern, handler, path_inject, index))
                     for method, pattern, handler, path_inject, index in sorted(
                         route_entries,
@@ -1673,7 +1713,7 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def _sensitive_request_error(self, method, path, request_data=None):
-        route_sensitive = self._route_metadata_sensitive(method, path)
+        route_sensitive, route_local_only = self._route_metadata_flags(method, path)
         coding_error = require_local_guard(
             path,
             method,
@@ -1686,6 +1726,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return None
         if not (route_sensitive or _requires_sensitive_http_auth(method, path)):
             return None
+        if route_local_only and not _local_is_loopback_request(
+            {str(key): str(value) for key, value in self.headers.items()},
+            self.client_address,
+        ):
+            return (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
         origin = self.headers.get("Origin", "")
         if not _is_allowed_sensitive_origin(origin):
             return (403, "origin not allowed for sensitive integration route", "ORIGIN_DENIED")
@@ -1710,6 +1755,9 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         return None
 
     def _route_metadata_sensitive(self, method, path):
+        return self._route_metadata_flags(method, path)[0]
+
+    def _route_metadata_flags(self, method, path):
         method = str(method or "").upper()
         path = str(path or "")
         server_ref = getattr(self, "server_ref", None)
@@ -1726,11 +1774,18 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 matched = None
             if not matched:
                 continue
-            return bool(
+            sensitive = bool(
                 getattr(handler, "__rumi_route_sensitive__", False)
                 or getattr(handler, "__rumi_route_pre_auth__", False)
             )
-        return False
+            local_only = bool(getattr(handler, "__rumi_route_local_only__", False))
+            if path.startswith("/api/prompts"):
+                sensitive = True
+                local_only = True
+            return sensitive, local_only
+        if path.startswith("/api/prompts"):
+            return True, True
+        return False, False
 
     def _send_cors_headers(self):
         path = self.path.split("?")[0]

@@ -60,6 +60,7 @@ def test_fallback_routes_dedupe_component_routes_without_reordering_core_paths()
     assert len(pairs) == len(set(pairs))
     assert any(method == "POST" and "api/integrations/line/webhook" in pattern for method, pattern in pairs)
     assert any(method == "GET" and "api/ui/catalog" in pattern for method, pattern in pairs)
+    assert any(method == "GET" and pattern == "^/prompts$" for method, pattern in pairs)
 
 
 def test_ui_catalog_exposes_component_route_and_surface_metadata():

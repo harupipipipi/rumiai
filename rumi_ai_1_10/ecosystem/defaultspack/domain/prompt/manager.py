@@ -35,6 +35,7 @@ from typing import Any
 from ..extensions.runtime import get_extension_registry, get_extensions_root
 from .component_prompts import component_prompt_records
 from .template import PromptTemplate
+from .trust import prompt_pack_is_trusted, prompt_pack_source_is_trusted
 
 
 # ---------------------------------------------------------------------------
@@ -120,12 +121,19 @@ class PromptManager:
 
     def _save_prompt(self, prompt: dict) -> None:
         """プロンプトを JSON ファイルに保存する。"""
-        prompts_dir = _get_prompts_dir()
-        name = prompt.get("name", "unnamed")
-        fname = _safe_filename(name) + ".json"
-        fpath = os.path.join(prompts_dir, fname)
-        with open(fpath, "w", encoding="utf-8") as f:
-            json.dump(prompt, f, ensure_ascii=False, indent=2)
+        fpath = self.prompt_path_for_name(str(prompt.get("name") or "unnamed"))
+        tmp_path = fpath.with_suffix(fpath.suffix + f".tmp.{os.getpid()}.{uuid.uuid4().hex}")
+        tmp_path.write_text(
+            json.dumps(prompt, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp_path.replace(fpath)
+
+    def prompt_path_for_name(self, name: str) -> Path:
+        """Return the durable JSON path for a user-owned prompt name."""
+        prompts_dir = Path(_get_prompts_dir())
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        return prompts_dir / (_safe_filename(name) + ".json")
 
     def _delete_prompt_file(self, name: str) -> None:
         """プロンプトの JSON ファイルを削除する。"""
@@ -162,6 +170,13 @@ class PromptManager:
                 prompt_id = str(manifest.get("id", "")).strip()
                 if not prompt_id:
                     continue
+                source_pack_id = str(
+                    manifest.get("source_pack_id")
+                    or manifest.get("_source_pack_id")
+                    or extensions_root.parent.name
+                ).strip()
+                if not prompt_pack_source_is_trusted(source_pack_id, manifest.get("source_path", "")):
+                    continue
                 template_file = str(
                     (manifest.get("config", {}) or {}).get("template_file", "prompt.md")
                 ).strip() or "prompt.md"
@@ -184,11 +199,13 @@ class PromptManager:
                     "variables": list((manifest.get("config", {}) or {}).get("variables", [])),
                     "metadata": {
                         "source": source,
+                        "source_pack_id": source_pack_id,
                         "manifest_path": manifest.get("source_path", ""),
                     },
                     "created_at": "",
                     "updated_at": "",
                     "read_only": True,
+                    "source_pack_id": source_pack_id,
                 }
         except Exception:
             return {}
@@ -206,6 +223,8 @@ class PromptManager:
             if not prompt_dir.exists():
                 continue
             source_pack_id = _read_pack_id(pack_root)
+            if not prompt_pack_is_trusted(source_pack_id):
+                continue
             for prompt_path in sorted(prompt_dir.glob("*.system.md")):
                 try:
                     body = prompt_path.read_text(encoding="utf-8")

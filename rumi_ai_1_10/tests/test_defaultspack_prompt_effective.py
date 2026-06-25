@@ -79,7 +79,16 @@ def test_effective_prompt_falls_back_to_defaultspack_prompt_component(tmp_path: 
     assert result["data"]["source_type"] == "pack_default"
 
 
-def test_effective_prompt_can_resolve_sibling_pack_prompt_from_profile_id(tmp_path: Path):
+def test_effective_prompt_can_resolve_sibling_pack_prompt_from_profile_id(monkeypatch, tmp_path: Path):
+    trusted_packs = {"defaultspack", "rumi_operations_company_pack"}
+    monkeypatch.setattr(
+        "domain.prompt.resolver.prompt_pack_is_trusted",
+        lambda pack_id: str(pack_id) in trusted_packs,
+    )
+    monkeypatch.setattr(
+        "domain.prompt.effective.is_trusted_prompt_pack",
+        lambda pack_id: (str(pack_id) in trusted_packs, None),
+    )
     workspace = _workspace(
         tmp_path,
         profile_id="defaultspack.mimo_coding_company",
