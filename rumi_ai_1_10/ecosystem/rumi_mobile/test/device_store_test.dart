@@ -127,7 +127,7 @@ void main() {
     expect(remaining.single.pcLabel, 'Studio Mac');
   });
 
-  test('legacy pc connection does not resurrect paired state', () async {
+  test('migrates legacy pc connection into paired devices once', () async {
     final storage = _FakeSecureStorage();
     final store = MobileDeviceStore(storage: storage);
 
@@ -139,6 +139,21 @@ void main() {
       }),
     );
 
+    final migrated = await store.loadPairedDevice();
+    expect(migrated, isNotNull);
+    expect(migrated!.deviceToken, 'dtk-legacy');
+    expect(migrated.approvalToken, isEmpty);
+    expect(migrated.scopes, ['chat.read', 'chat.write', 'tools.observe']);
+    expect(migrated.approvalScopes, isEmpty);
+    expect(migrated.canApprovePcTools, isFalse);
+    expect(migrated.pcBaseUrl, 'http://192.168.11.25:8765');
+    expect(storage._values.containsKey('rumi.pc_connection.v1'), isFalse);
+
+    final devices = await store.loadPairedDevices();
+    expect(devices, hasLength(1));
+    expect(devices.single.connectionId, migrated.connectionId);
+
+    await store.removePairedDevice(migrated.connectionId);
     expect(await store.loadPairedDevice(), isNull);
     expect(await store.loadPairedDevices(), isEmpty);
   });

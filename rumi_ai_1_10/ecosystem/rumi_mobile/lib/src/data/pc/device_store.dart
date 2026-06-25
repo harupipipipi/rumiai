@@ -27,12 +27,12 @@ class DeviceIdentity {
       privateKey.trim().isNotEmpty;
 
   Map<String, dynamic> toJson() => {
-    'deviceId': deviceId,
-    'deviceLabel': deviceLabel,
-    'publicKey': publicKey,
-    'privateKey': privateKey,
-    'keyType': keyType,
-  };
+        'deviceId': deviceId,
+        'deviceLabel': deviceLabel,
+        'publicKey': publicKey,
+        'privateKey': privateKey,
+        'keyType': keyType,
+      };
 
   factory DeviceIdentity.fromJson(Map<String, dynamic> json) {
     return DeviceIdentity(
@@ -85,34 +85,32 @@ class PairedDevice {
   String get connectionId => pairedDeviceConnectionId(this);
 
   PcConnection toPcConnection() => PcConnection(
-    baseUrl: pcBaseUrl,
-    token: deviceToken,
-    approvalToken: approvalToken,
-  );
+        baseUrl: pcBaseUrl,
+        token: deviceToken,
+        approvalToken: approvalToken,
+      );
 
   Map<String, dynamic> toJson() => {
-    'deviceId': deviceId,
-    'deviceToken': deviceToken,
-    'approvalToken': approvalToken,
-    'clientToken': deviceToken,
-    'approverToken': approvalToken,
-    'label': label,
-    'scopes': scopes,
-    'approvalScopes': approvalScopes,
-    'pcBaseUrl': pcBaseUrl,
-    'pcLabel': pcLabel,
-    'pairingId': pairingId,
-  };
+        'deviceId': deviceId,
+        'deviceToken': deviceToken,
+        'approvalToken': approvalToken,
+        'clientToken': deviceToken,
+        'approverToken': approvalToken,
+        'label': label,
+        'scopes': scopes,
+        'approvalScopes': approvalScopes,
+        'pcBaseUrl': pcBaseUrl,
+        'pcLabel': pcLabel,
+        'pairingId': pairingId,
+      };
 
   factory PairedDevice.fromJson(Map<String, dynamic> json) {
     return PairedDevice(
       deviceId: json['deviceId'] as String? ?? '',
-      deviceToken:
-          (json['clientToken'] as String?) ??
+      deviceToken: (json['clientToken'] as String?) ??
           (json['deviceToken'] as String?) ??
           '',
-      approvalToken:
-          (json['approverToken'] as String?) ??
+      approvalToken: (json['approverToken'] as String?) ??
           (json['approvalToken'] as String?) ??
           '',
       label: json['label'] as String? ?? '',
@@ -237,8 +235,7 @@ class PairingV2Payload {
   bool get isExpired => DateTime.now().millisecondsSinceEpoch > expiresAt;
 
   factory PairingV2Payload.fromJson(Map<String, dynamic> json) {
-    final rawBaseUrls =
-        (json['baseUrls'] as List?) ??
+    final rawBaseUrls = (json['baseUrls'] as List?) ??
         (json['base_urls'] as List?) ??
         [
           if ((json['baseUrl'] as String? ?? '').trim().isNotEmpty)
@@ -250,20 +247,17 @@ class PairingV2Payload {
       pairingId:
           json['pairingId'] as String? ?? json['pairing_id'] as String? ?? '',
       code: json['code'] as String? ?? '',
-      pickupSecret:
-          json['pickupSecret'] as String? ??
+      pickupSecret: json['pickupSecret'] as String? ??
           json['pickup_secret'] as String? ??
           '',
       baseUrls: rawBaseUrls.map((e) => e.toString()).toList(),
-      serverPublicKey:
-          json['serverPublicKey'] as String? ??
+      serverPublicKey: json['serverPublicKey'] as String? ??
           json['server_public_key'] as String? ??
           '',
       expiresAt:
           (json['expiresAt'] as num? ?? json['expires_at'] as num?)?.toInt() ??
-          0,
-      manifestUrl:
-          json['manifestUrl'] as String? ??
+              0,
+      manifestUrl: json['manifestUrl'] as String? ??
           json['manifest_url'] as String? ??
           '',
       roles: (json['roles'] as List? ?? [])
@@ -274,9 +268,22 @@ class PairingV2Payload {
   }
 }
 
+const _migratedPcScopes = <String>[
+  'chat.read',
+  'chat.write',
+  'tools.observe',
+];
+
+const _migratedApprovalScopes = <String>[
+  'authority.request.approve',
+  'authority.request.deny',
+  'authority.request.list',
+  'authority.request.read',
+];
+
 class MobileDeviceStore {
   MobileDeviceStore({SecureKeyValueStorage? storage})
-    : _storage = storage ?? PlatformSecureStorage();
+      : _storage = storage ?? PlatformSecureStorage();
 
   static const _identityKey = 'rumi.device.identity.v1';
   static const _pairedKey = 'rumi.paired_device.v1';
@@ -352,6 +359,8 @@ class MobileDeviceStore {
     } catch (_) {
       // ignore malformed paired device state
     }
+    final migrated = await _migrateLegacyPcConnection();
+    if (migrated != null) return migrated;
     return null;
   }
 
@@ -375,10 +384,11 @@ class MobileDeviceStore {
       final raw = await _storage.read(_pairedListKey);
       if (raw != null && raw.trim().isNotEmpty) {
         final list = jsonDecode(raw) as List;
-        return list
+        final devices = list
             .map((e) => PairedDevice.fromJson(e as Map<String, dynamic>))
             .where((device) => device.isConfigured)
             .toList();
+        if (devices.isNotEmpty) return devices;
       }
     } catch (_) {
       // fall through
@@ -390,6 +400,43 @@ class MobileDeviceStore {
       await savePairedDevices(devices);
     }
     return devices;
+  }
+
+  Future<PairedDevice?> _migrateLegacyPcConnection() async {
+    try {
+      final raw = await _storage.read(_legacyPcKey);
+      if (raw == null || raw.trim().isEmpty) return null;
+      final pc = PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      if (!pc.isConfigured) {
+        await _storage.delete(_legacyPcKey);
+        return null;
+      }
+      final identity = await loadOrCreateIdentity();
+      final connectionId = _safeConnectionId(pc.baseUrl);
+      final device = PairedDevice(
+        deviceId: identity.deviceId,
+        deviceToken: pc.token,
+        approvalToken: pc.approvalToken,
+        label: identity.deviceLabel,
+        scopes: _migratedPcScopes,
+        approvalScopes: pc.approvalToken.trim().isEmpty
+            ? const []
+            : _migratedApprovalScopes,
+        pcBaseUrl: pc.baseUrl,
+        pcLabel: friendlyPcLabel('', pc.baseUrl),
+        pairingId: connectionId.isEmpty ? 'legacy-pc' : 'legacy-$connectionId',
+      );
+      if (!device.isConfigured) {
+        await _storage.delete(_legacyPcKey);
+        return null;
+      }
+      await _storage.write(_pairedKey, jsonEncode(device.toJson()));
+      await _storage.write(_pairedListKey, jsonEncode([device.toJson()]));
+      await _storage.delete(_legacyPcKey);
+      return device;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> savePairedDevices(List<PairedDevice> devices) async {

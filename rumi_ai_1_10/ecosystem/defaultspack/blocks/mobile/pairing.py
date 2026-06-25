@@ -73,6 +73,12 @@ def _register_authority_device_key(*, profile_id: str, device_id: str, public_ke
         return {"registered": False, "reason": str(exc)}
 
 
+def _public_pairing(pairing: dict) -> dict:
+    public = dict(pairing or {})
+    public.pop("code", None)
+    return public
+
+
 def claim(input_data, context=None):
     args = _merged(input_data)
     pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
@@ -93,7 +99,7 @@ def claim(input_data, context=None):
     )
     if not result.get("ok"):
         return error(str(result.get("reason") or "claim failed"), str(result.get("code") or "CLAIM_FAILED"))
-    return ok({"pairing": result["pairing"]})
+    return ok({"pairing": _public_pairing(result["pairing"])})
 
 
 def approve(input_data, context=None):
@@ -117,7 +123,7 @@ def approve(input_data, context=None):
         public_key=result.get("device_public_key") or "",
     )
     return ok({
-        "pairing": result["pairing"],
+        "pairing": _public_pairing(result["pairing"]),
         "device": {
             "device_id": result["device_id"],
             "label": result.get("device_label") or "",
@@ -142,7 +148,7 @@ def reject(input_data, context=None):
     result = manager.reject_pairing(session.code, reason=str(args.get("reason") or "rejected"))
     if not result.get("ok"):
         return error(str(result.get("reason") or "reject failed"), str(result.get("code") or "REJECT_FAILED"))
-    return ok({"pairing": result["pairing"]})
+    return ok({"pairing": _public_pairing(result["pairing"])})
 
 
 def status(input_data, context=None):
@@ -155,7 +161,7 @@ def status(input_data, context=None):
     session = manager.get_pairing(pairing_id)
     if session is None:
         return error("pairing not found", "PAIRING_NOT_FOUND")
-    pairing = session.as_dict()
+    pairing = _public_pairing(session.as_dict())
     result: dict = dict(pairing)
     result["pairing"] = pairing
     result["pc_label"] = _pc_label()
@@ -192,8 +198,9 @@ def status(input_data, context=None):
                     device_id=pickup["device_id"],
                     public_key=pickup.get("device_public_key") or "",
                 )
-                result["pairing"] = pickup["pairing"]
-                result["token_pickup_consumed_at"] = pickup["pairing"].get("token_pickup_consumed_at")
+                pickup_pairing = _public_pairing(pickup["pairing"])
+                result["pairing"] = pickup_pairing
+                result["token_pickup_consumed_at"] = pickup_pairing.get("token_pickup_consumed_at")
                 result["device_token"] = token
                 result["approval_token"] = approval_token
                 result["client_access_token"] = token
