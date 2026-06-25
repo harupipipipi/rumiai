@@ -110,6 +110,9 @@
       "readme": [
         "README.md"
       ],
+      "frontend_extensions": [
+        "frontend_extensions/marketplace_preview.ui.json"
+      ],
       "docs": [
         "docs/README.md",
         "docs/architecture.md",
