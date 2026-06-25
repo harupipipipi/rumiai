@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import importlib
 import json
@@ -516,37 +517,73 @@ def test_browser_computer_run_passes_context_sequence_to_controller(monkeypatch)
     assert captured["payload"]["computer_use_haze_sequence_id"] == "req_ctx"
 
 
-def test_browser_computer_run_ends_haze_sequence_on_success_and_exception(monkeypatch):
+def test_browser_computer_run_ends_haze_sequence_and_removes_lease(tmp_path, monkeypatch):
     with _default_tools_function_imports():
         from browser_computer import main as browser_computer_main
         from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
 
+        monkeypatch.syspath_prepend(str(DEFAULTSPACK_ROOT))
+        for module_name in list(sys.modules):
+            if module_name == "domain" or module_name.startswith("domain.host_bridge"):
+                sys.modules.pop(module_name, None)
         router = importlib.import_module("domain.host_bridge.computer_router")
-        ended: list[str] = []
 
-        class FakeManager:
-            def end_sequence(self, sequence_id):
-                ended.append(sequence_id)
-
-        monkeypatch.setattr(ComputerUseEdgeHazeManager, "from_pack_root", classmethod(lambda cls, pack_root: FakeManager()))
+        terminated: list[int] = []
+        monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+        monkeypatch.setattr(
+            ComputerUseEdgeHazeManager,
+            "_terminate_pid",
+            classmethod(lambda cls, pid: terminated.append(pid)),
+        )
         monkeypatch.setattr(
             router,
             "run_computer_action",
             lambda *args, **kwargs: {"action": "computer.type", "executed": True},
         )
 
+        lease_path = tmp_path / "user_data" / "shared" / "helpers" / "edge_haze" / "edge_haze.lease.json"
+
+        def write_lease(sequence_id: str, pid: int) -> None:
+            lease_path.parent.mkdir(parents=True, exist_ok=True)
+            lease_path.write_text(
+                json.dumps(
+                    {
+                        "schema": "rumi.edge_haze_lease.v1",
+                        "pid": pid,
+                        "sequence_id": sequence_id,
+                        "deadline_epoch": time.time() + 120,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+        write_lease("run_success", 9101)
         browser_computer_main.run({"request_id": "run_success"}, {"action": "computer.type", "payload": {"text": "hi"}})
+        assert not lease_path.exists()
 
         def raise_timeout(*args, **kwargs):
             raise TimeoutError("timed out")
 
+        write_lease("run_timeout", 9102)
         monkeypatch.setattr(router, "run_computer_action", raise_timeout)
         try:
             browser_computer_main.run({"request_id": "run_timeout"}, {"action": "computer.type", "payload": {"text": "hi"}})
         except TimeoutError:
             pass
+        assert not lease_path.exists()
 
-    assert ended == ["run_success", "run_timeout"]
+        def raise_cancelled(*args, **kwargs):
+            raise asyncio.CancelledError()
+
+        write_lease("run_cancelled", 9103)
+        monkeypatch.setattr(router, "run_computer_action", raise_cancelled)
+        try:
+            browser_computer_main.run({"request_id": "run_cancelled"}, {"action": "computer.type", "payload": {"text": "hi"}})
+        except asyncio.CancelledError:
+            pass
+        assert not lease_path.exists()
+
+    assert terminated == [9101, 9102, 9103]
 
 
 def test_browser_use_and_computer_use_preserve_sequence_payload(monkeypatch):
