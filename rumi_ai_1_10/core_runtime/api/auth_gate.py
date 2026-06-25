@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import hmac
 import logging
+import os
 from http import cookies
 from typing import Any
 
+from .auth_principal import AuthenticatedPrincipal
+from .api_response import APIResponse
+from .request_authorizer import authorize_route
+from ..access_tokens import TOKEN_PREFIX, get_scoped_access_token_manager
 from ..panel_auth import PanelAuthManager
 
 
@@ -13,16 +18,41 @@ logger = logging.getLogger(__name__)
 
 class AuthGateMixin:
     def _check_bearer_auth(self) -> bool:
+        self._authenticated_principal = None
         auth_header = self.headers.get("Authorization", "")
         if not auth_header or not auth_header.startswith("Bearer "):
             return False
         token = auth_header[7:]
+
+        if token.startswith(TOKEN_PREFIX):
+            principal = get_scoped_access_token_manager().verify_token(token, audience="kernel_api")
+            if principal is None:
+                return False
+            self._authenticated_principal = principal
+            return True
+
+        if not self._legacy_bearer_allowed_from_client():
+            logger.warning("Rejecting legacy bearer token from non-loopback client")
+            return False
+
+        verified = False
         if self._hmac_key_manager is not None:
-            return self._hmac_key_manager.verify_token(token)
-        if not self.internal_token:
+            verified = bool(self._hmac_key_manager.verify_token(token))
+        elif not self.internal_token:
             logger.error("API token not configured - rejecting request")
             return False
-        return hmac.compare_digest(token, self.internal_token)
+        else:
+            verified = hmac.compare_digest(token, self.internal_token)
+        if verified:
+            self._authenticated_principal = AuthenticatedPrincipal.legacy_root()
+        return verified
+
+    def _legacy_bearer_allowed_from_client(self) -> bool:
+        if os.environ.get("RUMI_ALLOW_LEGACY_REMOTE_BEARER", "").strip() == "1":
+            return True
+        client_address = getattr(self, "client_address", ("127.0.0.1", 0))
+        ip = client_address[0] if isinstance(client_address, tuple) and client_address else "127.0.0.1"
+        return str(ip) in {"127.0.0.1", "::1", "::ffff:127.0.0.1", "localhost"}
 
     def _parse_cookie_header(self) -> dict[str, str]:
         raw_cookie = self.headers.get("Cookie", "")
@@ -76,6 +106,7 @@ class AuthGateMixin:
                 return False
 
         self._panel_session = session
+        self._authenticated_principal = AuthenticatedPrincipal.panel_session(session)
         self._panel_session_cookie = self._build_set_cookie(
             "rumi_panel_session",
             session_id,
@@ -91,6 +122,7 @@ class AuthGateMixin:
         return True
 
     def _check_auth(self, method: str, path: str) -> bool:
+        self._authenticated_principal = None
         if self._check_bearer_auth():
             self._request_auth_mode = "bearer"
             return True
@@ -102,6 +134,7 @@ class AuthGateMixin:
 
     def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
         del web_mount
+        self._authenticated_principal = None
         if self._check_bearer_auth():
             self._request_auth_mode = "bearer"
             return True
@@ -109,4 +142,27 @@ class AuthGateMixin:
             self._request_auth_mode = "panel_session"
             return True
         self._request_auth_mode = None
+        return False
+
+    def _authorize_authenticated_route(
+        self,
+        method: str,
+        path: str,
+        route_entry: dict[str, Any] | None = None,
+    ) -> bool:
+        principal = getattr(self, "_authenticated_principal", None)
+        if principal is None or principal.core_role:
+            return True
+        authorization = authorize_route(
+            principal=principal,
+            method=method,
+            path=path,
+            route_entry=route_entry,
+        )
+        if authorization.allowed:
+            return True
+        self._send_response(
+            APIResponse(False, error=authorization.reason or "Forbidden"),
+            authorization.status_code,
+        )
         return False

@@ -35,6 +35,9 @@ class Recovery:
         
         self.state.update_progress(80, "設定ファイルを確認中...")
         issues.extend(self._check_config_files())
+
+        self.state.update_progress(90, "managed sandbox を確認中...")
+        issues.extend(self._check_managed_sandbox())
         
         summary = {
             "healthy": len([i for i in issues if i["severity"] == "error"]) == 0,
@@ -110,6 +113,7 @@ class Recovery:
         issues.extend(self._check_ecosystem())
         issues.extend(self._check_flow())
         issues.extend(self._check_config_files())
+        issues.extend(self._check_managed_sandbox())
         
         return {
             "healthy": len([i for i in issues if i["severity"] == "error"]) == 0,
@@ -144,6 +148,48 @@ class Recovery:
                         "fix_args": {"path": str(subpath)}
                     })
         
+        return issues
+
+    def _check_managed_sandbox(self) -> List[Dict[str, Any]]:
+        issues: List[Dict[str, Any]] = []
+        try:
+            from ecosystem.defaultspack.backend.sandbox.isolation import diagnose_sandbox_environment
+        except Exception as exc:
+            issues.append({
+                "id": "managed_sandbox_doctor_unavailable",
+                "severity": "warn",
+                "message": f"managed sandbox doctor を読み込めません: {exc}",
+                "auto_fix": False,
+            })
+            self.state.log_warn("managed sandbox doctor を読み込めません", str(exc))
+            return issues
+
+        diagnostics = diagnose_sandbox_environment()
+        checks = diagnostics.get("checks") if isinstance(diagnostics, dict) else []
+        if diagnostics.get("ready"):
+            self.state.log_success("managed sandbox OK")
+            return issues
+
+        for check in checks if isinstance(checks, list) else []:
+            if not isinstance(check, dict) or check.get("ok"):
+                continue
+            name = str(check.get("name") or "managed_sandbox")
+            message = str(check.get("message") or "managed sandbox is not ready")
+            path = str(check.get("path") or "")
+            issues.append({
+                "id": f"managed_sandbox_{name}_unavailable",
+                "severity": "warn",
+                "message": message,
+                "auto_fix": False,
+                "details": {
+                    "path": path,
+                    "code": check.get("code"),
+                    "marker": check.get("marker"),
+                },
+            })
+            detail = path or str(check.get("stderr") or "")
+            self.state.log_warn(f"managed sandbox: {name}: {message}", detail or None)
+
         return issues
     
     def _check_ecosystem(self) -> List[Dict[str, Any]]:

@@ -56,6 +56,7 @@ class _MockFunctionEntry:
     caller_requires: Optional[List[str]] = None
     docker_image: str = ""
     command: Optional[List[str]] = None
+    is_builtin: bool = False
 
     def __post_init__(self):
         if self.manifest is None:
@@ -106,8 +107,91 @@ class TestDockerFallbackBlocked:
                             start_time=time.time(),
                         )
         assert not resp.success
-        assert resp.error_type == "docker_unavailable"
-        assert "RUMI_ALLOW_HOST_FALLBACK" in resp.error
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
+        assert resp.output["execution_boundary"] == "managed_sandbox"
+
+
+def test_managed_sandbox_context_seals_server_values_and_timeout(monkeypatch):
+    executor = _make_test_executor()
+    captured: Dict[str, Any] = {}
+
+    class FakeSupervisor:
+        def execute_capability(self, request):
+            captured.update(request)
+            return {"success": True, "output": {"ok": True}}
+
+    executor._entry_requires_managed_sandbox = MagicMock(return_value=True)
+    executor._development_host_boundary_allowed = MagicMock(return_value=False)
+    executor._managed_sandbox_supervisor = MagicMock(return_value=FakeSupervisor())
+    entry = _MockFunctionEntry(
+        pack_id="third_party_pack",
+        function_id="run",
+        qualified_name="third_party_pack:run",
+        calling_convention="subprocess",
+    )
+
+    response = executor._managed_sandbox_response_if_required(
+        entry=entry,
+        principal_id="profile:work__graph:g__node:n",
+        args={"value": "hello"},
+        request_id="req-sandbox",
+        start_time=time.time(),
+        request_context={
+            "safe": "kept",
+            "principal_id": "profile:evil",
+            "pack_id": "evil_pack",
+            "function_id": "evil_func",
+            "request_id": "evil-request",
+            "grant_config": {"provider_ids": ["evil"]},
+        },
+        calling_convention="subprocess",
+        timeout_seconds=7,
+        grant_config={"provider_ids": ["openai"]},
+    )
+
+    assert response.success is True
+    assert captured["timeout_seconds"] == 7.0
+    context = captured["context"]
+    assert context["safe"] == "kept"
+    assert context["principal_id"] == "profile:work__graph:g__node:n"
+    assert context["pack_id"] == "third_party_pack"
+    assert context["function_id"] == "run"
+    assert context["request_id"] == "req-sandbox"
+    assert context["grant_config"] == {"provider_ids": ["openai"]}
+
+
+def test_permission_fallback_passes_context_timeout_and_grant_to_sandbox():
+    executor = _make_test_executor()
+    captured: Dict[str, Any] = {}
+
+    def fake_sandbox(**kwargs):
+        captured.update(kwargs)
+        return CapabilityResponse(success=False, error="sandbox blocked", error_type="blocked")
+
+    executor._managed_sandbox_response_if_required = fake_sandbox
+    entry = _MockFunctionEntry(
+        pack_id="third_party_pack",
+        function_id="run",
+        qualified_name="third_party_pack:run",
+        calling_convention="",
+    )
+
+    response = executor._dispatch_by_permission_id(
+        entry=entry,
+        principal_id="profile:work",
+        effective_permission_id="model.invoke",
+        grant_config={"provider_ids": ["openai"]},
+        args={"value": 1},
+        timeout_seconds=9,
+        request_id="req-fallback",
+        start_time=time.time(),
+        request_context={"trace": "ctx"},
+    )
+
+    assert response.success is False
+    assert captured["request_context"] == {"trace": "ctx"}
+    assert captured["timeout_seconds"] == 9
+    assert captured["grant_config"] == {"provider_ids": ["openai"]}
 
 
 class TestDockerFallbackAllowed:
@@ -141,8 +225,9 @@ class TestDockerFallbackAllowed:
                         request_id="req_002",
                         start_time=time.time(),
                     )
-        assert resp.success
-        mock_host.assert_called_once()
+        assert resp.success is False
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
+        mock_host.assert_not_called()
 
 
 class TestDockerStrictBoundary:
@@ -177,8 +262,7 @@ class TestDockerStrictBoundary:
                     )
 
         assert resp.success is False
-        assert resp.error_type == "docker_unavailable"
-        assert "strict function isolation" in resp.error
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
         mock_host.assert_not_called()
 
 
@@ -343,7 +427,8 @@ class TestCommandFunctionHostExecutionGuard:
         """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
         monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True)
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
+        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True, is_builtin=True)
         resp = executor._execute_command_function(
             principal_id="test_principal",
             entry=entry,
@@ -362,6 +447,7 @@ class TestCommandFunctionPathTraversal:
         """command[0] が function_dir の外を指す絶対パス → security_violation"""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
@@ -371,6 +457,7 @@ class TestCommandFunctionPathTraversal:
             command=[str(outside_command)],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -386,7 +473,8 @@ class TestCommandFunctionPathTraversal:
     def test_command_requires_absolute_executable_path(self, monkeypatch):
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True)
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
+        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True, is_builtin=True)
 
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -404,6 +492,7 @@ class TestCommandFunctionPathTraversal:
         """sys.executable + -c cannot bypass the function_dir boundary."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
@@ -412,6 +501,7 @@ class TestCommandFunctionPathTraversal:
             command=[sys.executable, "-c", "print('pwned')"],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -428,6 +518,7 @@ class TestCommandFunctionPathTraversal:
         """sys.executable + a script outside function_dir is rejected."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
@@ -438,6 +529,7 @@ class TestCommandFunctionPathTraversal:
             command=[sys.executable, str(outside_script)],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",

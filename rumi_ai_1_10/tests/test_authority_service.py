@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -35,6 +37,12 @@ def _ui_operator(request_id: str):
     return sign_ui_operator(request_id, nonce="nonce-" + request_id)
 
 
+def _grant_profile_chain(grants, principal_id: str, permission_id: str, config: dict | None = None) -> None:
+    parts = [part for part in principal_id.split("__") if part]
+    for index in range(1, len(parts) + 1):
+        grants.grant_permission("__".join(parts[:index]), permission_id, dict(config or {}))
+
+
 def test_authority_denies_model_without_grant(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
 
@@ -54,16 +62,18 @@ def test_authority_denies_model_without_grant(tmp_path, monkeypatch):
     assert requests[0].resource["provider_id"] == "openai"
 
 
-def test_authority_allows_model_with_profile_grant(tmp_path, monkeypatch):
+def test_authority_allows_model_with_profile_and_child_grants(tmp_path, monkeypatch):
     service, grants, _ = _service(tmp_path, monkeypatch)
-    grants.grant_permission(
-        "profile:work",
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    _grant_profile_chain(
+        grants,
+        child_principal,
         "model.invoke",
         {"provider_ids": ["openai"], "api_ids": ["work"], "model_ids": ["gpt-5.4"]},
     )
 
     allowed = service.check(
-        principal_id="profile:work__graph:startup__node:agent.ai",
+        principal_id=child_principal,
         permission_id="model.invoke",
         resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
         profile_id="work",
@@ -71,7 +81,7 @@ def test_authority_allows_model_with_profile_grant(tmp_path, monkeypatch):
         node_id="agent.ai",
     )
     denied = service.check(
-        principal_id="profile:work__graph:startup__node:agent.ai",
+        principal_id=child_principal,
         permission_id="model.invoke",
         resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
         profile_id="work",
@@ -132,6 +142,197 @@ def test_authority_empty_config_lists_do_not_grant_everything(tmp_path, monkeypa
         permission_id="model.invoke",
         resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
         profile_id="work",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_config_lattice_empty_child_inherits_parent_facets():
+    from core_runtime.authority.config_lattice import meet_authority_configs
+
+    assert meet_authority_configs({"provider_ids": ["openai"]}, {}) == {"provider_ids": ["openai"]}
+
+
+def test_authority_config_lattice_child_provider_must_be_subset_of_parent():
+    from core_runtime.authority.config_lattice import is_authority_config_subset, meet_authority_configs
+
+    parent = {"provider_ids": ["openai"]}
+    child = {"provider_ids": ["anthropic"]}
+
+    assert is_authority_config_subset(child, parent) is False
+    assert meet_authority_configs(parent, child) == {"provider_ids": []}
+
+
+def test_authority_config_lattice_empty_list_is_deny_all():
+    from core_runtime.authority.config_lattice import meet_authority_configs
+
+    assert meet_authority_configs({"provider_ids": ["openai"]}, {"provider_ids": []}) == {"provider_ids": []}
+
+
+def test_authority_config_lattice_rejects_unknown_keys():
+    from core_runtime.authority.config_lattice import AuthorityConfigError, validate_authority_config
+
+    with pytest.raises(AuthorityConfigError):
+        validate_authority_config({"provider_ids": ["openai"], "unexpected": ["anthropic"]})
+
+
+def test_authority_config_lattice_ignores_persisted_metadata_keys():
+    from core_runtime.authority.config_lattice import meet_authority_configs
+
+    assert meet_authority_configs({"mode": "builtin", "provider_ids": ["openai"]}) == {
+        "provider_ids": ["openai"]
+    }
+
+
+def test_authority_profile_child_graph_node_inherits_parent_grant_when_missing(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+
+    allowed = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+    denied = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert allowed.allowed is True
+    assert allowed.grant_config == {"provider_ids": ["openai"]}
+    assert denied.allowed is False
+    assert denied.approval_required is True
+
+
+def test_authority_profile_surface_child_still_requires_explicit_grant(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    surface_principal = "profile:work__surface:mobile__device:phone-1"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+
+    decision = service.check(
+        principal_id=surface_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_profile_principal_ignores_conversation_and_global_grants(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("conversation:c1", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("global", "model.invoke", {"provider_ids": ["openai"]})
+
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        conversation_id="c1",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_stub_and_rumi_require_grants(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+
+    stub = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "stub", "api_id": "local", "model_id": "default"},
+        profile_id="work",
+    )
+    rumi = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "rumi", "api_id": "local", "model_id": "default"},
+        profile_id="work",
+    )
+
+    assert stub.allowed is False
+    assert stub.approval_required is True
+    assert rumi.allowed is False
+    assert rumi.approval_required is True
+
+
+def test_authority_profile_child_empty_config_inherits_parent_constraints(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "model.invoke", {})
+    grants.grant_permission(child_principal, "model.invoke", {})
+
+    allowed = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+    denied = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert allowed.allowed is True
+    assert allowed.grant_config == {"provider_ids": ["openai"]}
+    assert denied.allowed is False
+    assert denied.approval_required is True
+
+
+def test_authority_profile_child_cannot_widen_parent_provider(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "model.invoke", {})
+    grants.grant_permission(child_principal, "model.invoke", {"provider_ids": ["anthropic"]})
+
+    decision = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "anthropic", "api_id": "work", "model_id": "claude-sonnet"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
+    )
+
+    assert decision.allowed is False
+    assert decision.approval_required is True
+
+
+def test_authority_profile_child_disabled_permission_blocks_parent_grant(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    child_principal = "profile:work__graph:startup__node:agent.ai"
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "model.invoke", {})
+    grants.grant_permission(child_principal, "model.invoke", {})
+    assert grants.revoke_permission(child_principal, "model.invoke") is True
+
+    decision = service.check(
+        principal_id=child_principal,
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+        graph_id="startup",
+        node_id="agent.ai",
     )
 
     assert decision.allowed is False
@@ -728,6 +929,112 @@ def test_authority_signed_deny_and_request_views(tmp_path, monkeypatch):
     assert denied["success"] is True
     assert denied["denied"] is True
     assert store.get_request(decision.request_id).status == "denied"
+
+
+def test_authority_mobile_approver_is_profile_scoped(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, _, _ = _service(tmp_path, monkeypatch)
+    work = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    personal = service.check(
+        principal_id="profile:personal",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "personal", "model_id": "gpt-5.4"},
+        profile_id="personal",
+    )
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile-approver",
+        device_id="phone-1",
+        role="mobile_approver",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    listed = service.list_requests("pending", actor_principal=actor)
+    hidden = service.get_request(personal.request_id, actor_principal=actor)
+    cross_profile_approval = service.approve_request(
+        personal.request_id,
+        scope="once",
+        actor_principal=actor,
+        ui_operator=_ui_operator(personal.request_id),
+    )
+    persistent = service.approve_request(
+        work.request_id,
+        scope="profile",
+        actor_principal=actor,
+        ui_operator=_ui_operator(work.request_id),
+    )
+
+    assert [item["request_id"] for item in listed["requests"]] == [work.request_id]
+    assert hidden["success"] is False
+    assert hidden["status_code"] == 404
+    assert cross_profile_approval["success"] is False
+    assert cross_profile_approval["status_code"] == 404
+    assert persistent["success"] is False
+    assert persistent["status_code"] == 403
+
+
+def test_authority_scoped_grants_are_profile_filtered(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "model.invoke", {"model_ids": ["gpt-5.4"]})
+    grants.grant_permission("profile:personal", "model.invoke", {"provider_ids": ["anthropic"]})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    own_default = service.list_grants(actor_principal=actor)
+    own_child = service.list_grants("profile:work__graph:startup", actor_principal=actor)
+    other = service.list_grants("profile:personal", actor_principal=actor)
+    core_all = service.list_grants(actor_principal=AuthenticatedPrincipal.legacy_root())
+
+    assert set(own_default["grants"]) == {"profile:work"}
+    assert set(own_child["grants"]) == {"profile:work__graph:startup"}
+    assert other["success"] is False
+    assert other["status_code"] == 404
+    assert set(core_all["grants"]) >= {"profile:work", "profile:personal"}
+
+
+def test_authority_events_are_core_only(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, _, store = _service(tmp_path, monkeypatch)
+    store.audit("authority_request_denied", {"principal_id": "profile:personal"})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    scoped = service.events(actor_principal=actor)
+    core = service.events(actor_principal=AuthenticatedPrincipal.legacy_root())
+
+    assert scoped["success"] is False
+    assert scoped["status_code"] == 403
+    assert core["_sse"] is True
+    assert core["events"]
 
 
 def test_authority_request_resource_redacts_secret_like_keys(tmp_path, monkeypatch):
