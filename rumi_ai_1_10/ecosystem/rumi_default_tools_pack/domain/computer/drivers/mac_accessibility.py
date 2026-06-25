@@ -14,15 +14,40 @@ from ..models import ActionResult, ComputerCapabilities, ComputerTarget, Observe
 from .base import ComputerDriver
 
 
-_AX_SET_VALUE_UNSAFE_APP_MARKERS = (
+_AX_SET_VALUE_UNSAFE_APP_NAMES = {
     "arc",
     "brave",
+    "brave browser",
     "chrome",
     "chromium",
-    "edge",
-    "msedge",
+    "google chrome",
+    "microsoft edge",
     "opera",
+    "opera gx",
     "vivaldi",
+}
+
+_AX_SET_VALUE_UNSAFE_BUNDLE_IDS = {
+    "com.vivaldi.Vivaldi",
+    "com.google.Chrome",
+    "com.google.Chrome.beta",
+    "com.google.Chrome.canary",
+    "com.microsoft.edgemac",
+    "com.microsoft.edgemac.Beta",
+    "com.microsoft.edgemac.Canary",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",
+    "com.operasoftware.Opera",
+    "com.operasoftware.OperaGX",
+}
+
+_AX_SET_VALUE_UNSAFE_BUNDLE_PREFIXES = (
+    "com.google.Chrome.",
+    "com.microsoft.edgemac.",
+    "com.vivaldi.Vivaldi.",
+    "com.brave.Browser.",
+    "company.thebrowser.Browser.",
+    "com.operasoftware.Opera.",
 )
 
 
@@ -321,9 +346,19 @@ class MacAccessibilityDriver(ComputerDriver):
 
     @staticmethod
     def _target_avoids_ax_set_value(target: ComputerTarget) -> bool:
-        values = (
-            target.app,
-            target.bundle_id,
+        app_name = MacAccessibilityDriver._normalized_app_name(target.app)
+        if app_name in _AX_SET_VALUE_UNSAFE_APP_NAMES:
+            return True
+        bundle_id = str(target.bundle_id or "").strip()
+        if not bundle_id:
+            return False
+        return bundle_id in _AX_SET_VALUE_UNSAFE_BUNDLE_IDS or any(
+            bundle_id.startswith(prefix) for prefix in _AX_SET_VALUE_UNSAFE_BUNDLE_PREFIXES
         )
-        haystack = " ".join(str(value or "").lower() for value in values)
-        return any(marker in haystack for marker in _AX_SET_VALUE_UNSAFE_APP_MARKERS)
+
+    @staticmethod
+    def _normalized_app_name(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text.endswith(".app"):
+            text = text[:-4]
+        return " ".join(part for part in text.replace("_", " ").replace("-", " ").split() if part)

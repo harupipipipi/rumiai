@@ -9,6 +9,10 @@ from __future__ import annotations
 import sys
 
 _CG_AVAILABLE = False
+kCGEventFlagMaskAlternate = 1 << 19
+kCGEventFlagMaskCommand = 1 << 20
+kCGEventFlagMaskControl = 1 << 18
+kCGEventFlagMaskShift = 1 << 17
 
 if sys.platform == "darwin":
     try:
@@ -108,6 +112,8 @@ def _key_combo_parts(key_combo: str) -> tuple[int | None, int]:
             flags |= int(kCGEventFlagMaskAlternate)
         elif modifier == "shift":
             flags |= int(kCGEventFlagMaskShift)
+        else:
+            return None, 0
     return _key_code(key), flags
 
 
@@ -122,16 +128,13 @@ def _key_code(key: str) -> int | None:
         ",": 43, "/": 44, "n": 45, "m": 46, ".": 47, "tab": 48, "space": 49,
         "`": 50, "delete": 51, "backspace": 51, "escape": 53, "esc": 53,
         "left": 123, "right": 124, "down": 125, "up": 126,
+        "f1": 122, "f2": 120, "f3": 99, "f4": 118, "f5": 96,
+        "f6": 97, "f7": 98, "f8": 100, "f9": 101, "f10": 109,
+        "f11": 103, "f12": 111, "f13": 105, "f14": 107, "f15": 113,
+        "f16": 106, "f17": 64, "f18": 79, "f19": 80, "f20": 90,
     }
     if key in codes:
         return codes[key]
-    if key.startswith("f"):
-        try:
-            number = int(key[1:])
-        except ValueError:
-            return None
-        if 1 <= number <= 20:
-            return 121 + number
     return None
 
 

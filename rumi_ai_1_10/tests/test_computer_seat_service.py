@@ -83,6 +83,31 @@ class BackgroundTypeDriver(MockDriver):
         )
 
 
+class BackgroundKeyDriver(MockDriver):
+    def __init__(self, name_: str):
+        super().__init__(name_, succeed=True)
+        self.called = False
+
+    def capabilities(self) -> ComputerCapabilities:
+        return ComputerCapabilities(
+            can_background_key=True,
+            can_parallel_user_work=True,
+            can_foreground_action=False,
+        )
+
+    def key(self, target, key_combo=""):
+        self.called = True
+        return ActionResult(
+            action="key",
+            driver=self._name,
+            executed=True,
+            confidence="experimental" if self._name == "mac_cgevent_pid" else "best_effort",
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+        )
+
+
 def _make_service(drivers):
     reg = DriverRegistry()
     for d in drivers:
@@ -134,6 +159,33 @@ def test_background_action_skips_foreground_only_driver():
     assert background.called is True
 
 
+@pytest.mark.parametrize("driver_name", ["mac_cgevent_pid", "windows_postmessage"])
+def test_post_only_transports_are_explicit_background_only(driver_name):
+    driver = BackgroundKeyDriver(driver_name)
+    svc = _make_service([driver])
+
+    normal = svc.key({"app": "Unknown", "pid": 123}, key_combo="return")
+    assert normal["executed"] is False
+    assert driver.called is False
+
+    background = svc.background_action("key", {"app": "Unknown", "pid": 123}, {"key_combo": "return"})
+
+    assert background["executed"] is True
+    assert background["driver"] == driver_name
+    assert driver.called is True
+
+    driver.called = False
+    verified = svc.background_action(
+        "key",
+        {"app": "Unknown", "pid": 123},
+        {"key_combo": "return"},
+        verified_only=True,
+    )
+
+    assert verified["executed"] is False
+    assert driver.called is False
+
+
 def test_mac_accessibility_skips_ax_set_value_for_vivaldi():
     from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_accessibility import (
         MacAccessibilityDriver,
@@ -148,6 +200,62 @@ def test_mac_accessibility_skips_ax_set_value_for_vivaldi():
     assert result.executed is False
     assert result.uses_physical_input is False
     assert "Skipping AXSetValue" in result.notes[0]
+
+
+def test_mac_accessibility_chromium_detection_uses_exact_names_and_bundles():
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_accessibility import (
+        MacAccessibilityDriver,
+    )
+
+    positives = [
+        ComputerTarget(app="Vivaldi", bundle_id="com.vivaldi.Vivaldi"),
+        ComputerTarget(app="Google Chrome", bundle_id="com.google.Chrome"),
+        ComputerTarget(app="Microsoft Edge", bundle_id="com.microsoft.edgemac"),
+        ComputerTarget(app="Arc", bundle_id="company.thebrowser.Browser"),
+    ]
+    negatives = [
+        ComputerTarget(app="Archive Utility", bundle_id="com.apple.archiveutility"),
+        ComputerTarget(app="Ledger Live", bundle_id="com.ledger.live"),
+    ]
+
+    assert all(MacAccessibilityDriver._target_avoids_ax_set_value(target) for target in positives)
+    assert not any(MacAccessibilityDriver._target_avoids_ax_set_value(target) for target in negatives)
+
+
+def test_macos_cgevent_keycodes_and_modifier_validation():
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac import cgevent
+
+    expected_f_keys = {
+        "f1": 122,
+        "f2": 120,
+        "f3": 99,
+        "f4": 118,
+        "f5": 96,
+        "f6": 97,
+        "f7": 98,
+        "f8": 100,
+        "f9": 101,
+        "f10": 109,
+        "f11": 103,
+        "f12": 111,
+        "f13": 105,
+        "f14": 107,
+        "f15": 113,
+        "f16": 106,
+        "f17": 64,
+        "f18": 79,
+        "f19": 80,
+        "f20": 90,
+    }
+    for key, code in expected_f_keys.items():
+        assert cgevent._key_code(key) == code
+    assert cgevent._key_code("left") == 123
+    assert cgevent._key_code("right") == 124
+    assert cgevent._key_code("down") == 125
+    assert cgevent._key_code("up") == 126
+    assert cgevent._key_combo_parts("cmd+ctrl+option+shift+delete")[0] == 51
+    assert cgevent._key_combo_parts("fn+delete") == (None, 0)
+    assert cgevent._key_combo_parts("typo+delete") == (None, 0)
 
 
 def test_audit_logger_called():

@@ -138,10 +138,12 @@ class ComputerSeatService:
         action: str,
         target: ComputerTarget | dict[str, Any],
         payload: dict[str, Any],
+        *,
+        verified_only: bool = False,
     ) -> dict[str, Any]:
         """Run an action only through non-physical background-capable drivers."""
         target = self._normalize_target(target)
-        return self._fallback_chain(action, target, payload, background_only=True)
+        return self._fallback_chain(action, target, payload, background_only=True, verified_only=verified_only)
 
     def type_text(
         self,
@@ -307,6 +309,7 @@ class ComputerSeatService:
         payload: dict[str, Any],
         *,
         background_only: bool = False,
+        verified_only: bool = False,
     ) -> dict[str, Any]:
         """Try each driver in the chain until one succeeds.
 
@@ -324,6 +327,10 @@ class ComputerSeatService:
         is_fallback = False
 
         for driver in chain:
+            if not background_only and self._driver_is_explicit_background_transport(driver):
+                continue
+            if background_only and verified_only and self._driver_is_explicit_background_transport(driver):
+                continue
             if background_only and not self._driver_supports_background_action(driver, action):
                 continue
             try:
@@ -335,6 +342,10 @@ class ComputerSeatService:
                 result: ActionResult = self._dispatch(method, target, payload)
 
                 if result.executed:
+                    if background_only and verified_only and self._result_is_post_only(result):
+                        errors.append(f"{driver.name}: background transport is not effect-verified")
+                        is_fallback = True
+                        continue
                     if background_only and result.uses_physical_input:
                         errors.append(f"{driver.name}: physical input is not background-safe")
                         is_fallback = True
@@ -377,10 +388,23 @@ class ComputerSeatService:
         return asdict(failure)
 
     @staticmethod
+    def _driver_is_explicit_background_transport(driver: Any) -> bool:
+        return str(getattr(driver, "name", "") or "") in {"mac_cgevent_pid", "windows_postmessage"}
+
+    @staticmethod
+    def _result_is_post_only(result: ActionResult) -> bool:
+        confidence = str(result.confidence or "").strip().lower()
+        if confidence in {"experimental", "best_effort", "posted_only", "posted only"}:
+            return True
+        return result.driver in {"mac_cgevent_pid", "windows_postmessage"}
+
+    @staticmethod
     def _driver_supports_background_action(driver: Any, action: str) -> bool:
         try:
             caps = driver.capabilities()
         except Exception:
+            return False
+        if bool(getattr(caps, "requires_foreground_for_capture", False)):
             return False
         if not bool(getattr(caps, "can_parallel_user_work", False)):
             return False

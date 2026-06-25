@@ -341,7 +341,7 @@ class ComputerUseEdgeHazeManager:
         now = time.time()
         existing = self._read_lease(self._lease_path)
         virtual_pointer = existing.get("virtual_pointer") if isinstance(existing.get("virtual_pointer"), dict) else None
-        target_window = self._target_window or (existing.get("target_window") if isinstance(existing.get("target_window"), dict) else {})
+        target_window = dict(self._target_window) if self._target_window else {}
         self._write_lease(
             self._lease_path,
             {

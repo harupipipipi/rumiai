@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import importlib
 import json
+import shutil
+import subprocess
 import sys
 import time
 from contextlib import contextmanager
@@ -323,6 +326,65 @@ def test_edge_haze_virtual_pointer_updates_lease(tmp_path, monkeypatch):
     }
 
 
+def test_edge_haze_does_not_reuse_old_target_when_new_payload_has_none(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    source = tmp_path / "EdgeHaze.swift"
+    source.write_text("print(\"haze\")\n", encoding="utf-8")
+    binary = tmp_path / "helpers" / "edge_haze"
+    events: list[str] = []
+
+    class FakeProcess:
+        pid = 97531
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            events.append("terminate")
+
+        def wait(self, timeout=None):
+            events.append(f"wait:{timeout}")
+
+        def kill(self):
+            events.append("kill")
+
+    def fake_run(args, capture_output=False, timeout=None, check=False):
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("binary", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: "/usr/bin/swiftc" if name == "swiftc" else None)
+    monkeypatch.setattr(edge_haze.subprocess, "run", fake_run)
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(ComputerUseEdgeHazeManager, "_pid_alive", staticmethod(lambda pid: pid == 97531))
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=tmp_path,
+        source_path=source,
+        binary_path=binary,
+        settings=EdgeHazeSettings(enabled=True, linger_seconds=1),
+    )
+    payload = {
+        "computer_use_haze_sequence_id": "target_run",
+        "edge_haze_target_window": {"app": "Safari", "pid": 111, "window_id": 222, "title": "Old"},
+    }
+
+    assert manager.start(action="computer.key", payload=payload) is True
+    assert "target_window" in json.loads(manager._lease_path.read_text(encoding="utf-8"))
+
+    assert manager.start(action="computer.key", payload={"computer_use_haze_sequence_id": "target_run"}) is True
+    lease = json.loads(manager._lease_path.read_text(encoding="utf-8"))
+
+    assert "target_window" not in lease
+
+
 def test_browser_computer_haze_payload_includes_target_window(tmp_path, monkeypatch):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
 
@@ -358,6 +420,64 @@ def test_browser_computer_haze_payload_includes_target_window(tmp_path, monkeypa
         "x": 0,
         "y": 37,
     }
+
+
+def test_browser_computer_virtual_pointer_payload_includes_target_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    captured: dict[str, object] = {}
+
+    class FakeManager:
+        @classmethod
+        def from_pack_root(cls, _pack_root):
+            return cls()
+
+        def update_virtual_pointer(self, pointer, *, action, payload):
+            captured["pointer"] = pointer
+            captured["action"] = action
+            captured["payload"] = payload
+            return {"started": True, "lease_path": "/tmp/lease.json", "sequence_id": "seq"}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.ComputerUseEdgeHazeManager, "from_pack_root", FakeManager.from_pack_root)
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "app": "Vivaldi",
+                "title": "Google - Vivaldi",
+                "x": 0,
+                "y": 37,
+                "width": 1470,
+                "height": 919,
+                "window_id": 7112,
+                "pid": 23721,
+            }
+        ],
+    )
+
+    result = controller._publish_virtual_pointer(
+        {"x": 100, "y": 120, "origin": "top_left"},
+        action="computer.move",
+        payload={"x": 100, "y": 120, "coordinate_space": "screen"},
+    )
+
+    assert result["started"] is True
+    assert captured["payload"]["edge_haze_target_window"]["pid"] == 23721
+    assert captured["payload"]["edge_haze_target_window"]["window_id"] == 7112
+
+
+def test_browser_computer_haze_payload_does_not_treat_coordinates_as_target(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    target = controller._edge_haze_target_from_mapping({"x": 10, "y": 20, "width": 300, "height": 200})
+
+    assert target is None
 
 
 def test_browser_computer_injects_haze_sequence_from_context_without_overwriting_payload():
@@ -396,6 +516,39 @@ def test_browser_computer_run_passes_context_sequence_to_controller(monkeypatch)
     assert captured["payload"]["computer_use_haze_sequence_id"] == "req_ctx"
 
 
+def test_browser_computer_run_ends_haze_sequence_on_success_and_exception(monkeypatch):
+    with _default_tools_function_imports():
+        from browser_computer import main as browser_computer_main
+        from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
+
+        router = importlib.import_module("domain.host_bridge.computer_router")
+        ended: list[str] = []
+
+        class FakeManager:
+            def end_sequence(self, sequence_id):
+                ended.append(sequence_id)
+
+        monkeypatch.setattr(ComputerUseEdgeHazeManager, "from_pack_root", classmethod(lambda cls, pack_root: FakeManager()))
+        monkeypatch.setattr(
+            router,
+            "run_computer_action",
+            lambda *args, **kwargs: {"action": "computer.type", "executed": True},
+        )
+
+        browser_computer_main.run({"request_id": "run_success"}, {"action": "computer.type", "payload": {"text": "hi"}})
+
+        def raise_timeout(*args, **kwargs):
+            raise TimeoutError("timed out")
+
+        monkeypatch.setattr(router, "run_computer_action", raise_timeout)
+        try:
+            browser_computer_main.run({"request_id": "run_timeout"}, {"action": "computer.type", "payload": {"text": "hi"}})
+        except TimeoutError:
+            pass
+
+    assert ended == ["run_success", "run_timeout"]
+
+
 def test_browser_use_and_computer_use_preserve_sequence_payload(monkeypatch):
     with _default_tools_function_imports():
         from browser_use import main as browser_use_main
@@ -431,11 +584,37 @@ def test_edge_haze_swift_helper_watches_lease():
     assert "status_text" in text
     assert "virtual_pointer" in text
     assert "target_window" in text
+    assert "EdgeHazeController" in text
+    assert "windowInfoMatches" in text
     assert "targetWindowDrawRect" in text
     assert "frontmostApplication" in text
+    assert "appKitRect(from:" in text
+    assert "displayBounds(for:" in text
     assert "drawVirtualPointer" in text
     assert "考え中" in text
     assert "app.terminate(nil)" in text
+
+
+def test_edge_haze_draw_path_uses_cached_state():
+    source = ROOT / "ecosystem" / "rumi_default_tools_pack" / "domain" / "computer" / "mac" / "EdgeHaze.swift"
+    text = source.read_text(encoding="utf-8")
+    draw_body = text.split("override func draw(_ dirtyRect: NSRect)", 1)[1].split("private func drawGlow", 1)[0]
+
+    assert "currentLease()" not in draw_body
+    assert "CGWindowListCopyWindowInfo" not in draw_body
+    assert "controller.lease" in draw_body
+    assert "controller.targetWindowDrawRect" in draw_body
+
+
+def test_edge_haze_swift_self_test_passes(tmp_path):
+    swiftc = shutil.which("swiftc")
+    if not swiftc:
+        return
+    source = ROOT / "ecosystem" / "rumi_default_tools_pack" / "domain" / "computer" / "mac" / "EdgeHaze.swift"
+    binary = tmp_path / "edge_haze_self_test"
+
+    subprocess.run([swiftc, str(source), "-o", str(binary)], check=True, timeout=30)
+    subprocess.run([str(binary), "--self-test"], check=True, timeout=10)
 
 
 def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monkeypatch):

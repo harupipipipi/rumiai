@@ -280,7 +280,8 @@ class BrowserComputerController:
             target = self._edge_haze_target_from_mapping(window_payload, fallback=payload)
             if target:
                 return target
-        if self._has_window_filter(payload):
+        has_explicit_target = self._has_explicit_window_filter(payload)
+        if has_explicit_target:
             target = self._matching_window(payload)
             if target:
                 return self._edge_haze_target_from_mapping(target, fallback=payload)
@@ -290,6 +291,8 @@ class BrowserComputerController:
                 target = self._window_at_point(*point)
                 if target:
                     return self._edge_haze_target_from_mapping(target, fallback=payload)
+        if has_explicit_target:
+            return None
         state = self._computer_state()
         selected = state.get("target_window") if isinstance(state.get("target_window"), dict) else None
         if selected:
@@ -365,7 +368,11 @@ class BrowserComputerController:
             ids = [item for item in (cls._optional_int(frame_id) for frame_id in frame_ids) if item and item > 0]
             if ids:
                 target["frame_window_ids"] = ids[:16]
-        return target or None
+        has_identifier = any(
+            target.get(key) not in (None, "", [])
+            for key in ("app", "window_title", "pid", "window_id", "frame_window_ids")
+        )
+        return target if has_identifier else None
 
     @staticmethod
     def _optional_int(value: Any) -> int | None:
@@ -1494,17 +1501,25 @@ class BrowserComputerController:
     def _computer_seat_target(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Build a ComputerTarget dict from payload."""
         coordinate_space = str(payload.get("coordinate_space") or payload.get("space") or "window").strip() or "window"
-        window = self._matching_window(payload) if self._has_window_filter(payload) else None
+        has_explicit_target = self._has_explicit_window_filter(payload)
+        window = self._matching_window(payload) if has_explicit_target else None
         state = self._computer_state()
-        if window is None:
+        if window is None and not has_explicit_target:
             selected = state.get("target_window")
             window = self._normalize_window_record(selected) if isinstance(selected, dict) else None
-        selected_app = state.get("target_app") if isinstance(state.get("target_app"), dict) else {}
+        selected_app = state.get("target_app") if (not has_explicit_target and isinstance(state.get("target_app"), dict)) else {}
         app = payload.get("app") or payload.get("application") or (window or {}).get("app") or selected_app.get("app") or selected_app.get("name")
         pid = payload.get("pid") or (window or {}).get("pid") or selected_app.get("pid")
-        if not pid:
+        resolution_error = ""
+        if has_explicit_target and window is None and not self._explicit_target_has_self_contained_window(payload):
+            resolution_error = "No visible window matched the explicit target; refusing to reuse a previously selected window."
+            pid = None
+        if pid and app and not self._pid_matches_app(pid, str(app)):
+            resolution_error = "Explicit PID does not match the requested app."
+            pid = None
+        if not pid and not resolution_error:
             pid = self._pid_for_app_name(str(app or ""))
-        return {
+        target = {
             "kind": payload.get("target_kind") or payload.get("kind") or "desktop",
             "app": app,
             "pid": pid,
@@ -1517,6 +1532,9 @@ class BrowserComputerController:
             "url": payload.get("url"),
             "coordinate_space": coordinate_space,
         }
+        if resolution_error:
+            target["_target_resolution_error"] = resolution_error
+        return target
 
     def _pid_for_app_name(self, app_name: str) -> int | None:
         app_name = str(app_name or "").strip()
@@ -1543,6 +1561,33 @@ class BrowserComputerController:
         except Exception:
             return None
         return pid if pid > 0 else None
+
+    def _pid_matches_app(self, pid: Any, app_name: str) -> bool:
+        try:
+            target_pid = int(pid)
+        except Exception:
+            return False
+        if target_pid <= 0:
+            return False
+        app_name = str(app_name or "").strip()
+        if not app_name:
+            return True
+        for item in self._running_apps():
+            if not isinstance(item, dict):
+                continue
+            try:
+                item_pid = int(item.get("pid") or 0)
+            except Exception:
+                continue
+            if item_pid == target_pid:
+                return self._app_matches_filter(item, app_name)
+        for item in self._list_windows():
+            window = self._normalize_window_record(item)
+            if not window:
+                continue
+            if int(window.get("pid") or 0) == target_pid:
+                return self._window_matches_filter(window, app=app_name.lower())
+        return False
 
     def _computer_seat_metadata_for_target(self, target_record: dict[str, Any] | None) -> dict[str, Any]:
         """Build additive ComputerSeat metadata for a selected target."""
@@ -1655,6 +1700,7 @@ class BrowserComputerController:
         action_payload: dict[str, Any],
         *,
         background_safe_only: bool = False,
+        verified_background_only: bool = False,
     ) -> dict[str, Any] | None:
         """Attempt to execute a mutation action via ComputerSeatService.
 
@@ -1675,8 +1721,28 @@ class BrowserComputerController:
             return None
 
         target = self._computer_seat_target(action_payload)
+        target_error = str(target.get("_target_resolution_error") or "")
+        if target_error:
+            return {
+                "action": action,
+                "driver": "computer_seat",
+                "executed": False,
+                "confidence": "failed",
+                "is_error": True,
+                "notes": [target_error],
+            }
         try:
-            if background_safe_only and hasattr(svc, "background_action"):
+            if background_safe_only:
+                background_method = getattr(svc, "background_action", None)
+                if not callable(background_method):
+                    return {
+                        "action": action,
+                        "driver": "computer_seat",
+                        "executed": False,
+                        "confidence": "failed",
+                        "is_error": True,
+                        "notes": ["ComputerSeatService does not expose a background_action API."],
+                    }
                 service_action = {
                     "computer.click": "click",
                     "computer.type": "type_text",
@@ -1704,16 +1770,46 @@ class BrowserComputerController:
                     }
                 if service_action == "key":
                     background_result: dict[str, Any] = {}
+                    last_success: dict[str, Any] = {}
                     count = _key_press_count(action_payload)
+                    executed_count = 0
                     for _ in range(count):
-                        background_result = svc.background_action(service_action, target, service_payload)
+                        background_result = background_method(
+                            service_action,
+                            target,
+                            service_payload,
+                            verified_only=verified_background_only,
+                        )
                         if not background_result or not background_result.get("executed"):
                             break
-                    if background_result:
-                        background_result["count"] = count
+                        executed_count += 1
+                        last_success = dict(background_result)
+                    if executed_count > 0:
+                        background_result = dict(last_success)
+                        background_result["executed"] = True
+                        background_result["executed_count"] = executed_count
                         background_result["requested_count"] = count
+                        background_result["count"] = executed_count
+                        if executed_count < count:
+                            background_result["partial_success"] = True
+                            background_result.setdefault("notes", [])
+                            if isinstance(background_result["notes"], list):
+                                background_result["notes"].append(
+                                    f"Stopped after {executed_count} of {count} background key press(es); refusing foreground replay."
+                                )
+                    elif background_result:
+                        background_result["executed_count"] = 0
+                        background_result["requested_count"] = count
+                    if background_result:
+                        background_result.setdefault("count", executed_count)
+                        background_result.setdefault("requested_count", count)
                 else:
-                    background_result = svc.background_action(service_action, target, service_payload)
+                    background_result = background_method(
+                        service_action,
+                        target,
+                        service_payload,
+                        verified_only=verified_background_only,
+                    )
                 return background_result if isinstance(background_result, dict) else None
             if action == "computer.click":
                 result = svc.click(target, x=int(action_payload.get("x", 0)), y=int(action_payload.get("y", 0)), button=action_payload.get("button", "left"))
@@ -1791,10 +1887,7 @@ class BrowserComputerController:
         background_only = self._background_requested(action_payload)
         if background_only:
             with self._edge_haze(action, action_payload) as edge_haze:
-                try:
-                    seat_result = self._try_computer_seat_action(action, action_payload, background_safe_only=True)
-                except TypeError:
-                    seat_result = self._try_computer_seat_action(action, action_payload)
+                seat_result = self._try_computer_seat_action(action, action_payload, background_safe_only=True)
             if seat_result is not None and seat_result.get("executed"):
                 if self._seat_result_is_background_safe(seat_result):
                     result = self._background_action_success(action, action_payload, seat_result, system)
@@ -1849,11 +1942,22 @@ class BrowserComputerController:
                     action,
                     action_payload,
                     background_safe_only=True,
+                    verified_background_only=True,
                 )
             if seat_result is not None and seat_result.get("executed") and self._seat_result_is_background_safe(seat_result):
-                result = self._background_action_success(action, action_payload, seat_result, system)
-                self._attach_edge_haze_result(result, edge_haze)
-                return result
+                if self._seat_result_is_verified_background(seat_result):
+                    result = self._background_action_success(action, action_payload, seat_result, system)
+                    self._attach_edge_haze_result(result, edge_haze)
+                    return result
+                executed_count = int(seat_result.get("executed_count") or 0)
+                requested_count = int(seat_result.get("requested_count") or executed_count)
+                if executed_count > 0 and executed_count < requested_count:
+                    result = self._background_action_success(action, action_payload, seat_result, system)
+                    self._attach_edge_haze_result(result, edge_haze)
+                    result["partial_success"] = True
+                    result["is_error"] = True
+                    result["reason"] = "Background key sequence partially executed; refusing foreground replay."
+                    return result
         if action in {"computer.type", "computer.key", "computer.scroll"} and action_payload.get("focus") is False:
             return {
                 "action": action,
@@ -1980,21 +2084,35 @@ class BrowserComputerController:
             "background": True,
             "driver": seat_result.get("driver", "computer_seat"),
             "confidence": seat_result.get("confidence", "best_effort"),
-            "can_parallel_user_work": seat_result.get("can_parallel_user_work", True),
+            "can_parallel_user_work": seat_result.get("can_parallel_user_work"),
+            "requires_foreground": seat_result.get("requires_foreground"),
+            "uses_physical_input": seat_result.get("uses_physical_input"),
         }
         if seat_result.get("notes"):
             result["notes"] = seat_result.get("notes")
         if seat_result.get("data"):
             result["target"] = seat_result.get("data")
         if action == "computer.key":
-            result["count"] = _key_press_count(action_payload)
+            requested_count = int(seat_result.get("requested_count") or _key_press_count(action_payload))
+            executed_count = int(seat_result.get("executed_count") or seat_result.get("count") or requested_count)
+            result["count"] = executed_count
+            result["requested_count"] = requested_count
+            result["executed_count"] = executed_count
+            if executed_count < requested_count:
+                result["partial_success"] = True
         if action == "computer.scroll":
             result["amount"] = int(action_payload.get("amount", action_payload.get("clicks", 1)))
         return result
 
     @staticmethod
     def _seat_result_is_background_safe(seat_result: dict[str, Any]) -> bool:
-        if seat_result.get("uses_physical_input") is True:
+        if seat_result.get("executed") is not True:
+            return False
+        if seat_result.get("uses_physical_input") is not False:
+            return False
+        if seat_result.get("requires_foreground") is not False:
+            return False
+        if seat_result.get("can_parallel_user_work") is not True:
             return False
         driver = str(seat_result.get("driver") or "").strip()
         if driver in {
@@ -2005,8 +2123,18 @@ class BrowserComputerController:
         }:
             return True
         if driver in {"mac_accessibility", "mac_cgevent_pid"}:
-            return bool(seat_result.get("can_parallel_user_work", True))
+            return True
         return False
+
+    @staticmethod
+    def _seat_result_is_verified_background(seat_result: dict[str, Any]) -> bool:
+        if not BrowserComputerController._seat_result_is_background_safe(seat_result):
+            return False
+        confidence = str(seat_result.get("confidence") or "").strip().lower()
+        if confidence in {"experimental", "best_effort", "posted_only", "posted only"}:
+            return False
+        driver = str(seat_result.get("driver") or "").strip()
+        return driver in {"browser_cdp", "browser_companion", "mac_accessibility", "windows_uia"}
 
     @staticmethod
     def _background_visible_window_required(
@@ -2327,6 +2455,29 @@ class BrowserComputerController:
             if item_app or not cls._app_name_matches(app, item_title):
                 return False
         if title and title not in item_title:
+            return False
+        return True
+
+    @classmethod
+    def _window_matches_explicit_filter(cls, window: dict[str, Any], payload: dict[str, Any]) -> bool:
+        filters = cls._window_filter(payload)
+        if not cls._window_matches_filter(
+            window,
+            app=filters.get("app", "").lower(),
+            title=filters.get("title", "").lower(),
+        ):
+            return False
+        wanted_pid = cls._optional_int(payload.get("pid"))
+        if wanted_pid is not None and int(window.get("pid") or 0) != wanted_pid:
+            return False
+        wanted_window_id = cls._window_id_int(payload.get("window_id"))
+        if wanted_window_id:
+            window_id = cls._window_id_int(window.get("window_id"))
+            frame_ids = window.get("frame_window_ids") if isinstance(window.get("frame_window_ids"), list) else []
+            if window_id != wanted_window_id and wanted_window_id not in frame_ids:
+                return False
+        wanted_hwnd = cls._window_id_int(payload.get("hwnd"))
+        if wanted_hwnd and cls._window_id_int(window.get("hwnd")) != wanted_hwnd:
             return False
         return True
 
@@ -2842,30 +2993,50 @@ class BrowserComputerController:
     def _window_filter(payload: dict[str, Any] | None = None) -> dict[str, str]:
         payload = payload or {}
         app = str(payload.get("app") or payload.get("application") or "").strip()
-        title = str(payload.get("title") or payload.get("title_contains") or "").strip()
+        title = str(payload.get("title") or payload.get("window_title") or payload.get("title_contains") or "").strip()
         return {"app": app, "title": title}
 
     def _has_window_filter(self, payload: dict[str, Any] | None = None) -> bool:
+        return self._has_explicit_window_filter(payload)
+
+    def _has_explicit_window_filter(self, payload: dict[str, Any] | None = None) -> bool:
+        payload = payload or {}
         filters = self._window_filter(payload)
-        return bool(filters.get("app") or filters.get("title"))
+        if filters.get("app") or filters.get("title"):
+            return True
+        if isinstance(payload.get("window"), dict):
+            return True
+        for key in ("pid", "window_id", "hwnd"):
+            if payload.get(key) not in (None, ""):
+                return True
+        return False
+
+    def _explicit_target_has_self_contained_window(self, payload: dict[str, Any]) -> bool:
+        window = self._normalize_window_record(payload.get("window")) if isinstance(payload.get("window"), dict) else None
+        return bool(window and self._window_matches_explicit_filter(window, payload))
 
     def _matching_window(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         filters = self._window_filter(payload)
         app = filters.get("app", "").lower()
         title = filters.get("title", "").lower()
+        explicit_window = self._normalize_window_record(payload.get("window")) if isinstance(payload.get("window"), dict) else None
+        if explicit_window and self._window_matches_explicit_filter(explicit_window, payload):
+            return explicit_window
         candidates: list[dict[str, Any]] = []
         for item in self._list_windows():
             window = self._normalize_window_record(item)
-            if window and self._is_usable_target_window(window) and self._window_matches_filter(window, app=app, title=title):
+            if window and self._is_usable_target_window(window) and self._window_matches_explicit_filter(window, payload):
                 candidates.append(window)
         selected_candidate = self._best_window_candidate(candidates, app=app, title=title)
         if selected_candidate:
             return selected_candidate
+        if self._has_explicit_window_filter(payload):
+            return None
         state = self._computer_state()
         selected = self._normalize_window_record(
             state.get("target_window") if self._state_matches_artifact_root(state) else None
         )
-        if selected and self._is_usable_target_window(selected) and self._window_matches_filter(selected, app=app, title=title):
+        if selected and self._is_usable_target_window(selected) and self._window_matches_explicit_filter(selected, payload):
             return selected
         return None
 
@@ -2911,6 +3082,7 @@ class BrowserComputerController:
             screen_y = int(target.get("y", 0)) + y
             action_payload["x"] = screen_x
             action_payload["y"] = screen_y
+            action_payload["coordinate_space"] = "screen"
             marker = {
                 "x": x,
                 "y": y,
@@ -2921,6 +3093,7 @@ class BrowserComputerController:
         else:
             action_payload["x"] = x
             action_payload["y"] = y
+            action_payload["coordinate_space"] = "screen"
             marker = {"x": x, "y": y, "screen_x": x, "screen_y": y, "coordinate_space": "screen"}
             if target:
                 marker["x"] = x - int(target.get("x", 0))
@@ -3139,6 +3312,7 @@ class BrowserComputerController:
         action_payload = dict(payload)
         action_payload["x"] = int(screen_x)
         action_payload["y"] = int(screen_y)
+        action_payload["coordinate_space"] = "screen"
         marker = {
             "x": x,
             "y": y,
@@ -3209,10 +3383,11 @@ class BrowserComputerController:
             from ..computer.mac.edge_haze import ComputerUseEdgeHazeManager
 
             manager = ComputerUseEdgeHazeManager.from_pack_root(Path(__file__).resolve().parents[2])
+            haze_payload = self._edge_haze_payload(action, payload)
             result = manager.update_virtual_pointer(
                 {**pointer, "phase": action.removeprefix("computer.")},
                 action=action,
-                payload=payload,
+                payload=haze_payload,
             )
             return result if result.get("started") else None
         except Exception:
@@ -3396,6 +3571,9 @@ class BrowserComputerController:
         parsed_window_id = BrowserComputerController._window_id_int(window_id)
         if parsed_window_id:
             normalized["window_id"] = parsed_window_id
+        hwnd = BrowserComputerController._window_id_int(value.get("hwnd"))
+        if hwnd:
+            normalized["hwnd"] = hwnd
         for rect_key in ("capture_rect", "content_rect"):
             rect = BrowserComputerController._normalize_rect(value.get(rect_key))
             if rect:

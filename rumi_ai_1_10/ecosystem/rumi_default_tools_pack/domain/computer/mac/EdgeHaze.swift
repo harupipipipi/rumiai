@@ -125,6 +125,92 @@ func leaseIsCurrent() -> Bool {
     return currentLease() != nil
 }
 
+struct WindowSnapshot {
+    let info: [String: Any]
+    let windowNumber: Int
+    let ownerPID: Int
+    let ownerName: String
+    let title: String
+    let layer: Int
+    let bounds: Any?
+}
+
+final class EdgeHazeController {
+    private(set) var lease: HazeLease?
+    private(set) var windows: [WindowSnapshot] = []
+    private(set) var frontmostPID: Int = 0
+
+    func poll() {
+        lease = currentLease()
+        frontmostPID = Int(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0)
+        windows = currentWindowSnapshot()
+    }
+
+    var leaseIsCurrent: Bool {
+        return lease != nil
+    }
+
+    func targetWindowDrawRect(for lease: HazeLease, displayBounds: CGRect, viewBounds: NSRect) -> NSRect? {
+        guard let target = lease.target_window else {
+            return nil
+        }
+        guard let targetRect = visibleTargetWindowRect(for: target, displayBounds: displayBounds, viewBounds: viewBounds) else {
+            return nil
+        }
+        let clipped = targetRect.intersection(viewBounds)
+        if clipped.isNull || clipped.isEmpty || clipped.width < 80 || clipped.height < 60 {
+            return nil
+        }
+        return clipped
+    }
+
+    private func visibleTargetWindowRect(for target: TargetWindowLease, displayBounds: CGRect, viewBounds: NSRect) -> NSRect? {
+        var candidates: [(score: Int, area: CGFloat, rect: NSRect)] = []
+        for snapshot in windows {
+            if frontmostPID > 0 && snapshot.ownerPID != frontmostPID {
+                continue
+            }
+            guard windowInfoMatches(snapshot.info, target: target) else {
+                continue
+            }
+            guard let rect = appKitRect(from: snapshot.bounds, displayBounds: displayBounds) else {
+                continue
+            }
+            let clipped = rect.intersection(viewBounds)
+            if clipped.isNull || clipped.isEmpty {
+                continue
+            }
+            candidates.append((windowMatchScore(snapshot.info, target: target), clipped.width * clipped.height, clipped))
+        }
+        return candidates.sorted { lhs, rhs in
+            if lhs.score == rhs.score {
+                return lhs.area > rhs.area
+            }
+            return lhs.score > rhs.score
+        }.first?.rect
+    }
+
+    private func currentWindowSnapshot() -> [WindowSnapshot] {
+        guard let windowInfos = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return windowInfos.compactMap { info in
+            guard let ownerPID = intValue(info[kCGWindowOwnerPID as String]) else {
+                return nil
+            }
+            return WindowSnapshot(
+                info: info,
+                windowNumber: intValue(info[kCGWindowNumber as String]) ?? 0,
+                ownerPID: ownerPID,
+                ownerName: stringValue(info[kCGWindowOwnerName as String]),
+                title: stringValue(info[kCGWindowName as String]),
+                layer: intValue(info[kCGWindowLayer as String]) ?? 0,
+                bounds: info[kCGWindowBounds as String]
+            )
+        }
+    }
+}
+
 final class EdgeHazeWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -132,12 +218,14 @@ final class EdgeHazeWindow: NSWindow {
 
 final class EdgeHazeView: NSView {
     let config: HazeConfig
-    let screenFrame: NSRect
+    let displayBounds: CGRect
+    let controller: EdgeHazeController
     let startedAt = Date()
 
-    init(frame frameRect: NSRect, screenFrame: NSRect, config: HazeConfig) {
+    init(frame frameRect: NSRect, displayBounds: CGRect, config: HazeConfig, controller: EdgeHazeController) {
         self.config = config
-        self.screenFrame = screenFrame
+        self.displayBounds = displayBounds
+        self.controller = controller
         super.init(frame: frameRect)
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor
@@ -154,7 +242,7 @@ final class EdgeHazeView: NSView {
         NSColor.clear.setFill()
         dirtyRect.fill()
 
-        guard let lease = currentLease(), let drawRect = targetWindowDrawRect(for: lease) else {
+        guard let lease = controller.lease, let drawRect = controller.targetWindowDrawRect(for: lease, displayBounds: displayBounds, viewBounds: bounds) else {
             return
         }
 
@@ -195,7 +283,7 @@ final class EdgeHazeView: NSView {
             radius: width * (1.22 + 0.1 * cos(elapsed * 0.9)),
             color: config.startColor
         )
-        drawVirtualPointer(in: drawRect)
+        drawVirtualPointer(in: drawRect, lease: lease)
         drawStatusText(in: drawRect, lease: lease)
         NSGraphicsContext.restoreGraphicsState()
     }
@@ -215,8 +303,8 @@ final class EdgeHazeView: NSView {
         )
     }
 
-    private func drawVirtualPointer(in area: NSRect) {
-        guard let pointer = currentLease()?.virtual_pointer else {
+    private func drawVirtualPointer(in area: NSRect, lease: HazeLease) {
+        guard let pointer = lease.virtual_pointer else {
             return
         }
         if pointer.visible == false {
@@ -275,12 +363,12 @@ final class EdgeHazeView: NSView {
             return nil
         }
         let origin = (pointer.origin ?? "top_left").lowercased()
-        let localX = CGFloat(x) - screenFrame.minX
+        let localX = CGFloat(x) - CGFloat(displayBounds.origin.x)
         let localY: CGFloat
         if origin == "appkit_bottom_left" || origin == "bottom_left" {
-            localY = CGFloat(y) - screenFrame.minY
+            localY = CGFloat(y) - CGFloat(displayBounds.origin.y)
         } else {
-            localY = screenFrame.maxY - CGFloat(y)
+            localY = CGFloat(displayBounds.origin.y + displayBounds.height) - CGFloat(y)
         }
         let margin: CGFloat = 64
         if localX < area.minX - margin || localX > area.maxX + margin || localY < area.minY - margin || localY > area.maxY + margin {
@@ -314,170 +402,6 @@ final class EdgeHazeView: NSView {
         attributed.draw(at: NSPoint(x: rect.minX + padX, y: rect.minY + padY))
     }
 
-    private func targetWindowDrawRect(for lease: HazeLease) -> NSRect? {
-        guard let target = lease.target_window else {
-            return nil
-        }
-        guard let targetRect = visibleTargetWindowRect(for: target) else {
-            return nil
-        }
-        let clipped = targetRect.intersection(bounds)
-        if clipped.isNull || clipped.isEmpty || clipped.width < 80 || clipped.height < 60 {
-            return nil
-        }
-        return clipped
-    }
-
-    private func visibleTargetWindowRect(for target: TargetWindowLease) -> NSRect? {
-        guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return nil
-        }
-        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
-        var candidates: [(score: Int, area: CGFloat, rect: NSRect)] = []
-        for info in windows {
-            guard let ownerPID = intValue(info[kCGWindowOwnerPID as String]) else {
-                continue
-            }
-            if frontmostPID > 0 && ownerPID != frontmostPID {
-                continue
-            }
-            guard windowInfoMatches(info, target: target) else {
-                continue
-            }
-            guard let rect = appKitRect(from: info[kCGWindowBounds as String]) else {
-                continue
-            }
-            let clipped = rect.intersection(bounds)
-            if clipped.isNull || clipped.isEmpty {
-                continue
-            }
-            candidates.append((windowMatchScore(info, target: target), clipped.width * clipped.height, clipped))
-        }
-        return candidates.sorted { lhs, rhs in
-            if lhs.score == rhs.score {
-                return lhs.area > rhs.area
-            }
-            return lhs.score > rhs.score
-        }.first?.rect
-    }
-
-    private func windowInfoMatches(_ info: [String: Any], target: TargetWindowLease) -> Bool {
-        let layer = intValue(info[kCGWindowLayer as String]) ?? 0
-        if layer != 0 {
-            return false
-        }
-        let windowNumber = intValue(info[kCGWindowNumber as String]) ?? 0
-        if let targetWindowID = target.window_id, targetWindowID > 0 {
-            if windowNumber == targetWindowID || (target.frame_window_ids ?? []).contains(windowNumber) {
-                return true
-            }
-        }
-        let ownerPID = intValue(info[kCGWindowOwnerPID as String]) ?? 0
-        if let targetPID = target.pid, targetPID > 0, ownerPID != targetPID {
-            return false
-        }
-        let ownerName = stringValue(info[kCGWindowOwnerName as String])
-        if let appName = target.app, !appName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !appNameMatches(appName, ownerName) {
-            return false
-        }
-        let targetTitle = target.window_title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if !targetTitle.isEmpty && target.pid == nil && target.window_id == nil {
-            let windowTitle = stringValue(info[kCGWindowName as String])
-            if !windowTitle.isEmpty && !windowTitle.localizedCaseInsensitiveContains(targetTitle) && !targetTitle.localizedCaseInsensitiveContains(windowTitle) {
-                return false
-            }
-        }
-        return target.pid != nil || target.window_id != nil || !(target.app ?? "").isEmpty || !targetTitle.isEmpty
-    }
-
-    private func windowMatchScore(_ info: [String: Any], target: TargetWindowLease) -> Int {
-        var score = 0
-        let windowNumber = intValue(info[kCGWindowNumber as String]) ?? 0
-        if let targetWindowID = target.window_id, targetWindowID == windowNumber {
-            score += 100
-        }
-        if (target.frame_window_ids ?? []).contains(windowNumber) {
-            score += 80
-        }
-        let ownerPID = intValue(info[kCGWindowOwnerPID as String]) ?? 0
-        if let targetPID = target.pid, targetPID == ownerPID {
-            score += 40
-        }
-        if let appName = target.app, appNameMatches(appName, stringValue(info[kCGWindowOwnerName as String])) {
-            score += 20
-        }
-        return score
-    }
-
-    private func appKitRect(from value: Any?) -> NSRect? {
-        guard let bounds = value as? [String: Any] else {
-            return nil
-        }
-        guard
-            let x = doubleValue(bounds["X"]),
-            let y = doubleValue(bounds["Y"]),
-            let width = doubleValue(bounds["Width"]),
-            let height = doubleValue(bounds["Height"]),
-            width > 0,
-            height > 0
-        else {
-            return nil
-        }
-        return NSRect(
-            x: CGFloat(x) - screenFrame.minX,
-            y: screenFrame.maxY - CGFloat(y + height),
-            width: CGFloat(width),
-            height: CGFloat(height)
-        )
-    }
-
-    private func intValue(_ value: Any?) -> Int? {
-        if let number = value as? NSNumber {
-            return number.intValue
-        }
-        if let int = value as? Int {
-            return int
-        }
-        if let string = value as? String {
-            return Int(string)
-        }
-        return nil
-    }
-
-    private func doubleValue(_ value: Any?) -> Double? {
-        if let number = value as? NSNumber {
-            return number.doubleValue
-        }
-        if let double = value as? Double {
-            return double
-        }
-        if let string = value as? String {
-            return Double(string)
-        }
-        return nil
-    }
-
-    private func stringValue(_ value: Any?) -> String {
-        return (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    }
-
-    private func appNameMatches(_ left: String, _ right: String) -> Bool {
-        let lhs = normalizedAppName(left)
-        let rhs = normalizedAppName(right)
-        if lhs.isEmpty || rhs.isEmpty {
-            return false
-        }
-        return lhs == rhs || lhs.contains(rhs) || rhs.contains(lhs)
-    }
-
-    private func normalizedAppName(_ value: String) -> String {
-        let lower = value.lowercased()
-        let filtered = lower.unicodeScalars.map { scalar -> Character in
-            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
-        }
-        return String(filtered).split(separator: " ").joined()
-    }
-
     private func fallbackStatusText(for action: String?, active: Bool) -> String {
         if !active {
             return "考え中"
@@ -495,15 +419,204 @@ final class EdgeHazeView: NSView {
     }
 }
 
+func windowInfoMatches(_ info: [String: Any], target: TargetWindowLease) -> Bool {
+    let layer = intValue(info[kCGWindowLayer as String]) ?? 0
+    if layer != 0 {
+        return false
+    }
+    let hasWindowID = (target.window_id ?? 0) > 0 || !(target.frame_window_ids ?? []).isEmpty
+    let windowNumber = intValue(info[kCGWindowNumber as String]) ?? 0
+    if hasWindowID {
+        let acceptedIDs = Set(([target.window_id].compactMap { $0 } + (target.frame_window_ids ?? [])).filter { $0 > 0 })
+        if !acceptedIDs.contains(windowNumber) {
+            return false
+        }
+    }
+    let ownerPID = intValue(info[kCGWindowOwnerPID as String]) ?? 0
+    if let targetPID = target.pid, targetPID > 0, ownerPID != targetPID {
+        return false
+    }
+    let appName = target.app?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !appName.isEmpty && !appNameMatches(appName, stringValue(info[kCGWindowOwnerName as String])) {
+        return false
+    }
+    let targetTitle = target.window_title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !targetTitle.isEmpty {
+        let windowTitle = stringValue(info[kCGWindowName as String])
+        if windowTitle.isEmpty || !windowTitle.localizedCaseInsensitiveContains(targetTitle) {
+            return false
+        }
+    }
+    return hasWindowID || target.pid != nil || !appName.isEmpty || !targetTitle.isEmpty
+}
+
+func windowMatchScore(_ info: [String: Any], target: TargetWindowLease) -> Int {
+    var score = 0
+    let windowNumber = intValue(info[kCGWindowNumber as String]) ?? 0
+    if let targetWindowID = target.window_id, targetWindowID == windowNumber {
+        score += 100
+    }
+    if (target.frame_window_ids ?? []).contains(windowNumber) {
+        score += 80
+    }
+    let ownerPID = intValue(info[kCGWindowOwnerPID as String]) ?? 0
+    if let targetPID = target.pid, targetPID == ownerPID {
+        score += 40
+    }
+    if let appName = target.app, appNameMatches(appName, stringValue(info[kCGWindowOwnerName as String])) {
+        score += 20
+    }
+    let targetTitle = target.window_title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    if !targetTitle.isEmpty && stringValue(info[kCGWindowName as String]).localizedCaseInsensitiveContains(targetTitle) {
+        score += 10
+    }
+    return score
+}
+
+func appKitRect(from value: Any?, displayBounds: CGRect) -> NSRect? {
+    guard let bounds = value as? [String: Any] else {
+        return nil
+    }
+    guard
+        let x = doubleValue(bounds["X"]),
+        let y = doubleValue(bounds["Y"]),
+        let width = doubleValue(bounds["Width"]),
+        let height = doubleValue(bounds["Height"]),
+        width > 0,
+        height > 0
+    else {
+        return nil
+    }
+    return NSRect(
+        x: CGFloat(x - Double(displayBounds.origin.x)),
+        y: CGFloat(Double(displayBounds.origin.y + displayBounds.height) - (y + height)),
+        width: CGFloat(width),
+        height: CGFloat(height)
+    )
+}
+
+func displayBounds(for screen: NSScreen) -> CGRect {
+    if let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+        let displayID = CGDirectDisplayID(number.uint32Value)
+        let bounds = CGDisplayBounds(displayID)
+        if bounds.width > 0 && bounds.height > 0 {
+            return bounds
+        }
+    }
+    return CGRect(x: screen.frame.origin.x, y: screen.frame.origin.y, width: screen.frame.width, height: screen.frame.height)
+}
+
+func intValue(_ value: Any?) -> Int? {
+    if let number = value as? NSNumber {
+        return number.intValue
+    }
+    if let int = value as? Int {
+        return int
+    }
+    if let string = value as? String {
+        return Int(string)
+    }
+    return nil
+}
+
+func doubleValue(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+        return number.doubleValue
+    }
+    if let double = value as? Double {
+        return double
+    }
+    if let string = value as? String {
+        return Double(string)
+    }
+    return nil
+}
+
+func stringValue(_ value: Any?) -> String {
+    return (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+}
+
+func appNameMatches(_ left: String, _ right: String) -> Bool {
+    let lhs = normalizedAppName(left)
+    let rhs = normalizedAppName(right)
+    if lhs.isEmpty || rhs.isEmpty {
+        return false
+    }
+    if lhs == rhs {
+        return true
+    }
+    let aliases: [String: Set<String>] = [
+        "googlechrome": ["chrome"],
+        "microsoftedge": ["edge", "msedge"],
+        "bravebrowser": ["brave"],
+        "operagx": ["opera"]
+    ]
+    return aliases[lhs]?.contains(rhs) == true || aliases[rhs]?.contains(lhs) == true
+}
+
+func normalizedAppName(_ value: String) -> String {
+    let lower = value.lowercased()
+    let withoutSuffix = lower.hasSuffix(".app") ? String(lower.dropLast(4)) : lower
+    let filtered = withoutSuffix.unicodeScalars.map { scalar -> Character in
+        CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+    }
+    return String(filtered).split(separator: " ").joined()
+}
+
+func runSelfTests() {
+    let baseWindow: [String: Any] = [
+        kCGWindowLayer as String: 0,
+        kCGWindowNumber as String: 101,
+        kCGWindowOwnerPID as String: 222,
+        kCGWindowOwnerName as String: "Vivaldi",
+        kCGWindowName as String: "Google - Vivaldi",
+        kCGWindowBounds as String: ["X": 10, "Y": 20, "Width": 800, "Height": 600],
+    ]
+    let samePIDOtherWindow: [String: Any] = [
+        kCGWindowLayer as String: 0,
+        kCGWindowNumber as String: 102,
+        kCGWindowOwnerPID as String: 222,
+        kCGWindowOwnerName as String: "Vivaldi",
+        kCGWindowName as String: "Settings",
+        kCGWindowBounds as String: ["X": 20, "Y": 30, "Width": 900, "Height": 700],
+    ]
+    let target = TargetWindowLease(app: "Vivaldi", pid: 222, window_id: 101, window_title: "Google", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)
+    precondition(windowInfoMatches(baseWindow, target: target), "exact target should match")
+    precondition(!windowInfoMatches(samePIDOtherWindow, target: target), "same PID with different window id/title must not match")
+    precondition(!windowInfoMatches(baseWindow, target: TargetWindowLease(app: "Safari", pid: 222, window_id: 101, window_title: "Google", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)), "app mismatch must fail")
+    precondition(!windowInfoMatches(baseWindow, target: TargetWindowLease(app: "Vivaldi", pid: 333, window_id: 101, window_title: "Google", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)), "PID mismatch must fail")
+    precondition(!windowInfoMatches(baseWindow, target: TargetWindowLease(app: "Vivaldi", pid: 222, window_id: 999, window_title: "Google", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)), "window id mismatch must fail")
+    precondition(!windowInfoMatches(baseWindow, target: TargetWindowLease(app: "Vivaldi", pid: 222, window_id: 101, window_title: "Mail", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)), "title mismatch must fail")
+
+    let displays = [
+        CGRect(x: 0, y: 0, width: 1440, height: 900),
+        CGRect(x: 1440, y: 0, width: 1080, height: 1920),
+        CGRect(x: 0, y: -1200, width: 1600, height: 1200),
+        CGRect(x: -1280, y: 200, width: 1280, height: 1024),
+    ]
+    for display in displays {
+        let rect = appKitRect(from: ["X": display.origin.x + 10, "Y": display.origin.y + 20, "Width": 200, "Height": 100], displayBounds: display)
+        precondition(rect == NSRect(x: 10, y: display.height - 120, width: 200, height: 100), "display-local rect conversion failed")
+    }
+}
+
+if CommandLine.arguments.contains("--self-test") {
+    runSelfTests()
+    exit(0)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 signal(SIGTERM) { _ in exit(0) }
 signal(SIGINT) { _ in exit(0) }
 
 let config = resolvedConfig()
+let controller = EdgeHazeController()
+controller.poll()
 var windows: [NSWindow] = []
 
 for screen in NSScreen.screens {
+    let displayBounds = displayBounds(for: screen)
     let window = EdgeHazeWindow(
         contentRect: screen.frame,
         styleMask: [.borderless],
@@ -517,19 +630,29 @@ for screen in NSScreen.screens {
     window.ignoresMouseEvents = true
     window.level = .screenSaver
     window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-    window.contentView = EdgeHazeView(frame: NSRect(origin: .zero, size: screen.frame.size), screenFrame: screen.frame, config: config)
+    window.contentView = EdgeHazeView(
+        frame: NSRect(origin: .zero, size: screen.frame.size),
+        displayBounds: displayBounds,
+        config: config,
+        controller: controller
+    )
     window.orderFrontRegardless()
     windows.append(window)
 }
 
 Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
+    controller.poll()
+    if !controller.leaseIsCurrent {
+        app.terminate(nil)
+        return
+    }
     for window in windows {
         window.contentView?.needsDisplay = true
     }
 }
 
 Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-    if !leaseIsCurrent() {
+    if !controller.leaseIsCurrent {
         app.terminate(nil)
     }
 }

@@ -38,23 +38,27 @@ def run(context, args):
     ):
         payload["persistent"] = False
     payload = _payload_with_context_defaults(action, payload, context)
-    result = run_computer_action(
-        action,
-        payload,
-        context if isinstance(context, dict) else None,
-        tool_name=tool_name,
-        tool_arguments=tool_arguments,
-        artifact_root=artifact_root,
-        yolo_mode=yolo_mode,
-    )
-    summary = "{} {} completed".format(tool_name, result.get("action", "action"))
-    if result.get("is_error"):
-        summary = "{} {} failed".format(tool_name, result.get("action", "action"))
-        if result.get("reason"):
-            summary += ": {}".format(result.get("reason"))
-    if result.get("path"):
-        summary += "; artifact: {}".format(result.get("path"))
-    return tool_result(summary, widget={"type": tool_name, **result}, is_error=bool(result.get("is_error")))
+    sequence_id = _sequence_id_from_mapping(payload)
+    try:
+        result = run_computer_action(
+            action,
+            payload,
+            context if isinstance(context, dict) else None,
+            tool_name=tool_name,
+            tool_arguments=tool_arguments,
+            artifact_root=artifact_root,
+            yolo_mode=yolo_mode,
+        )
+        summary = "{} {} completed".format(tool_name, result.get("action", "action"))
+        if result.get("is_error"):
+            summary = "{} {} failed".format(tool_name, result.get("action", "action"))
+            if result.get("reason"):
+                summary += ": {}".format(result.get("reason"))
+        if result.get("path"):
+            summary += "; artifact: {}".format(result.get("path"))
+        return tool_result(summary, widget={"type": tool_name, **result}, is_error=bool(result.get("is_error")))
+    finally:
+        _end_haze_sequence(sequence_id)
 
 
 def _payload_with_context_defaults(action, payload, context):
@@ -106,6 +110,22 @@ def _sequence_id_from_mapping(value):
         if candidate:
             return candidate
     return ""
+
+
+def _end_haze_sequence(sequence_id):
+    sequence_id = str(sequence_id or "").strip()
+    if not sequence_id:
+        return
+    try:
+        try:
+            from domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
+        except ImportError:
+            from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
+
+        pack_root = Path(__file__).resolve().parents[2]
+        ComputerUseEdgeHazeManager.from_pack_root(pack_root).end_sequence(sequence_id)
+    except Exception:
+        return
 
 
 def _truthy(value):
