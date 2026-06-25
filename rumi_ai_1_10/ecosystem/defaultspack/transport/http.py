@@ -1505,6 +1505,16 @@ def _apply_defaultspack_local_ui_context(context, payload):
     context["approval_id"] = "defaultspack_local_ui"
 
 
+def _allow_local_pairing_start_without_token(method, path, headers):
+    if str(method or "").upper() != "POST" or path != "/api/p2p/pairing/start":
+        return False
+    origin = _header_value(headers, "Origin")
+    if not origin or not _is_allowed_sensitive_origin(origin):
+        return False
+    csrf = _header_value(headers, "X-Rumi-CSRF")
+    return bool(csrf.strip())
+
+
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
@@ -1743,6 +1753,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
             return None
         if not _configured_local_auth_tokens():
+            if _allow_local_pairing_start_without_token(method, path, self.headers):
+                return None
             return (403, "local auth token is not configured", "AUTH_REQUIRED")
         if not _local_auth_token_authorized(self.headers):
             return (401, "local auth token required", "AUTH_REQUIRED")
