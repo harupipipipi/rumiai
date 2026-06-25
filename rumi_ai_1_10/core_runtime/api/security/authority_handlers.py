@@ -44,15 +44,26 @@ class AuthorityHandlersMixin:
     def _authority_check(self, body: dict) -> dict:
         try:
             resource = body.get("resource") if isinstance(body.get("resource"), dict) else {}
+            actor_principal = getattr(self, "_authenticated_principal", None)
+            if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+                principal_id = getattr(actor_principal, "principal_id", "")
+                profile_id = getattr(actor_principal, "profile_id", "")
+                node_id = None
+                graph_id = None
+            else:
+                principal_id = str(body.get("principal_id") or "")
+                profile_id = body.get("profile_id")
+                node_id = body.get("node_id")
+                graph_id = body.get("graph_id")
             decision = _authority_service().check(
-                principal_id=str(body.get("principal_id") or ""),
+                principal_id=str(principal_id or ""),
                 permission_id=str(body.get("permission_id") or ""),
                 resource=resource,
                 reason=str(body.get("reason") or ""),
                 conversation_id=body.get("conversation_id"),
-                profile_id=body.get("profile_id"),
-                node_id=body.get("node_id"),
-                graph_id=body.get("graph_id"),
+                profile_id=profile_id,
+                node_id=node_id,
+                graph_id=graph_id,
                 request_id=body.get("request_id"),
                 approval_token=body.get("approval_token"),
             )

@@ -12,6 +12,7 @@ def build_bubblewrap_argv(spec: BubblewrapSandboxSpec) -> list[str]:
     argv = [
         "bwrap",
         "--unshare-user",
+        "--disable-userns",
         "--unshare-pid",
         "--unshare-ipc",
         "--unshare-uts",

@@ -488,6 +488,55 @@ class TestCheckAuth:
         assert captured["decision"] == "approve"
         assert captured["scope"] == "once"
 
+    def test_scoped_authority_check_cannot_impersonate_principal(self, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.api.security import authority_handlers
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        captured = {}
+
+        class FakeDecision:
+            def to_dict(self):
+                return {"allowed": False, "request_id": "req-1"}
+
+        class FakeAuthorityService:
+            def check(self, **kwargs):
+                captured.update(kwargs)
+                return FakeDecision()
+
+        monkeypatch.setattr(
+            authority_handlers,
+            "_authority_service",
+            lambda: FakeAuthorityService(),
+        )
+        handler = _make_handler(_authenticated_principal=principal)
+
+        result = handler._authority_check(
+            {
+                "principal_id": "profile:other",
+                "profile_id": "other",
+                "node_id": "node-other",
+                "graph_id": "graph-other",
+                "permission_id": "model.invoke",
+                "resource": {"kind": "model"},
+            }
+        )
+
+        assert result["request_id"] == "req-1"
+        assert captured["principal_id"] == "profile:work__surface:mobile__device:phone-1"
+        assert captured["profile_id"] == "work"
+        assert captured["node_id"] is None
+        assert captured["graph_id"] is None
+
     def test_mobile_approver_requires_grant_for_authority_request_routes(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal
         from core_runtime import capability_grant_manager as cgm

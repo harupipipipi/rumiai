@@ -11,6 +11,7 @@ from .api_response import APIResponse
 from .request_authorizer import authorize_route
 from .route_errors import api_route_function_error_status, api_route_function_public_error
 from .route_handlers import _compile_template_path, _is_safe_path_param
+from .safe_headers import RESERVED_REQUEST_CONTEXT_KEYS, strip_reserved_request_context
 from ..validation import HANDLER_NAME_RE
 
 
@@ -279,17 +280,22 @@ class APIRouteTableMixin:
                     )
                     return True
 
-                call_args = dict(body if pass_body and body is not None else {})
+                call_args = strip_reserved_request_context(body) if pass_body else {}
                 if pass_query:
-                    call_args.update(dict(query or {}))
-                call_args.update(entry.get("args") or {})
+                    call_args.update(strip_reserved_request_context(query))
+                call_args.update(strip_reserved_request_context(entry.get("args") or {}))
                 param_map = entry.get("path_param_map") or {}
                 if param_map:
                     for target_key, source_key in param_map.items():
+                        if str(target_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
                         if source_key in path_params:
                             call_args[target_key] = path_params[source_key]
                 else:
-                    call_args.update(path_params)
+                    for target_key, value in path_params.items():
+                        if str(target_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
+                        call_args[target_key] = value
                 route_context = {
                     "pack_id": entry["pack_id"],
                     "method": method_upper,
