@@ -27,7 +27,14 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer
 @pytest.fixture
 def controller(tmp_path, monkeypatch):
     monkeypatch.setenv("PYTEST_CURRENT_TEST", "computer seat delegation")
-    return BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+    instance = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    shared = tmp_path / "user_data" / "shared"
+    instance._session_path = shared / "browser_sessions.json"
+    instance._approval_path = shared / "browser_computer_approvals.json"
+    instance._browser_root = shared / "browser"
+    instance._profile_root = instance._browser_root / "profiles"
+    return instance
 
 
 def _mock_service():
@@ -76,7 +83,17 @@ def _approval_token_for(controller: BrowserComputerController, action: str, payl
 def test_click_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.click", {"x": 100, "y": 200, "physical": True, "approval_token": "bypass"}, yolo_mode=True)
+    result = controller.run(
+        "computer.click",
+        {
+            "x": 100,
+            "y": 200,
+            "physical": True,
+            "approval_token": "bypass",
+            "include_screenshot": False,
+        },
+        yolo_mode=True,
+    )
     assert result["executed"] is True
     assert result["action"] == "computer.click"
     svc.click.assert_called_once()
@@ -85,7 +102,11 @@ def test_click_delegates_to_seat(controller):
 def test_type_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+    result = controller.run(
+        "computer.type",
+        {"text": "hello", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
     svc.background_action.assert_called_once()
     assert svc.background_action.call_args.args[0] == "type_text"
@@ -94,7 +115,11 @@ def test_type_delegates_to_seat(controller):
 def test_key_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.key", {"key": "enter"}, yolo_mode=True)
+    result = controller.run(
+        "computer.key",
+        {"key": "enter", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
     svc.background_action.assert_called_once()
     assert svc.background_action.call_args.args[0] == "key"
@@ -103,7 +128,11 @@ def test_key_delegates_to_seat(controller):
 def test_scroll_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.scroll", {"direction": "down"}, yolo_mode=True)
+    result = controller.run(
+        "computer.scroll",
+        {"direction": "down", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
     svc.background_action.assert_called_once()
     assert svc.background_action.call_args.args[0] == "scroll"
