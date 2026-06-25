@@ -127,9 +127,37 @@ void main() {
       'http://172.16.0.2:8765',
       'http://192.168.11.25:8765',
       'http://[fe80::1]:8765',
-    ]);
+    ], allowCleartext: true);
 
     expect(selected, 'http://192.168.11.25:8765');
+  });
+
+  test('preferredPairingBaseUrl rejects cleartext when release policy is used',
+      () {
+    final selected = preferredPairingBaseUrl(const [
+      'http://192.168.11.25:8765',
+      'https://rumi.example.com',
+    ], allowCleartext: false);
+
+    expect(selected, 'https://rumi.example.com');
+  });
+
+  test('pcConnectionUrlAllowed enforces release HTTPS policy', () {
+    expect(
+      pcConnectionUrlAllowed(
+        'http://192.168.11.25:8765',
+        allowCleartext: false,
+      ),
+      isFalse,
+    );
+    expect(pcConnectionUrlAllowed('rumi.example.com'), isTrue);
+    expect(
+      pcConnectionUrlAllowed(
+        'http://192.168.11.25:8765',
+        allowCleartext: true,
+      ),
+      isTrue,
+    );
   });
 
   test('preferredPairingBaseUrl falls back to first usable url', () {
@@ -137,7 +165,7 @@ void main() {
       '',
       'http://[fe80::1]:8765',
       'http://169.254.193.88:8765',
-    ]);
+    ], allowCleartext: true);
 
     expect(selected, 'http://[fe80::1]:8765');
   });
@@ -239,6 +267,31 @@ void main() {
     expect(migrated.deviceToken, 'dtk-old-remote');
     expect(storage._values.containsKey('rumi_remote.base_url'), isFalse);
     expect(storage._values.containsKey('rumi_remote.token'), isFalse);
+  });
+
+  test('migrates legacy FlutterSecureStorage values when new storage is empty',
+      () async {
+    final storage = _FakeSecureStorage();
+    final legacyStorage = _FakeSecureStorage();
+    final store = MobileDeviceStore(
+      storage: storage,
+      legacyStorage: legacyStorage,
+    );
+
+    await legacyStorage.write(
+      'rumi.pc_connection.v1',
+      jsonEncode({
+        'baseUrl': 'https://rumi.example.com',
+        'token': 'dtk-legacy-secure',
+      }),
+    );
+
+    final migrated = await store.loadPairedDevice();
+    expect(migrated, isNotNull);
+    expect(migrated!.pcBaseUrl, 'https://rumi.example.com');
+    expect(migrated.deviceToken, 'dtk-legacy-secure');
+    expect(storage._values.containsKey('rumi.paired_device.v1'), isTrue);
+    expect(legacyStorage._values.containsKey('rumi.pc_connection.v1'), isFalse);
   });
 
   test('paired device keeps normal and approval tokens separate', () {

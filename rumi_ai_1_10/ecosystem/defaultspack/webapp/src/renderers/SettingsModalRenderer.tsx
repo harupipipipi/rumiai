@@ -34,6 +34,14 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
   },
 ]);
 
+function viteEnv(): Record<string, string | undefined> {
+  return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) ?? {};
+}
+
+function mobileCredentialTransferEnabled(): boolean {
+  return viteEnv().VITE_RUMI_MOBILE_CREDENTIAL_TRANSFER === "1";
+}
+
 function formatReadonlyValue(value: unknown, fallback: unknown): string {
   const resolved = value ?? fallback ?? "";
   if (typeof resolved === "boolean") return resolved ? "保存済み" : "未設定";
@@ -2107,14 +2115,16 @@ function SettingsField({
           onChange(sectionId, field.id, {
             action: "oauth_refresh",
           });
-          setCredentialTransfer({
-            providerId: savedProviderId,
-            providerLabel: selectedProviderOption?.label,
-            apiKey: apiSecret,
-            apiId: savedApiId,
-            baseUrl: savedBaseUrl || undefined,
-            defaultModel: savedDefaultModel || undefined,
-          });
+          if (mobileCredentialTransferEnabled()) {
+            setCredentialTransfer({
+              providerId: savedProviderId,
+              providerLabel: selectedProviderOption?.label,
+              apiKey: apiSecret,
+              apiId: savedApiId,
+              baseUrl: savedBaseUrl || undefined,
+              defaultModel: savedDefaultModel || undefined,
+            });
+          }
         } catch (saveError) {
           setApiSaveState("idle");
           setApiSaveError(saveError instanceof Error ? saveError.message : "API key save failed.");

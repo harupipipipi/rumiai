@@ -17,6 +17,10 @@ TOKEN_DELIVERY_VERSION = 1
 _HKDF_SALT = b"rumi-mobile-token-delivery-v1"
 
 
+def validate_token_delivery_public_key(value: str) -> None:
+    _decode_x25519_public_key(value)
+
+
 def encrypt_token_delivery(
     payload: dict[str, Any],
     recipient_public_key: str,

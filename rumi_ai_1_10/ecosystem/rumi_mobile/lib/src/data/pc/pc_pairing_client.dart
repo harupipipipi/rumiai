@@ -156,8 +156,6 @@ class PcPairingClient {
     PcConnection pc, {
     required String pairingId,
     String? code,
-    String? pickupSecret,
-    String? deviceId,
   }) async {
     if (!_hasBaseUrl(pc)) {
       throw const PcPairingException('PC接続が設定されていません。');
@@ -169,10 +167,6 @@ class PcPairingClient {
         _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status').replace(
       queryParameters: {
         if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
-        if (pickupSecret != null && pickupSecret.trim().isNotEmpty)
-          'pickup_secret': pickupSecret.trim(),
-        if (deviceId != null && deviceId.trim().isNotEmpty)
-          'device_id': deviceId.trim(),
       },
     );
     final resp = await _http
@@ -181,6 +175,39 @@ class PcPairingClient {
     if (resp.statusCode < 200 || resp.statusCode >= 300) {
       throw PcPairingException(
         'ステータス取得に失敗しました (HTTP ${resp.statusCode})',
+        statusCode: resp.statusCode,
+      );
+    }
+    return PairingStatusResponse.fromJson(_decodeData(resp.body));
+  }
+
+  Future<PairingStatusResponse> pickupTokenDelivery(
+    PcConnection pc, {
+    required String pairingId,
+    required String pickupSecret,
+    required String deviceId,
+  }) async {
+    if (!_hasBaseUrl(pc)) {
+      throw const PcPairingException('PC接続が設定されていません。');
+    }
+    if (_closed) {
+      throw const PcPairingException('クライアントは閉じられました。');
+    }
+    final uri =
+        _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/token/pickup');
+    final resp = await _http
+        .post(
+          uri,
+          headers: _headers(pc.token),
+          body: jsonEncode({
+            'pickup_secret': pickupSecret,
+            'device_id': deviceId,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw PcPairingException(
+        'トークン取得に失敗しました (HTTP ${resp.statusCode})',
         statusCode: resp.statusCode,
       );
     }

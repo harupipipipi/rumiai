@@ -128,10 +128,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _saving = true);
     final config = _buildConfig();
     await widget.configStore.saveApi(config);
-    final pc = _pcUrl.text.trim().isEmpty || _pcToken.text.trim().isEmpty
+    final pcUrl = _pcUrl.text.trim();
+    if (pcUrl.isNotEmpty && !pcConnectionUrlAllowed(pcUrl)) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      _toast('release版ではPC接続にHTTPS URLが必要です');
+      return;
+    }
+    final pc = pcUrl.isEmpty || _pcToken.text.trim().isEmpty
         ? null
         : PcConnection(
-            baseUrl: _pcUrl.text.trim(),
+            baseUrl: pcUrl,
             token: _pcToken.text.trim(),
           );
     await widget.configStore.savePc(pc);
@@ -191,6 +198,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (result == null) return;
     final (payload, mismatch) = result;
     if (payload is QrPcConnection) {
+      if (!pcConnectionUrlAllowed(payload.baseUrl)) {
+        _toast('release版ではPC接続にHTTPS URLが必要です');
+        return;
+      }
       setState(() {
         _pcUrl.text = payload.baseUrl;
         _pcToken.text = payload.token;
@@ -236,11 +247,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'chat.read',
           'chat.write',
           'tools.observe',
-          'authority.request.list',
-          'authority.request.read',
-          'authority.request.approve',
-          'authority.request.deny',
-          'credentials.request',
         ],
       );
 
@@ -291,12 +297,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final statusResp = await client.pollStatus(
           pc,
           pairingId: pairingId,
+        );
+        if (!statusResp.isAccepted) continue;
+
+        final tokenResp = await client.pickupTokenDelivery(
+          pc,
+          pairingId: pairingId,
           pickupSecret: payload.pickupSecret,
           deviceId: _deviceIdentity!.deviceId,
         );
-        if (statusResp.isAccepted &&
-            !statusResp.hasDeviceToken &&
-            !statusResp.hasTokenDeliveryEnvelope) {
+        if (!tokenResp.hasDeviceToken && !tokenResp.hasTokenDeliveryEnvelope) {
           if (!mounted) return;
           setState(() {
             _pairingInProgress = false;
@@ -305,23 +315,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _toast('ペアリングエラー: 端末トークンが空です');
           return;
         }
-        if (statusResp.isReady) {
-          final deliveryPayload = statusResp.hasTokenDeliveryEnvelope
+        if (tokenResp.isReady) {
+          final deliveryPayload = tokenResp.hasTokenDeliveryEnvelope
               ? await widget.deviceStore.decryptTokenDeliveryEnvelope(
-                  statusResp.tokenDeliveryEnvelope!,
+                  tokenResp.tokenDeliveryEnvelope!,
                   pairingId: pairingId,
                   deviceId: _deviceIdentity!.deviceId,
                 )
               : <String, dynamic>{};
           final token = (deliveryPayload['client_access_token'] as String? ??
                   deliveryPayload['device_token'] as String? ??
-                  statusResp.deviceToken ??
+                  tokenResp.deviceToken ??
                   '')
               .trim();
           final approvalToken =
               (deliveryPayload['approver_access_token'] as String? ??
                       deliveryPayload['approval_token'] as String? ??
-                      statusResp.approvalToken ??
+                      tokenResp.approvalToken ??
                       '')
                   .trim();
           if (token.isEmpty) {
@@ -335,11 +345,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           }
           final scopes = _stringList(
             deliveryPayload['scopes'],
-            fallback: statusResp.scopes,
+            fallback: tokenResp.scopes,
           );
           final approvalScopes = _stringList(
             deliveryPayload['approval_scopes'],
-            fallback: statusResp.approvalScopes,
+            fallback: tokenResp.approvalScopes,
           );
           final device = PairedDevice(
             deviceId: _deviceIdentity!.deviceId,
@@ -350,7 +360,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             approvalScopes: approvalScopes,
             pcBaseUrl: pc.baseUrl,
             pcLabel: friendlyPcLabel(
-              deliveryPayload['pc_label'] as String? ?? statusResp.pcLabel,
+              deliveryPayload['pc_label'] as String? ?? tokenResp.pcLabel,
               pc.baseUrl,
             ),
             pairingId: pairingId,
@@ -362,14 +372,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             approvalToken: approvalToken,
           );
           await widget.configStore.savePc(newPc);
-          if (statusResp.hasTokenDeliveryEnvelope) {
+          if (tokenResp.hasTokenDeliveryEnvelope) {
             try {
               await client.ackTokenDelivery(
                 pc,
                 pairingId: pairingId,
                 pickupSecret: payload.pickupSecret,
                 deviceId: _deviceIdentity!.deviceId,
-                deliveryId: statusResp.deliveryId,
+                deliveryId: tokenResp.deliveryId,
               );
             } catch (_) {
               // The encrypted payload is already saved locally; ack can retry on
@@ -926,7 +936,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 keyboardType: TextInputType.url,
                 decoration: const InputDecoration(
                   labelText: 'Kernel API URL',
-                  hintText: 'http://192.168.x.x:8765',
+                  hintText: 'https://your-rumi.example.com',
                   prefixIcon: Icon(Icons.dns_outlined),
                 ),
               ),

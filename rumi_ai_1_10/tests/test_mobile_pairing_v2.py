@@ -192,6 +192,22 @@ def test_device_token_is_scoped():
     assert ds.verify_token(approval_token).scopes == AUTHORITY_APPROVER_SCOPES
 
 
+def test_device_store_touch_does_not_revive_revoked_device():
+    from domain.p2p.device_store import DeviceStore
+
+    tmp = tempfile.mkdtemp()
+    store = DeviceStore(tmp)
+    _device, token, _approval_token = store.issue_tokens("d1")
+    stale_store = DeviceStore(tmp)
+
+    store.revoke_device("d1")
+    stale_store.touch("d1")
+
+    fresh = DeviceStore(tmp)
+    assert fresh.get_device("d1").status == "revoked"
+    assert fresh.verify_token(token) is None
+
+
 def test_legacy_device_record_does_not_keep_approval_scope_on_normal_token():
     from domain.p2p.device_store import DeviceRecord
 
@@ -222,7 +238,7 @@ def test_pairing_claim_requires_matching_code():
     assert result["code"] == "PAIRING_CODE_MISMATCH"
 
 
-def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
+def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     from domain.p2p.device_store import DeviceStore
     from domain.p2p.pairing import PairingManager
     from blocks.mobile.pairing import run
@@ -283,8 +299,19 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     assert "code" not in with_code["data"]
     assert "code" not in with_code["data"]["pairing"]
 
-    with_secret = run({
+    status_with_secret = run({
         "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": session.token_pickup_secret,
+        "device_id": "mobile-1",
+    }, None)
+    assert status_with_secret["status"] == "ok"
+    assert "token_delivery_envelope" not in status_with_secret["data"]
+    assert "code" not in status_with_secret["data"]
+
+    with_secret = run({
+        "action": "pickup_token_delivery",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "pickup_secret": session.token_pickup_secret,
@@ -311,7 +338,7 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     first_token_hash = first_device.token_hash
 
     replay = run({
-        "action": "status",
+        "action": "pickup_token_delivery",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "pickup_secret": session.token_pickup_secret,
@@ -336,14 +363,14 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     }, None)
     assert ack["status"] == "ok"
     after_ack = run({
-        "action": "status",
+        "action": "pickup_token_delivery",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "pickup_secret": session.token_pickup_secret,
         "device_id": "mobile-1",
     }, None)
-    assert after_ack["status"] == "ok"
-    assert "token_delivery_envelope" not in after_ack["data"]
+    assert after_ack["status"] == "error"
+    assert after_ack["error"]["code"] == "TOKEN_PICKUP_CONSUMED"
 
 
 def test_pairing_start_returns_mobile_pickup_secret():
@@ -386,16 +413,69 @@ def test_mobile_pairing_status_rejects_wrong_pickup_secret_without_rotating():
     issued_hash = issued.token_hash
 
     wrong = run({
-        "action": "status",
+        "action": "pickup_token_delivery",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "pickup_secret": "pup_wrong",
         "device_id": "mobile-1",
     }, None)
-    assert wrong["status"] == "ok"
-    assert "device_token" not in wrong["data"]
-    assert "token_delivery_envelope" not in wrong["data"]
+    assert wrong["status"] == "error"
+    assert wrong["error"]["code"] == "PICKUP_SECRET_MISMATCH"
     assert DeviceStore(tmp).get_device("mobile-1").token_hash == issued_hash
+
+
+def test_mobile_pairing_claim_rejects_invalid_encryption_key():
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+
+    result = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "encryption_public_key": "not-a-key",
+    }, None)
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "INVALID_ENCRYPTION_KEY"
+
+
+def test_mobile_pairing_approve_rolls_back_when_delivery_store_fails(monkeypatch):
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile import pairing as pairing_block
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    _private_key, public_key = _x25519_keypair()
+    assert pairing_block.run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "encryption_public_key": public_key,
+    }, None)["status"] == "ok"
+
+    def fail_store(*_args, **_kwargs):
+        raise RuntimeError("disk unavailable")
+
+    monkeypatch.setattr(PairingManager, "store_token_delivery", fail_store)
+
+    result = pairing_block.run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "TOKEN_DELIVERY_FAILED"
+    restored = PairingManager(tmp).get_pairing(session.pairing_id)
+    assert restored is not None
+    assert restored.status == "claimed"
 
 
 def test_mobile_pairing_status_splits_normal_and_approval_tokens():
@@ -440,7 +520,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     assert "approver_access_token" not in approved["data"]
 
     status = run({
-        "action": "status",
+        "action": "pickup_token_delivery",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "pickup_secret": session.token_pickup_secret,
@@ -513,12 +593,24 @@ def test_mobile_pairing_status_returns_pc_label(monkeypatch):
     assert status["data"]["pc_label"] == "Haru MacBook"
 
 
-def test_mobile_pairing_base_urls_do_not_advertise_loopback():
+def test_mobile_pairing_base_urls_require_https_by_default():
     from domain.mobile.base_urls import mobile_base_urls_from_headers
 
     urls = mobile_base_urls_from_headers(
         {"Host": "localhost:8765"},
         local_addresses=["127.0.0.1", "192.168.1.44"],
+    )
+
+    assert urls == []
+
+
+def test_mobile_pairing_base_urls_can_allow_cleartext_for_debug():
+    from domain.mobile.base_urls import mobile_base_urls_from_headers
+
+    urls = mobile_base_urls_from_headers(
+        {"Host": "localhost:8765"},
+        local_addresses=["127.0.0.1", "192.168.1.44"],
+        allow_cleartext=True,
     )
 
     assert urls == ["http://192.168.1.44:8765"]
@@ -531,7 +623,7 @@ def test_pairing_start_returns_mobile_reachable_base_urls(monkeypatch):
     monkeypatch.setattr(
         pairing_start,
         "mobile_base_urls_from_headers",
-        lambda headers: ["http://192.168.1.44:8765"],
+        lambda headers, **kwargs: ["https://rumi.example.com"],
     )
 
     result = pairing_start.run({
@@ -540,7 +632,7 @@ def test_pairing_start_returns_mobile_reachable_base_urls(monkeypatch):
     }, None)
 
     assert result["status"] == "ok"
-    assert result["data"]["pairing"]["base_urls"] == ["http://192.168.1.44:8765"]
+    assert result["data"]["pairing"]["base_urls"] == ["https://rumi.example.com"]
 
 
 def test_mobile_conversations_list_create_get():
@@ -558,9 +650,10 @@ def test_mobile_conversations_list_create_get():
     assert r["status"] == "ok"
 
 
-def test_mobile_credentials_create_get_ack():
+def test_mobile_credentials_create_get_ack(monkeypatch):
     from blocks.mobile.credentials import run
 
+    monkeypatch.setenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", "1")
     r = run({
         "action": "create",
         "device_id": "d1",
@@ -586,9 +679,26 @@ def test_mobile_credentials_create_get_ack():
     assert r["status"] == "error"
 
 
-def test_mobile_credentials_reject_plaintext_fallback():
+def test_mobile_credentials_disabled_by_default(monkeypatch):
     from blocks.mobile.credentials import run
 
+    monkeypatch.delenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", raising=False)
+    r = run({
+        "action": "create",
+        "device_id": "d1",
+        "provider_id": "openai",
+        "ciphertext": "encrypted-payload",
+        "nonce": "nonce-1",
+    }, None)
+
+    assert r["status"] == "error"
+    assert r["error"]["code"] == "FEATURE_DISABLED"
+
+
+def test_mobile_credentials_reject_plaintext_fallback(monkeypatch):
+    from blocks.mobile.credentials import run
+
+    monkeypatch.setenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", "1")
     r = run({
         "action": "create",
         "device_id": "d1",
@@ -599,10 +709,11 @@ def test_mobile_credentials_reject_plaintext_fallback():
     assert r["status"] == "error"
 
 
-def test_mobile_credentials_expired():
+def test_mobile_credentials_expired(monkeypatch):
     import time
     from blocks.mobile.credentials import run, _TRANSFER_TTL_SECONDS
 
+    monkeypatch.setenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", "1")
     r = run({
         "action": "create",
         "device_id": "d1",

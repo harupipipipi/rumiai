@@ -185,7 +185,7 @@ void main() {
     });
 
     test(
-      'pollStatus sends GET to /api/mobile/v1/pairings/{id}/status',
+      'pollStatus sends GET without pickup secrets',
       () async {
         String? requestedPath;
         Map<String, String>? requestedQuery;
@@ -206,18 +206,48 @@ void main() {
         final resp = await pairingClient.pollStatus(
           _pc,
           pairingId: 'p1',
-          pickupSecret: 'pup_123',
-          deviceId: 'mobile-abc123',
         );
         pairingClient.close();
 
         expect(requestedPath, '/api/mobile/v1/pairings/p1/status');
-        expect(requestedQuery?['pickup_secret'], 'pup_123');
-        expect(requestedQuery?['device_id'], 'mobile-abc123');
+        expect(requestedQuery?.containsKey('pickup_secret'), isFalse);
+        expect(requestedQuery?.containsKey('device_id'), isFalse);
         expect(resp.isAccepted, isTrue);
         expect(resp.deviceToken, 'dt-123');
       },
     );
+
+    test('pickupTokenDelivery posts pickup secret in request body', () async {
+      String? requestedPath;
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        requestedPath = request.url.path;
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _ok({
+          'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+          'token_delivery_envelope': {
+            'version': 1,
+            'delivery_id': 'tdv-test',
+            'alg': 'X25519-HKDF-SHA256-AES-256-GCM',
+          },
+        });
+      });
+
+      final pairingClient = PcPairingClient(client: client);
+      final resp = await pairingClient.pickupTokenDelivery(
+        _pc,
+        pairingId: 'p1',
+        pickupSecret: 'pup_123',
+        deviceId: 'mobile-abc123',
+      );
+      pairingClient.close();
+
+      expect(requestedPath, '/api/mobile/v1/pairings/p1/token/pickup');
+      expect(body?['pickup_secret'], 'pup_123');
+      expect(body?['device_id'], 'mobile-abc123');
+      expect(resp.hasTokenDeliveryEnvelope, isTrue);
+      expect(resp.deliveryId, 'tdv-test');
+    });
 
     test('ackTokenDelivery posts to token ack route', () async {
       String? requestedPath;

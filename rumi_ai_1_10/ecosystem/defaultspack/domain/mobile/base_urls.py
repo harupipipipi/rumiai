@@ -18,15 +18,18 @@ def is_loopback_host(host: str) -> bool:
         return False
 
 
-def normalize_mobile_base_url(value: str) -> str:
+def normalize_mobile_base_url(value: str, *, allow_cleartext: bool = False) -> str:
     raw = str(value or "").strip()
     if not raw:
         return ""
     try:
-        parsed = urlsplit(raw if "://" in raw else f"http://{raw}")
+        default_scheme = "http" if allow_cleartext else "https"
+        parsed = urlsplit(raw if "://" in raw else f"{default_scheme}://{raw}")
     except ValueError:
         return ""
     if parsed.scheme not in {"http", "https"}:
+        return ""
+    if parsed.scheme == "http" and not allow_cleartext:
         return ""
     host = parsed.hostname or ""
     if is_loopback_host(host):
@@ -42,6 +45,7 @@ def mobile_base_urls_from_headers(
     headers: dict[str, str] | None,
     *,
     local_addresses: list[str] | None = None,
+    allow_cleartext: bool = False,
 ) -> list[str]:
     headers = headers or {}
     host_header = str(headers.get("Host") or headers.get("host") or "").strip()
@@ -59,7 +63,7 @@ def mobile_base_urls_from_headers(
     urls: list[str] = []
     seen: set[str] = set()
     for candidate in candidates:
-        normalized = normalize_mobile_base_url(candidate)
+        normalized = normalize_mobile_base_url(candidate, allow_cleartext=allow_cleartext)
         if normalized and normalized not in seen:
             seen.add(normalized)
             urls.append(normalized)

@@ -4,7 +4,7 @@
   1. PC が /api/p2p/pairing/start でセッション作成 (既存)
   2. スマホが POST /api/mobile/v1/pairings/{id}/claim で端末情報を送る
   3. PC が POST /api/mobile/v1/pairings/{id}/approve で承認
-  4. スマホが pickup_secret 付き status で一回だけ device token を受け取る
+  4. スマホが POST /token/pickup body で一回だけ device token を受け取る
   5. GET /api/mobile/v1/devices / DELETE /api/mobile/v1/devices/{id} で管理
 """
 
@@ -20,7 +20,7 @@ from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
 from domain.p2p.device_store import DeviceStore
 from domain.p2p.pairing import PairingManager
-from domain.p2p.token_delivery import encrypt_token_delivery
+from domain.p2p.token_delivery import encrypt_token_delivery, validate_token_delivery_public_key
 
 
 def _merged(input_data: dict) -> dict:
@@ -96,6 +96,10 @@ def claim(input_data, context=None):
     ).strip()
     if not encryption_public_key:
         return error("device_encryption_public_key is required", "ENCRYPTION_KEY_REQUIRED")
+    try:
+        validate_token_delivery_public_key(encryption_public_key)
+    except Exception as exc:
+        return error(f"invalid device_encryption_public_key: {exc}", "INVALID_ENCRYPTION_KEY")
     s = _settings(input_data, context)
     manager = PairingManager(s.store_path)
     result = manager.claim_pairing(
@@ -163,6 +167,10 @@ def approve(input_data, context=None):
     except Exception as exc:
         if issued_device_id:
             ds.revoke_device(issued_device_id)
+        manager.rollback_approved_pairing(
+            pairing_id,
+            reason=f"token delivery failed: {exc}",
+        )
         return error(f"encrypted token delivery failed: {exc}", "TOKEN_DELIVERY_FAILED")
 
     key_registration = _register_authority_device_key(
@@ -214,31 +222,41 @@ def status(input_data, context=None):
     result: dict = dict(pairing)
     result["pairing"] = pairing
     result["pc_label"] = _pc_label()
-    # After PC approval, the mobile may pick up split device tokens only once,
-    # and only with the QR-only pickup secret. The pairing code stays useful
-    # for claim, but is not a bearer-equivalent token pickup credential.
-    requested_secret = str(
-        args.get("pickup_secret")
-        or args.get("pickupSecret")
-        or args.get("token_pickup_secret")
-        or ""
-    ).strip()
-    requested_device_id = str(args.get("device_id") or "").strip()
-    if session.status == "approved" and session.claimed_device_id and requested_secret and requested_device_id:
-        pickup = manager.peek_token_delivery(
-            pairing_id,
-            pickup_secret=requested_secret,
-            device_id=requested_device_id,
-        )
-        if pickup.get("ok"):
-            pickup_pairing = _public_pairing(pickup["pairing"])
-            result["pairing"] = pickup_pairing
-            result["token_pickup_consumed_at"] = pickup_pairing.get("token_pickup_consumed_at")
-            result["token_delivery"] = "mobile_encrypted_pickup"
-            result["token_delivery_envelope"] = pickup.get("token_delivery_envelope") or {}
-            result["pc_base_url"] = _detect_base_url(input_data, context)
-            result["pc_label"] = _pc_label()
     return ok(result)
+
+
+def pickup_token_delivery(input_data, context=None):
+    args = _merged(input_data)
+    pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
+    if not pairing_id:
+        return error("pairing_id is required", "INVALID_INPUT")
+    s = _settings(input_data, context)
+    manager = PairingManager(s.store_path)
+    pickup = manager.peek_token_delivery(
+        pairing_id,
+        pickup_secret=str(
+            args.get("pickup_secret")
+            or args.get("pickupSecret")
+            or args.get("token_pickup_secret")
+            or ""
+        ).strip(),
+        device_id=str(args.get("device_id") or "").strip(),
+    )
+    if not pickup.get("ok"):
+        return error(
+            str(pickup.get("reason") or "token pickup failed"),
+            str(pickup.get("code") or "TOKEN_PICKUP_FAILED"),
+        )
+    pairing = _public_pairing(pickup["pairing"])
+    return ok({
+        **pairing,
+        "pairing": pairing,
+        "token_pickup_consumed_at": pairing.get("token_pickup_consumed_at"),
+        "token_delivery": "mobile_encrypted_pickup",
+        "token_delivery_envelope": pickup.get("token_delivery_envelope") or {},
+        "pc_base_url": _detect_base_url(input_data, context),
+        "pc_label": _pc_label(),
+    })
 
 
 def ack_token_delivery(input_data, context=None):
@@ -337,6 +355,7 @@ def run(input_data, context=None):
         "approve": approve,
         "reject": reject,
         "status": status,
+        "pickup_token_delivery": pickup_token_delivery,
         "ack_token_delivery": ack_token_delivery,
         "list_devices": list_devices,
         "delete_device": delete_device,

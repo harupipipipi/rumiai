@@ -365,6 +365,30 @@ class PairingManager:
         self._replace(session)
         return {"ok": True, "pairing": session.as_dict()}
 
+    def rollback_approved_pairing(
+        self,
+        pairing_id: str,
+        *,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        sessions = self._sessions()
+        session = sessions.get(str(pairing_id or "").strip())
+        if session is None:
+            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+        if session.status != PAIRING_APPROVED:
+            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
+        session.status = PAIRING_CLAIMED
+        session.accepted_at = 0
+        session.peer_id = ""
+        session.peer_label = ""
+        session.capabilities = list(session.claimed_capabilities or session.capabilities)
+        session.reason = str(reason or "approval rolled back")
+        session.token_delivery_envelope = {}
+        session.token_delivery_created_at = 0
+        session.token_pickup_consumed_at = 0
+        self._replace(session)
+        return {"ok": True, "pairing": session.as_dict()}
+
     def peek_token_delivery(
         self,
         pairing_id: str,

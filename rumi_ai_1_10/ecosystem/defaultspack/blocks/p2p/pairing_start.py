@@ -29,5 +29,11 @@ def run(input_data, context=None):
         pairing["pickup_secret"] = session.token_pickup_secret
     pairing["base_urls"] = mobile_base_urls_from_headers(
         input_data.get("_headers") if isinstance(input_data.get("_headers"), dict) else None,
+        allow_cleartext=str(os.environ.get("RUMI_MOBILE_ALLOW_CLEARTEXT_QR") or "").strip().lower()
+        in {"1", "true", "yes", "on"},
     )
+    pairing["transport_policy"] = {
+        "release": "https_required",
+        "cleartext_debug_env": "RUMI_MOBILE_ALLOW_CLEARTEXT_QR",
+    }
     return ok({"pairing": pairing})

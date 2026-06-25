@@ -162,6 +162,14 @@ function windowOrigin() {
   return window.location?.origin ?? "";
 }
 
+function viteEnv(): Record<string, string | undefined> {
+  return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) ?? {};
+}
+
+function allowCleartextPairingQr(): boolean {
+  return viteEnv().VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR === "1";
+}
+
 function formatRelativeTime(isoString: string | undefined): string {
   if (!isoString) return "不明";
   const date = new Date(isoString);
@@ -213,11 +221,6 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
           "chat.read",
           "chat.write",
           "tools.observe",
-          "authority.request.list",
-          "authority.request.read",
-          "authority.request.approve",
-          "authority.request.deny",
-          "credentials.request",
         ],
       });
       if (!mountedRef.current) return;
@@ -267,7 +270,10 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
   );
   const currentOrigin = windowOrigin();
   const qrBaseUrls = useMemo(
-    () => buildMobilePairingBaseUrls([manualBaseUrl, ...advertisedBaseUrls, kernelBaseUrl, currentOrigin]),
+    () => buildMobilePairingBaseUrls(
+      [manualBaseUrl, ...advertisedBaseUrls, kernelBaseUrl, currentOrigin],
+      { allowCleartext: allowCleartextPairingQr() },
+    ),
     [advertisedBaseUrls, currentOrigin, kernelBaseUrl, manualBaseUrl],
   );
 
@@ -325,7 +331,7 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
                 {qr.error ? (
                   <span className="text-rose-300">{qr.error}</span>
                 ) : qrBaseUrls.length === 0 ? (
-                  "LAN URLを入力するとQRが表示されます。"
+                  "HTTPS URLを入力するとQRが表示されます。"
                 ) : (
                   "QRを生成中..."
                 )}
@@ -334,16 +340,16 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
           </div>
 
           <CopyField
-            label="PC LAN URL"
+            label="PC HTTPS URL"
             value={manualBaseUrl || qrBaseUrls[0] || ""}
             onChange={setManualBaseUrl}
-            placeholder="http://192.168.x.x:8765"
+            placeholder="https://your-rumi.example.com"
             mono
           />
 
           {qrBaseUrls.length === 0 && (
             <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
-              スマホから到達できるPCのLAN URLを検出できませんでした。localhostでは接続できないため、PCのLAN IPを入力してください。
+              release版AndroidはLAN HTTPを許可しません。Cloudflare Tunnel/PagesなどでPCへ届くHTTPS URLを入力してください。
             </div>
           )}
 

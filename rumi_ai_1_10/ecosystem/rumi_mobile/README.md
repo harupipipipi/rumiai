@@ -55,8 +55,8 @@ The PC side (defaultspack webapp **Settings → アプリ**) emits JSON QR codes
   "pairingId": "pair-...",
   "code": "ABCD-2345",
   "pickupSecret": "pup_...",
-  "baseUrls": ["http://192.168.1.10:8765"],
-  "manifestUrl": "http://192.168.1.10:8765/api/mobile/v1/manifest",
+  "baseUrls": ["https://rumi.example.com"],
+  "manifestUrl": "https://rumi.example.com/api/mobile/v1/manifest",
   "roles": ["mobile_client", "mobile_approver"],
   "serverPublicKey": "",
   "expiresAt": 1781830000000
@@ -78,15 +78,17 @@ Cloudflare Pages URLs).
    ```
 
 2. On the Mac/PC control panel, open **Settings → アプリ** and use
-   **スマホをペアリング**. If the QR panel says no LAN URL was detected, enter
-   `http://<PC LAN IP>:8765`; `localhost`, `127.0.0.1`, and `0.0.0.0` are not
-   reachable from a real phone.
+   **スマホをペアリング**. Release Android builds require HTTPS for PC pairing,
+   so enter a Cloudflare Tunnel/reverse-proxy origin such as
+   `https://rumi.example.com`. Debug/profile builds can opt into LAN HTTP with
+   `RUMI_MOBILE_ALLOW_CLEARTEXT_QR=1` for local testing.
 3. Scan the `rumi_mobile_pair_v1` QR from the mobile app. The app claims
    `/api/mobile/v1/pairings/{id}/claim` with the QR code, the mobile
    `device_id`, label, public key, and requested scopes.
 4. Approve the claimed device in the control panel. Mobile polls
-   `/api/mobile/v1/pairings/{id}/status?pickup_secret=...&device_id=...` and
-   stores the returned split `dtk_...` client/approver tokens in secure storage.
+   `GET /api/mobile/v1/pairings/{id}/status` without secrets, then retrieves
+   the encrypted token envelope with `POST /api/mobile/v1/pairings/{id}/token/pickup`
+   using `pickup_secret` and `device_id` in the JSON body.
 5. Confirm the paired phone can load PC chat state, create/send a test message,
    and still cannot call non-mobile API routes with the `dtk_...` token.
 
@@ -98,19 +100,17 @@ normal pairing tests.
 
 - `dtk_...` client tokens are mobile-only. The backend accepts them only on
   `/api/mobile/v1/...` routes, and only when the route declares a matching
-  device scope such as `chat.read`, `chat.write`, `tools.observe`, or
-  `credentials.request`.
+  device scope such as `chat.read`, `chat.write`, or `tools.observe`.
 - `dtk_...` approver tokens are separate and accepted only on
   `/api/authority/*` request list/read/challenge/approve/deny routes.
-- Pairing status is observable by the PC, but token pickup requires the QR-only
-  pickup secret and the claimed `device_id`. A status response without both
-  values must not include token material. Token delivery is an encrypted
+- Pairing status is observable by the PC, but token pickup is a separate POST
+  body request that requires the QR-only pickup secret and the claimed
+  `device_id`. Status responses must not include token material. Token delivery is an encrypted
   X25519/AES-GCM envelope, and pickup is consumed only after mobile decrypts,
   stores, and acknowledges the delivery.
-- Credential transfer is fail-closed. PC-created transfers must name a paired
-  device and include encrypted `ciphertext` plus `nonce`; plaintext keys,
-  `api_key` fallback fields, and `plaintext`/`base64-wrapper` algorithms are
-  rejected. Mobile get/ack calls require the matching authenticated device.
+- Credential transfer is behind `RUMI_MOBILE_CREDENTIAL_TRANSFER=1` until
+  encrypted device-bound delivery is complete. Plaintext keys, `api_key`
+  fallback fields, and `plaintext`/`base64-wrapper` algorithms are rejected.
 - Do not paste real provider keys, bearer tokens, or device tokens into docs,
   screenshots, issues, or test fixtures. Use redacted placeholders.
 
@@ -120,15 +120,14 @@ normal pairing tests.
   install from macOS with Xcode/Flutter and a valid signing team. The
   `flutter build ios --no-codesign` command is for unsigned build verification;
   use Xcode signing to run on a physical device.
-- iPhone and PC must be on the same reachable LAN. Disable guest Wi-Fi
-  isolation/VPNs for the test, allow the iOS Local Network prompt, and allow the
-  Rumi port through the host firewall.
+- iPhone and PC must be on the same reachable network path. Disable guest Wi-Fi
+  isolation/VPNs for LAN debug tests, allow the iOS Local Network prompt, and
+  allow the Rumi port through the host firewall when using direct LAN access.
 - iOS declares `NSLocalNetworkUsageDescription` and `NSAllowsLocalNetworking`
-  for private-network HTTP. This supports LAN origins such as
-  `http://192.168.x.x:8765`; use HTTPS or a reverse proxy for non-LAN exposure.
+  for private-network debug paths. Prefer HTTPS for release-like pairing.
 - Android declares internet/network/camera permissions. Debug/profile builds
   permit cleartext HTTP for LAN testing; release builds use the platform HTTPS
-  default.
+  default and will not pair over `http://192.168.x.x:8765`.
 - For off-LAN smoke tests, expose the local Kernel API with Cloudflare Tunnel:
 
   ```bash

@@ -20,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
+from domain.mobile.contract import mobile_feature_enabled
 
 
 _TRANSFER_TTL_SECONDS = 60
@@ -186,6 +187,11 @@ def ack_transfer(input_data, context=None):
 
 
 def run(input_data, context=None):
+    if not mobile_feature_enabled("credential_transfer"):
+        return error(
+            "mobile credential transfer is disabled until encrypted device-bound delivery is complete",
+            "FEATURE_DISABLED",
+        )
     args = _merged(input_data)
     action = str(args.get("action") or "").strip().lower()
     handlers = {

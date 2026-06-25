@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .settings import default_store_path
 
@@ -29,6 +31,9 @@ APPROVER_SCOPES = [
 ]
 LEGACY_APPROVER_SCOPES = {"tools.approve"}
 ALL_SCOPES = DEFAULT_SCOPES + APPROVER_SCOPES + ["credentials.request"]
+_TOUCH_THROTTLE_MS = 30_000
+_LOCK_TIMEOUT_SECONDS = 5.0
+_LOCK_STALE_SECONDS = 30.0
 
 
 def _now_ms() -> int:
@@ -160,13 +165,16 @@ class DeviceStore:
         self._data = self._load()
 
     def list_devices(self) -> list[dict[str, Any]]:
+        self._data = self._load()
         return [d.as_dict() for d in self._devices().values()]
 
     def get_device(self, device_id: str) -> DeviceRecord | None:
+        self._data = self._load()
         return self._devices().get(str(device_id or "").strip())
 
     def verify_token(self, token: str) -> DeviceRecord | None:
         """Look up a device by token hash. Returns the device if active."""
+        self._data = self._load()
         token_hash = _hash_token(token)
         for device in self._devices().values():
             if device.token_hash == token_hash and device.active:
@@ -199,33 +207,35 @@ class DeviceStore:
         clean_id = str(device_id or "").strip()
         if not clean_id:
             raise ValueError("device_id is required")
-        devices = self._devices()
-        now = _now_ms()
-        plaintext = _generate_token()
-        requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
-        resolved_scopes, approval_scopes = _split_device_scopes(requested_scopes)
-        if not resolved_scopes and not scopes:
-            resolved_scopes = list(DEFAULT_SCOPES)
-        approval_plaintext = _generate_token() if approval_scopes else ""
-        code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
-        device = DeviceRecord(
-            device_id=clean_id,
-            profile_id=str(profile_id or "default").strip() or "default",
-            label=label,
-            public_key=public_key,
-            fingerprint=fingerprint,
-            token_hash=_hash_token(plaintext),
-            scopes=resolved_scopes,
-            approval_token_hash=_hash_token(approval_plaintext) if approval_plaintext else "",
-            approval_scopes=approval_scopes,
-            status=DEVICE_ACTIVE,
-            pairing_id=pairing_id,
-            confirmation_code=code,
-            created_at=devices[clean_id].created_at if clean_id in devices else now,
-            updated_at=now,
-        )
-        devices[clean_id] = device
-        self._save_devices(devices)
+        with self._file_lock():
+            self._data = self._load()
+            devices = self._devices()
+            now = _now_ms()
+            plaintext = _generate_token()
+            requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
+            resolved_scopes, approval_scopes = _split_device_scopes(requested_scopes)
+            if not resolved_scopes and not scopes:
+                resolved_scopes = list(DEFAULT_SCOPES)
+            approval_plaintext = _generate_token() if approval_scopes else ""
+            code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
+            device = DeviceRecord(
+                device_id=clean_id,
+                profile_id=str(profile_id or "default").strip() or "default",
+                label=label,
+                public_key=public_key,
+                fingerprint=fingerprint,
+                token_hash=_hash_token(plaintext),
+                scopes=resolved_scopes,
+                approval_token_hash=_hash_token(approval_plaintext) if approval_plaintext else "",
+                approval_scopes=approval_scopes,
+                status=DEVICE_ACTIVE,
+                pairing_id=pairing_id,
+                confirmation_code=code,
+                created_at=devices[clean_id].created_at if clean_id in devices else now,
+                updated_at=now,
+            )
+            devices[clean_id] = device
+            self._save_devices(devices)
         return device, plaintext, approval_plaintext
 
     def issue_token(
@@ -257,35 +267,49 @@ class DeviceStore:
         return device, plaintext
 
     def revoke_device(self, device_id: str) -> DeviceRecord | None:
-        device = self.get_device(device_id)
-        if device is None:
-            return None
-        device.status = DEVICE_REVOKED
-        device.updated_at = _now_ms()
-        devices = self._devices()
-        devices[device_id] = device
-        self._save_devices(devices)
-        return device
+        clean_id = str(device_id or "").strip()
+        with self._file_lock():
+            self._data = self._load()
+            devices = self._devices()
+            device = devices.get(clean_id)
+            if device is None:
+                return None
+            device.status = DEVICE_REVOKED
+            device.updated_at = _now_ms()
+            devices[clean_id] = device
+            self._save_devices(devices)
+            return device
 
     def update_label(self, device_id: str, label: str) -> DeviceRecord | None:
-        device = self.get_device(device_id)
-        if device is None:
-            return None
-        device.label = label
-        device.updated_at = _now_ms()
-        devices = self._devices()
-        devices[device_id] = device
-        self._save_devices(devices)
-        return device
+        clean_id = str(device_id or "").strip()
+        with self._file_lock():
+            self._data = self._load()
+            devices = self._devices()
+            device = devices.get(clean_id)
+            if device is None:
+                return None
+            device.label = label
+            device.updated_at = _now_ms()
+            devices[clean_id] = device
+            self._save_devices(devices)
+            return device
 
     def touch(self, device_id: str) -> None:
-        device = self.get_device(device_id)
-        if device is None:
+        clean_id = str(device_id or "").strip()
+        if not clean_id:
             return
-        device.last_seen_at = _now_ms()
-        devices = self._devices()
-        devices[device_id] = device
-        self._save_devices(devices)
+        with self._file_lock():
+            self._data = self._load()
+            devices = self._devices()
+            device = devices.get(clean_id)
+            if device is None or not device.active:
+                return
+            now = _now_ms()
+            if device.last_seen_at and now - int(device.last_seen_at) < _TOUCH_THROTTLE_MS:
+                return
+            device.last_seen_at = now
+            devices[clean_id] = device
+            self._save_devices(devices)
 
     def _devices(self) -> dict[str, DeviceRecord]:
         raw = self._data.setdefault("devices", {})
@@ -320,9 +344,40 @@ class DeviceStore:
             self._data["devices"][did]["approval_token_hash"] = d.approval_token_hash
             self._data["devices"][did]["public_key"] = d.public_key
             self._data["devices"][did]["profile_id"] = d.profile_id
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
         tmp.write_text(
             json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
         tmp.replace(self.path)
+
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        fd: int | None = None
+        while fd is None:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+            except FileExistsError:
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                    if age > _LOCK_STALE_SECONDS:
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"timed out acquiring device store lock: {lock_path}")
+                time.sleep(0.025)
+        try:
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass

@@ -69,12 +69,13 @@ metadata, and `expiresAt`.
   request list/read/challenge/approve/deny routes. A mobile token must not
   authenticate PC/admin, pack, file, terminal, git, browser, or generic
   defaultspack routes.
-- `GET /api/mobile/v1/pairings/{id}/status` may reveal status to the PC, but it
-  returns split device tokens to the phone only once, and only when the request
-  includes both the QR-only pickup secret and the claimed `device_id`.
-- Credential transfer is encrypted and device-bound. Creation requires a target
-  device, `ciphertext`, and `nonce`; plaintext or wrapper-only payloads fail
-  closed. Get/ack calls require the authenticated device to match the transfer.
+- `GET /api/mobile/v1/pairings/{id}/status` reveals only public pairing state.
+  Split device token pickup is a separate `POST
+  /api/mobile/v1/pairings/{id}/token/pickup` JSON-body request containing the
+  QR-only pickup secret and claimed `device_id`.
+- Credential transfer is disabled by default behind
+  `RUMI_MOBILE_CREDENTIAL_TRANSFER=1` until encrypted device-bound delivery is
+  complete. Plaintext or wrapper-only payloads fail closed.
 - Mobile PC controls are catalog-driven. The phone reads the paired PC's mobile
   capabilities response for selectable profiles, runtime model settings, and
   public slash command manifest entries; it must not ship a separate hard-coded

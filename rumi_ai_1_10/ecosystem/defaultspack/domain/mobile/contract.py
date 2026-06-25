@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import os
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
@@ -18,6 +19,19 @@ class MobileRouteContract:
     device_scope: str = ""
     feature: str = ""
     pc_equivalent: str = ""
+
+
+_FEATURE_FLAG_ENV = {
+    "credential_transfer": "RUMI_MOBILE_CREDENTIAL_TRANSFER",
+    "credentials_admin": "RUMI_MOBILE_CREDENTIAL_TRANSFER",
+}
+
+
+def mobile_feature_enabled(feature: str) -> bool:
+    env_name = _FEATURE_FLAG_ENV.get(str(feature or ""))
+    if not env_name:
+        return True
+    return str(os.environ.get(env_name) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
@@ -80,6 +94,14 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
         block_module="blocks.mobile.pairing",
         path_inject={"id": "pairing_id"},
         defaults={"action": "status"},
+        feature="pairing",
+    ),
+    MobileRouteContract(
+        "POST",
+        "/api/mobile/v1/pairings/{id}/token/pickup",
+        block_module="blocks.mobile.pairing",
+        path_inject={"id": "pairing_id"},
+        defaults={"action": "pickup_token_delivery"},
         feature="pairing",
     ),
     MobileRouteContract(
@@ -317,13 +339,13 @@ def _compiled(pattern: str) -> re.Pattern[str]:
 
 
 def iter_mobile_route_contracts() -> tuple[MobileRouteContract, ...]:
-    return MOBILE_ROUTE_CONTRACTS
+    return tuple(route for route in MOBILE_ROUTE_CONTRACTS if mobile_feature_enabled(route.feature))
 
 
 def match_mobile_route(method: str, path: str) -> MobileRouteContract | None:
     method_upper = str(method or "").upper()
     normalized = str(path or "").rstrip("/") or "/"
-    for route in MOBILE_ROUTE_CONTRACTS:
+    for route in iter_mobile_route_contracts():
         if route.method.upper() != method_upper:
             continue
         if _compiled(route.pattern).match(normalized):
@@ -339,8 +361,9 @@ def required_device_scope(method: str, path: str) -> str:
 
 
 def mobile_capability_flags() -> dict[str, bool]:
-    features = {route.feature for route in MOBILE_ROUTE_CONTRACTS}
-    scopes = {route.device_scope for route in MOBILE_ROUTE_CONTRACTS if route.device_scope}
+    routes = iter_mobile_route_contracts()
+    features = {route.feature for route in routes}
+    scopes = {route.device_scope for route in routes if route.device_scope}
     return {
         "chat": "chat" in features and {"chat.read", "chat.write"} <= scopes,
         "tools": "tools" in features or "tools.observe" in scopes,
@@ -362,5 +385,5 @@ def mobile_route_manifest() -> list[dict[str, Any]]:
             "flow_id": route.flow_id,
             "fallback_block_module": route.fallback_block_module,
         }
-        for route in MOBILE_ROUTE_CONTRACTS
+        for route in iter_mobile_route_contracts()
     ]

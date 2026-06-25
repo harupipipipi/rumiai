@@ -220,24 +220,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
             ),
             const SizedBox(height: 12),
             _showManualInput ? _buildManualInput() : _buildScanner(),
-            const SizedBox(height: 24),
-            const Divider(),
-            const SizedBox(height: 12),
-            Text('サンプル', style: Theme.of(context).textTheme.labelMedium),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ActionChip(
-                  label: const Text('ペアリングv2'),
-                  onPressed: () {
-                    _controller.text =
-                        '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"pair-abc","code":"7KMX-PQ2F","pickupSecret":"pup_sample","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"","expiresAt":1781830000000}';
-                  },
-                ),
-              ],
-            ),
           ],
         ),
       ),

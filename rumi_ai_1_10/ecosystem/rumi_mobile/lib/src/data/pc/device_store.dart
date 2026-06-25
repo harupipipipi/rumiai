@@ -196,12 +196,19 @@ String _safeConnectionId(String value) {
   return safe;
 }
 
-String preferredPairingBaseUrl(List<String> baseUrls) {
+const bool _isProductBuild = bool.fromEnvironment('dart.vm.product');
+
+String preferredPairingBaseUrl(
+  List<String> baseUrls, {
+  bool? allowCleartext,
+}) {
+  final allowHttp = allowCleartext ?? !_isProductBuild;
   var selected = '';
   var selectedScore = -1;
   for (final rawUrl in baseUrls) {
     final url = rawUrl.trim();
     if (url.isEmpty) continue;
+    if (!allowHttp && _urlScheme(url) == 'http') continue;
     final score = _pairingBaseUrlScore(url);
     if (score > selectedScore) {
       selected = url;
@@ -209,6 +216,21 @@ String preferredPairingBaseUrl(List<String> baseUrls) {
     }
   }
   return selected;
+}
+
+bool pcConnectionUrlAllowed(
+  String url, {
+  bool? allowCleartext,
+}) {
+  final scheme = _urlScheme(url);
+  if (scheme.isEmpty) return false;
+  if (scheme == 'http') return allowCleartext ?? !_isProductBuild;
+  return scheme == 'https';
+}
+
+String _urlScheme(String url) {
+  final normalized = url.contains('://') ? url : 'https://$url';
+  return Uri.tryParse(normalized)?.scheme.toLowerCase() ?? '';
 }
 
 int _pairingBaseUrlScore(String url) {
@@ -318,8 +340,12 @@ const _migratedApprovalScopes = <String>[
 ];
 
 class MobileDeviceStore {
-  MobileDeviceStore({SecureKeyValueStorage? storage})
-      : _storage = storage ?? PlatformSecureStorage();
+  MobileDeviceStore({
+    SecureKeyValueStorage? storage,
+    SecureKeyValueStorage? legacyStorage,
+  })  : _storage = storage ?? PlatformSecureStorage(),
+        _legacyStorage = legacyStorage ??
+            (storage == null ? LegacyFlutterSecureStorage() : null);
 
   static const _identityKey = 'rumi.device.identity.v1';
   static const _pairedKey = 'rumi.paired_device.v1';
@@ -329,6 +355,7 @@ class MobileDeviceStore {
   static const _legacyRemoteTokenKey = 'rumi_remote.token';
 
   final SecureKeyValueStorage _storage;
+  final SecureKeyValueStorage? _legacyStorage;
   final _uuid = const Uuid();
 
   Future<DeviceIdentity> loadOrCreateIdentity() async {
@@ -531,10 +558,7 @@ class MobileDeviceStore {
 
   Future<PairedDevice?> _migrateLegacyPcConnection() async {
     try {
-      final raw = await _storage.read(_legacyPcKey);
-      final pc = raw == null || raw.trim().isEmpty
-          ? await _loadLegacyRemoteConnection()
-          : PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      final pc = await _loadLegacyPcConnection();
       if (pc == null) return null;
       if (!pc.isConfigured) {
         await _deleteLegacyConnectionKeys();
@@ -568,18 +592,43 @@ class MobileDeviceStore {
     }
   }
 
-  Future<PcConnection?> _loadLegacyRemoteConnection() async {
-    final baseUrl =
-        (await _storage.read(_legacyRemoteBaseUrlKey))?.trim() ?? '';
-    final token = (await _storage.read(_legacyRemoteTokenKey))?.trim() ?? '';
+  Future<PcConnection?> _loadLegacyPcConnection() async {
+    for (final storage in _legacyCandidateStorages()) {
+      final raw = await storage.read(_legacyPcKey);
+      if (raw != null && raw.trim().isNotEmpty) {
+        try {
+          return PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        } catch (_) {
+          // Try the older split keys below.
+        }
+      }
+      final split = await _loadLegacyRemoteConnection(storage);
+      if (split != null) return split;
+    }
+    return null;
+  }
+
+  Iterable<SecureKeyValueStorage> _legacyCandidateStorages() sync* {
+    yield _storage;
+    final legacy = _legacyStorage;
+    if (legacy != null && !identical(legacy, _storage)) yield legacy;
+  }
+
+  Future<PcConnection?> _loadLegacyRemoteConnection(
+    SecureKeyValueStorage storage,
+  ) async {
+    final baseUrl = (await storage.read(_legacyRemoteBaseUrlKey))?.trim() ?? '';
+    final token = (await storage.read(_legacyRemoteTokenKey))?.trim() ?? '';
     if (baseUrl.isEmpty && token.isEmpty) return null;
     return PcConnection(baseUrl: baseUrl, token: token);
   }
 
   Future<void> _deleteLegacyConnectionKeys() async {
-    await _storage.delete(_legacyPcKey);
-    await _storage.delete(_legacyRemoteBaseUrlKey);
-    await _storage.delete(_legacyRemoteTokenKey);
+    for (final storage in _legacyCandidateStorages()) {
+      await storage.delete(_legacyPcKey);
+      await storage.delete(_legacyRemoteBaseUrlKey);
+      await storage.delete(_legacyRemoteTokenKey);
+    }
   }
 
   Future<void> savePairedDevices(List<PairedDevice> devices) async {

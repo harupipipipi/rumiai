@@ -20,7 +20,7 @@ def test_mobile_bootstrap_returns_server_and_capability_flags():
     caps = data["capabilities"]
     assert caps["chat"] is True
     assert caps["tools"] is True
-    assert "credential_transfer" in caps
+    assert caps["credential_transfer"] is False
     assert "cursor" in data
 
 
@@ -38,6 +38,11 @@ def test_mobile_manifest_exposes_facade_without_authority_routes():
     assert data["authority_routes"] == []
     assert "mobile_client" in data["token_roles"]
     assert "mobile_approver" in data["token_roles"]
+    assert data["token_roles"]["mobile_client"]["scopes"] == [
+        "chat.read",
+        "chat.write",
+        "tools.observe",
+    ]
 
 
 def test_mobile_capabilities_returns_provider_and_model_catalogs():
