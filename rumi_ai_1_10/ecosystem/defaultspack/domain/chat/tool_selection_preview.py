@@ -9,60 +9,62 @@ from pathlib import Path
 from typing import Any
 
 
-TRACE_TTL_SECONDS = 7 * 24 * 60 * 60
-_TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
+PREVIEW_TTL_SECONDS = 5 * 60
+_PREVIEW_ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
-class ToolSelectionTraceAccessError(Exception):
+class ToolSelectionPreviewAccessError(Exception):
     def __init__(self, message: str, code: str) -> None:
         super().__init__(message)
         self.code = code
 
 
-class ToolSelectionTraceStore:
+class ToolSelectionPreviewStore:
     def __init__(self, *, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
-        root_override = os.environ.get("RUMI_DEFAULTSPACK_TOOL_SELECTION_TRACE_DIR")
+        root_override = os.environ.get("RUMI_DEFAULTSPACK_TOOL_SELECTION_PREVIEW_DIR")
         self._root = (
             Path(root_override).expanduser()
             if root_override
-            else self._pack_root / "user_data" / "shared" / "tool_selection_traces"
+            else self._pack_root / "user_data" / "shared" / "tool_selection_previews"
         )
 
-    def save(self, trace: dict[str, Any]) -> None:
-        trace_id = str(trace.get("selection_id") or "").strip()
-        if not _valid_trace_id(trace_id):
+    def save(self, snapshot: dict[str, Any]) -> None:
+        preview_id = str(snapshot.get("preview_id") or "").strip()
+        if not _valid_preview_id(preview_id):
             return
         try:
-            payload = dict(trace)
+            payload = dict(snapshot)
             now = time.time()
             payload.setdefault("created_at_epoch", now)
-            payload.setdefault("expires_at_epoch", now + TRACE_TTL_SECONDS)
+            payload.setdefault("expires_at_epoch", now + PREVIEW_TTL_SECONDS)
             self._root.mkdir(parents=True, exist_ok=True)
-            self._atomic_write_json(self._root / f"{trace_id}.json", payload)
+            self._atomic_write_json(self._root / f"{preview_id}.json", payload)
         except OSError:
             return
 
-    def get(self, trace_id: str) -> dict[str, Any] | None:
-        candidate = str(trace_id or "").strip()
-        if not _valid_trace_id(candidate):
+    def get(self, preview_id: str) -> dict[str, Any] | None:
+        candidate = str(preview_id or "").strip()
+        if not _valid_preview_id(candidate):
             return None
-        path = self._root / f"{candidate}.json"
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads((self._root / f"{candidate}.json").read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             return None
         return payload if isinstance(payload, dict) else None
 
-    def get_authorized(self, trace_id: str, context: dict[str, Any] | None) -> dict[str, Any]:
-        trace = self.get(trace_id)
-        if trace is None:
-            raise ToolSelectionTraceAccessError("Tool selection trace not found", "NOT_FOUND")
-        if _is_expired(trace):
-            raise ToolSelectionTraceAccessError("Tool selection trace expired", "EXPIRED")
-        if not _context_can_access_trace(trace, context or {}):
-            raise ToolSelectionTraceAccessError("Tool selection trace is not available to this profile", "FORBIDDEN")
-        return trace
+    def get_authorized(self, preview_id: str, context: dict[str, Any] | None) -> dict[str, Any]:
+        snapshot = self.get(preview_id)
+        if snapshot is None:
+            raise ToolSelectionPreviewAccessError("Tool selection preview not found", "NOT_FOUND")
+        if _is_expired(snapshot):
+            raise ToolSelectionPreviewAccessError("Tool selection preview expired", "EXPIRED")
+        if not _context_can_access_preview(snapshot, context or {}):
+            raise ToolSelectionPreviewAccessError(
+                "Tool selection preview is not available to this profile",
+                "FORBIDDEN",
+            )
+        return snapshot
 
     def _atomic_write_json(self, path: Path, payload: dict[str, Any]) -> None:
         fd, tmp_name = tempfile.mkstemp(
@@ -93,22 +95,29 @@ class ToolSelectionTraceStore:
             raise
 
 
-def _valid_trace_id(value: str) -> bool:
-    return bool(_TRACE_ID_RE.match(str(value or "").strip()))
+def preview_context_metadata(context: dict[str, Any] | None, *, conversation_id: str = "") -> dict[str, str]:
+    safe_context = context if isinstance(context, dict) else {}
+    return {
+        "owner_profile_id": _context_profile_id(safe_context),
+        "conversation_id": str(conversation_id or safe_context.get("conversation_id") or "").strip(),
+    }
 
 
-def _is_expired(trace: dict[str, Any]) -> bool:
-    expires_at = _float_or_none(trace.get("expires_at_epoch"))
+def _valid_preview_id(value: str) -> bool:
+    return bool(_PREVIEW_ID_RE.match(str(value or "").strip()))
+
+
+def _is_expired(snapshot: dict[str, Any]) -> bool:
+    expires_at = _float_or_none(snapshot.get("expires_at_epoch"))
     return expires_at is not None and expires_at <= time.time()
 
 
-def _context_can_access_trace(trace: dict[str, Any], context: dict[str, Any]) -> bool:
-    owner_profile_id = str(trace.get("owner_profile_id") or "").strip()
+def _context_can_access_preview(snapshot: dict[str, Any], context: dict[str, Any]) -> bool:
+    owner_profile_id = str(snapshot.get("owner_profile_id") or "").strip()
     context_profile_id = _context_profile_id(context)
-    if owner_profile_id:
-        if not context_profile_id or context_profile_id != owner_profile_id:
-            return False
-    conversation_id = str(trace.get("conversation_id") or "").strip()
+    if owner_profile_id and (not context_profile_id or owner_profile_id != context_profile_id):
+        return False
+    conversation_id = str(snapshot.get("conversation_id") or "").strip()
     context_conversation_id = str(context.get("conversation_id") or context.get("chat_id") or "").strip()
     if conversation_id and context_conversation_id and conversation_id != context_conversation_id:
         return False

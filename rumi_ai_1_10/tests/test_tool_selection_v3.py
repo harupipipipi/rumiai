@@ -135,6 +135,37 @@ def test_computer_tool_requires_explicit_intent():
     assert "computer_use" in [tool["tool_id"] for tool in with_intent.selected_tools]
 
 
+def test_unknown_connection_status_fails_closed():
+    from domain.chat.tool_selection_service import ToolSelectionService
+    from domain.tool.service_catalog import infer_connection_status
+
+    tools = [
+        {
+            "tool_id": "unknown_connector",
+            "name": "Unknown Connector",
+            "summary": "Should not be selected when status is ambiguous.",
+            "availability": {"status": "maybe_later"},
+            "tags": ["search"],
+        },
+        {
+            "tool_id": "web_search",
+            "name": "Web Search",
+            "summary": "Search web pages.",
+            "tags": ["web", "search"],
+        },
+    ]
+
+    assert infer_connection_status(tools[0]) == "unavailable"
+    decision = ToolSelectionService(settings={"tools": {"selection_strategy": "all_schemas"}}).select(
+        "search",
+        tools,
+        selection=_selection(mode="auto", strategy="all_schemas"),
+        context={},
+    )
+
+    assert [tool["tool_id"] for tool in decision.selected_tools] == ["web_search"]
+
+
 def test_conversation_preferences_apply_when_turn_has_no_override():
     from domain.chat.tool_selection_service import ToolSelectionService
 

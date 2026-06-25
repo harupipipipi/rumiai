@@ -13,10 +13,7 @@
       "group_id": "sandbox/coding/files",
       "group_label": "Sandbox Files",
       "group_icon": "box",
-      "widget_kind": "tool_toggle",
-      "settings_fields": [
-        {"id": "max_output_chars", "label": "Max Output Chars", "type": "number", "default": 20000, "min": 1000, "max": 200000}
-      ]
+      "widget_kind": "tool_toggle"
     },
     "tool_category": "sandbox",
     "action_type": "sandbox_read",

@@ -127,10 +127,9 @@ class ToolSelectionService:
 
         if strategy == "all_with_hints":
             hints = self._semantic_candidates(user_text, eligible, context=context)
-            hint_candidates = self._tools_by_ids(eligible, list(hints.get("tool_ids") or []))
             hint_selected_ids, hint_stage, hint_fallbacks, hint_recommendations, hint_selector_model = self._select_with_utility_model(
                 user_text,
-                hint_candidates or eligible[: self._catalog_ai_direct_limit()],
+                eligible,
                 strategy=strategy,
                 fallback_ids=list(hints.get("tool_ids") or []),
                 context=context,
@@ -199,15 +198,9 @@ class ToolSelectionService:
             )
 
         if strategy == "catalog_ai":
-            direct_limit = self._catalog_ai_direct_limit()
-            if len(eligible) <= direct_limit:
-                candidates = eligible
-                selector_prefilter = False
-                selector_fallback_ids = [_tool_id(tool) for tool in eligible]
-            else:
-                candidates = self._stable_merge(included, semantic_candidates)
-                selector_prefilter = True
-                selector_fallback_ids = semantic_ids
+            candidates = eligible
+            selector_prefilter = False
+            selector_fallback_ids = [_tool_id(tool) for tool in eligible]
         else:
             candidates = self._stable_merge(included, semantic_candidates)
             selector_prefilter = True

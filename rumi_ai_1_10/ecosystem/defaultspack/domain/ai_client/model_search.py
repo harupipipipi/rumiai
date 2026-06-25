@@ -150,7 +150,11 @@ def recommend_model(request: dict[str, Any] | None = None, *, profiles: list[dic
 def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     groups = normalize_model_groups((settings or {}).get("model_groups") if isinstance(settings, dict) else None)
     group = groups.get(str(group_id or "default"), groups["default"])
-    candidates = [_public_model(profile) for profile in (profiles if profiles is not None else _profile_catalog()) if isinstance(profile, dict)]
+    candidates = [
+        _public_model(profile)
+        for profile in (profiles if profiles is not None else _profile_catalog())
+        if isinstance(profile, dict) and _is_chat_routable_profile(profile)
+    ]
     allowed = {str(item) for item in group.get("allowed_models", []) if str(item or "").strip()}
     if allowed:
         candidates = [item for item in candidates if str(item.get("profile_id") or "") in allowed or str(item.get("qualified_model_id") or "") in allowed]
@@ -176,6 +180,33 @@ def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: l
     if min_speed:
         candidates = [item for item in candidates if str(item.get("speed_tier") or "") == min_speed]
     return candidates
+
+
+def _is_chat_routable_profile(profile: dict[str, Any]) -> bool:
+    model_type = str(profile.get("type") or "chat").strip().lower()
+    if not model_type or model_type == "chat":
+        return True
+    if model_type != "reasoning":
+        return False
+    defaults = profile.get("defaults") if isinstance(profile.get("defaults"), dict) else {}
+    capabilities = _capability_dict(profile.get("capabilities"))
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    metadata_capabilities = _capability_dict(metadata.get("capabilities"))
+    return bool(
+        defaults.get("chat")
+        or capabilities.get("chat")
+        or capabilities.get("text")
+        or metadata_capabilities.get("chat")
+        or metadata_capabilities.get("text")
+    )
+
+
+def _capability_dict(value: Any) -> dict[str, bool]:
+    if isinstance(value, dict):
+        return {str(key): bool(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item): True for item in value if str(item or "").strip()}
+    return {}
 
 
 def _profile_catalog() -> list[dict[str, Any]]:

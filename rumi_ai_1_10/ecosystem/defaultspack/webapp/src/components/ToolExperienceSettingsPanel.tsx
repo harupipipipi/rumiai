@@ -27,8 +27,10 @@ const STRATEGY_OPTIONS: Array<{ value: ToolSelectionStrategy; label: string; not
 ];
 
 const STANDARD_PERMISSION_ROWS: Array<{ keys: string[]; label: string; note: string; allowAuto?: boolean }> = [
-  { keys: ["read", "search"], label: "読む・検索する", note: "ファイル、ブラウザ、外部サービスから情報を読む" },
-  { keys: ["create", "update"], label: "作る・更新する", note: "ファイル、ドキュメント、チケットなどを作成・編集する" },
+  { keys: ["read"], label: "読む", note: "ファイル、ブラウザ、外部サービスから情報を読む" },
+  { keys: ["search"], label: "検索する", note: "Web、リポジトリ、接続済みサービスから探す" },
+  { keys: ["create"], label: "作る", note: "ファイル、ドキュメント、チケットなどを新規作成する" },
+  { keys: ["update"], label: "更新する", note: "既存のファイル、ドキュメント、チケットなどを編集する" },
   { keys: ["send"], label: "送信する", note: "メール、Slack、外部APIへ内容を送る" },
   { keys: ["execute"], label: "実行する", note: "コマンド、コード、端末操作を実行する" },
   { keys: ["computer"], label: "コンピュータ操作", note: "クリック、キーボード入力、画面操作を行う" },
@@ -399,9 +401,6 @@ export function ToolExperienceSettingsPanel({
   const updateToolSetting = (fieldId: string, value: unknown) => onSettingChange("tools", fieldId, value);
   const updateUtilityModel = (roleId: string, value: string) => {
     onSettingChange("models", "utility_models", { ...utilityModels, [roleId]: value });
-    if (roleId === "tool_selector") {
-      updateToolSetting("selector_model", value);
-    }
   };
   const updateStandardPermission = (keys: string[], value: PermissionDecision) => {
     const next = { ...standardPermissions };
@@ -523,7 +522,7 @@ export function ToolExperienceSettingsPanel({
                       <div className="text-sm text-zinc-300">{ACTION_LABELS[actionClass] ?? actionClass}</div>
                       <PermissionSegmented
                         value={permissionValue(recordValue(serviceOverrides[service.service_id])[actionClass] ?? standardPermissions[actionClass], "confirm")}
-                        allowAuto={actionClass !== "dangerous"}
+                        allowAuto={actionClass !== "dangerous" && actionClass !== "delete"}
                         onChange={(next) => updateServiceOverride(service.service_id, actionClass, next)}
                       />
                     </div>
@@ -627,7 +626,7 @@ export function ToolExperienceSettingsPanel({
         <ModelPicker
           label="Tool補助モデル"
           note="機能カタログを読む補助AIです。自由入力ではなく、登録済みモデルから選びます。"
-          value={stringValue(utilityModels.tool_selector ?? toolSettings.selector_model)}
+          value={stringValue(utilityModels.tool_selector)}
           models={chatModels}
           loading={modelsLoading}
           placeholder="補助AIモデルを検索"

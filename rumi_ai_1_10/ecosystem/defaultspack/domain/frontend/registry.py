@@ -1592,14 +1592,6 @@ class FrontendRegistry:
                         "advanced": True,
                     },
                     {
-                        "id": "selector_model",
-                        "label": "Selector model",
-                        "type": "text",
-                        "default": "",
-                        "help": "空なら高速なutility modelを自動選択します。",
-                        "advanced": True,
-                    },
-                    {
                         "id": "final_tool_limit",
                         "label": "最終機能数",
                         "type": "number",
@@ -2607,7 +2599,6 @@ class FrontendRegistry:
                 "semantic_candidate_limit": 32,
                 "final_tool_limit": 8,
                 "catalog_ai_direct_limit": 80,
-                "selector_model": "",
                 "selector_trace": "summary",
                 "show_selection_summary": True,
                 "show_selection_reasons": False,
@@ -3167,7 +3158,7 @@ class FrontendRegistry:
         selector_alias = str(tools.get("selector_model") or "").strip()
         if selector_alias and not str(utility_models.get("tool_selector") or "").strip():
             utility_models["tool_selector"] = selector_alias
-        tools["selector_model"] = str(utility_models.get("tool_selector") or selector_alias or "").strip()
+        tools.pop("selector_model", None)
         show_summary = self._setting_bool(tools.get("show_selected_tools_in_answer", tools.get("show_selection_summary")), True)
         show_reasons = self._setting_bool(tools.get("expand_selection_reasoning", tools.get("show_selection_reasons")), False)
         tools["show_selection_summary"] = show_summary

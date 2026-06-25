@@ -7,6 +7,11 @@ from typing import Any
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error
+from domain.chat.tool_selection_preview import (
+    PREVIEW_TTL_SECONDS,
+    ToolSelectionPreviewStore,
+    preview_context_metadata,
+)
 from domain.chat.tool_selection_service import ToolSelectionService
 from domain.chat.tool_selection_schema import normalize_tool_targets
 from domain.tool.registry import ToolRegistry
@@ -50,10 +55,38 @@ def run(input_data, context):
     except Exception as exc:
         return error("tool selection preview failed: " + str(exc), "SELECTION_PREVIEW_FAILED")
     trace = decision.to_trace_dict()
+    preview_id = trace["selection_id"]
+    expires_at_epoch = time.time() + PREVIEW_TTL_SECONDS
+    ToolSelectionPreviewStore().save(
+        {
+            "preview_id": preview_id,
+            **preview_context_metadata(
+                resolved_context,
+                conversation_id=str(input_data.get("conversation_id") or ""),
+            ),
+            "expires_at_epoch": expires_at_epoch,
+            "selection": {
+                "mode": selection.mode,
+                "strategy": trace.get("strategy") or selection.strategy,
+                "scope": selection.scope,
+                "include": [
+                    {"kind": "tool", "id": tool_id}
+                    for tool_id in trace.get("selected_tool_ids", [])
+                    if str(tool_id or "").strip()
+                ],
+                "exclude": selection.exclude,
+                "must_use": selection.must_use,
+                "review": selection.mode == "review",
+                "preview_id": preview_id,
+                "source": "tool_selection_preview",
+            },
+            "decision": trace,
+        }
+    )
     return ok(
         {
-            "preview_id": trace["selection_id"],
-            "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() + 300)),
+            "preview_id": preview_id,
+            "expires_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(expires_at_epoch)),
             "decision": {
                 "selected_tools": trace["selected_tool_ids"],
                 "selected_services": trace["selected_services"],

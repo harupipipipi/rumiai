@@ -104,6 +104,22 @@ def test_chat_send_fallback_specs_target_chat_turn_flow():
     assert stream.path_inject == {"id": "conversation_id"}
 
 
+def test_tool_selection_resource_routes_have_authority_metadata():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    preferences = specs[("PUT", "/api/chat/conversations/{id}/tool-preferences")]
+    assert preferences.permission_id == "chat.tool_preferences.write"
+    assert preferences.owner_pack_id == "defaultspack"
+    assert preferences.resource_template == {"conversation_id": "{path.id}"}
+
+    trace = specs[("GET", "/api/tools/selection/traces/{trace_id}")]
+    assert trace.permission_id == "tool_selection.trace.read"
+    assert trace.owner_pack_id == "defaultspack"
+    assert trace.resource_template == {"trace_id": "{path.trace_id}"}
+
+
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     from ecosystem.defaultspack.transport.registry import (
         canonical_http_route_specs,

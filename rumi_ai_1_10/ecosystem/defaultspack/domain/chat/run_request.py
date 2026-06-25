@@ -7,6 +7,7 @@ from functools import lru_cache
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
 from domain.chat.tool_selection_schema import TOOL_SELECTION_MODES, TOOL_SELECTION_SCOPES, TOOL_SELECTION_STRATEGIES, normalize_tool_targets
 from domain.chat.tool_selection_service import ToolSelectionService
+from domain.chat.tool_selection_preview import ToolSelectionPreviewAccessError, ToolSelectionPreviewStore
 from domain.chat.tool_selection_trace import ToolSelectionTraceStore
 from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
@@ -277,6 +279,11 @@ def prepare_chat_run(
 
     params = dict(prepared_input.get("params") or {})
     tool_selection = _normalize_tool_selection(prepared_input)
+    tool_selection = _apply_tool_selection_preview_snapshot(
+        tool_selection,
+        context if isinstance(context, dict) else {},
+        conversation_id=conversation_id,
+    )
     params.pop("tool_selection", None)
     requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
     if requested_model:
@@ -2185,6 +2192,45 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
     return NormalizedToolSelection()
 
 
+def _apply_tool_selection_preview_snapshot(
+    selection: NormalizedToolSelection,
+    context: dict[str, Any],
+    *,
+    conversation_id: str,
+) -> NormalizedToolSelection:
+    preview_id = str(selection.preview_id or "").strip()
+    if not preview_id:
+        return selection
+    lookup_context = dict(context or {})
+    if conversation_id:
+        lookup_context["conversation_id"] = conversation_id
+    try:
+        snapshot = ToolSelectionPreviewStore().get_authorized(preview_id, lookup_context)
+    except ToolSelectionPreviewAccessError as exc:
+        raise ValueError(f"params.tool_selection.preview_id is invalid: {exc.code}") from exc
+    raw_selection = snapshot.get("selection") if isinstance(snapshot.get("selection"), dict) else {}
+    mode = str(raw_selection.get("mode") or selection.mode or "review").strip().lower()
+    if mode not in TOOL_SELECTION_MODES:
+        mode = "review"
+    scope = str(raw_selection.get("scope") or selection.scope or "turn").strip().lower()
+    if scope not in TOOL_SELECTION_SCOPES:
+        scope = "turn"
+    return NormalizedToolSelection(
+        mode=mode,
+        strategy=_normalize_tool_selection_strategy(raw_selection.get("strategy") or selection.strategy),
+        include=_coerce_tool_items(raw_selection.get("include")),
+        exclude=_coerce_tool_items(raw_selection.get("exclude")),
+        scope=scope,
+        must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=selection.must_use),
+        review=_coerce_optional_bool(
+            raw_selection.get("review"),
+            default=(mode == "review" or selection.review),
+        ),
+        preview_id=preview_id,
+        source="tool_selection_preview",
+    )
+
+
 def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
     params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
     if "tool_selection" not in params:
@@ -2626,6 +2672,8 @@ def _available_tools(
         resolved_context["runtime_profile"] = runtime_profile
     if agent_id:
         resolved_context["agent_id"] = agent_id
+    settings: dict[str, Any] = {}
+    profile_filtered: list[dict[str, Any]] = []
     try:
         settings = _read_frontend_settings()
         explicit_tool_definitions = [
@@ -2701,6 +2749,49 @@ def _available_tools(
                     resolved_context["unknown_selected_tools"] = unknown_tools
             except Exception:
                 filtered = []
+        elif selection.mode != "none" and profile_filtered:
+            try:
+                fallback_settings = dict(settings)
+                fallback_tools_settings = (
+                    dict(fallback_settings.get("tools"))
+                    if isinstance(fallback_settings.get("tools"), dict)
+                    else {}
+                )
+                fallback_tools_settings["selection_strategy"] = "lexical"
+                fallback_settings["tools"] = fallback_tools_settings
+                fallback_selection = NormalizedToolSelection(
+                    mode=selection.mode if selection.mode in {"auto", "review"} else "auto",
+                    strategy="lexical",
+                    include=selection.include,
+                    exclude=selection.exclude,
+                    scope=selection.scope,
+                    must_use=selection.must_use,
+                    review=selection.review,
+                    preview_id=selection.preview_id,
+                    source=selection.source,
+                )
+                fallback_decision = ToolSelectionService(
+                    call_handler=resolved_context.get("call_handler"),
+                    settings=fallback_settings,
+                ).select(
+                    user_text,
+                    profile_filtered,
+                    selection=fallback_selection,
+                    context=resolved_context,
+                )
+                filtered = list(fallback_decision.selected_tools)
+                fallback_trace = fallback_decision.to_trace_dict()
+                resolved_context["tool_selection"] = {
+                    **resolved_context["tool_selection"],
+                    **fallback_trace,
+                    "stage": "selection_failed_lexical_fallback",
+                    "fallbacks": [
+                        {"stage": "tool_selection_service", "reason": str(exc)},
+                        *list(fallback_trace.get("fallbacks") or []),
+                    ],
+                }
+            except Exception:
+                filtered = []
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
 
@@ -2719,6 +2810,7 @@ def _persist_tool_selection_trace(
         trace_mode = "summary"
     selection_metadata = resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {}
     selection_metadata["trace_mode"] = trace_mode
+    _attach_tool_selection_trace_authority(selection_metadata, resolved_context)
     if trace_mode == "none":
         selection_metadata.pop("selection_id", None)
         return
@@ -2749,6 +2841,7 @@ def _create_hidden_tool_selection_conversation(
         store = ChatStore()
         selector_model = _tool_selection_selector_model(resolved_context, decision, trace)
         trace_model = selector_model or str(resolved_context.get("model") or "").strip()
+        trace_metadata = _tool_selection_trace_metadata(resolved_context, trace, trace_mode="full")
         child = store.create_conversation(
             model=trace_model,
             parent_conversation_id=conversation_id,
@@ -2758,6 +2851,7 @@ def _create_hidden_tool_selection_conversation(
                 "tool_selection_trace": True,
                 "selection_id": trace.get("selection_id"),
                 "trace_mode": "full",
+                **trace_metadata,
                 **({"selector_model": selector_model} if selector_model else {}),
             },
         )
@@ -2776,6 +2870,7 @@ def _create_hidden_tool_selection_conversation(
                     "tool_selection_trace": True,
                     "selection_id": trace.get("selection_id"),
                     "trace_mode": "full",
+                    **trace_metadata,
                     **({"selector_model": selector_model} if selector_model else {}),
                 },
             },
@@ -2799,6 +2894,63 @@ def _create_hidden_tool_selection_conversation(
         return child_id
     except Exception:
         return ""
+
+
+def _attach_tool_selection_trace_authority(
+    selection_metadata: dict[str, Any],
+    resolved_context: dict[str, Any],
+) -> None:
+    metadata = _tool_selection_trace_metadata(
+        resolved_context,
+        selection_metadata,
+        trace_mode=str(selection_metadata.get("trace_mode") or "summary"),
+    )
+    for key, value in metadata.items():
+        if value not in ("", None):
+            selection_metadata[key] = value
+
+
+def _tool_selection_trace_metadata(
+    resolved_context: dict[str, Any],
+    trace: dict[str, Any],
+    *,
+    trace_mode: str,
+) -> dict[str, Any]:
+    now = time.time()
+    source_message_id = str(
+        resolved_context.get("source_message_id")
+        or resolved_context.get("message_id")
+        or resolved_context.get("request_id")
+        or ""
+    ).strip()
+    return {
+        "owner_profile_id": _tool_selection_trace_profile_id(resolved_context),
+        "conversation_id": str(resolved_context.get("conversation_id") or "").strip(),
+        "source_message_id": source_message_id,
+        "trace_mode": trace_mode,
+        "created_at_epoch": trace.get("created_at_epoch") or now,
+        "expires_at_epoch": trace.get("expires_at_epoch") or now + 7 * 24 * 60 * 60,
+        "ephemeral": True,
+        "purpose": "tool_selection_trace",
+    }
+
+
+def _tool_selection_trace_profile_id(resolved_context: dict[str, Any]) -> str:
+    principal = resolved_context.get("_authenticated_principal") if isinstance(resolved_context, dict) else None
+    if isinstance(principal, dict):
+        candidate = str(principal.get("profile_id") or "").strip()
+        if candidate:
+            return candidate
+    subject = resolved_context.get("_authority_subject") if isinstance(resolved_context, dict) else None
+    if isinstance(subject, dict):
+        candidate = str(subject.get("profile_id") or "").strip()
+        if candidate:
+            return candidate
+    for key in ("profile_id", "input_profile_id", "active_profile_id"):
+        candidate = str(resolved_context.get(key) or "").strip()
+        if candidate:
+            return candidate
+    return ""
 
 
 def _tool_selection_selector_model(

@@ -79,7 +79,7 @@ export function useToolSelectionController({
         must_use: false,
       };
     }
-    if (effectiveMode === "manual" || uniqueToolIds.length > 0) {
+    if (effectiveMode === "manual" || (effectiveMode === "auto" && uniqueToolIds.length > 0)) {
       return {
         mode: "manual",
         include: uniqueToolIds.map((id) => ({ kind: "tool", id })),
@@ -90,7 +90,7 @@ export function useToolSelectionController({
     }
     return {
       mode: effectiveMode,
-      include: [],
+      include: uniqueToolIds.map((id) => ({ kind: "tool", id })),
       exclude: turnExclude,
       scope: "turn",
       must_use: false,

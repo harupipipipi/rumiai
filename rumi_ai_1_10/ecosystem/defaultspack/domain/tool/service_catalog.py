@@ -175,8 +175,8 @@ def infer_service_id(tool: dict[str, Any]) -> str:
         ("google_drive", ("google_drive", "drive", "slides", "sheet", "doc_")),
         ("calendar", ("calendar",)),
         ("notion", ("notion",)),
-        ("browser", ("browser", "html_preview", "webapp_preview")),
         ("computer", ("computer_use", "browser_computer", "screen", "mouse", "keyboard")),
+        ("browser", ("browser", "html_preview", "webapp_preview")),
         ("terminal", ("terminal", "sandbox_exec", "python_exec", "node_exec", "command", "shell")),
         ("coding", ("coding", "workspace", "git_", "webapp_build", "webapp_lint", "project_scaffold", "package_install")),
         ("files", ("file", "pdf", "doc", "ocr", "audio_transcribe", "image_convert", "image_resize")),
@@ -228,11 +228,15 @@ def infer_connection_status(tool: dict[str, Any]) -> str:
     availability = tool.get("availability") if isinstance(tool.get("availability"), dict) else metadata.get("availability")
     if isinstance(availability, dict):
         status = str(availability.get("status") or "").strip().lower()
+        if status in {"connected", "available", "ok", "ready"}:
+            return "connected"
         if status in {"missing_api_key", "setup_required", "not_configured"}:
             return "setup_required"
         if status in {"error", "failed"}:
             return "error"
         if status in {"unavailable", "disabled"}:
+            return "unavailable"
+        if status:
             return "unavailable"
     if metadata.get("legacy_compat_unexecutable"):
         return "unavailable"

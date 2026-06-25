@@ -15,8 +15,7 @@
       "group_icon": "box",
       "widget_kind": "tool_toggle",
       "settings_fields": [
-        {"id": "default_timeout_seconds", "label": "Default Timeout Seconds", "type": "number", "default": 30, "min": 1, "max": 120},
-        {"id": "max_output_chars", "label": "Max Output Chars", "type": "number", "default": 20000, "min": 1000, "max": 200000}
+        {"id": "default_timeout_seconds", "label": "Default Timeout Seconds", "type": "number", "default": 30, "min": 1, "max": 120}
       ]
     },
     "tool_category": "sandbox",
