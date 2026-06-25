@@ -1441,7 +1441,6 @@ def _runtime_profile_with_policy_connected_tools(
     *,
     profile_id: Any = None,
     agent_id: Any = None,
-    requested_tool_ids: list[str] | None = None,
 ) -> tuple[dict[str, Any] | None, str]:
     base_profile = dict(runtime_profile) if isinstance(runtime_profile, dict) else {}
     snapshot_profile_id = str(
@@ -1466,7 +1465,6 @@ def _runtime_profile_with_policy_connected_tools(
     tool_ids = _merge_profile_tool_ids(
         current_tool_ids,
         policy_tool_ids,
-        requested_tool_ids or [],
     )
     if current_tool_ids and tool_ids == current_tool_ids:
         return base_profile, resolved_agent_id
@@ -2480,9 +2478,6 @@ def _apply_requested_tool_policy(context: dict[str, Any], requested_tool_ids: li
         return
     if not _requested_tool_ids_include_shell(requested_tool_ids):
         return
-    updated_policy = dict(profile_policy) if isinstance(profile_policy, dict) else {}
-    updated_policy["allow_shell"] = True
-    context["profile_policy"] = updated_policy
     context["user_requested_shell_tool"] = True
 
 
@@ -2666,7 +2661,6 @@ def _available_tools(
         resolved_context.get("runtime_profile"),
         profile_id=resolved_context.get("profile_id"),
         agent_id=agent_id,
-        requested_tool_ids=requested_tool_ids,
     )
     if isinstance(runtime_profile, dict):
         resolved_context["runtime_profile"] = runtime_profile
