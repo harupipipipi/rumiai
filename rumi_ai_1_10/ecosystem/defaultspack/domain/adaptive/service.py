@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import re
 import uuid
 from pathlib import Path
@@ -12,6 +13,7 @@ from .context import (
     compact_text,
     now_iso,
     now_seconds,
+    path_is_restricted,
     profile_id_from,
     redact,
     resolve_under,
@@ -217,9 +219,6 @@ class AdaptiveService:
         self._ensure_not_frozen("onboarding.apply")
         plan = args.get("plan") if isinstance(args.get("plan"), dict) else None
         if plan is None:
-            compiled_preview = self.onboarding_compile(args, ctx)
-            plan = compiled_preview.get("plan") if isinstance(compiled_preview.get("plan"), dict) else None
-        if plan is None:
             raise AdaptiveError("INVALID_INPUT", "signed onboarding plan is required")
         try:
             from core_runtime.operating_profile import OperatingProfilePlanStore
@@ -260,6 +259,15 @@ class AdaptiveService:
                 break
         if target is None:
             raise AdaptiveError("NOT_FOUND", "no onboarding apply history to undo")
+        undo_result: dict[str, Any] | None = None
+        plan_id = str((target.get("payload") or {}).get("plan_id") or "").strip()
+        if plan_id:
+            try:
+                from core_runtime.operating_profile import OperatingProfilePlanStore
+
+                undo_result = OperatingProfilePlanStore().undo_plan(self.profile_id, plan_id)
+            except Exception as exc:
+                raise AdaptiveError("UNDO_FAILED", str(exc)) from exc
         state = self._onboarding_state()
         previous = copy.deepcopy(target.get("payload", {}).get("previous"))
         state["current"] = previous if isinstance(previous, dict) else None
@@ -269,7 +277,13 @@ class AdaptiveService:
         target["undone_by"] = undo["history_id"]
         self.store.write_json("onboarding/history.json", history_state)
         self._append_event("adaptive.onboarding.undo", {"history_id": undo["history_id"]})
-        return {"profile_id": self.profile_id, "undone": True, "history_id": undo["history_id"], "current": state["current"]}
+        return {
+            "profile_id": self.profile_id,
+            "undone": True,
+            "history_id": undo["history_id"],
+            "current": state["current"],
+            "operating_profile_undo": undo_result,
+        }
 
     def onboarding_history(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
@@ -317,6 +331,13 @@ class AdaptiveService:
                 "open": len([item for item in conflicts if item.get("status") == "open"]),
             },
             "leases": {"active": active_leases, "total": len(leases)},
+            "automations": self._automations(),
+            "automation_templates": self._automation_templates(),
+            "automation_simulation": {
+                "scenario": "Review automation activation",
+                "result": "Automation changes are prepared first and apply only after prepared-action commit.",
+                "approvals": ["prepared_action.commit", "external_send"],
+            },
         }
         return snapshot
 
@@ -361,10 +382,10 @@ class AdaptiveService:
         if start.is_file():
             return {"workspace_root": str(root), "entries": [_file_entry(root, start)], "truncated": False}
         base_depth = len(start.relative_to(root).parts)
-        for path in sorted(start.rglob("*")):
+        for path in start.rglob("*"):
             if len(entries) >= max_entries:
                 break
-            if _should_skip(path):
+            if _should_skip(path) or path_is_restricted(root, path):
                 if path.is_dir():
                     continue
                 continue
@@ -416,10 +437,30 @@ class AdaptiveService:
         start_line = coerce_int(args.get("start_line"), 1, minimum=1, maximum=1000000000)
         max_lines = coerce_int(args.get("max_lines"), 120, minimum=1, maximum=500)
         max_bytes = coerce_int(args.get("max_bytes"), 20000, minimum=1, maximum=100000)
-        text = path.read_text(encoding="utf-8", errors="replace")[:max_bytes]
-        source_lines = text.splitlines()
-        selected = source_lines[start_line - 1 : start_line - 1 + max_lines]
-        lines = [{"line": start_line + index, "text": line} for index, line in enumerate(selected)]
+        lines: list[dict[str, Any]] = []
+        bytes_read = 0
+        truncated = False
+        with path.open("r", encoding="utf-8", errors="replace") as handle:
+            for line_number, raw_line in enumerate(handle, start=1):
+                if line_number < start_line:
+                    continue
+                if len(lines) >= max_lines:
+                    truncated = True
+                    break
+                encoded = raw_line.encode("utf-8", errors="replace")
+                if bytes_read + len(encoded) > max_bytes:
+                    remaining = max_bytes - bytes_read
+                    if remaining > 0:
+                        lines.append(
+                            {
+                                "line": line_number,
+                                "text": encoded[:remaining].decode("utf-8", errors="replace").rstrip("\r\n"),
+                            }
+                        )
+                    truncated = True
+                    break
+                lines.append({"line": line_number, "text": raw_line.rstrip("\r\n")})
+                bytes_read += len(encoded)
         return {
             "workspace_root": str(root),
             "root": str(root),
@@ -427,7 +468,7 @@ class AdaptiveService:
             "start_line": start_line,
             "line_count": len(lines),
             "lines": lines,
-            "truncated": len(source_lines) > start_line - 1 + len(lines),
+            "truncated": truncated,
         }
 
     def context_evidence(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -462,13 +503,13 @@ class AdaptiveService:
         max_results = coerce_int(args.get("max_results") or args.get("max_matches"), 50, minimum=1, maximum=200)
         max_file_bytes = coerce_int(args.get("max_file_bytes"), 1000000, minimum=1024, maximum=5000000)
         matcher = _compile_matcher(query, regex=regex, case_sensitive=case_sensitive)
-        paths = [start] if start.is_file() else sorted(start.rglob("*"))
+        paths = [start] if start.is_file() else start.rglob("*")
         results: list[dict[str, Any]] = []
         searched_files = 0
         for path in paths:
             if len(results) >= max_results:
                 break
-            if not path.is_file() or _should_skip(path):
+            if not path.is_file() or _should_skip(path) or path_is_restricted(root, path):
                 continue
             try:
                 if path.stat().st_size > max_file_bytes:
@@ -531,12 +572,29 @@ class AdaptiveService:
         action, actions = self._find_action(args)
         if action.get("status") == "revoked":
             raise AdaptiveError("ACTION_REVOKED", "revoked prepared action cannot be committed")
+        execution = self._execute_prepared_action(action, args)
         action["status"] = "committed"
         action["committed_at"] = now_iso()
         action["updated_at"] = action["committed_at"]
+        action["execution_status"] = execution["status"]
+        action["execution_result"] = redact(execution.get("result"))
+        if execution.get("outbox_id"):
+            action["outbox_id"] = execution["outbox_id"]
         self._write_prepared_actions(actions)
-        self._append_event("adaptive.prepared_action.commit", {"action_id": action["action_id"]})
-        return {"profile_id": self.profile_id, "committed": True, "action": action, "executed": False}
+        self._append_event(
+            "adaptive.prepared_action.commit",
+            {"action_id": action["action_id"], "execution_status": execution["status"]},
+            continuation=execution.get("continuation") if isinstance(execution.get("continuation"), dict) else None,
+        )
+        return {
+            "profile_id": self.profile_id,
+            "committed": True,
+            "action": action,
+            "executed": execution["status"] == "executed",
+            "execution_status": execution["status"],
+            "execution_result": execution.get("result"),
+            "outbox_id": execution.get("outbox_id"),
+        }
 
     def prepared_action_revoke(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
@@ -565,10 +623,16 @@ class AdaptiveService:
         event_type = str(args.get("event_type") or args.get("type") or "").strip()
         if not event_type:
             raise AdaptiveError("INVALID_INPUT", "event_type is required")
+        idempotency_key = str(args.get("idempotency_key") or "").strip()
+        if idempotency_key:
+            for existing in reversed(self.store.read_jsonl("events/events.jsonl")):
+                if existing.get("idempotency_key") == idempotency_key:
+                    return {"profile_id": self.profile_id, "event": existing, "duplicate": True}
         event = self._append_event(
             event_type,
             args.get("payload") if isinstance(args.get("payload"), dict) else {},
             continuation=args.get("continuation") if isinstance(args.get("continuation"), dict) else None,
+            idempotency_key=idempotency_key or None,
         )
         return {"profile_id": self.profile_id, "event": event}
 
@@ -597,6 +661,12 @@ class AdaptiveService:
             "events": events,
             "replayed": len(events),
             "cursor": events[-1]["event_id"] if events else after_event_id or None,
+            "next_cursor": events[-1]["event_id"] if events else after_event_id or None,
+            "continuations": [
+                event.get("continuation")
+                for event in events
+                if isinstance(event.get("continuation"), dict)
+            ],
         }
 
     # Conflicts
@@ -653,72 +723,91 @@ class AdaptiveService:
         holder = str(args.get("holder") or args.get("owner") or ctx.get("principal_id") or ctx.get("caller") or "anonymous").strip()
         ttl = coerce_int(args.get("ttl_seconds"), 300, minimum=1, maximum=86400)
         now = now_seconds()
-        leases = self._leases()
-        for lease in leases:
-            if lease.get("key") != key or lease.get("status") != "active":
-                continue
-            if int(lease.get("expires_at") or 0) <= now:
-                lease["status"] = "expired"
-                continue
-            if lease.get("holder") != holder:
-                raise AdaptiveError("LEASE_HELD", "lease is already held", details={"key": key, "holder": lease.get("holder")})
-            lease["expires_at"] = now + ttl
-            lease["updated_at"] = now_iso()
-            self._write_leases(leases)
-            return {"profile_id": self.profile_id, "lease": lease, "renewed": True}
-        lease = {
-            "id": str(uuid.uuid4()),
-            "profile_id": self.profile_id,
-            "key": key,
-            "resource": key,
-            "holder": holder,
-            "owner": holder,
-            "status": "active",
-            "budget": redact(args.get("budget") if isinstance(args.get("budget"), dict) else {}),
-            "created_at": now_iso(),
-            "updated_at": now_iso(),
-            "expires_at": now + ttl,
-        }
-        lease["lease_id"] = lease["id"]
-        if bool(args.get("freeze_snapshot", False)):
-            lease["freeze_id"] = self.activity_freeze({"reason": f"lease:{key}"}, ctx)["freeze_id"]
-        leases.append(lease)
-        self._write_leases(leases)
-        self._append_event("adaptive.orchestration.lease.acquire", {"lease_id": lease["lease_id"], "key": key})
-        return {"profile_id": self.profile_id, "lease": lease, "acquired": True}
+        response: dict[str, Any] = {}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal response
+            leases = state.get("leases") if isinstance(state, dict) and isinstance(state.get("leases"), list) else []
+            for lease in leases:
+                if lease.get("key") != key or lease.get("status") != "active":
+                    continue
+                if int(lease.get("expires_at") or 0) <= now:
+                    lease["status"] = "expired"
+                    lease["updated_at"] = now_iso()
+                    continue
+                if lease.get("holder") != holder:
+                    raise AdaptiveError("LEASE_HELD", "lease is already held", details={"key": key, "holder": lease.get("holder")})
+                lease["expires_at"] = now + ttl
+                lease["updated_at"] = now_iso()
+                response = {"profile_id": self.profile_id, "lease": lease, "renewed": True}
+                return {"version": 1, "leases": leases[-500:]}
+            lease = {
+                "id": str(uuid.uuid4()),
+                "profile_id": self.profile_id,
+                "key": key,
+                "resource": key,
+                "holder": holder,
+                "owner": holder,
+                "status": "active",
+                "budget": redact(args.get("budget") if isinstance(args.get("budget"), dict) else {}),
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+                "expires_at": now + ttl,
+            }
+            lease["lease_id"] = lease["id"]
+            if bool(args.get("freeze_snapshot", False)):
+                lease["freeze_id"] = self.activity_freeze({"reason": f"lease:{key}"}, ctx)["freeze_id"]
+            leases.append(lease)
+            response = {"profile_id": self.profile_id, "lease": lease, "acquired": True}
+            return {"version": 1, "leases": leases[-500:]}
+
+        self.store.update_json("orchestration/leases.json", {"version": 1, "leases": []}, update)
+        lease = response.get("lease") if isinstance(response.get("lease"), dict) else {}
+        self._append_event("adaptive.orchestration.lease.acquire", {"lease_id": lease.get("lease_id"), "key": key})
+        return response
 
     def orchestration_lease_release(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         lease_id = str(args.get("lease_id") or args.get("id") or "").strip()
         key = str(args.get("key") or args.get("lease_key") or args.get("resource") or "").strip()
         holder = str(args.get("holder") or args.get("owner") or ctx.get("principal_id") or ctx.get("caller") or "").strip()
-        leases = self._leases()
-        for lease in leases:
-            matches_id = bool(lease_id and (lease.get("lease_id") == lease_id or lease.get("id") == lease_id))
-            matches_key = bool(key and lease.get("key") == key)
-            if not (matches_id or matches_key):
-                continue
-            if holder and lease.get("holder") != holder:
-                raise AdaptiveError("LEASE_HELD", "lease is held by another holder")
-            lease["status"] = "released"
-            lease["released_at"] = now_iso()
-            lease["updated_at"] = lease["released_at"]
-            self._write_leases(leases)
-            self._append_event("adaptive.orchestration.lease.release", {"lease_id": lease.get("lease_id")})
-            return {"profile_id": self.profile_id, "released": True, "lease": lease}
-        raise AdaptiveError("NOT_FOUND", "lease not found")
+        response: dict[str, Any] = {}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal response
+            leases = state.get("leases") if isinstance(state, dict) and isinstance(state.get("leases"), list) else []
+            for lease in leases:
+                matches_id = bool(lease_id and (lease.get("lease_id") == lease_id or lease.get("id") == lease_id))
+                matches_key = bool(key and lease.get("key") == key)
+                if not (matches_id or matches_key):
+                    continue
+                if holder and lease.get("holder") != holder:
+                    raise AdaptiveError("LEASE_HELD", "lease is held by another holder")
+                lease["status"] = "released"
+                lease["released_at"] = now_iso()
+                lease["updated_at"] = lease["released_at"]
+                response = {"profile_id": self.profile_id, "released": True, "lease": lease}
+                return {"version": 1, "leases": leases[-500:]}
+            raise AdaptiveError("NOT_FOUND", "lease not found")
+
+        self.store.update_json("orchestration/leases.json", {"version": 1, "leases": []}, update)
+        lease = response.get("lease") if isinstance(response.get("lease"), dict) else {}
+        self._append_event("adaptive.orchestration.lease.release", {"lease_id": lease.get("lease_id")})
+        return response
 
     def orchestration_lease_list(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
         include_inactive = bool(args.get("include_inactive", False))
         now = now_seconds()
-        leases = self._leases()
-        changed = False
-        for lease in leases:
-            if lease.get("status") == "active" and int(lease.get("expires_at") or 0) <= now:
-                lease["status"] = "expired"
-                changed = True
-        if changed:
-            self._write_leases(leases)
+        def update(state: Any) -> dict[str, Any]:
+            leases = state.get("leases") if isinstance(state, dict) and isinstance(state.get("leases"), list) else []
+            for lease in leases:
+                if lease.get("status") == "active" and int(lease.get("expires_at") or 0) <= now:
+                    lease["status"] = "expired"
+                    lease["updated_at"] = now_iso()
+            return {"version": 1, "leases": leases[-500:]}
+
+        state = self.store.update_json("orchestration/leases.json", {"version": 1, "leases": []}, update)
+        leases = state.get("leases") if isinstance(state, dict) and isinstance(state.get("leases"), list) else []
         if not include_inactive:
             leases = [lease for lease in leases if lease.get("status") == "active"]
         return {"profile_id": self.profile_id, "leases": leases}
@@ -761,18 +850,26 @@ class AdaptiveService:
             raise AdaptiveError("ACTIVATE_FAILED", str(exc)) from exc
 
     def pack_recommendations_preview(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-        del args, ctx
+        del ctx
+        recommendations = self._pack_recommendations(args)
         return {
             "profile_id": self.profile_id,
-            "recommendations": [],
-            "degraded": True,
-            "reason": "local marketplace recommendation provider is not registered",
+            "recommendations": recommendations,
+            "pack_recommendations": recommendations,
+            "count": len(recommendations),
+            "local_only": True,
         }
 
     def skill_candidate_list(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del args, ctx
         state = self.store.read_json("skills/candidates.json", {"version": 1, "candidates": []})
-        return {"profile_id": self.profile_id, "candidates": state.get("candidates", []), "degraded": True}
+        promoted = self.store.read_json("skills/promoted.json", {"version": 1, "skills": []})
+        return {
+            "profile_id": self.profile_id,
+            "candidates": state.get("candidates", []) if isinstance(state, dict) else [],
+            "promoted_skills": promoted.get("skills", []) if isinstance(promoted, dict) else [],
+            "local_only": True,
+        }
 
     def skill_candidate_promote(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
@@ -780,7 +877,9 @@ class AdaptiveService:
         candidate_id = str(args.get("candidate_id") or "").strip()
         if not candidate_id:
             raise AdaptiveError("INVALID_INPUT", "candidate_id is required")
-        return {"profile_id": self.profile_id, "candidate_id": candidate_id, "promoted": False, "degraded": True}
+        result = self._promote_skill_candidate(candidate_id, args)
+        self._append_event("adaptive.skill_candidate.promote", {"candidate_id": candidate_id, "skill_id": result["skill"]["skill_id"]})
+        return {"profile_id": self.profile_id, "candidate_id": candidate_id, "promoted": True, **result}
 
     def skill_candidate_rollback(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
@@ -788,7 +887,268 @@ class AdaptiveService:
         candidate_id = str(args.get("candidate_id") or "").strip()
         if not candidate_id:
             raise AdaptiveError("INVALID_INPUT", "candidate_id is required")
-        return {"profile_id": self.profile_id, "candidate_id": candidate_id, "rolled_back": False, "degraded": True}
+        result = self._rollback_skill_candidate(candidate_id, args)
+        self._append_event("adaptive.skill_candidate.rollback", {"candidate_id": candidate_id, "skill_id": result["skill"].get("skill_id")})
+        return {"profile_id": self.profile_id, "candidate_id": candidate_id, "rolled_back": True, **result}
+
+    def _execute_prepared_action(self, action: dict[str, Any], args: dict[str, Any]) -> dict[str, Any]:
+        operation = str(action.get("operation") or action.get("action_type") or "").strip()
+        arguments = action.get("arguments") if isinstance(action.get("arguments"), dict) else {}
+        if operation == "automation.update":
+            automation_id = str(
+                arguments.get("automationId")
+                or arguments.get("automation_id")
+                or args.get("automation_id")
+                or ""
+            ).strip()
+            patch = arguments.get("patch") if isinstance(arguments.get("patch"), dict) else {}
+            if not automation_id:
+                raise AdaptiveError("INVALID_INPUT", "automation update requires automationId")
+            automation = self._apply_automation_patch(automation_id, patch)
+            return {"status": "executed", "result": automation}
+        outbox = self._append_outbox("prepared_action.commit", {"action_id": action.get("action_id"), "operation": operation})
+        return {
+            "status": "queued",
+            "outbox_id": outbox["outbox_id"],
+            "result": {"queued": True, "outbox_id": outbox["outbox_id"]},
+            "continuation": {"kind": "prepared_action", "outbox_id": outbox["outbox_id"], "action_id": action.get("action_id")},
+        }
+
+    def _append_outbox(self, kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+        item = {
+            "outbox_id": str(uuid.uuid4()),
+            "profile_id": self.profile_id,
+            "kind": kind,
+            "payload": redact(payload),
+            "status": "pending",
+            "attempts": 0,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+
+        def update(state: Any) -> dict[str, Any]:
+            items = state.get("items") if isinstance(state, dict) and isinstance(state.get("items"), list) else []
+            items.append(item)
+            return {"version": 1, "items": items[-1000:]}
+
+        self.store.update_json("events/outbox.json", {"version": 1, "items": []}, update)
+        return item
+
+    def _automations(self) -> list[dict[str, Any]]:
+        state = self.store.read_json("automation/state.json", {"version": 1, "automations": []})
+        automations = state.get("automations") if isinstance(state, dict) and isinstance(state.get("automations"), list) else []
+        if automations:
+            return automations
+        return [
+            {
+                "id": "automation_daily_context",
+                "name": "Daily context refresh",
+                "description": "Prepare bounded repository and activity context for the next local session.",
+                "trigger": "daily",
+                "schedule": "local 09:00",
+                "enabled": False,
+                "risk": "medium",
+                "last_run": None,
+                "steps": [
+                    {"id": "repo_map", "label": "Refresh repository map", "capability_label": "context.repository_map", "requires_approval": False},
+                    {"id": "activity", "label": "Summarize activity", "capability_label": "activity.snapshot", "requires_approval": False},
+                ],
+            },
+            {
+                "id": "automation_release_notes",
+                "name": "Release notes draft",
+                "description": "Draft release notes from committed adaptive events and prepared actions.",
+                "trigger": "manual",
+                "schedule": "on demand",
+                "enabled": False,
+                "risk": "medium",
+                "last_run": None,
+                "steps": [
+                    {"id": "events", "label": "Replay durable events", "capability_label": "events.replay", "requires_approval": False},
+                    {"id": "draft", "label": "Prepare release note draft", "capability_label": "prepared_action.prepare", "requires_approval": True},
+                ],
+            },
+        ]
+
+    def _automation_templates(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": "template_review_gate",
+                "name": "Review-gated local workflow",
+                "description": "Prepare, simulate, and commit local-only changes behind explicit review.",
+            },
+            {
+                "id": "template_failure_success",
+                "name": "Failure-to-success capture",
+                "description": "Pair failing evidence with the verified fix before creating a skill candidate.",
+            },
+        ]
+
+    def _apply_automation_patch(self, automation_id: str, patch: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        allowed_keys = {"name", "description", "trigger", "schedule", "enabled", "risk", "last_run", "lastRun"}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal result
+            automations = state.get("automations") if isinstance(state, dict) and isinstance(state.get("automations"), list) else self._automations()
+            target = next((item for item in automations if item.get("id") == automation_id), None)
+            if target is None:
+                target = {
+                    "id": automation_id,
+                    "name": automation_id.replace("_", " ").title(),
+                    "description": "Locally prepared adaptive automation.",
+                    "trigger": "manual",
+                    "schedule": "on demand",
+                    "enabled": False,
+                    "risk": "medium",
+                    "steps": [],
+                }
+                automations.append(target)
+            for key, value in patch.items():
+                if key in allowed_keys:
+                    target["last_run" if key == "lastRun" else key] = redact(value)
+            target["updated_at"] = now_iso()
+            result = dict(target)
+            return {"version": 1, "automations": automations[-100:]}
+
+        self.store.update_json("automation/state.json", {"version": 1, "automations": self._automations()}, update)
+        self._append_event("adaptive.automation.update", {"automation_id": automation_id, "patch": patch})
+        return result
+
+    def _pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
+        answers = self._answers_from(args)
+        use_cases = answers.get("use_cases") if isinstance(answers.get("use_cases"), dict) else {}
+        actions = answers.get("actions") if isinstance(answers.get("actions"), dict) else {}
+        selected = {str(key) for key, enabled in use_cases.items() if enabled is not False}
+        desired: list[str] = []
+
+        def add(component_id: str) -> None:
+            if component_id not in desired:
+                desired.append(component_id)
+
+        if not selected or {"coding", "uc_coding", "repository", "frontend", "backend"} & selected:
+            add("coding")
+            add("context")
+            add("agent")
+        if {"research", "uc_research", "evidence"} & selected:
+            add("research")
+            add("knowledge")
+            add("context")
+        if {"automation", "uc_automation", "workflow"} & selected:
+            add("scheduler")
+            add("agent")
+            add("tool")
+        if answers.get("skill_learning_enabled"):
+            add("prompt")
+            add("memory")
+        if str(answers.get("memory_mode") or "") not in {"", "off"}:
+            add("memory")
+        if str(actions.get("browser_control") or "") in {"ask", "allow"}:
+            add("tool")
+        if str(actions.get("external_send") or "") in {"ask", "allow"}:
+            add("gateway")
+        if not desired:
+            desired.extend(["context", "memory", "tool"])
+
+        components = self._component_manifest()
+        recommendations: list[dict[str, Any]] = []
+        for component_id in desired:
+            component = components.get(component_id)
+            if not isinstance(component, dict):
+                continue
+            recommendations.append(
+                {
+                    "pack_id": component_id,
+                    "id": component_id,
+                    "label": str(component.get("id") or component_id).replace("_", " ").title(),
+                    "component_type": str(component.get("type") or component_id),
+                    "reason": f"Local defaultspack component supports {component_id.replace('_', ' ')} work under this operating profile.",
+                    "status": "recommended",
+                    "confidence": 0.82,
+                    "local_only": True,
+                }
+            )
+        return recommendations
+
+    def _component_manifest(self) -> dict[str, Any]:
+        manifest_path = Path(__file__).resolve().parents[2] / "ecosystem.json"
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        components = manifest.get("components")
+        return components if isinstance(components, dict) else {}
+
+    def _promote_skill_candidate(self, candidate_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        selected: dict[str, Any] = {}
+
+        def update_candidates(state: Any) -> dict[str, Any]:
+            nonlocal selected
+            candidates = state.get("candidates") if isinstance(state, dict) and isinstance(state.get("candidates"), list) else []
+            selected = next((item for item in candidates if item.get("candidate_id") == candidate_id or item.get("id") == candidate_id), {})
+            if not selected and isinstance(args.get("candidate"), dict):
+                selected = dict(args["candidate"])
+                selected.setdefault("candidate_id", candidate_id)
+                candidates.append(selected)
+            if not selected:
+                raise AdaptiveError("NOT_FOUND", "skill candidate not found")
+            selected["status"] = "promoted"
+            selected["promoted_at"] = now_iso()
+            selected["updated_at"] = selected["promoted_at"]
+            return {"version": 1, "candidates": candidates[-500:]}
+
+        self.store.update_json("skills/candidates.json", {"version": 1, "candidates": []}, update_candidates)
+        skill = {
+            "skill_id": str(args.get("skill_id") or selected.get("skill_id") or f"skill_{candidate_id}"),
+            "candidate_id": candidate_id,
+            "title": str(selected.get("title") or selected.get("name") or candidate_id),
+            "status": "active",
+            "source": redact(selected),
+            "promoted_at": now_iso(),
+            "updated_at": now_iso(),
+        }
+
+        def update_promoted(state: Any) -> dict[str, Any]:
+            skills = state.get("skills") if isinstance(state, dict) and isinstance(state.get("skills"), list) else []
+            existing = next((item for item in skills if item.get("skill_id") == skill["skill_id"]), None)
+            if existing is None:
+                skills.append(skill)
+            else:
+                existing.update(skill)
+            return {"version": 1, "skills": skills[-500:]}
+
+        self.store.update_json("skills/promoted.json", {"version": 1, "skills": []}, update_promoted)
+        return {"candidate": selected, "skill": skill}
+
+    def _rollback_skill_candidate(self, candidate_id: str, args: dict[str, Any]) -> dict[str, Any]:
+        skill_id = str(args.get("skill_id") or "").strip()
+        rolled_back: dict[str, Any] = {}
+
+        def update_promoted(state: Any) -> dict[str, Any]:
+            nonlocal rolled_back
+            skills = state.get("skills") if isinstance(state, dict) and isinstance(state.get("skills"), list) else []
+            for skill in skills:
+                if skill.get("candidate_id") == candidate_id or (skill_id and skill.get("skill_id") == skill_id):
+                    skill["status"] = "rolled_back"
+                    skill["rollback_reason"] = str(args.get("reason") or "").strip() or None
+                    skill["rolled_back_at"] = now_iso()
+                    skill["updated_at"] = skill["rolled_back_at"]
+                    rolled_back = dict(skill)
+                    return {"version": 1, "skills": skills[-500:]}
+            raise AdaptiveError("NOT_FOUND", "promoted skill not found")
+
+        self.store.update_json("skills/promoted.json", {"version": 1, "skills": []}, update_promoted)
+
+        def update_candidates(state: Any) -> dict[str, Any]:
+            candidates = state.get("candidates") if isinstance(state, dict) and isinstance(state.get("candidates"), list) else []
+            for candidate in candidates:
+                if candidate.get("candidate_id") == candidate_id or candidate.get("id") == candidate_id:
+                    candidate["status"] = "rolled_back"
+                    candidate["updated_at"] = now_iso()
+            return {"version": 1, "candidates": candidates[-500:]}
+
+        self.store.update_json("skills/candidates.json", {"version": 1, "candidates": []}, update_candidates)
+        return {"skill": rolled_back}
 
     # State helpers
 
@@ -799,10 +1159,17 @@ class AdaptiveService:
                 compile_operating_profile,
                 simulate_scenarios,
             )
+            from core_runtime.operating_profile.provenance import stable_sha256
         except Exception as exc:
             raise AdaptiveError("COMPILER_UNAVAILABLE", str(exc)) from exc
 
         answers = self._answers_from(args)
+        input_hash = stable_sha256(
+            {
+                "answers": answers,
+                "pack_recommendations": args.get("pack_recommendations") or args.get("recommendations"),
+            }
+        )
         profile = compile_operating_profile(
             answers,
             pack_recommendations=args.get("pack_recommendations") or args.get("recommendations"),
@@ -812,6 +1179,7 @@ class AdaptiveService:
             profile,
             actor=str(args.get("actor") or "local_user"),
             reason=str(args.get("reason") or "adaptive onboarding compile"),
+            input_hash=input_hash,
         )
         scenarios = [scenario.to_dict() for scenario in simulate_scenarios(profile)]
         return profile.to_dict(), plan, scenarios
@@ -948,6 +1316,7 @@ class AdaptiveService:
         payload: dict[str, Any],
         *,
         continuation: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         event = {
             "event_id": str(uuid.uuid4()),
@@ -955,6 +1324,9 @@ class AdaptiveService:
             "event_type": event_type,
             "payload": redact(payload),
             "continuation": redact(continuation) if continuation is not None else None,
+            "idempotency_key": idempotency_key,
+            "ack_state": "pending",
+            "delivery_status": "outbox_pending" if continuation is not None else "recorded",
             "created_at": now_iso(),
         }
         event["id"] = event["event_id"]

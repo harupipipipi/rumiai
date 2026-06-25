@@ -25,7 +25,7 @@ def compile_operating_profile(
     ]
 
     if normalized.explicit_actions:
-        policy = _meet_selected(policy, normalized.explicit_actions)
+        policy = _apply_selected(policy, normalized.explicit_actions)
         provenance.append(
             provenance_event(
                 "explicit_answers",
@@ -99,10 +99,10 @@ def _partial_ceiling(raw: Mapping[str, Any]) -> ActionPolicy:
     return ActionPolicy.from_mapping(levels)
 
 
-def _meet_selected(policy: ActionPolicy, selected: Mapping[str, Any]) -> ActionPolicy:
-    ceiling = {action_id: "allow" for action_id in ACTION_IDS}
-    ceiling.update(dict(selected))
-    return meet_policy(policy, ceiling)
+def _apply_selected(policy: ActionPolicy, selected: Mapping[str, Any]) -> ActionPolicy:
+    levels = policy.to_dict()
+    levels.update(dict(selected))
+    return ActionPolicy.from_mapping(levels)
 
 
 def _coerce_profile(raw: OperatingProfile | Mapping[str, Any] | None) -> OperatingProfile | None:

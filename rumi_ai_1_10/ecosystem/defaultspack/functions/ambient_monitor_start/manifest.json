@@ -1,10 +1,19 @@
 {
   "function_id": "ambient_monitor_start",
   "description": "Enable the ambient microphone and camera trigger monitor.",
-  "tags": ["ambient", "monitor"],
+  "tags": [
+    "ambient",
+    "monitor"
+  ],
   "risk": "high",
-  "requires": ["host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"],
-  "caller_requires": ["user.approved.high_risk"],
+  "requires": [
+    "host.microphone.capture",
+    "host.camera.capture",
+    "ambient.trigger.dispatch"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
@@ -19,12 +28,23 @@
     "additionalProperties": true
   },
   "output_schema": {
-    "type": "object"
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
   },
   "extensions": {
     "defaultspack": {
       "block_module": "blocks.ambient.monitor",
-      "default_args": {"action": "start"}
+      "default_args": {
+        "action": "start"
+      }
     }
   }
 }

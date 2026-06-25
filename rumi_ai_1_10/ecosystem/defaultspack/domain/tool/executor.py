@@ -5,6 +5,7 @@ from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import is_trusted_pack_id, requires_approval_for_security, unsupported_execution_reason
+from domain.adaptive.guard import guard_tool_execution, tool_guard_response
 from domain.tool_policy.audit import audit_tool_policy
 from domain.tool_policy.internal_context import (
     internal_tool_decision_allows,
@@ -135,6 +136,14 @@ class ToolExecutor:
                 "is_error": True,
                 "widget": None
             }
+        adaptive_decision = guard_tool_execution(
+            tool_name,
+            arguments if isinstance(arguments, dict) else {},
+            context if isinstance(context, dict) else {},
+            tool_def=tool_def if isinstance(tool_def, dict) else None,
+        )
+        if adaptive_decision is not None:
+            return tool_guard_response(adaptive_decision, tool_name)
         policy = policy_from_context(context if isinstance(context, dict) else {})
         if is_tool_rejected_by_policy(tool_def, policy):
             return {
@@ -909,6 +918,14 @@ class ToolExecutor:
             registry = getattr(self, "_registry", None)
             tool_def = registry.get(tool_name) if registry is not None else {}
             tool_def = tool_def or {}
+        adaptive_decision = guard_tool_execution(
+            tool_name,
+            arguments if isinstance(arguments, dict) else {},
+            context if isinstance(context, dict) else {},
+            tool_def=explicit_tool_def if isinstance(explicit_tool_def, dict) else tool_def,
+        )
+        if adaptive_decision is not None:
+            return tool_guard_response(adaptive_decision, tool_name)
         if tool_name == "web_search":
             from domain.research.providers import ExternalWebProvider
 

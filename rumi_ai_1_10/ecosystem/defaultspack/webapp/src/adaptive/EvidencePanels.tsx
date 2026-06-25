@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { AdaptiveContextBudget, AdaptiveEvidenceBundle, AdaptiveRepositoryMap } from "../lib/adaptiveApi";
 import { fetchAdaptiveContextBudget, fetchAdaptiveEvidence, fetchAdaptiveRepositoryMap } from "../lib/adaptiveApi";
 import {
+  AdaptiveEmptyState,
   ProgressBar,
   ResourceBanner,
   SurfaceHeader,
@@ -23,16 +24,19 @@ export function EvidenceViewer({ initialBundle }: { initialBundle?: AdaptiveEvid
     initialData: initialBundle,
     load: fetchAdaptiveEvidence,
   });
-  const [selectedId, setSelectedId] = useState(data.selectedId ?? data.items[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState(initialBundle?.selectedId ?? initialBundle?.items[0]?.id ?? demoEvidenceBundle.selectedId ?? demoEvidenceBundle.items[0]?.id ?? null);
   const selected = useMemo(
-    () => data.items.find((item) => item.id === selectedId) ?? data.items[0] ?? null,
-    [data.items, selectedId],
+    () => data?.items.find((item) => item.id === selectedId) ?? data?.items[0] ?? null,
+    [data, selectedId],
   );
 
   return (
     <section className={`${adaptivePageClass} ${adaptivePanelClass}`} aria-label="Adaptive evidence viewer">
       <SurfaceHeader eyebrow="Adaptive runtime" title="Evidence Viewer" description="Inspect source summaries, confidence, redactions, and linked proof for reviewable decisions." />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive evidence is unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
       <div className="grid border-t border-zinc-800/70 lg:grid-cols-[290px_1fr]">
         <div className={adaptiveSectionClass} role="tablist" aria-label="Evidence items">
           <div className="space-y-2">
@@ -87,6 +91,7 @@ export function EvidenceViewer({ initialBundle }: { initialBundle?: AdaptiveEvid
           )}
         </div>
       </div>
+      )}
     </section>
   );
 }
@@ -104,9 +109,12 @@ export function RepositoryMapPanel({ initialMap }: { initialMap?: AdaptiveReposi
         eyebrow="Adaptive runtime"
         title="Repository Map"
         description="Show owned adaptive files, read-only integration context, and repository risks before a task starts."
-        action={data.branch ? <ToneBadge tone="info">{data.branch}</ToneBadge> : null}
+        action={data?.branch ? <ToneBadge tone="info">{data.branch}</ToneBadge> : null}
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive repository mapping is unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
       <div className={adaptiveSectionClass}>
         <div className="mb-3 flex items-center gap-2">
           <GitBranch size={15} className="text-cyan-200" aria-hidden="true" />
@@ -143,6 +151,7 @@ export function RepositoryMapPanel({ initialMap }: { initialMap?: AdaptiveReposi
           </ul>
         </div>
       </div>
+      )}
     </section>
   );
 }
@@ -153,7 +162,7 @@ export function ContextBudgetPanel({ initialBudget }: { initialBudget?: Adaptive
     initialData: initialBudget,
     load: fetchAdaptiveContextBudget,
   });
-  const available = Math.max(0, data.limit - data.used - data.reserved);
+  const available = data ? Math.max(0, data.limit - data.used - data.reserved) : 0;
 
   return (
     <section className={`${adaptivePageClass} ${adaptivePanelClass}`} aria-label="Adaptive context budget">
@@ -161,9 +170,12 @@ export function ContextBudgetPanel({ initialBudget }: { initialBudget?: Adaptive
         eyebrow="Adaptive runtime"
         title="Context Budget"
         description="Track used, reserved, and available context before the runtime expands repository or evidence detail."
-        action={<ToneBadge tone={toneForRisk(data.riskLevel)}>{data.riskLevel}</ToneBadge>}
+        action={data ? <ToneBadge tone={toneForRisk(data.riskLevel)}>{data.riskLevel}</ToneBadge> : null}
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive context budget is unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
       <div className={adaptiveSectionClass}>
         <div className="mb-4 flex items-center gap-2">
           <Gauge size={15} className="text-cyan-200" aria-hidden="true" />
@@ -206,6 +218,7 @@ export function ContextBudgetPanel({ initialBudget }: { initialBudget?: Adaptive
           </ul>
         </div>
       </div>
+      )}
     </section>
   );
 }

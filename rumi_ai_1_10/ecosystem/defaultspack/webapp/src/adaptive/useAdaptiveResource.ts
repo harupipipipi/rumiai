@@ -1,16 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-export type AdaptiveResourceStatus = "demo" | "loading" | "live" | "degraded";
+export type AdaptiveResourceStatus = "placeholder" | "loading" | "live" | "error";
 
 export type AdaptiveResource<T> = {
-  data: T;
+  data: T | null;
   status: AdaptiveResourceStatus;
   error: string | null;
   refresh: () => void;
 };
 
 export function useAdaptiveResource<T>({
-  demoData,
   initialData,
   load,
   enabled = true,
@@ -20,10 +19,11 @@ export function useAdaptiveResource<T>({
   load: () => Promise<T>;
   enabled?: boolean;
 }): AdaptiveResource<T> {
-  const [data, setData] = useState<T>(initialData ?? demoData);
-  const [status, setStatus] = useState<AdaptiveResourceStatus>(initialData ? "live" : "demo");
+  const [data, setData] = useState<T | null>(initialData ?? null);
+  const [status, setStatus] = useState<AdaptiveResourceStatus>(initialData ? "live" : enabled ? "loading" : "placeholder");
   const [error, setError] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const hasLiveDataRef = useRef(Boolean(initialData));
 
   useEffect(() => {
     if (!enabled) return;
@@ -34,20 +34,23 @@ export function useAdaptiveResource<T>({
     void load()
       .then((nextData) => {
         if (cancelled) return;
+        hasLiveDataRef.current = true;
         setData(nextData);
         setStatus("live");
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setData(initialData ?? demoData);
-        setStatus("degraded");
+        if (!hasLiveDataRef.current) {
+          setData(null);
+        }
+        setStatus("error");
         setError(err instanceof Error ? err.message : String(err));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [demoData, enabled, initialData, load, nonce]);
+  }, [enabled, load, nonce]);
 
   return {
     data,

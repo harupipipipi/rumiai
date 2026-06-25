@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .context import adaptive_store_root, clean_profile_id
 
@@ -31,11 +33,34 @@ class AdaptiveStore:
         tmp.replace(path)
         return payload
 
+    def update_json(self, relative_path: str, default: Any, update: Callable[[Any], Any]) -> Any:
+        path = self._path(relative_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_fd, lock_path = self._acquire_lock(path)
+        try:
+            current = self.read_json(relative_path, default)
+            next_payload = update(current)
+            return self.write_json(relative_path, next_payload)
+        finally:
+            os.close(lock_fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
+
     def append_jsonl(self, relative_path: str, payload: dict[str, Any]) -> dict[str, Any]:
         path = self._path(relative_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        lock_fd, lock_path = self._acquire_lock(path)
+        try:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str) + "\n")
+        finally:
+            os.close(lock_fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass
         return payload
 
     def read_jsonl(self, relative_path: str, *, limit: int | None = None) -> list[dict[str, Any]]:
@@ -66,3 +91,23 @@ class AdaptiveStore:
         except ValueError as exc:
             raise ValueError("adaptive store path escaped profile root") from exc
         return candidate
+
+    def _acquire_lock(self, path: Path, *, timeout_seconds: float = 5.0, stale_seconds: float = 30.0) -> tuple[int, Path]:
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        deadline = time.monotonic() + timeout_seconds
+        while True:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.write(fd, str(os.getpid()).encode("ascii", errors="ignore"))
+                return fd, lock_path
+            except FileExistsError:
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                    if age > stale_seconds:
+                        lock_path.unlink()
+                        continue
+                except FileNotFoundError:
+                    continue
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"timed out waiting for adaptive store lock: {lock_path.name}")
+                time.sleep(0.025)

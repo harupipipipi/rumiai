@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { AdaptiveAutomation, AdaptiveAutomationState } from "../lib/adaptiveApi";
 import { fetchAdaptiveAutomations, updateAdaptiveAutomation } from "../lib/adaptiveApi";
 import {
+  AdaptiveEmptyState,
   ResourceBanner,
   SurfaceHeader,
   ToneBadge,
@@ -80,11 +81,11 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
   const [enabledOverrides, setEnabledOverrides] = useState<Record<string, boolean>>({});
   const [message, setMessage] = useState<string | null>(null);
   const automations = useMemo(
-    () => data.automations.map((automation) => ({
+    () => (data?.automations ?? []).map((automation) => ({
       ...automation,
       enabled: enabledOverrides[automation.id] ?? automation.enabled,
     })),
-    [data.automations, enabledOverrides],
+    [data, enabledOverrides],
   );
 
   const handleToggle = async (automation: AdaptiveAutomation) => {
@@ -120,6 +121,10 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
       {message ? <div className="border-t border-zinc-800/70 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-300">{message}</div> : null}
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive automations are unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
+        <>
 
       <div className="grid gap-0 border-t border-zinc-800/70 xl:grid-cols-[1fr_330px]">
         <div className={adaptiveSectionClass}>
@@ -172,6 +177,8 @@ export function AutomationStudio({ initialState }: { initialState?: AdaptiveAuto
           </div>
         </aside>
       </div>
+        </>
+      )}
     </section>
   );
 }

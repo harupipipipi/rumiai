@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import type { AdaptiveActivityItem, AdaptiveActivityState } from "../lib/adaptiveApi";
 import { fetchAdaptiveActivity } from "../lib/adaptiveApi";
 import {
+  AdaptiveEmptyState,
   MetricTile,
   ResourceBanner,
   SurfaceHeader,
@@ -65,9 +66,10 @@ export function ActivityCenter({ initialState }: { initialState?: AdaptiveActivi
   });
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const filteredItems = useMemo(() => {
-    if (filter === "all") return data.items;
-    return data.items.filter((item) => item.status === filter);
-  }, [data.items, filter]);
+    const items = data?.items ?? [];
+    if (filter === "all") return items;
+    return items.filter((item) => item.status === filter);
+  }, [data, filter]);
 
   return (
     <section className={`${adaptivePageClass} ${adaptivePanelClass}`} aria-label="Adaptive activity center">
@@ -83,6 +85,10 @@ export function ActivityCenter({ initialState }: { initialState?: AdaptiveActivi
         }
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive activity is unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
+        <>
 
       <div className={adaptiveSectionClass}>
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
@@ -160,6 +166,8 @@ export function ActivityCenter({ initialState }: { initialState?: AdaptiveActivi
           </div>
         </aside>
       </div>
+        </>
+      )}
     </section>
   );
 }

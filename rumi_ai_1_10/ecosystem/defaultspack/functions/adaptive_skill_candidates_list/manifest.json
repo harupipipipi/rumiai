@@ -1,0 +1,44 @@
+{
+  "function_id": "adaptive_skill_candidates_list",
+  "description": "List adaptive Skill candidates.",
+  "tags": [
+    "adaptive",
+    "skill"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.skill_candidates_list",
+    "defaultspack.adaptive.skill_candidates_list",
+    "defaults.adaptive.skill.candidates.list",
+    "defaultspack.adaptive.skill.candidates.list"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "skill_candidates_list"
+      }
+    }
+  }
+}

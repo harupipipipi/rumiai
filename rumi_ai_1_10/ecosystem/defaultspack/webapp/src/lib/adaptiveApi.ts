@@ -9,6 +9,8 @@ type ApiEnvelope<T> = {
   status?: "ok" | "error" | string;
   data?: T;
   error?: ApiErrorPayload;
+  code?: string;
+  message?: string;
 };
 
 export type AdaptiveTone = "neutral" | "good" | "warning" | "danger" | "info";
@@ -66,6 +68,7 @@ export type AdaptiveSettingsDiff = {
 };
 
 export type AdaptiveOnboardingState = {
+  profileId?: string | null;
   completedStepId?: string | null;
   useCases: AdaptiveUseCase[];
   role: AdaptiveRoleProfile;
@@ -238,6 +241,60 @@ export type AdaptiveContextBudget = {
   compressionPlan: string[];
 };
 
+export const adaptiveOnboardingActionIds = [
+  "discuss",
+  "propose",
+  "read_local",
+  "local_write",
+  "terminal",
+  "git_write",
+  "browser_control",
+  "computer_control",
+  "external_send",
+  "secrets_access",
+] as const;
+
+export type AdaptiveOnboardingActionId = (typeof adaptiveOnboardingActionIds)[number];
+export type AdaptiveOnboardingActionLevel = "deny" | "ask" | "allow";
+export type AdaptiveOnboardingPreset = "discussion_only" | "balanced_local" | "max_local_autonomy";
+
+export type AdaptiveOnboardingAnswers = {
+  profile_id: string;
+  preset_id: AdaptiveOnboardingPreset;
+  use_cases: Record<string, boolean>;
+  actions: Partial<Record<AdaptiveOnboardingActionId, AdaptiveOnboardingActionLevel>>;
+  memory_mode: string;
+  skill_learning_enabled: boolean;
+  skill_learning_review_required: boolean;
+  pack_recommendations: string[];
+};
+
+export type AdaptiveScenarioResult = {
+  scenarioId: string;
+  label: string;
+  actions: string[];
+  allowed: string[];
+  approvalRequired: string[];
+  blocked: string[];
+};
+
+export type AdaptiveOnboardingApiResult = {
+  profileId: string;
+  normalizedProfile?: Record<string, unknown>;
+  operatingProfile?: Record<string, unknown>;
+  plan?: Record<string, unknown>;
+  diagnostics: Record<string, unknown>[];
+  scenarioSimulation: AdaptiveScenarioResult[];
+  settingsDiff: AdaptiveSettingsDiff[];
+  localOnly: boolean;
+  wouldWrite: string[];
+  applied: boolean;
+  historyId?: string | null;
+  planId?: string | null;
+  path?: string | null;
+  raw: Record<string, unknown>;
+};
+
 function fallbackApiHeaders(method: string, headers?: HeadersInit): Headers {
   const nextHeaders = new Headers(headers);
   if (!nextHeaders.has("Content-Type")) {
@@ -289,6 +346,18 @@ function isEnvelope<T>(value: unknown): value is ApiEnvelope<T> {
   return isRecord(value) && ("status" in value || "data" in value || "error" in value);
 }
 
+function errorPayloadFrom(value: unknown): ApiErrorPayload | undefined {
+  if (!isRecord(value)) return undefined;
+  const nested = recordValue(value.error);
+  const code = nested.code ?? value.code;
+  const message = nested.message ?? value.message;
+  if (code === undefined && message === undefined) return undefined;
+  return {
+    code: code === undefined ? undefined : String(code),
+    message: message === undefined ? undefined : String(message),
+  };
+}
+
 export async function adaptiveApiRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await adaptiveFetch(path, init);
   let payload: unknown;
@@ -304,13 +373,13 @@ export async function adaptiveApiRequest<T>(path: string, init: RequestInit = {}
 
   if (isEnvelope<T>(payload)) {
     if (!response.ok || payload.status === "error") {
-      throw new Error(explainAdaptiveError(response.status, payload.error, response.statusText));
+      throw new Error(explainAdaptiveError(response.status, errorPayloadFrom(payload), response.statusText));
     }
     if ("data" in payload) return payload.data as T;
   }
 
   if (!response.ok) {
-    throw new Error(explainAdaptiveError(response.status, undefined, response.statusText));
+    throw new Error(explainAdaptiveError(response.status, errorPayloadFrom(payload), response.statusText));
   }
 
   return payload as T;
@@ -319,6 +388,43 @@ export async function adaptiveApiRequest<T>(path: string, init: RequestInit = {}
 export function fetchAdaptiveOnboarding(): Promise<AdaptiveOnboardingState> {
   return adaptiveApiRequest<Record<string, unknown>>("/api/onboarding/status", { cache: "no-store" })
     .then(toOnboardingState);
+}
+
+export function normalizeAdaptiveOnboardingAnswers(
+  answers: AdaptiveOnboardingAnswers,
+): Promise<AdaptiveOnboardingApiResult> {
+  return adaptiveApiRequest<Record<string, unknown>>("/api/onboarding/answers/normalize", {
+    method: "POST",
+    body: JSON.stringify({ draft: answers }),
+  }).then(toOnboardingApiResult);
+}
+
+export function compileAdaptiveOnboardingAnswers(
+  answers: AdaptiveOnboardingAnswers,
+): Promise<AdaptiveOnboardingApiResult> {
+  return adaptiveApiRequest<Record<string, unknown>>("/api/onboarding/compile", {
+    method: "POST",
+    body: JSON.stringify(onboardingAnswersPayload(answers)),
+  }).then(toOnboardingApiResult);
+}
+
+export function simulateAdaptiveOnboardingAnswers(
+  answers: AdaptiveOnboardingAnswers,
+): Promise<AdaptiveOnboardingApiResult> {
+  return adaptiveApiRequest<Record<string, unknown>>("/api/onboarding/simulate", {
+    method: "POST",
+    body: JSON.stringify(onboardingAnswersPayload(answers)),
+  }).then(toOnboardingApiResult);
+}
+
+export function applyAdaptiveOnboardingPlan(
+  answers: AdaptiveOnboardingAnswers,
+  plan?: Record<string, unknown>,
+): Promise<AdaptiveOnboardingApiResult> {
+  return adaptiveApiRequest<Record<string, unknown>>("/api/onboarding/apply", {
+    method: "POST",
+    body: JSON.stringify(plan ? { plan } : onboardingAnswersPayload(answers)),
+  }).then(toOnboardingApiResult);
 }
 
 export function fetchAdaptiveOperatingProfile(): Promise<AdaptiveOperatingProfile> {
@@ -350,7 +456,15 @@ export function updateAdaptiveAutomation(
   return adaptiveApiRequest<Record<string, unknown>>("/api/prepared-actions/prepare", {
     method: "POST",
     body: JSON.stringify({ operation: "automation.update", arguments: { automationId, patch } }),
-  }).then(() => ({ id: automationId, name: String(patch.name ?? automationId), description: "", trigger: "", schedule: "", enabled: patch.enabled ?? false, risk: "medium", steps: [] }));
+  }).then((prepared) => {
+    const action = recordValue(prepared.prepared_action ?? prepared.action);
+    const actionId = String(action.action_id ?? action.id ?? "");
+    if (!actionId) throw new Error("adaptive API did not return a prepared action id");
+    return adaptiveApiRequest<Record<string, unknown>>("/api/prepared-actions/commit", {
+      method: "POST",
+      body: JSON.stringify({ action_id: actionId }),
+    });
+  }).then((committed) => toAutomation(recordValue(committed.execution_result ?? committed.automation), automationId));
 }
 
 export function fetchAdaptiveEvidence(): Promise<AdaptiveEvidenceBundle> {
@@ -377,17 +491,138 @@ export function fetchAdaptiveContextBudget(): Promise<AdaptiveContextBudget> {
   });
 }
 
+function onboardingAnswersPayload(answers: AdaptiveOnboardingAnswers): Record<string, unknown> {
+  return {
+    answers,
+    pack_recommendations: answers.pack_recommendations.map((packId) => ({
+      pack_id: packId,
+      reason: "Selected during adaptive onboarding.",
+    })),
+  };
+}
+
+function toOnboardingApiResult(payload: Record<string, unknown>): AdaptiveOnboardingApiResult {
+  const operatingProfile = isRecord(payload.operating_profile)
+    ? payload.operating_profile
+    : isRecord(payload.profile)
+      ? payload.profile
+      : undefined;
+  const normalizedProfile = isRecord(payload.profile) ? payload.profile : undefined;
+  const plan = isRecord(payload.plan) ? payload.plan : undefined;
+  return {
+    profileId: String(payload.profile_id ?? operatingProfile?.profile_id ?? ""),
+    normalizedProfile,
+    operatingProfile,
+    plan,
+    diagnostics: Array.isArray(payload.diagnostics)
+      ? payload.diagnostics.filter(isRecord)
+      : [],
+    scenarioSimulation: adaptiveScenarioResultsFrom(payload.scenario_simulation),
+    settingsDiff: settingsDiffFrom(payload.settings_diff),
+    localOnly: payload.local_only === true,
+    wouldWrite: Array.isArray(payload.would_write) ? payload.would_write.map(String) : [],
+    applied: payload.applied === true,
+    historyId: payload.history_id === undefined ? null : String(payload.history_id),
+    planId: payload.plan_id === undefined ? plan?.plan_id === undefined ? null : String(plan.plan_id) : String(payload.plan_id),
+    path: payload.path === undefined ? null : String(payload.path),
+    raw: payload,
+  };
+}
+
+function adaptiveScenarioResultsFrom(value: unknown): AdaptiveScenarioResult[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => {
+    const record = recordValue(item);
+    const scenarioId = String(record.scenario_id ?? record.id ?? `scenario-${index}`);
+    return {
+      scenarioId,
+      label: titleCase(scenarioId),
+      actions: stringArray(record.actions),
+      allowed: stringArray(record.allowed),
+      approvalRequired: stringArray(record.approval_required ?? record.required_approvals),
+      blocked: stringArray(record.blocked),
+    };
+  });
+}
+
+function adaptiveScenariosFrom(value: unknown): AdaptiveScenario[] {
+  return adaptiveScenarioResultsFrom(value).map((scenario) => ({
+    id: scenario.scenarioId,
+    label: scenario.label,
+    prompt: scenario.actions.length ? `Actions: ${scenario.actions.join(", ")}` : "No scenario actions returned.",
+    expectedOutcome: [
+      scenario.allowed.length ? `Allowed: ${scenario.allowed.join(", ")}` : "",
+      scenario.blocked.length ? `Blocked: ${scenario.blocked.join(", ")}` : "",
+    ].filter(Boolean).join(" "),
+    requiredApprovals: scenario.approvalRequired,
+  }));
+}
+
+function settingsDiffFrom(value: unknown): AdaptiveSettingsDiff[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item, index) => {
+    const record = recordValue(item);
+    return {
+      id: String(record.id ?? `diff-${index}`),
+      label: String(record.label ?? record.id ?? `Setting ${index + 1}`),
+      before: String(record.before ?? ""),
+      after: String(record.after ?? ""),
+      tone: toneFrom(record.tone),
+    };
+  });
+}
+
+function onboardingPackRecommendations(
+  profile: Record<string, unknown>,
+  answers: Record<string, unknown>,
+): AdaptivePackRecommendation[] {
+  const raw = Array.isArray(profile.recommended_packs)
+    ? profile.recommended_packs
+    : Array.isArray(answers.pack_recommendations)
+      ? answers.pack_recommendations
+      : [];
+  return raw.map((item) => {
+    const id = String(item);
+    return {
+      id,
+      label: titleCase(id),
+      reason: "Selected or recommended for this operating profile.",
+      status: "recommended",
+    };
+  });
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function toneFrom(value: unknown): AdaptiveTone | undefined {
+  if (value === "neutral" || value === "good" || value === "warning" || value === "danger" || value === "info") {
+    return value;
+  }
+  return undefined;
+}
+
 function toOnboardingState(payload: Record<string, unknown>): AdaptiveOnboardingState {
-  const profile = recordValue(payload.operating_profile);
+  const profile = recordValue(payload.operating_profile ?? payload.profile);
   const sideEffect = recordValue(profile.side_effect_policy ?? profile.policy);
+  const answers = recordValue(profile.answers);
+  const useCases = recordValue(answers.use_cases);
   const uses = Array.isArray(profile.uses) ? profile.uses : [];
   const presetLabel = String(recordValue(profile.source).preset_id ?? profile.preset_id ?? "Guided");
+  const hasProfile = Object.keys(profile).length > 0;
   return {
-    completedStepId: profile ? "settings-diff" : null,
-    useCases: (uses.length ? uses : [{ id: "coding" }, { id: "research" }]).map((item) => {
+    profileId: String(payload.profile_id ?? profile.profile_id ?? "default"),
+    completedStepId: hasProfile ? "settings-diff" : null,
+    useCases: (Object.keys(useCases).length
+      ? Object.entries(useCases).map(([id, enabled]) => ({ id, enabled }))
+      : uses.length
+        ? uses
+        : [{ id: "coding" }, { id: "research" }]
+    ).map((item) => {
       const record = recordValue(item);
       const id = String(record.id ?? "coding");
-      return { id, label: titleCase(id), description: `${titleCase(id)} work`, enabled: true };
+      return { id, label: titleCase(id), description: `${titleCase(id)} work`, enabled: record.enabled !== false };
     }),
     role: {
       title: String(recordValue(profile.role_context).title ?? "Local operator"),
@@ -421,13 +656,13 @@ function toOnboardingState(payload: Record<string, unknown>): AdaptiveOnboarding
       sensitiveBoundaries: ["secrets", "external sends", "cross-profile sharing"],
     },
     skillLearning: {
-      enabled: Boolean(recordValue(profile.skill_learning_policy).enabled),
+      enabled: Boolean(answers.skill_learning_enabled ?? recordValue(profile.skill_learning_policy).enabled),
       sources: ["failure-to-success episodes", "verified tests", "user corrections"],
-      reviewRequired: true,
+      reviewRequired: answers.skill_learning_review_required !== false,
     },
-    packRecommendations: [],
-    scenarioSimulation: [],
-    settingsDiff: [],
+    packRecommendations: onboardingPackRecommendations(profile, answers),
+    scenarioSimulation: adaptiveScenariosFrom(payload.scenario_simulation),
+    settingsDiff: settingsDiffFrom(payload.settings_diff),
   };
 }
 
@@ -501,15 +736,52 @@ function toActivityState(payload: Record<string, unknown>): AdaptiveActivityStat
   };
 }
 
-function toAutomationState(_payload: Record<string, unknown>): AdaptiveAutomationState {
+function toAutomationState(payload: Record<string, unknown>): AdaptiveAutomationState {
+  const automations = Array.isArray(payload.automations) ? payload.automations : [];
+  const templates = Array.isArray(payload.automation_templates ?? payload.templates)
+    ? (payload.automation_templates ?? payload.templates) as unknown[]
+    : [];
+  const simulation = recordValue(payload.automation_simulation ?? payload.simulation);
   return {
-    automations: [],
-    templates: [],
+    automations: automations.map((item, index) => toAutomation(recordValue(item), `automation-${index}`)),
+    templates: templates.map((item, index) => {
+      const record = recordValue(item);
+      return {
+        id: String(record.id ?? `template-${index}`),
+        name: String(record.name ?? record.label ?? `Template ${index + 1}`),
+        description: String(record.description ?? ""),
+      };
+    }),
     simulation: {
-      scenario: "Draft automation",
-      result: "Automation remains inactive until reviewed and activated.",
-      approvals: ["webhook_create", "external_message"],
+      scenario: String(simulation.scenario ?? "Draft automation"),
+      result: String(simulation.result ?? "Automation remains inactive until reviewed and activated."),
+      approvals: stringArray(simulation.approvals),
     },
+  };
+}
+
+function toAutomation(record: Record<string, unknown>, fallbackId: string): AdaptiveAutomation {
+  const id = String(record.id ?? record.automation_id ?? fallbackId);
+  const steps = Array.isArray(record.steps) ? record.steps : [];
+  return {
+    id,
+    name: String(record.name ?? titleCase(id)),
+    description: String(record.description ?? ""),
+    trigger: String(record.trigger ?? "manual"),
+    schedule: String(record.schedule ?? "on demand"),
+    enabled: record.enabled === true,
+    risk: String(record.risk ?? "medium"),
+    lastRun: record.lastRun === undefined && record.last_run === undefined ? null : String(record.lastRun ?? record.last_run),
+    steps: steps.map((item, index) => {
+      const step = recordValue(item);
+      return {
+        id: String(step.id ?? `step-${index}`),
+        label: String(step.label ?? `Step ${index + 1}`),
+        capabilityLabel: step.capabilityLabel === undefined && step.capability_label === undefined ? null : String(step.capabilityLabel ?? step.capability_label),
+        internalToolId: step.internalToolId === undefined && step.internal_tool_id === undefined ? null : String(step.internalToolId ?? step.internal_tool_id),
+        requiresApproval: step.requiresApproval === true || step.requires_approval === true,
+      };
+    }),
   };
 }
 

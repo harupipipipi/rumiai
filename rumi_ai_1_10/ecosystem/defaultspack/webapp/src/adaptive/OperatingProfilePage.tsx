@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { AdaptiveOperatingProfile } from "../lib/adaptiveApi";
 import { fetchAdaptiveOperatingProfile, saveAdaptiveOperatingProfile } from "../lib/adaptiveApi";
 import {
+  AdaptiveEmptyState,
   ResourceBanner,
   SurfaceHeader,
   ToneBadge,
@@ -30,16 +31,22 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
     initialData: initialProfile,
     load: fetchAdaptiveOperatingProfile,
   });
-  const [summaryDraft, setSummaryDraft] = useState(data.summary);
-  const [autonomyDraft, setAutonomyDraft] = useState(data.autonomy.level);
+  const initialDraft = initialProfile ?? demoOperatingProfile;
+  const [summaryDraft, setSummaryDraft] = useState(initialDraft.summary);
+  const [autonomyDraft, setAutonomyDraft] = useState(initialDraft.autonomy.level);
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!data) return;
     setSummaryDraft(data.summary);
     setAutonomyDraft(data.autonomy.level);
-  }, [data.summary, data.autonomy.level]);
+  }, [data]);
 
   const handleSave = async () => {
+    if (!data) {
+      setSaveStatus("Cannot save until the adaptive API returns a profile.");
+      return;
+    }
     setSaveStatus("Saving profile draft...");
     try {
       await saveAdaptiveOperatingProfile({
@@ -63,9 +70,13 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
         eyebrow="Adaptive runtime"
         title="Operating Profile"
         description="Review the assistant role, autonomy, approval policy, privacy posture, and pack recommendations as one reusable profile."
-        action={<ToneBadge tone={status === "live" ? "good" : "warning"}>{status === "live" ? "Live" : "Demo"}</ToneBadge>}
+        action={<ToneBadge tone={status === "live" ? "good" : status === "error" ? "danger" : "warning"}>{status === "live" ? "Live" : status === "error" ? "API error" : "Placeholder"}</ToneBadge>}
       />
       <ResourceBanner status={status} error={error} onRefresh={refresh} />
+      {!data ? (
+        <AdaptiveEmptyState>Adaptive operating profile is unavailable until the API returns live state.</AdaptiveEmptyState>
+      ) : (
+        <>
 
       <div className="grid gap-0 border-t border-zinc-800/70 xl:grid-cols-[1.15fr_0.85fr]">
         <div className={adaptiveSectionClass}>
@@ -170,6 +181,8 @@ export function OperatingProfilePage({ initialProfile }: { initialProfile?: Adap
           </div>
         </aside>
       </div>
+        </>
+      )}
     </section>
   );
 }

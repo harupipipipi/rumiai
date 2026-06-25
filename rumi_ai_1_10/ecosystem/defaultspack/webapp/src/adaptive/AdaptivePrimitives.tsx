@@ -98,12 +98,15 @@ export function ResourceBanner({
       </div>
     );
   }
+  const isError = status === "error";
   return (
-    <div className="flex flex-col gap-2 border-t border-zinc-800/70 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-100 sm:flex-row sm:items-center sm:justify-between">
+    <div className={`flex flex-col gap-2 border-t border-zinc-800/70 px-3 py-2 text-[11px] sm:flex-row sm:items-center sm:justify-between ${
+      isError ? "bg-rose-500/5 text-rose-100" : "bg-amber-500/5 text-amber-100"
+    }`}>
       <span className="flex min-w-0 items-center gap-2">
         <AlertTriangle size={13} className="shrink-0" aria-hidden="true" />
         <span className="truncate">
-          {status === "degraded" ? "Using demo adaptive state because the API is unavailable." : "Demo adaptive state."}
+          {isError ? "Adaptive API error." : "Local placeholder adaptive state."}
           {error ? ` ${error}` : ""}
         </span>
       </span>
@@ -112,6 +115,14 @@ export function ResourceBanner({
           Retry
         </button>
       ) : null}
+    </div>
+  );
+}
+
+export function AdaptiveEmptyState({ children }: { children: ReactNode }) {
+  return (
+    <div className="border-t border-zinc-800/70 p-6 text-center text-sm leading-6 text-zinc-500">
+      {children}
     </div>
   );
 }

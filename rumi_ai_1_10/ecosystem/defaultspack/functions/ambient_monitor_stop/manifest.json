@@ -1,7 +1,10 @@
 {
   "function_id": "ambient_monitor_stop",
   "description": "Pause the ambient trigger monitor.",
-  "tags": ["ambient", "monitor"],
+  "tags": [
+    "ambient",
+    "monitor"
+  ],
   "risk": "low",
   "requires": [],
   "caller_requires": [],
@@ -19,12 +22,23 @@
     "additionalProperties": true
   },
   "output_schema": {
-    "type": "object"
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
   },
   "extensions": {
     "defaultspack": {
       "block_module": "blocks.ambient.monitor",
-      "default_args": {"action": "stop"}
+      "default_args": {
+        "action": "stop"
+      }
     }
   }
 }

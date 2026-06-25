@@ -6,6 +6,21 @@ import time
 from pathlib import Path
 from typing import Any
 
+from domain.coding.workspace_jail import (
+    WorkspaceJail,
+    WorkspacePathViolation,
+    WorkspaceRestrictedPath,
+)
+from domain.coding.workspace_policy import (
+    WorkspaceTrustRequired,
+    require_registered_trusted_workspace,
+)
+from domain.coding.workspace_resolver import (
+    WorkspacePathError,
+    WorkspaceResolutionError,
+    WorkspaceResolver,
+)
+
 
 SECRET_KEY_PARTS = (
     "authorization",
@@ -99,13 +114,32 @@ def adaptive_store_root(profile_id: str) -> Path:
 def workspace_root_from(args: dict[str, Any] | None, ctx: dict[str, Any] | None) -> Path:
     args = args if isinstance(args, dict) else {}
     ctx = ctx if isinstance(ctx, dict) else {}
-    raw = (
-        args.get("workspace_root")
-        or args.get("root")
-        or ctx.get("workspace_root")
-        or ctx.get("root")
-        or os.environ.get("RUMI_WORKSPACE_ROOT")
+    resolver = WorkspaceResolver()
+    request_selects_workspace = any(
+        args.get(key) not in (None, "") for key in ("workspace_id", "workspace_root", "root")
     )
+    context_selects_workspace = any(
+        ctx.get(key) not in (None, "") for key in ("workspace_id", "workspace_root", "root")
+    )
+    try:
+        if request_selects_workspace or context_selects_workspace:
+            resolution = resolver.resolve(args, ctx, allow_cwd_fallback=False)
+            trusted = require_registered_trusted_workspace(
+                resolution,
+                operation="adaptive.context",
+                store=resolver.store,
+            )
+            return Path(trusted.root_path).resolve()
+    except WorkspaceTrustRequired as exc:
+        raise AdaptiveError(exc.code, str(exc)) from exc
+    except WorkspacePathError as exc:
+        raise AdaptiveError(exc.code, str(exc)) from exc
+    except WorkspaceResolutionError as exc:
+        raise AdaptiveError(exc.code, str(exc)) from exc
+    except ValueError as exc:
+        raise AdaptiveError("WORKSPACE_INVALID", str(exc)) from exc
+
+    raw = os.environ.get("RUMI_WORKSPACE_ROOT")
     root = Path(raw).expanduser() if raw else Path.cwd()
     root = root.resolve()
     if not root.exists() or not root.is_dir():
@@ -114,13 +148,23 @@ def workspace_root_from(args: dict[str, Any] | None, ctx: dict[str, Any] | None)
 
 
 def resolve_under(root: Path, value: Any) -> Path:
-    rel = str(value or ".").strip() or "."
-    candidate = (root / rel).resolve() if not Path(rel).is_absolute() else Path(rel).resolve()
+    jail = WorkspaceJail(root)
     try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise AdaptiveError("PATH_OUTSIDE_WORKSPACE", "path is outside workspace") from exc
+        candidate = jail.resolve(value if str(value or "").strip() else ".")
+        jail.ensure_allowed(jail.relative(candidate), operation="adaptive context access")
+    except WorkspacePathViolation as exc:
+        raise AdaptiveError("PATH_OUTSIDE_WORKSPACE", str(exc)) from exc
+    except WorkspaceRestrictedPath as exc:
+        raise AdaptiveError("PATH_RESTRICTED", str(exc)) from exc
     return candidate
+
+
+def path_is_restricted(root: Path, path: Path) -> bool:
+    jail = WorkspaceJail(root)
+    try:
+        return bool(jail.restriction_reason(jail.relative(path)))
+    except Exception:
+        return True
 
 
 def coerce_int(value: Any, default: int, *, minimum: int, maximum: int) -> int:

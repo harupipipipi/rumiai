@@ -59,6 +59,20 @@ def test_lattice_meet_and_occupation_never_widens_permissions():
     assert child.policy.level_for("external_send").value == "deny"
 
 
+def test_explicit_answers_override_preset_defaults_but_not_ceilings():
+    profile = compile_operating_profile(
+        {
+            "profile_id": "p2b",
+            "preset": "balanced_local",
+            "actions": {"local_write": "allow", "terminal": "allow"},
+        },
+        system_ceiling={"terminal": "ask"},
+    )
+
+    assert profile.policy.level_for("local_write").value == "allow"
+    assert profile.policy.level_for("terminal").value == "ask"
+
+
 def test_malicious_pack_recommendation_cannot_widen_answers_or_system_ceiling():
     profile = compile_operating_profile(
         {
@@ -131,7 +145,11 @@ def test_signed_plan_apply_and_undo_persist_profile_scoped_files(tmp_path: Path)
     store = OperatingProfilePlanStore(manager)
     initial = compile_operating_profile({"profile_id": "p8", "preset": "discussion_only"})
     first_plan = store.create_plan("p8", initial, reason="initial")
-    assert first_plan["signature"]
+    assert first_plan["signature"].startswith("hmac-sha256:")
+    assert first_plan["expires_at"] > first_plan["issued_at"]
+    assert first_plan["settings_revision"]
+    assert first_plan["pack_digest"]
+    assert len(first_plan["input_hash"]) == 64
     store.apply_plan(first_plan)
 
     target = compile_operating_profile({"profile_id": "p8", "preset": "max_local_autonomy"})
@@ -140,6 +158,19 @@ def test_signed_plan_apply_and_undo_persist_profile_scoped_files(tmp_path: Path)
     tampered["reason"] = "tampered"
     with pytest.raises(ValueError):
         store.apply_plan(tampered)
+
+    expired = store.create_plan("p8", target, reason="expired", expires_in_seconds=-1)
+    with pytest.raises(ValueError, match="expired"):
+        store.apply_plan(expired)
+
+    stale_initial = compile_operating_profile({"profile_id": "p8_stale", "preset": "discussion_only"})
+    store.apply_plan(store.create_plan("p8_stale", stale_initial, reason="stale initial"))
+    stale_target = compile_operating_profile({"profile_id": "p8_stale", "preset": "max_local_autonomy"})
+    stale_plan = store.create_plan("p8_stale", stale_target, reason="stale revision")
+    stale_alternate = compile_operating_profile({"profile_id": "p8_stale", "preset": "balanced_local"})
+    store.apply_plan(store.create_plan("p8_stale", stale_alternate, reason="intermediate"))
+    with pytest.raises(ValueError, match="settings revision"):
+        store.apply_plan(stale_plan)
 
     apply_result = store.apply_plan(second_plan)
     active_path = Path(apply_result["path"])

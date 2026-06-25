@@ -1,6 +1,6 @@
 {
   "function_id": "tool_task_board_agent_session",
-  "description": "Link Kanban-backed task board cards to defaultspack coding agent sessions.",
+  "description": "Link task board cards to defaultspack coding agent sessions.",
   "tags": [
     "tool",
     "planning",
@@ -9,8 +9,7 @@
   ],
   "risk": "medium",
   "requires": [
-    "tool.task_board",
-    "coding.agent.session.create"
+    "tool.task.board.agent.session"
   ],
   "caller_requires": [],
   "host_execution": false,
@@ -19,8 +18,8 @@
   "vocab_aliases": [
     "defaults.tool.task_board_agent_session",
     "defaultspack.tool.task_board_agent_session",
-    "defaults.tool.task_board.agent.session",
-    "defaultspack.tool.task_board.agent.session"
+    "defaults.tool.task.board.agent.session",
+    "defaultspack.tool.task.board.agent.session"
   ],
   "input_schema": {
     "type": "object",
