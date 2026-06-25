@@ -1,0 +1,73 @@
+{
+  "id": "tool_ui_compile_plan",
+  "description": "Compile a requested page into a recursive Rumi UI tree, leaf contracts, and optional .rumi/ui artifacts.",
+  "config": {
+    "tool_id": "tool_ui_compile_plan",
+    "name": "tool_ui_compile_plan",
+    "summary": "Compile recursive UI tree and contracts.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
+    "tags": [
+      "frontend",
+      "ui",
+      "planner",
+      "recursive-ui-compiler"
+    ],
+    "metadata": {
+      "keywords": [
+        "ui compiler",
+        "recursive ui",
+        "component contract",
+        "compression",
+        "frontend planning"
+      ]
+    },
+    "ui": {
+      "group_id": "frontend",
+      "group_label": "Frontend",
+      "group_icon": "layout",
+      "item_icon": "layout",
+      "widget_kind": "tool_toggle",
+      "composer_label": "UI Compile Plan",
+      "composer_description": "Split a page request into bounded UI leaf contracts.",
+      "composer_icon": "layout"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ui_tree": {
+            "type": "object",
+            "description": "Root UI node with optional children or splitHints."
+          },
+          "config": {
+            "type": "object",
+            "description": "Optional recursive UI compiler config and budgets."
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "persist": {
+            "type": "boolean",
+            "description": "When true, write constitution, blueprint, contracts, and report to .rumi/ui."
+          },
+          "artifact_root": {
+            "type": "string",
+            "description": "Workspace root or explicit .rumi/ui root for persisted artifacts."
+          }
+        },
+        "required": [
+          "ui_tree"
+        ]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.ui_compiler.tool:ui_compile_plan"
+    }
+  }
+}

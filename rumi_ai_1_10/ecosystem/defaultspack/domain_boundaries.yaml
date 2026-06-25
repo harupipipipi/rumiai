@@ -279,6 +279,9 @@ domains:
   ui_surfaces:
     may_import: []
     path: domain/ui_surfaces
+  ui_compiler:
+    may_import: []
+    path: domain/ui_compiler
   vision:
     may_import:
     - domain/chat
