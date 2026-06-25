@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../settings/api_config_store.dart';
@@ -9,23 +11,36 @@ class DeviceIdentity {
     required this.deviceId,
     required this.deviceLabel,
     required this.publicKey,
+    this.privateKey = '',
+    this.keyType = 'ed25519',
   });
 
   final String deviceId;
   final String deviceLabel;
   final String publicKey;
+  final String privateKey;
+  final String keyType;
+
+  bool get canSignApproval =>
+      keyType == 'ed25519' &&
+      publicKey.trim().startsWith('ed25519:') &&
+      privateKey.trim().isNotEmpty;
 
   Map<String, dynamic> toJson() => {
-        'deviceId': deviceId,
-        'deviceLabel': deviceLabel,
-        'publicKey': publicKey,
-      };
+    'deviceId': deviceId,
+    'deviceLabel': deviceLabel,
+    'publicKey': publicKey,
+    'privateKey': privateKey,
+    'keyType': keyType,
+  };
 
   factory DeviceIdentity.fromJson(Map<String, dynamic> json) {
     return DeviceIdentity(
       deviceId: json['deviceId'] as String? ?? '',
       deviceLabel: json['deviceLabel'] as String? ?? '',
       publicKey: json['publicKey'] as String? ?? '',
+      privateKey: json['privateKey'] as String? ?? '',
+      keyType: json['keyType'] as String? ?? 'ed25519',
     );
   }
 }
@@ -53,12 +68,16 @@ class PairedDevice {
   final String pcLabel;
   final String pairingId;
 
+  String get clientToken => deviceToken;
+  String get approverToken => approvalToken;
+
   bool get canReadPcConversations => scopes.contains('chat.read');
   bool get canWritePcConversations => scopes.contains('chat.write');
   bool get canObservePcTools => scopes.contains('tools.observe');
   bool get canApprovePcTools =>
       approvalToken.trim().isNotEmpty &&
-      approvalScopes.contains('tools.approve');
+      approvalScopes.contains('authority.request.approve') &&
+      approvalScopes.contains('authority.request.deny');
   bool get canRequestCredentialCopy => scopes.contains('credentials.request');
   bool get isConfigured =>
       deviceToken.trim().isNotEmpty && pcBaseUrl.trim().isNotEmpty;
@@ -66,28 +85,36 @@ class PairedDevice {
   String get connectionId => pairedDeviceConnectionId(this);
 
   PcConnection toPcConnection() => PcConnection(
-        baseUrl: pcBaseUrl,
-        token: deviceToken,
-        approvalToken: approvalToken,
-      );
+    baseUrl: pcBaseUrl,
+    token: deviceToken,
+    approvalToken: approvalToken,
+  );
 
   Map<String, dynamic> toJson() => {
-        'deviceId': deviceId,
-        'deviceToken': deviceToken,
-        'approvalToken': approvalToken,
-        'label': label,
-        'scopes': scopes,
-        'approvalScopes': approvalScopes,
-        'pcBaseUrl': pcBaseUrl,
-        'pcLabel': pcLabel,
-        'pairingId': pairingId,
-      };
+    'deviceId': deviceId,
+    'deviceToken': deviceToken,
+    'approvalToken': approvalToken,
+    'clientToken': deviceToken,
+    'approverToken': approvalToken,
+    'label': label,
+    'scopes': scopes,
+    'approvalScopes': approvalScopes,
+    'pcBaseUrl': pcBaseUrl,
+    'pcLabel': pcLabel,
+    'pairingId': pairingId,
+  };
 
   factory PairedDevice.fromJson(Map<String, dynamic> json) {
     return PairedDevice(
       deviceId: json['deviceId'] as String? ?? '',
-      deviceToken: json['deviceToken'] as String? ?? '',
-      approvalToken: json['approvalToken'] as String? ?? '',
+      deviceToken:
+          (json['clientToken'] as String?) ??
+          (json['deviceToken'] as String?) ??
+          '',
+      approvalToken:
+          (json['approverToken'] as String?) ??
+          (json['approvalToken'] as String?) ??
+          '',
       label: json['label'] as String? ?? '',
       scopes: (json['scopes'] as List? ?? []).map((e) => e.toString()).toList(),
       approvalScopes: (json['approvalScopes'] as List? ?? [])
@@ -193,6 +220,8 @@ class PairingV2Payload {
     required this.baseUrls,
     required this.serverPublicKey,
     required this.expiresAt,
+    this.manifestUrl = '',
+    this.roles = const [],
   });
 
   final String pairingId;
@@ -200,24 +229,48 @@ class PairingV2Payload {
   final List<String> baseUrls;
   final String serverPublicKey;
   final int expiresAt;
+  final String manifestUrl;
+  final List<String> roles;
 
   bool get isExpired => DateTime.now().millisecondsSinceEpoch > expiresAt;
 
   factory PairingV2Payload.fromJson(Map<String, dynamic> json) {
+    final rawBaseUrls =
+        (json['baseUrls'] as List?) ??
+        (json['base_urls'] as List?) ??
+        [
+          if ((json['baseUrl'] as String? ?? '').trim().isNotEmpty)
+            json['baseUrl'],
+          if ((json['base_url'] as String? ?? '').trim().isNotEmpty)
+            json['base_url'],
+        ];
     return PairingV2Payload(
-      pairingId: json['pairingId'] as String? ?? '',
+      pairingId:
+          json['pairingId'] as String? ?? json['pairing_id'] as String? ?? '',
       code: json['code'] as String? ?? '',
-      baseUrls:
-          (json['baseUrls'] as List? ?? []).map((e) => e.toString()).toList(),
-      serverPublicKey: json['serverPublicKey'] as String? ?? '',
-      expiresAt: (json['expiresAt'] as num?)?.toInt() ?? 0,
+      baseUrls: rawBaseUrls.map((e) => e.toString()).toList(),
+      serverPublicKey:
+          json['serverPublicKey'] as String? ??
+          json['server_public_key'] as String? ??
+          '',
+      expiresAt:
+          (json['expiresAt'] as num? ?? json['expires_at'] as num?)?.toInt() ??
+          0,
+      manifestUrl:
+          json['manifestUrl'] as String? ??
+          json['manifest_url'] as String? ??
+          '',
+      roles: (json['roles'] as List? ?? [])
+          .map((e) => e.toString())
+          .where((e) => e.trim().isNotEmpty)
+          .toList(),
     );
   }
 }
 
 class MobileDeviceStore {
   MobileDeviceStore({SecureKeyValueStorage? storage})
-      : _storage = storage ?? PlatformSecureStorage();
+    : _storage = storage ?? PlatformSecureStorage();
 
   static const _identityKey = 'rumi.device.identity.v1';
   static const _pairedKey = 'rumi.paired_device.v1';
@@ -231,22 +284,54 @@ class MobileDeviceStore {
     try {
       final raw = await _storage.read(_identityKey);
       if (raw != null && raw.trim().isNotEmpty) {
-        return DeviceIdentity.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+        final identity = DeviceIdentity.fromJson(
+          jsonDecode(raw) as Map<String, dynamic>,
+        );
+        if (identity.deviceId.trim().isNotEmpty && identity.canSignApproval) {
+          return identity;
+        }
       }
     } catch (_) {
       // fall through to create new
     }
-    final identity = DeviceIdentity(
-      deviceId: 'mobile-${_uuid.v4().substring(0, 12)}',
-      deviceLabel: 'Rumi Mobile',
-      publicKey: 'pk-${_uuid.v4()}',
-    );
+    final identity = await _createIdentity();
     try {
       await _storage.write(_identityKey, jsonEncode(identity.toJson()));
     } catch (_) {
       // ignore secure storage failures
     }
     return identity;
+  }
+
+  Future<String> signApprovalPayloadHash(String payloadHash) async {
+    final identity = await loadOrCreateIdentity();
+    if (!identity.canSignApproval) {
+      throw StateError('approval signing key is not available');
+    }
+    final publicKeyBytes = _decodePublicKey(identity.publicKey);
+    final keyPair = SimpleKeyPairData(
+      _decodeBase64Url(identity.privateKey),
+      publicKey: SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519),
+      type: KeyPairType.ed25519,
+    );
+    final signature = await Ed25519().sign(
+      _hexToBytes(payloadHash),
+      keyPair: keyPair,
+    );
+    return _encodeBase64Url(signature.bytes);
+  }
+
+  Future<DeviceIdentity> _createIdentity() async {
+    final keyPair = await Ed25519().newKeyPair();
+    final keyPairData = await keyPair.extract();
+    final publicKey = await keyPair.extractPublicKey();
+    return DeviceIdentity(
+      deviceId: 'mobile-${_uuid.v4().substring(0, 12)}',
+      deviceLabel: 'Rumi Mobile',
+      publicKey: 'ed25519:${_encodeBase64Url(publicKey.bytes)}',
+      privateKey: _encodeBase64Url(keyPairData.bytes),
+      keyType: 'ed25519',
+    );
   }
 
   Future<PairedDevice?> loadPairedDevice() async {
@@ -340,4 +425,32 @@ class MobileDeviceStore {
       // ignore
     }
   }
+}
+
+String _encodeBase64Url(List<int> bytes) =>
+    base64Url.encode(bytes).replaceAll('=', '');
+
+Uint8List _decodeBase64Url(String value) {
+  final text = value.trim();
+  return base64Url.decode(
+    text.padRight(text.length + ((4 - text.length % 4) % 4), '='),
+  );
+}
+
+Uint8List _decodePublicKey(String value) {
+  final text = value.trim();
+  final raw = text.startsWith('ed25519:') ? text.substring(8) : text;
+  return _decodeBase64Url(raw);
+}
+
+Uint8List _hexToBytes(String value) {
+  final text = value.trim();
+  if (text.length.isOdd) {
+    throw FormatException('invalid hex length');
+  }
+  final out = Uint8List(text.length ~/ 2);
+  for (var i = 0; i < out.length; i++) {
+    out[i] = int.parse(text.substring(i * 2, i * 2 + 2), radix: 16);
+  }
+  return out;
 }

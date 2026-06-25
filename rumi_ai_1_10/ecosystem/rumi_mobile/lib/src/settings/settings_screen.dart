@@ -236,7 +236,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'chat.read',
           'chat.write',
           'tools.observe',
-          'tools.approve',
+          'authority.request.list',
+          'authority.request.read',
+          'authority.request.approve',
+          'authority.request.deny',
           'credentials.request',
         ],
       );

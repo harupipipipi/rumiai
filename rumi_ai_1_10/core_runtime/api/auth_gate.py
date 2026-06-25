@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import hmac
 import logging
 from http import cookies
@@ -12,6 +13,25 @@ logger = logging.getLogger(__name__)
 
 
 class AuthGateMixin:
+    @staticmethod
+    def _authority_device_scope(method: str | None, path: str | None) -> str:
+        method_upper = str(method or "").upper()
+        path_value = str(path or "")
+        if not path_value.startswith("/api/authority/"):
+            return ""
+        if method_upper == "GET" and path_value == "/api/authority/requests":
+            return "authority.request.list"
+        if method_upper == "GET" and path_value.startswith("/api/authority/requests/"):
+            return "authority.request.read"
+        if method_upper == "POST" and path_value.startswith("/api/authority/requests/"):
+            if path_value.endswith("/approve"):
+                return "authority.request.approve"
+            if path_value.endswith("/deny"):
+                return "authority.request.deny"
+            if path_value.endswith("/challenge"):
+                return "authority.request.approve"
+        return ""
+
     def _check_bearer_auth(
         self,
         method: str | None = None,
@@ -26,25 +46,49 @@ class AuthGateMixin:
         if token.startswith("dtk_"):
             self._authenticated_device_id = None
             self._authenticated_scopes = []
+            self._authenticated_principal = None
             if not allow_device or not method or not path:
-                return False
-            if not str(path).startswith("/api/mobile/v1/"):
                 return False
             try:
                 from ecosystem.defaultspack.domain.mobile.contract import required_device_scope
                 from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
 
-                required_scope = required_device_scope(method, path)
-                if not required_scope:
-                    return False
                 store = DeviceStore()
                 device = store.verify_token(token)
                 if device is None:
                     return False
-                if required_scope not in set(device.scopes):
+                scopes = set(device.scopes)
+                if str(path).startswith("/api/mobile/v1/"):
+                    required_scope = required_device_scope(method, path)
+                elif str(path).startswith("/api/authority/"):
+                    required_scope = self._authority_device_scope(method, path)
+                    if str(path).endswith("/challenge") and not (
+                        {"authority.request.approve", "authority.request.deny"} & scopes
+                    ):
+                        return False
+                else:
+                    return False
+                if not required_scope:
+                    return False
+                if required_scope not in scopes:
                     return False
                 self._authenticated_device_id = device.device_id
                 self._authenticated_scopes = list(device.scopes)
+                role = (
+                    "mobile_approver"
+                    if any(scope.startswith("authority.request.") for scope in scopes)
+                    else "mobile_client"
+                )
+                self._authenticated_principal = {
+                    "token_id": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                    "profile_id": getattr(device, "profile_id", "") or "default",
+                    "surface_id": "mobile-approver" if role == "mobile_approver" else "mobile",
+                    "device_id": device.device_id,
+                    "role": role,
+                    "audiences": ["kernel_api"],
+                    "scopes": sorted(scopes),
+                    "core_role": False,
+                }
                 store.touch(device.device_id)
                 return True
             except Exception:

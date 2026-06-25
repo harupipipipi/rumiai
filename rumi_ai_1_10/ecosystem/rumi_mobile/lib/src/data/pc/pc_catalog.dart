@@ -44,13 +44,15 @@ class ProviderEntry {
       catalogOnly: json['catalog_only'] as bool? ?? false,
       defaultModel: json['default_model'] as String? ?? '',
       defaultBaseUrl: json['default_base_url'] as String? ?? '',
-      defaultModelFor: (json['default_model_for'] as Map? ?? const {})
-          .map((key, value) => MapEntry(key.toString(), value.toString())),
+      defaultModelFor: (json['default_model_for'] as Map? ?? const {}).map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      ),
       capabilities: (json['capabilities'] as List? ?? [])
           .map((e) => e.toString())
           .toList(),
-      envVars:
-          (json['env_vars'] as List? ?? []).map((e) => e.toString()).toList(),
+      envVars: (json['env_vars'] as List? ?? [])
+          .map((e) => e.toString())
+          .toList(),
       baseUrlEnvs: (json['base_url_envs'] as List? ?? [])
           .map((e) => e.toString())
           .toList(),
@@ -59,21 +61,21 @@ class ProviderEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'provider_id': providerId,
-        'display_name': displayName,
-        'kind': kind,
-        'configured': configured,
-        'openai_compatible': openaiCompatible,
-        'local': local,
-        'catalog_only': catalogOnly,
-        'default_model': defaultModel,
-        'default_base_url': defaultBaseUrl,
-        'default_model_for': defaultModelFor,
-        'capabilities': capabilities,
-        'env_vars': envVars,
-        'base_url_envs': baseUrlEnvs,
-        'configured_api_count': configuredApiCount,
-      };
+    'provider_id': providerId,
+    'display_name': displayName,
+    'kind': kind,
+    'configured': configured,
+    'openai_compatible': openaiCompatible,
+    'local': local,
+    'catalog_only': catalogOnly,
+    'default_model': defaultModel,
+    'default_base_url': defaultBaseUrl,
+    'default_model_for': defaultModelFor,
+    'capabilities': capabilities,
+    'env_vars': envVars,
+    'base_url_envs': baseUrlEnvs,
+    'configured_api_count': configuredApiCount,
+  };
 }
 
 class ModelEntry {
@@ -253,6 +255,65 @@ class TemplateEntry {
   }
 }
 
+class PcManifestRoute {
+  const PcManifestRoute({
+    required this.method,
+    required this.path,
+    required this.feature,
+    required this.deviceScope,
+    required this.pcEquivalent,
+  });
+
+  final String method;
+  final String path;
+  final String feature;
+  final String deviceScope;
+  final String pcEquivalent;
+
+  factory PcManifestRoute.fromJson(Map<String, dynamic> json) {
+    return PcManifestRoute(
+      method: json['method'] as String? ?? '',
+      path: json['path'] as String? ?? '',
+      feature: json['feature'] as String? ?? '',
+      deviceScope: json['device_scope'] as String? ?? '',
+      pcEquivalent: json['pc_equivalent'] as String? ?? '',
+    );
+  }
+}
+
+class PcMobileManifest {
+  const PcMobileManifest({
+    required this.kind,
+    required this.version,
+    required this.routes,
+    required this.authorityRoutes,
+  });
+
+  final String kind;
+  final int version;
+  final List<PcManifestRoute> routes;
+  final List<PcManifestRoute> authorityRoutes;
+
+  factory PcMobileManifest.fromJson(Map<String, dynamic> json) {
+    List<PcManifestRoute> parseRoutes(Object? value) {
+      return (value as List? ?? const [])
+          .whereType<Map>()
+          .map(
+            (item) => PcManifestRoute.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .where((route) => !route.path.startsWith('/api/authority/'))
+          .toList();
+    }
+
+    return PcMobileManifest(
+      kind: json['kind'] as String? ?? '',
+      version: (json['version'] as num?)?.toInt() ?? 0,
+      routes: parseRoutes(json['routes']),
+      authorityRoutes: parseRoutes(json['authority_routes']),
+    );
+  }
+}
+
 class PcRuntimeSettings {
   const PcRuntimeSettings({
     required this.preferredModel,
@@ -357,8 +418,9 @@ class PcCommandItem {
     return PcCommandItem(
       id: json['id'] as String? ?? '',
       name: json['name'] as String? ?? '',
-      aliases:
-          (json['aliases'] as List? ?? []).map((e) => e.toString()).toList(),
+      aliases: (json['aliases'] as List? ?? [])
+          .map((e) => e.toString())
+          .toList(),
       label: json['label'] as String? ?? json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
       category: json['category'] as String? ?? 'chat',
@@ -417,7 +479,8 @@ class PcModelCandidate {
       displayName: json['display_name'] as String? ?? '',
       providerDisplayName: json['provider_display_name'] as String? ?? '',
       label: json['label'] as String? ?? '',
-      configured: json['configured'] as bool? ??
+      configured:
+          json['configured'] as bool? ??
           json['api_key_configured'] as bool? ??
           false,
     );
@@ -511,12 +574,14 @@ class PcCatalog {
 
   List<ProfileEntry> get selectableProfiles {
     final list = profiles
-        .where((p) =>
-            p.effectiveProfileId.isNotEmpty &&
-            (p.type == 'chat' ||
-                p.type == 'reasoning' ||
-                p.type == 'vision' ||
-                p.supportsToolCalling))
+        .where(
+          (p) =>
+              p.effectiveProfileId.isNotEmpty &&
+              (p.type == 'chat' ||
+                  p.type == 'reasoning' ||
+                  p.type == 'vision' ||
+                  p.supportsToolCalling),
+        )
         .toList();
     list.sort((a, b) {
       final favorite = (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0);

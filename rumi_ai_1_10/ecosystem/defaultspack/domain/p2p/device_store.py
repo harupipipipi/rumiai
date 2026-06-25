@@ -21,7 +21,13 @@ DEVICE_ACTIVE = "active"
 DEVICE_REVOKED = "revoked"
 
 DEFAULT_SCOPES = ["chat.read", "chat.write", "tools.observe"]
-APPROVER_SCOPES = ["tools.approve"]
+APPROVER_SCOPES = [
+    "authority.request.list",
+    "authority.request.read",
+    "authority.request.approve",
+    "authority.request.deny",
+]
+LEGACY_APPROVER_SCOPES = {"tools.approve"}
 ALL_SCOPES = DEFAULT_SCOPES + APPROVER_SCOPES + ["credentials.request"]
 
 
@@ -55,9 +61,32 @@ def _string_list(values: Any) -> list[str]:
     return sorted({str(v).strip() for v in values if str(v).strip()})
 
 
+def _split_device_scopes(scopes: list[str]) -> tuple[list[str], list[str]]:
+    normal: list[str] = []
+    approver: list[str] = []
+    wants_approver = False
+    allowed_normal = set(DEFAULT_SCOPES + ["credentials.request"])
+    allowed_approver = set(APPROVER_SCOPES)
+    for scope in scopes:
+        if scope in LEGACY_APPROVER_SCOPES:
+            wants_approver = True
+            continue
+        if scope in allowed_approver:
+            wants_approver = True
+            if scope not in approver:
+                approver.append(scope)
+            continue
+        if scope in allowed_normal and scope not in normal:
+            normal.append(scope)
+    if wants_approver and not approver:
+        approver = list(APPROVER_SCOPES)
+    return sorted(normal), sorted(approver)
+
+
 @dataclass
 class DeviceRecord:
     device_id: str
+    profile_id: str = "default"
     label: str = ""
     public_key: str = ""
     fingerprint: str = ""
@@ -76,18 +105,24 @@ class DeviceRecord:
     def from_dict(cls, value: dict[str, Any]) -> "DeviceRecord":
         raw_scopes = _string_list(value.get("scopes")) or list(DEFAULT_SCOPES)
         approval_token_hash = str(value.get("approval_token_hash") or "")
-        approval_scopes = _string_list(value.get("approval_scopes"))
-        if approval_token_hash and not approval_scopes:
-            approval_scopes = list(APPROVER_SCOPES)
+        explicit_approval_scopes = _string_list(value.get("approval_scopes"))
+        normal_scopes, legacy_approval_scopes = _split_device_scopes(raw_scopes)
+        normalized_approval_scopes: list[str] = []
+        if approval_token_hash:
+            if explicit_approval_scopes:
+                _normal_from_approval, normalized_approval_scopes = _split_device_scopes(explicit_approval_scopes)
+            else:
+                normalized_approval_scopes = legacy_approval_scopes or list(APPROVER_SCOPES)
         return cls(
             device_id=str(value.get("device_id") or value.get("id") or ""),
+            profile_id=str(value.get("profile_id") or "default"),
             label=str(value.get("label") or ""),
             public_key=str(value.get("public_key") or value.get("device_public_key") or ""),
             fingerprint=str(value.get("fingerprint") or ""),
             token_hash=str(value.get("token_hash") or ""),
-            scopes=[scope for scope in raw_scopes if scope not in set(APPROVER_SCOPES)],
+            scopes=normal_scopes,
             approval_token_hash=approval_token_hash,
-            approval_scopes=approval_scopes,
+            approval_scopes=normalized_approval_scopes,
             status=str(value.get("status") or DEVICE_ACTIVE),
             pairing_id=str(value.get("pairing_id") or ""),
             confirmation_code=str(value.get("confirmation_code") or ""),
@@ -99,6 +134,7 @@ class DeviceRecord:
     def as_dict(self) -> dict[str, Any]:
         return {
             "device_id": self.device_id,
+            "profile_id": self.profile_id,
             "label": self.label,
             "public_key": self.public_key[:16] + "…" if len(self.public_key) > 16 else self.public_key,
             "fingerprint": self.fingerprint,
@@ -152,6 +188,7 @@ class DeviceStore:
         fingerprint: str = "",
         scopes: list[str] | None = None,
         pairing_id: str = "",
+        profile_id: str = "default",
     ) -> tuple[DeviceRecord, str, str]:
         """Create or refresh split device tokens.
 
@@ -166,18 +203,14 @@ class DeviceStore:
         now = _now_ms()
         plaintext = _generate_token()
         requested_scopes = _string_list(scopes) if scopes else list(DEFAULT_SCOPES)
-        allowed_scopes = set(ALL_SCOPES)
-        resolved = [scope for scope in requested_scopes if scope in allowed_scopes]
-        if not resolved and not scopes:
-            resolved = list(DEFAULT_SCOPES)
-        resolved_scopes = [scope for scope in resolved if scope not in set(APPROVER_SCOPES)]
-        approval_scopes = [scope for scope in resolved if scope in set(APPROVER_SCOPES)]
+        resolved_scopes, approval_scopes = _split_device_scopes(requested_scopes)
         if not resolved_scopes and not scopes:
             resolved_scopes = list(DEFAULT_SCOPES)
         approval_plaintext = _generate_token() if approval_scopes else ""
         code = f"{_confirmation_emoji()}・{secrets.randbelow(90) + 10}"
         device = DeviceRecord(
             device_id=clean_id,
+            profile_id=str(profile_id or "default").strip() or "default",
             label=label,
             public_key=public_key,
             fingerprint=fingerprint,
@@ -204,6 +237,7 @@ class DeviceStore:
         fingerprint: str = "",
         scopes: list[str] | None = None,
         pairing_id: str = "",
+        profile_id: str = "default",
     ) -> tuple[DeviceRecord, str]:
         """Create or refresh the normal device token.
 
@@ -218,6 +252,7 @@ class DeviceStore:
             fingerprint=fingerprint,
             scopes=scopes,
             pairing_id=pairing_id,
+            profile_id=profile_id,
         )
         return device, plaintext
 
@@ -284,6 +319,7 @@ class DeviceStore:
             self._data["devices"][did]["token_hash"] = d.token_hash
             self._data["devices"][did]["approval_token_hash"] = d.approval_token_hash
             self._data["devices"][did]["public_key"] = d.public_key
+            self._data["devices"][did]["profile_id"] = d.profile_id
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(
             json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",

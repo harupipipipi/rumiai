@@ -289,7 +289,13 @@ class TestCheckAuth:
         )
         _device, token, approval_token = DeviceStore(tmp_path).issue_tokens(
             "mobile-1",
-            scopes=["chat.read", "tools.approve"],
+            scopes=[
+                "chat.read",
+                "authority.request.list",
+                "authority.request.read",
+                "authority.request.approve",
+                "authority.request.deny",
+            ],
         )
         handler = _make_handler(
             headers=_make_headers(Authorization=f"Bearer {token}"),
@@ -305,10 +311,16 @@ class TestCheckAuth:
         assert handler._check_auth("GET", "/api/mobile/v1/conversations") is True
         assert handler._authenticated_device_id == "mobile-1"
         assert handler._check_auth("POST", "/api/mobile/v1/conversations/c1/stream") is False
-        assert handler._check_auth("POST", "/api/mobile/v1/approvals/a1/approve") is False
-        assert approval_handler._check_auth("POST", "/api/mobile/v1/approvals/a1/approve") is True
+        assert handler._check_auth("GET", "/api/authority/requests") is False
+        assert approval_handler._check_auth("GET", "/api/authority/requests") is True
         assert approval_handler._authenticated_device_id == "mobile-1"
+        assert approval_handler._check_auth("POST", "/api/authority/requests/auth_1/challenge") is True
+        assert approval_handler._check_auth("POST", "/api/authority/requests/auth_1/approve") is True
+        assert approval_handler._check_auth("POST", "/api/authority/requests/auth_1/deny") is True
+        assert approval_handler._check_auth("GET", "/api/mobile/v1/conversations") is False
+        assert approval_handler._check_auth("POST", "/api/packs/defaultspack/approve") is False
         assert handler._check_auth("GET", "/api/packs") is False
+        assert handler._check_auth("POST", "/api/packs/defaultspack/approve") is False
 
     def test_panel_session_auth_success_for_get(self) -> None:
         panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")

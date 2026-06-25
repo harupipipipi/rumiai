@@ -191,6 +191,8 @@ class PcConnection {
   final String token;
   final String approvalToken;
 
+  String get clientToken => token;
+  String get approverToken => approvalToken;
   bool get isConfigured => baseUrl.trim().isNotEmpty && token.trim().isNotEmpty;
   bool get canApprove => approvalToken.trim().isNotEmpty;
 

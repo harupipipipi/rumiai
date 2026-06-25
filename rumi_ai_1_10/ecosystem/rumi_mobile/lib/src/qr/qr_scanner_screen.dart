@@ -7,11 +7,7 @@ import 'qr_payload.dart';
 enum QrScanPurpose { apiImport, pcConnect, general }
 
 class QrScannerScreen extends StatefulWidget {
-  const QrScannerScreen({
-    super.key,
-    required this.purpose,
-    this.hint,
-  });
+  const QrScannerScreen({super.key, required this.purpose, this.hint});
 
   final QrScanPurpose purpose;
   final String? hint;
@@ -48,10 +44,10 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   String get _title => switch (widget.purpose) {
-        QrScanPurpose.apiImport => 'API/モデルをQRで取り込む',
-        QrScanPurpose.pcConnect => 'PCにQRで接続',
-        QrScanPurpose.general => 'QRスキャン',
-      };
+    QrScanPurpose.apiImport => 'API/モデルをQRで取り込む',
+    QrScanPurpose.pcConnect => 'PCにQRで接続',
+    QrScanPurpose.general => 'QRスキャン',
+  };
 
   bool _matchesPurpose(QrPayload payload) {
     switch (widget.purpose) {
@@ -115,8 +111,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.qr_code_scanner,
-                  color: Colors.white70, size: 48),
+              const Icon(
+                Icons.qr_code_scanner,
+                color: Colors.white70,
+                size: 48,
+              ),
               const SizedBox(height: 14),
               Text(
                 _scanError ?? 'カメラを開いてQRをスキャンします',
@@ -159,8 +158,11 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.no_photography_outlined,
-                color: Colors.white70, size: 42),
+            const Icon(
+              Icons.no_photography_outlined,
+              color: Colors.white70,
+              size: 42,
+            ),
             const SizedBox(height: 12),
             const Text(
               'この環境ではカメラを開始できませんでした',
@@ -212,8 +214,10 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(widget.hint ?? _title,
-                style: Theme.of(context).textTheme.bodySmall),
+            Text(
+              widget.hint ?? _title,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
             const SizedBox(height: 12),
             _showManualInput ? _buildManualInput() : _buildScanner(),
             const SizedBox(height: 24),
@@ -243,7 +247,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   label: const Text('ペアリングv2'),
                   onPressed: () {
                     _controller.text =
-                        '{"kind":"rumi_pair_v2","pairingId":"pair-abc","code":"7KMX-PQ2F","baseUrls":["http://192.168.1.10:8765"],"serverPublicKey":"","expiresAt":1781830000000}';
+                        '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"pair-abc","code":"7KMX-PQ2F","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"","expiresAt":1781830000000}';
                   },
                 ),
               ],

@@ -11,8 +11,11 @@ import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 const _pc = PcConnection(baseUrl: 'http://192.168.1.10:8765', token: 'tok');
 
 http.Response _ok(Map<String, dynamic> data) {
-  return http.Response(jsonEncode({'status': 'ok', 'data': data}), 200,
-      headers: {'content-type': 'application/json'});
+  return http.Response(
+    jsonEncode({'status': 'ok', 'data': data}),
+    200,
+    headers: {'content-type': 'application/json'},
+  );
 }
 
 void main() {
@@ -53,7 +56,7 @@ void main() {
             'env_vars': ['OPENAI_API_KEY'],
             'base_url_envs': ['OPENAI_BASE_URL'],
             'configured_api_count': 1,
-          }
+          },
         ],
         'models': [
           {
@@ -72,7 +75,7 @@ void main() {
             'speed_tier': 'fast',
             'cost_tier': 'medium',
             'capability_tags': ['thinking', 'vision'],
-          }
+          },
         ],
         'profiles': [],
         'templates': [
@@ -83,7 +86,7 @@ void main() {
             'source_type': 'prompt',
             'tags': ['writing'],
             'updated_at': '2026-01-01T00:00:00Z',
-          }
+          },
         ],
         'runtime': {
           'preferred_model': 'openai/gpt-5.4',
@@ -100,17 +103,19 @@ void main() {
             'visibility': 'default',
             'risk': 'low',
             'args': [
-              {'name': 'query', 'type': 'string'}
+              {'name': 'query', 'type': 'string'},
             ],
-            'execution': {'type': 'model_command', 'action': 'select'}
-          }
+            'execution': {'type': 'model_command', 'action': 'select'},
+          },
         ],
       });
       expect(catalog.providers.length, 1);
       expect(catalog.providers.first.providerId, 'openai');
       expect(catalog.providers.first.configured, isTrue);
       expect(
-          catalog.providers.first.defaultBaseUrl, 'https://api.openai.com/v1');
+        catalog.providers.first.defaultBaseUrl,
+        'https://api.openai.com/v1',
+      );
       expect(catalog.providers.first.defaultModelFor['chat'], 'gpt-5.4');
       expect(catalog.models.first.modelId, 'gpt-5.4');
       expect(catalog.models.first.maxContext, 128000);
@@ -122,6 +127,31 @@ void main() {
       expect(catalog.runtime.deepthinkEnabled, isTrue);
       expect(catalog.commands.single.name, 'model');
       expect(catalog.commands.single.args.single.name, 'query');
+    });
+
+    test('PcMobileManifest drops authority routes from mobile route list', () {
+      final manifest = PcMobileManifest.fromJson({
+        'kind': 'rumi_mobile_manifest_v1',
+        'version': 1,
+        'routes': [
+          {'method': 'GET', 'path': '/api/mobile/v1/bootstrap'},
+          {'method': 'POST', 'path': '/api/authority/requests/a1/approve'},
+        ],
+        'authority_routes': [
+          {'method': 'POST', 'path': '/api/authority/requests/a1/approve'},
+        ],
+      });
+
+      expect(manifest.kind, 'rumi_mobile_manifest_v1');
+      expect(
+        manifest.routes.map((r) => r.path),
+        contains('/api/mobile/v1/bootstrap'),
+      );
+      expect(
+        manifest.routes.any((r) => r.path.startsWith('/api/authority/')),
+        isFalse,
+      );
+      expect(manifest.authorityRoutes, isEmpty);
     });
   });
 
@@ -154,17 +184,52 @@ void main() {
       expect(b.capabilities.chat, isTrue);
     });
 
+    test(
+      'fetchMobileManifest calls /api/mobile/v1/manifest with client token',
+      () async {
+        String? authHeader;
+        String? requestedPath;
+        final client = MockClient((request) async {
+          authHeader = request.headers['Authorization'];
+          requestedPath = request.url.path;
+          return _ok({
+            'kind': 'rumi_mobile_manifest_v1',
+            'version': 1,
+            'routes': [
+              {'method': 'GET', 'path': '/api/mobile/v1/bootstrap'},
+            ],
+            'authority_routes': [],
+          });
+        });
+
+        final pcClient = PcCatalogClient(client: client);
+        final manifest = await pcClient.fetchMobileManifest(_pc);
+        pcClient.close();
+
+        expect(authHeader, 'Bearer tok');
+        expect(requestedPath, '/api/mobile/v1/manifest');
+        expect(manifest.routes.single.path, '/api/mobile/v1/bootstrap');
+      },
+    );
+
     test('fetchCapabilities passes provider filter as query param', () async {
       Map<String, String>? query;
       final client = MockClient((request) async {
         query = request.url.queryParameters;
-        return _ok(
-            {'providers': [], 'models': [], 'profiles': [], 'templates': []});
+        return _ok({
+          'providers': [],
+          'models': [],
+          'profiles': [],
+          'templates': [],
+        });
       });
 
       final pcClient = PcCatalogClient(client: client);
-      await pcClient.fetchCapabilities(_pc,
-          providerFilter: 'openai', includeTemplates: false);
+      await pcClient.fetchCapabilities(
+        _pc,
+        providerFilter: 'openai',
+        includeTemplates: false,
+      );
       pcClient.close();
 
       expect(query?['provider'], 'openai');
@@ -175,15 +240,19 @@ void main() {
       final client = MockClient((request) async {
         return _ok({
           'providers': [
-            {'provider_id': 'groq', 'display_name': 'Groq', 'configured': false}
+            {
+              'provider_id': 'groq',
+              'display_name': 'Groq',
+              'configured': false,
+            },
           ],
           'models': [
             {
               'id': 'groq/m1',
               'provider_id': 'groq',
               'model_id': 'm1',
-              'display_name': 'M1'
-            }
+              'display_name': 'M1',
+            },
           ],
           'profiles': [],
           'templates': [],
@@ -212,7 +281,7 @@ void main() {
             'category': 'model',
             'visibility': 'default',
             'risk': 'low',
-            'execution': {'type': 'model_command', 'action': 'select'}
+            'execution': {'type': 'model_command', 'action': 'select'},
           },
           'executed': true,
           'selected_model': {'profile_id': 'openai/gpt-5.4'},
@@ -239,24 +308,28 @@ void main() {
     test('throws on non-ok status', () async {
       final client = MockClient((request) async {
         return http.Response(
-            jsonEncode({
-              'status': 'error',
-              'error': {'message': 'bad'}
-            }),
-            500);
+          jsonEncode({
+            'status': 'error',
+            'error': {'message': 'bad'},
+          }),
+          500,
+        );
       });
       final pcClient = PcCatalogClient(client: client);
-      expect(() => pcClient.fetchBootstrap(_pc),
-          throwsA(isA<PcCatalogFetchException>()));
+      expect(
+        () => pcClient.fetchBootstrap(_pc),
+        throwsA(isA<PcCatalogFetchException>()),
+      );
     });
 
     test('throws when pc not configured', () async {
       final client = MockClient((request) async => _ok({}));
       final pcClient = PcCatalogClient(client: client);
       expect(
-          () => pcClient
-              .fetchBootstrap(const PcConnection(baseUrl: '', token: '')),
-          throwsA(isA<PcCatalogFetchException>()));
+        () =>
+            pcClient.fetchBootstrap(const PcConnection(baseUrl: '', token: '')),
+        throwsA(isA<PcCatalogFetchException>()),
+      );
     });
   });
 }

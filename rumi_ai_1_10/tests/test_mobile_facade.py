@@ -24,6 +24,22 @@ def test_mobile_bootstrap_returns_server_and_capability_flags():
     assert "cursor" in data
 
 
+def test_mobile_manifest_exposes_facade_without_authority_routes():
+    from blocks.mobile.manifest import run
+
+    result = run({}, None)
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["kind"] == "rumi_mobile_manifest_v1"
+    routes = data["routes"]
+    assert routes
+    assert all(route["path"].startswith("/api/mobile/v1/") for route in routes)
+    assert all(not route["path"].startswith("/api/authority/") for route in routes)
+    assert data["authority_routes"] == []
+    assert "mobile_client" in data["token_roles"]
+    assert "mobile_approver" in data["token_roles"]
+
+
 def test_mobile_capabilities_returns_provider_and_model_catalogs():
     from blocks.mobile.capabilities import run
 

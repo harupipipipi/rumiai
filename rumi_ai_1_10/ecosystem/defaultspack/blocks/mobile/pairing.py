@@ -42,6 +42,37 @@ def _settings(input_data, context):
     return s
 
 
+def _profile_id(input_data, context) -> str:
+    args = _merged(input_data)
+    for value in (
+        args.get("profile_id"),
+        args.get("runtime_profile_id"),
+        (context or {}).get("profile_id") if isinstance(context, dict) else None,
+        os.environ.get("RUMI_PROFILE_ID"),
+        os.environ.get("RUMI_ACTIVE_PROFILE_ID"),
+    ):
+        cleaned = str(value or "").strip()
+        if cleaned:
+            return cleaned
+    return "default"
+
+
+def _register_authority_device_key(*, profile_id: str, device_id: str, public_key: str) -> dict:
+    if not str(public_key or "").strip():
+        return {"registered": False, "reason": "missing_public_key"}
+    try:
+        from core_runtime.authority import get_authority_service
+
+        result = get_authority_service().register_device_key(
+            profile_id=profile_id,
+            device_id=device_id,
+            public_key=public_key,
+        )
+        return {"registered": bool(result.get("success")), "device_key": result.get("device_key")}
+    except Exception as exc:
+        return {"registered": False, "reason": str(exc)}
+
+
 def claim(input_data, context=None):
     args = _merged(input_data)
     pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
@@ -81,19 +112,30 @@ def approve(input_data, context=None):
 
     # Issue scoped device token
     device_store = DeviceStore(s.store_path)
+    profile_id = _profile_id(input_data, context)
     device, token, approval_token = device_store.issue_tokens(
         result["device_id"],
         label=result.get("device_label") or "",
         public_key=result.get("device_public_key") or "",
         scopes=result.get("scopes"),
         pairing_id=pairing_id,
+        profile_id=profile_id,
+    )
+    key_registration = _register_authority_device_key(
+        profile_id=profile_id,
+        device_id=result["device_id"],
+        public_key=result.get("device_public_key") or "",
     )
     return ok({
         "pairing": result["pairing"],
         "device": device.as_dict(),
         "device_token": token,  # plaintext — returned only once
         "approval_token": approval_token,
+        "client_access_token": token,
+        "approver_access_token": approval_token,
         "approval_scopes": list(device.approval_scopes),
+        "profile_id": profile_id,
+        "device_key": key_registration,
     })
 
 
@@ -145,18 +187,29 @@ def status(input_data, context=None):
             ds = DeviceStore(s.store_path)
             device = ds.get_device(session.claimed_device_id)
             if device and device.active and device.pairing_id == pairing_id:
+                profile_id = _profile_id(input_data, context)
                 device, token, approval_token = ds.issue_tokens(
                     session.claimed_device_id,
                     label=session.claimed_device_label,
                     public_key=session.claimed_device_public_key,
                     scopes=session.capabilities,
                     pairing_id=pairing_id,
+                    profile_id=profile_id,
+                )
+                key_registration = _register_authority_device_key(
+                    profile_id=profile_id,
+                    device_id=session.claimed_device_id,
+                    public_key=session.claimed_device_public_key,
                 )
                 result["device_token"] = token
                 result["approval_token"] = approval_token
+                result["client_access_token"] = token
+                result["approver_access_token"] = approval_token
                 result["device"] = device.as_dict()
                 result["scopes"] = list(device.scopes)
                 result["approval_scopes"] = list(device.approval_scopes)
+                result["profile_id"] = profile_id
+                result["device_key"] = key_registration
                 result["confirmation_code"] = device.confirmation_code
                 result["pc_base_url"] = _detect_base_url(input_data, context)
                 result["pc_label"] = _pc_label()

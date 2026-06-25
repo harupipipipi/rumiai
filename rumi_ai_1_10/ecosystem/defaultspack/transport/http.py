@@ -972,24 +972,45 @@ class DefaultsHttpServer:
         try:
             from core_runtime.authority import get_authority_service
 
-            return ok(
-                get_authority_service().list_requests(str(request_data.get("status") or "all"))
-            )
+            return ok(get_authority_service().list_requests(
+                str(request_data.get("status") or "all"),
+                actor_principal=request_data.get("_authenticated_principal"),
+            ))
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
     def _handle_authority_request(self, request_data, path_params):
-        del request_data
         request_id = str((path_params or {}).get("request_id") or "").strip()
         try:
             from core_runtime.authority import get_authority_service
 
-            result = get_authority_service().get_request(request_id)
+            result = get_authority_service().get_request(
+                request_id,
+                actor_principal=request_data.get("_authenticated_principal"),
+            )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
         if not result.get("success"):
             return self._authority_http_error(result, "AUTHORITY_NOT_FOUND")
         return ok(result.get("request"))
+
+    def _handle_authority_challenge(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().create_approval_challenge(
+                request_id,
+                decision=str(request_data.get("decision") or "approve"),
+                scope=str(request_data.get("scope") or "once"),
+                expires_in_seconds=request_data.get("expires_in_seconds"),
+                actor_principal=request_data.get("_authenticated_principal"),
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
 
     def _handle_authority_test_request(self, request_data, path_params):
         del path_params
@@ -1122,7 +1143,11 @@ class DefaultsHttpServer:
             "config": config,
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
+            "actor_principal": request_data.get("_authenticated_principal"),
         }
+        attestation = request_data.get("attestation")
+        if isinstance(attestation, dict):
+            approval_kwargs["attestation"] = attestation
         if related_permissions:
             approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
         try:
@@ -1153,6 +1178,8 @@ class DefaultsHttpServer:
                 reason=str(request_data.get("reason") or ""),
                 persist=bool(request_data.get("persist") or request_data.get("remember")),
                 ui_operator=ui_operator,
+                actor_principal=request_data.get("_authenticated_principal"),
+                attestation=request_data.get("attestation") if isinstance(request_data.get("attestation"), dict) else None,
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")

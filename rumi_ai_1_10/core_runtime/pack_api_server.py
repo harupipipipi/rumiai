@@ -237,6 +237,7 @@ class PackAPIHandler(
     _request_auth_mode: Optional[str] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
+    _authenticated_principal: Optional[dict[str, Any]] = None
     _authenticated_device_id: Optional[str] = None
     _authenticated_scopes: list[str] = []
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
@@ -811,6 +812,8 @@ class PackAPIHandler(
             request_data.update(body)
         for url_param, data_key in (path_inject or {}).items():
             request_data[data_key] = (path_params or {}).get(url_param, "")
+        if self._authenticated_principal is not None:
+            request_data["_authenticated_principal"] = dict(self._authenticated_principal)
         request_data["_method"] = method.upper()
         request_data["_actual_method"] = method.upper()
         return request_data
@@ -826,6 +829,11 @@ class PackAPIHandler(
             "_facade": facade,
             "_authenticated_device_id": self._authenticated_device_id or "",
             "_authenticated_scopes": list(self._authenticated_scopes or []),
+            "_authenticated_principal": (
+                dict(self._authenticated_principal)
+                if self._authenticated_principal is not None
+                else None
+            ),
         }
 
     def _dispatch_defaultspack_http_route(
@@ -962,8 +970,28 @@ class PackAPIHandler(
         self._request_auth_mode = None
         self._panel_session = None
         self._panel_session_cookie = None
+        self._authenticated_principal = None
         self._authenticated_device_id = None
         self._authenticated_scopes = []
+
+    @staticmethod
+    def _authority_device_scope(method: str | None, path: str | None) -> str:
+        method_upper = str(method or "").upper()
+        path_value = str(path or "")
+        if not path_value.startswith("/api/authority/"):
+            return ""
+        if method_upper == "GET" and path_value == "/api/authority/requests":
+            return "authority.request.list"
+        if method_upper == "GET" and path_value.startswith("/api/authority/requests/"):
+            return "authority.request.read"
+        if method_upper == "POST" and path_value.startswith("/api/authority/requests/"):
+            if path_value.endswith("/approve"):
+                return "authority.request.approve"
+            if path_value.endswith("/deny"):
+                return "authority.request.deny"
+            if path_value.endswith("/challenge"):
+                return "authority.request.approve"
+        return ""
 
     def _check_bearer_auth(
         self,
@@ -986,26 +1014,50 @@ class PackAPIHandler(
         if token.startswith("dtk_"):
             self._authenticated_device_id = None
             self._authenticated_scopes = []
+            self._authenticated_principal = None
             if not allow_device or not method or not path:
-                return False
-            if not str(path).startswith("/api/mobile/v1/"):
                 return False
             try:
                 from ecosystem.defaultspack.domain.mobile.contract import required_device_scope
                 from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
 
-                required_scope = required_device_scope(method, path)
-                if not required_scope:
-                    return False
                 store = DeviceStore()
                 device = store.verify_token(token)
                 if device is None:
                     return False
                 scopes = set(device.scopes)
+                required_scope = ""
+                if str(path).startswith("/api/mobile/v1/"):
+                    required_scope = required_device_scope(method, path)
+                elif str(path).startswith("/api/authority/"):
+                    required_scope = self._authority_device_scope(method, path)
+                    if str(path).endswith("/challenge") and not (
+                        {"authority.request.approve", "authority.request.deny"} & scopes
+                    ):
+                        return False
+                else:
+                    return False
+                if not required_scope:
+                    return False
                 if required_scope not in scopes:
                     return False
                 self._authenticated_device_id = device.device_id
                 self._authenticated_scopes = list(device.scopes)
+                role = (
+                    "mobile_approver"
+                    if any(scope.startswith("authority.request.") for scope in scopes)
+                    else "mobile_client"
+                )
+                self._authenticated_principal = {
+                    "token_id": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+                    "profile_id": getattr(device, "profile_id", "") or "default",
+                    "surface_id": "mobile-approver" if role == "mobile_approver" else "mobile",
+                    "device_id": device.device_id,
+                    "role": role,
+                    "audiences": ["kernel_api"],
+                    "scopes": sorted(scopes),
+                    "core_role": False,
+                }
                 store.touch(device.device_id)
                 return True
             except Exception:
@@ -1787,6 +1839,18 @@ class PackAPIHandler(
                         self._send_response(APIResponse(True, result))
                     else:
                         self._send_response(APIResponse(False, error=result.get("error", "Authority approve failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
+            elif path.startswith("/api/authority/requests/") and path.endswith("/challenge"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_challenge(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority challenge failed")), result.get("status_code", 400))
                 else:
                     self._send_response(APIResponse(False, error="Not found"), 404)
 

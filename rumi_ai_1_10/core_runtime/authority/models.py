@@ -11,20 +11,30 @@ from ..host_permissions.models import HOST_PERMISSION_IDS
 AUTHORITY_PERMISSION_IDS = frozenset(
     {
         "model.invoke",
+        "api_key.manage",
         "api_key.use",
         "function.call",
         "secret.read",
+        "secret.manage",
         "network.egress",
+        "network.manage",
         "host.execute",
         "tool.execute",
         "file.read",
         "file.write",
+        "pack.read",
+        "pack.manage",
+        "pack.approve",
+        "provider.read",
+        "provider.manage",
         "authority.request.read",
         "authority.request.list",
         "authority.request.approve",
         "authority.request.deny",
         "authority.host_intent.approve",
         "authority.host_intent.deny",
+        "authority.grant.read",
+        "authority.grant.manage",
     }
 ) | HOST_PERMISSION_IDS
 

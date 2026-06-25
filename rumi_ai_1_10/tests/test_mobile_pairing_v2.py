@@ -9,6 +9,13 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
+AUTHORITY_APPROVER_SCOPES = [
+    "authority.request.approve",
+    "authority.request.deny",
+    "authority.request.list",
+    "authority.request.read",
+]
+
 
 def test_pairing_v2_claim_approve_flow():
     from domain.p2p.pairing import PairingManager
@@ -52,7 +59,7 @@ def test_pairing_v2_claim_approve_flow():
     assert approval_token.startswith("dtk_")
     assert device.confirmation_code  # visual code like "🟢・58"
     assert "tools.approve" not in device.scopes
-    assert device.approval_scopes == ["tools.approve"]
+    assert device.approval_scopes == AUTHORITY_APPROVER_SCOPES
 
     # Verify token
     verified = ds.verify_token(token)
@@ -63,7 +70,7 @@ def test_pairing_v2_claim_approve_flow():
     verified_approval = ds.verify_token(approval_token)
     assert verified_approval is not None
     assert verified_approval.device_id == "iphone-1"
-    assert verified_approval.scopes == ["tools.approve"]
+    assert verified_approval.scopes == AUTHORITY_APPROVER_SCOPES
 
     # Revoke
     revoked = ds.revoke_device("iphone-1")
@@ -130,10 +137,10 @@ def test_device_token_is_scoped():
     assert "chat.read" in device.scopes
     assert "chat.write" not in device.scopes
     assert "tools.approve" not in device.scopes
-    assert device.approval_scopes == ["tools.approve"]
+    assert device.approval_scopes == AUTHORITY_APPROVER_SCOPES
     assert "credentials.request" not in device.scopes
     assert ds.verify_token(token).scopes == ["chat.read", "tools.observe"]
-    assert ds.verify_token(approval_token).scopes == ["tools.approve"]
+    assert ds.verify_token(approval_token).scopes == AUTHORITY_APPROVER_SCOPES
 
 
 def test_legacy_device_record_does_not_keep_approval_scope_on_normal_token():
@@ -225,7 +232,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
 
     tmp = tempfile.mkdtemp()
     session = PairingManager(tmp).start_pairing(
-        capabilities=["chat.read", "chat.write", "tools.observe", "tools.approve"],
+        capabilities=["chat.read", "chat.write", "tools.observe", *AUTHORITY_APPROVER_SCOPES],
     )
 
     claim = run({
@@ -239,7 +246,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
             "chat.read",
             "chat.write",
             "tools.observe",
-            "tools.approve",
+            *AUTHORITY_APPROVER_SCOPES,
         ],
     }, None)
     assert claim["status"] == "ok"
@@ -263,9 +270,11 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     data = status["data"]
     assert data["device_token"].startswith("dtk_")
     assert data["approval_token"].startswith("dtk_")
+    assert data["client_access_token"] == data["device_token"]
+    assert data["approver_access_token"] == data["approval_token"]
     assert data["device_token"] != data["approval_token"]
     assert "tools.approve" not in data["scopes"]
-    assert data["approval_scopes"] == ["tools.approve"]
+    assert data["approval_scopes"] == AUTHORITY_APPROVER_SCOPES
 
     store = DeviceStore(tmp)
     normal = store.verify_token(data["device_token"])
@@ -273,7 +282,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     assert normal is not None
     assert "tools.approve" not in normal.scopes
     assert approver is not None
-    assert approver.scopes == ["tools.approve"]
+    assert approver.scopes == AUTHORITY_APPROVER_SCOPES
 
 
 def test_mobile_pairing_status_returns_pc_label(monkeypatch):

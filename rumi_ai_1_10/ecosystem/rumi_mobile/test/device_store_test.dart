@@ -32,7 +32,12 @@ const _validDevice = PairedDevice(
   approvalToken: 'dtk-approve',
   label: 'iPhone',
   scopes: ['chat.read', 'chat.write'],
-  approvalScopes: ['tools.approve'],
+  approvalScopes: [
+    'authority.request.approve',
+    'authority.request.deny',
+    'authority.request.list',
+    'authority.request.read',
+  ],
   pcBaseUrl: 'http://192.168.11.25:8765',
   pcLabel: 'Mac',
   pairingId: 'pair-1',
@@ -112,7 +117,9 @@ void main() {
     final devices = await store.loadPairedDevices();
     expect(devices, hasLength(2));
     expect(
-        devices.map((d) => d.connectionId), containsAll(['pair-1', 'pair-2']));
+      devices.map((d) => d.connectionId),
+      containsAll(['pair-1', 'pair-2']),
+    );
 
     await store.removePairedDevice(_validDevice.connectionId);
     final remaining = await store.loadPairedDevices();
@@ -145,8 +152,15 @@ void main() {
     final reloaded = PairedDevice.fromJson(json);
     expect(reloaded.deviceToken, 'dtk-test');
     expect(reloaded.approvalToken, 'dtk-approve');
+    expect(reloaded.clientToken, 'dtk-test');
+    expect(reloaded.approverToken, 'dtk-approve');
     expect(reloaded.scopes, ['chat.read', 'chat.write']);
-    expect(reloaded.approvalScopes, ['tools.approve']);
+    expect(reloaded.approvalScopes, [
+      'authority.request.approve',
+      'authority.request.deny',
+      'authority.request.list',
+      'authority.request.read',
+    ]);
     expect(reloaded.canApprovePcTools, isTrue);
   });
 
@@ -162,5 +176,18 @@ void main() {
     );
 
     expect(device.canApprovePcTools, isFalse);
+  });
+
+  test('device identity stores an Ed25519 signing key', () async {
+    final store = MobileDeviceStore(storage: _FakeSecureStorage());
+
+    final identity = await store.loadOrCreateIdentity();
+    final signature = await store.signApprovalPayloadHash(
+      List.filled(32, '00').join(),
+    );
+
+    expect(identity.publicKey, startsWith('ed25519:'));
+    expect(identity.privateKey, isNotEmpty);
+    expect(signature, isNotEmpty);
   });
 }

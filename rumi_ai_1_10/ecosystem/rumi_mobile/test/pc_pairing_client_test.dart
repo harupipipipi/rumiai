@@ -98,7 +98,10 @@ void main() {
         'device_token': 'dtk-123',
         'approval_token': 'dtk-approve',
         'scopes': ['chat.read'],
-        'approval_scopes': ['tools.approve'],
+        'approval_scopes': [
+          'authority.request.approve',
+          'authority.request.deny',
+        ],
         'pc_label': 'Haru MacBook',
       });
 
@@ -109,7 +112,24 @@ void main() {
       expect(resp.hasApprovalToken, isTrue);
       expect(resp.pcLabel, 'Haru MacBook');
       expect(resp.scopes, ['chat.read']);
-      expect(resp.approvalScopes, ['tools.approve']);
+      expect(resp.approvalScopes, [
+        'authority.request.approve',
+        'authority.request.deny',
+      ]);
+    });
+
+    test('parses client and approver token aliases', () {
+      final resp = PairingStatusResponse.fromJson({
+        'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+        'client_access_token': 'dtk-client',
+        'approver_access_token': 'dtk-approver',
+        'scopes': ['chat.read'],
+        'approval_scopes': ['authority.request.approve'],
+      });
+
+      expect(resp.deviceToken, 'dtk-client');
+      expect(resp.approvalToken, 'dtk-approver');
+      expect(resp.hasApprovalToken, isTrue);
     });
   });
 

@@ -30,6 +30,13 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
     ),
     MobileRouteContract(
         "GET",
+        "/api/mobile/v1/manifest",
+        block_module="blocks.mobile.manifest",
+        device_scope="chat.read",
+        feature="manifest",
+    ),
+    MobileRouteContract(
+        "GET",
         "/api/mobile/v1/capabilities",
         block_module="blocks.mobile.capabilities",
         device_scope="chat.read",

@@ -18,7 +18,10 @@ const SCOPE_LABELS: Record<string, string> = {
   "chat.read": "チャットの読み取り",
   "chat.write": "チャットの送信",
   "tools.observe": "ツールの監視",
-  "tools.approve": "ツール承認",
+  "authority.request.list": "承認一覧の確認",
+  "authority.request.read": "承認内容の確認",
+  "authority.request.approve": "署名付き承認",
+  "authority.request.deny": "署名付き拒否",
   "credentials.request": "API設定の受け取り",
 };
 
@@ -66,7 +69,7 @@ export function MobilePairingApproval({
 
         if (result.status === "approved") {
           stopPolling();
-          onApproved?.(pairingId, result.device_token);
+          onApproved?.(pairingId, result.client_access_token ?? result.device_token);
         } else if (result.status === "rejected") {
           stopPolling();
           onRejected?.(pairingId);
@@ -93,14 +96,16 @@ export function MobilePairingApproval({
     setError("");
     try {
       const result = await mobileApiResources.approvePairing(pairingId);
-      if (result.device_token || result.approval_token) {
+      const clientToken = result.client_access_token ?? result.device_token;
+      const approverToken = result.approver_access_token ?? result.approval_token;
+      if (clientToken || approverToken) {
         console.log("[pairing] split device tokens received (not displayed)", {
           pairingId,
-          hasDeviceToken: Boolean(result.device_token),
-          hasApprovalToken: Boolean(result.approval_token),
+          hasDeviceToken: Boolean(clientToken),
+          hasApprovalToken: Boolean(approverToken),
         });
       }
-      onApproved?.(pairingId, result.device_token);
+      onApproved?.(pairingId, clientToken);
     } catch (err) {
       setError(err instanceof Error ? err.message : "承認に失敗しました");
     } finally {

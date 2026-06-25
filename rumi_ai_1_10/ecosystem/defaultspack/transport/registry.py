@@ -1706,6 +1706,11 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     ),
     HttpRouteSpec(
         "POST",
+        "/api/authority/requests/{request_id}/challenge",
+        handler_name="_handle_authority_challenge",
+    ),
+    HttpRouteSpec(
+        "POST",
         "/api/authority/requests/{request_id}/approve",
         handler_name="_handle_authority_approve",
     ),

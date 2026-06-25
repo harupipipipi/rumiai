@@ -67,16 +67,16 @@ QrPayload parseQrPayload(String raw) {
         case 'rumi_api':
           return QrApiImport(
             baseUrl: (json['baseUrl'] as String?)?.trim() ?? '',
-            apiKey: (json['apiKey'] as String?)?.trim() ??
+            apiKey:
+                (json['apiKey'] as String?)?.trim() ??
                 (json['api_key'] as String?)?.trim() ??
                 '',
             model: (json['model'] as String?)?.trim(),
             label: (json['label'] as String?)?.trim(),
           );
+        case 'rumi_mobile_pair_v1':
         case 'rumi_pair_v2':
-          return QrPairingV2(
-            PairingV2Payload.fromJson(json),
-          );
+          return QrPairingV2(PairingV2Payload.fromJson(json));
       }
     } catch (_) {
       return QrUnknown(trimmed);

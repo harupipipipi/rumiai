@@ -26,10 +26,10 @@ class PcCatalogClient {
   }
 
   Map<String, String> _headers(PcConnection pc) => {
-        'Authorization': 'Bearer ${pc.token.trim()}',
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      };
+    'Authorization': 'Bearer ${pc.token.trim()}',
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
+  };
 
   Uri _uri(String baseUrl, String path) {
     var trimmed = baseUrl.trim();
@@ -45,6 +45,12 @@ class PcCatalogClient {
     final resp = await _get(pc, '/api/mobile/v1/bootstrap');
     final data = _decodeData(resp.body);
     return PcBootstrap.fromJson(data);
+  }
+
+  Future<PcMobileManifest> fetchMobileManifest(PcConnection pc) async {
+    final resp = await _get(pc, '/api/mobile/v1/manifest');
+    final data = _decodeData(resp.body);
+    return PcMobileManifest.fromJson(data);
   }
 
   Future<PcCatalog> fetchCapabilities(
@@ -95,10 +101,7 @@ class PcCatalogClient {
     }
     var uri = _uri(pc.baseUrl, path);
     if (query != null && query.isNotEmpty) {
-      uri = uri.replace(queryParameters: {
-        ...uri.queryParameters,
-        ...query,
-      });
+      uri = uri.replace(queryParameters: {...uri.queryParameters, ...query});
     }
     final resp = await _http
         .get(uri, headers: _headers(pc))

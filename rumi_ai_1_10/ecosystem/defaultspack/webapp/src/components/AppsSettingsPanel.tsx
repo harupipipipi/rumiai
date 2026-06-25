@@ -40,12 +40,14 @@ type ApiImportPayload = {
   label?: string;
 };
 
-type PairV2QrPayload = {
-  kind: "rumi_pair_v2";
-  version: 2;
+type MobilePairQrPayload = {
+  kind: "rumi_mobile_pair_v1";
+  version: 1;
   pairingId: string;
   code: string;
   baseUrls: string[];
+  manifestUrl: string;
+  roles: ("mobile_client" | "mobile_approver")[];
   serverPublicKey: string;
   expiresAt: number;
 };
@@ -234,7 +236,10 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
           "chat.read",
           "chat.write",
           "tools.observe",
-          "tools.approve",
+          "authority.request.list",
+          "authority.request.read",
+          "authority.request.approve",
+          "authority.request.deny",
           "credentials.request",
         ],
       });
@@ -289,12 +294,14 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
     [advertisedBaseUrls, currentOrigin, kernelBaseUrl, manualBaseUrl],
   );
 
-  const qrPayload: PairV2QrPayload | null = pairing && qrBaseUrls.length > 0 ? {
-    kind: "rumi_pair_v2",
-    version: 2,
+  const qrPayload: MobilePairQrPayload | null = pairing && qrBaseUrls.length > 0 ? {
+    kind: "rumi_mobile_pair_v1",
+    version: 1,
     pairingId: pairing.pairing_id,
     code: pairing.code,
     baseUrls: qrBaseUrls,
+    manifestUrl: `${qrBaseUrls[0].replace(/\/+$/, "")}/api/mobile/v1/manifest`,
+    roles: ["mobile_client", "mobile_approver"],
     serverPublicKey: "",
     expiresAt: pairing.expires_at,
   } : null;

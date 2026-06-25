@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../application/conversation_router.dart';
 import '../data/local/local_chat_backend.dart';
 import '../data/pc/device_store.dart';
+import '../data/pc/pc_approval_client.dart';
 import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
 import '../data/pc/pc_chat_backend.dart';
@@ -93,8 +94,8 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await widget.store.load();
       _apiConfig = await widget.configStore.loadApi();
-      _notificationSettings =
-          await widget.configStore.loadNotificationSettings();
+      _notificationSettings = await widget.configStore
+          .loadNotificationSettings();
       final active = widget.store.active;
       if (active == null) {
         await widget.store.createAndPersist();
@@ -199,8 +200,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
   String? _initialPcModelForCatalog(PcCatalog catalog) {
     final preferred = catalog.runtime.preferredModel.trim();
-    final preferredProfile =
-        preferred.isEmpty ? null : catalog.profileById(preferred);
+    final preferredProfile = preferred.isEmpty
+        ? null
+        : catalog.profileById(preferred);
     if (preferredProfile != null &&
         preferredProfile.effectiveProfileId != 'stub/default' &&
         (preferredProfile.configured || preferredProfile.local)) {
@@ -452,8 +454,9 @@ class _ChatScreenState extends State<ChatScreen> {
           },
           onDevicePaired: (device) async {
             await _loadPcConnection();
-            _activeSpaceId =
-                device == null ? Space.local.id : 'pc:${device.connectionId}';
+            _activeSpaceId = device == null
+                ? Space.local.id
+                : 'pc:${device.connectionId}';
             await _loadSpaces();
             if (mounted) setState(() {});
           },
@@ -461,8 +464,8 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
     final refreshed = await widget.configStore.loadApi();
-    final notificationSettings =
-        await widget.configStore.loadNotificationSettings();
+    final notificationSettings = await widget.configStore
+        .loadNotificationSettings();
     await _loadPcConnection();
     await _loadSpaces();
     if (mounted) {
@@ -785,9 +788,10 @@ class _ChatScreenState extends State<ChatScreen> {
       await _executePcCommand(parsed.command, args: parsed.args);
       return true;
     }
-    final localModelMatch =
-        RegExp(r'^/models?(?:\s+(.+))?$', caseSensitive: false)
-            .firstMatch(trimmed);
+    final localModelMatch = RegExp(
+      r'^/models?(?:\s+(.+))?$',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
     if (localModelMatch != null) {
       final model = (localModelMatch.group(1) ?? '').trim();
       if (model.isEmpty) {
@@ -816,8 +820,8 @@ class _ChatScreenState extends State<ChatScreen> {
     final catalog = _pcCatalog;
     final commands = _activeSpaceIsPc
         ? (catalog?.commands ?? const <PcCommandItem>[])
-            .where((c) => c.enabled && c.visibility != 'hidden')
-            .toList()
+              .where((c) => c.enabled && c.visibility != 'hidden')
+              .toList()
         : const <PcCommandItem>[];
     await showModalBottomSheet<void>(
       context: context,
@@ -1004,7 +1008,8 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                   title: Text(provider.effectiveLabel),
                   subtitle: Text('${provider.displayName} · ${provider.model}'),
-                  trailing: provider.providerId == _apiConfig?.providerId &&
+                  trailing:
+                      provider.providerId == _apiConfig?.providerId &&
                           provider.model == _activeModelId()
                       ? const Icon(Icons.check)
                       : null,
@@ -1107,7 +1112,7 @@ class _ChatScreenState extends State<ChatScreen> {
           'risk': 'low',
           'execution': {
             'type': 'model_command',
-            'action': 'select_or_suggest_model'
+            'action': 'select_or_suggest_model',
           },
         }),
         result,
@@ -1131,20 +1136,23 @@ class _ChatScreenState extends State<ChatScreen> {
         'visibility': 'default',
         'risk': 'low',
         'args': [
-          {'name': 'level', 'type': 'enum'}
+          {'name': 'level', 'type': 'enum'},
         ],
         'execution': {
           'type': 'rumi_function',
-          'qualified_name': 'defaultspack:ai_set_thinking_level'
+          'qualified_name': 'defaultspack:ai_set_thinking_level',
         },
       }),
     );
     if (command != null) {
-      await _executePcCommand(command, args: {
-        'level': level,
-        'scope': 'profile',
-        'profile_id': _activeModelId(),
-      });
+      await _executePcCommand(
+        command,
+        args: {
+          'level': level,
+          'scope': 'profile',
+          'profile_id': _activeModelId(),
+        },
+      );
       if (mounted) setState(() => _pcThinkingLevel = level);
     }
   }
@@ -1161,11 +1169,11 @@ class _ChatScreenState extends State<ChatScreen> {
         'visibility': 'default',
         'risk': 'medium',
         'args': [
-          {'name': 'enabled', 'type': 'boolean'}
+          {'name': 'enabled', 'type': 'boolean'},
         ],
         'execution': {
           'type': 'rumi_function',
-          'qualified_name': 'defaultspack:ai_set_deepthink_enabled'
+          'qualified_name': 'defaultspack:ai_set_deepthink_enabled',
         },
       }),
     );
@@ -1263,7 +1271,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final controllers = {
-      for (final arg in command.args) arg.name: TextEditingController()
+      for (final arg in command.args) arg.name: TextEditingController(),
     };
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -1280,8 +1288,9 @@ class _ChatScreenState extends State<ChatScreen> {
                     controller: controllers[arg.name],
                     decoration: InputDecoration(
                       labelText: arg.required ? '${arg.name} *' : arg.name,
-                      helperText:
-                          arg.values.isEmpty ? null : arg.values.join(', '),
+                      helperText: arg.values.isEmpty
+                          ? null
+                          : arg.values.join(', '),
                     ),
                   ),
                 ),
@@ -1347,6 +1356,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }) async {
     if (result.requiresApproval) {
       _showSnack(result.message.isNotEmpty ? result.message : '承認が必要です');
+      unawaited(_openPcApprovals());
       return;
     }
     if (command.isModelCommand) {
@@ -1369,7 +1379,10 @@ class _ChatScreenState extends State<ChatScreen> {
         : command.execution['action'] as String? ?? '';
     if (action.isNotEmpty) {
       await _runPcFrontendAction(
-          action, command, result.args.isEmpty ? parsedArgs : result.args);
+        action,
+        command,
+        result.args.isEmpty ? parsedArgs : result.args,
+      );
     }
     if (command.execution['type'] == 'rumi_function') {
       await _loadPcCatalogForActiveSpace();
@@ -1443,8 +1456,9 @@ class _ChatScreenState extends State<ChatScreen> {
         }
         return;
       case 'set_price_mode':
-        final tier =
-            '${args['tier'] ?? 'low'}'.toLowerCase() == 'high' ? 'high' : 'low';
+        final tier = '${args['tier'] ?? 'low'}'.toLowerCase() == 'high'
+            ? 'high'
+            : 'low';
         final candidate = _pricePcProfile(tier);
         if (candidate == null) {
           _showSnack('price=$tier の候補が見つかりません');
@@ -1471,14 +1485,17 @@ class _ChatScreenState extends State<ChatScreen> {
         _showSnack('PC mode: agent');
         return;
       case 'toggle_yolo':
-        setState(() =>
-            _pcYoloMode = _parseCommandBool(args['enabled'], !_pcYoloMode));
+        setState(
+          () => _pcYoloMode = _parseCommandBool(args['enabled'], !_pcYoloMode),
+        );
         _showSnack('Yolo: ${_pcYoloMode ? "on" : "off"}');
         return;
       case 'toggle_ultra_yolo':
         setState(() {
-          _pcUltraYoloMode =
-              _parseCommandBool(args['enabled'], !_pcUltraYoloMode);
+          _pcUltraYoloMode = _parseCommandBool(
+            args['enabled'],
+            !_pcUltraYoloMode,
+          );
           if (_pcUltraYoloMode) _pcYoloMode = true;
         });
         _showSnack('Ultra Yolo: ${_pcUltraYoloMode ? "on" : "off"}');
@@ -1553,6 +1570,31 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  PcConnection? _activeApprovalConnection() {
+    final connection = _activeSpace()?.pcConnection;
+    if (connection == null || !connection.canApprove) return null;
+    return connection;
+  }
+
+  Future<void> _openPcApprovals() async {
+    final connection = _activeApprovalConnection();
+    if (connection == null) {
+      _showSnack('PC承認tokenがありません');
+      return;
+    }
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (sheetContext) => _PcApprovalsSheet(
+        connection: connection,
+        deviceStore: widget.deviceStore,
+        onSnack: _showSnack,
+      ),
     );
   }
 
@@ -1725,6 +1767,12 @@ class _ChatScreenState extends State<ChatScreen> {
               ],
             ),
             actions: [
+              if (_activeApprovalConnection() != null)
+                IconButton(
+                  tooltip: 'PC承認',
+                  icon: const Icon(Icons.shield_outlined),
+                  onPressed: _openPcApprovals,
+                ),
               IconButton(
                 tooltip: '新規チャット',
                 icon: const Icon(Icons.add_comment_outlined),
@@ -1770,6 +1818,216 @@ class _ChatScreenState extends State<ChatScreen> {
           busy: _streaming,
         ),
       ],
+    );
+  }
+}
+
+class _PcApprovalsSheet extends StatefulWidget {
+  const _PcApprovalsSheet({
+    required this.connection,
+    required this.deviceStore,
+    required this.onSnack,
+  });
+
+  final PcConnection connection;
+  final MobileDeviceStore deviceStore;
+  final ValueChanged<String> onSnack;
+
+  @override
+  State<_PcApprovalsSheet> createState() => _PcApprovalsSheetState();
+}
+
+class _PcApprovalsSheetState extends State<_PcApprovalsSheet> {
+  late final PcApprovalClient _client;
+  late Future<List<AuthorityRequestItem>> _future;
+  String _busyRequestId = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _client = PcApprovalClient(deviceStore: widget.deviceStore);
+    _future = _client.listPending(widget.connection);
+  }
+
+  @override
+  void dispose() {
+    _client.close();
+    super.dispose();
+  }
+
+  void _reload() {
+    setState(() => _future = _client.listPending(widget.connection));
+  }
+
+  Future<void> _approve(AuthorityRequestItem request) async {
+    setState(() => _busyRequestId = request.requestId);
+    try {
+      await _client.approve(widget.connection, request);
+      widget.onSnack('PC承認を送信しました');
+      _reload();
+    } catch (e) {
+      widget.onSnack('PC承認に失敗しました: $e');
+    } finally {
+      if (mounted) setState(() => _busyRequestId = '');
+    }
+  }
+
+  Future<void> _deny(AuthorityRequestItem request) async {
+    setState(() => _busyRequestId = request.requestId);
+    try {
+      await _client.deny(
+        widget.connection,
+        request,
+        reason: 'denied from mobile',
+      );
+      widget.onSnack('PC承認を拒否しました');
+      _reload();
+    } catch (e) {
+      widget.onSnack('PC拒否に失敗しました: $e');
+    } finally {
+      if (mounted) setState(() => _busyRequestId = '');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return FutureBuilder<List<AuthorityRequestItem>>(
+      future: _future,
+      builder: (context, snapshot) {
+        final requests = snapshot.data ?? const <AuthorityRequestItem>[];
+        return ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text('PC承認', style: theme.textTheme.titleMedium),
+                ),
+                IconButton(
+                  tooltip: '再読み込み',
+                  onPressed: snapshot.connectionState == ConnectionState.waiting
+                      ? null
+                      : _reload,
+                  icon: const Icon(Icons.refresh_outlined),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (snapshot.connectionState == ConnectionState.waiting)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (snapshot.hasError)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.error_outline),
+                title: const Text('承認一覧を取得できませんでした'),
+                subtitle: Text('${snapshot.error}'),
+              )
+            else if (requests.isEmpty)
+              const ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(Icons.verified_user_outlined),
+                title: Text('保留中の承認はありません'),
+              )
+            else
+              for (final request in requests)
+                _AuthorityRequestTile(
+                  request: request,
+                  busy: _busyRequestId == request.requestId,
+                  onApprove: () => unawaited(_approve(request)),
+                  onDeny: () => unawaited(_deny(request)),
+                ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _AuthorityRequestTile extends StatelessWidget {
+  const _AuthorityRequestTile({
+    required this.request,
+    required this.busy,
+    required this.onApprove,
+    required this.onDeny,
+  });
+
+  final AuthorityRequestItem request;
+  final bool busy;
+  final VoidCallback onApprove;
+  final VoidCallback onDeny;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: Theme.of(context).dividerColor),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.security_outlined,
+                    size: 18,
+                    color: scheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      request.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                request.summary,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 10),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.close, size: 16),
+                    label: const Text('拒否'),
+                    onPressed: busy ? null : onDeny,
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.icon(
+                    icon: busy
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check, size: 16),
+                    label: const Text('承認'),
+                    onPressed: busy ? null : onApprove,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1836,8 +2094,9 @@ List<String> _pcCommandNames(PcCommandItem command) {
 }
 
 String? _matchPcCommandName(String body, String candidate) {
-  final direct =
-      RegExp('^${RegExp.escape(candidate)}(?:\\s+|\$)').firstMatch(body);
+  final direct = RegExp(
+    '^${RegExp.escape(candidate)}(?:\\s+|\$)',
+  ).firstMatch(body);
   if (direct != null) return direct.group(0)?.trimRight();
 
   final parts = candidate.split(RegExp(r'[\s_-]+')).where((p) => p.isNotEmpty);
@@ -1922,12 +2181,7 @@ class _EmptyState extends StatelessWidget {
             ),
           ),
         ),
-        ComposerBar(
-          onSend: onSuggest,
-          onStop: () {},
-          onAdd: onAdd,
-          busy: busy,
-        ),
+        ComposerBar(onSend: onSuggest, onStop: () {}, onAdd: onAdd, busy: busy),
       ],
     );
   }
