@@ -23,6 +23,7 @@ class HttpRouteSpec:
     defaults: Dict[str, Any] = field(default_factory=dict)
     pre_auth: bool = False
     sensitive: bool = False
+    local_only: bool = False
     block_module: str = ""
     function_name: str = ""
     fallback_block_module: str = ""
@@ -49,6 +50,9 @@ class HttpRouteSpec:
             object.__setattr__(self, "fallback_block_module", resolved_legacy_block)
         object.__setattr__(self, "function_id", resolved_function_id)
         object.__setattr__(self, "legacy_block_module", resolved_legacy_block)
+        if str(self.pattern or "").startswith("/api/prompts"):
+            object.__setattr__(self, "sensitive", True)
+            object.__setattr__(self, "local_only", True)
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
@@ -255,6 +259,8 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
         pattern = str(item.get("path") or "").strip()
         if not function_id or not method or not pattern.startswith("/"):
             continue
+        sensitive = bool(item.get("sensitive")) or pattern.startswith("/api/prompts")
+        local_only = bool(item.get("local_only")) or pattern.startswith("/api/prompts")
         specs.append(
             HttpRouteSpec(
                 method,
@@ -265,7 +271,8 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 path_inject=dict(item.get("path_inject") or {}),
                 defaults=dict(item.get("default_args") or {}),
                 pre_auth=bool(item.get("pre_auth")),
-                sensitive=bool(item.get("sensitive")),
+                sensitive=sensitive,
+                local_only=local_only,
             )
         )
     return specs
@@ -492,6 +499,98 @@ def flow_http_output_is_compatible(
             return True
         return False
     return True
+
+
+_PROMPT_HTTP_ROUTE_SPECS = [
+    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor_load", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/active", block_module="blocks.prompt.active", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/traces", block_module="blocks.prompt.trace", sensitive=True),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/traces/{trace_id}",
+        block_module="blocks.prompt.trace",
+        path_inject={"trace_id": "trace_id"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/toggle", block_module="blocks.prompt.toggle", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/preview-toggle",
+        block_module="blocks.prompt.preview_toggle",
+        sensitive=True,
+    ),
+    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor_load", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/editor/save",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "save"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/override",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "override"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/diff", block_module="blocks.prompt.diff", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/test", block_module="blocks.prompt.test", sensitive=True),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.versions",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/prompts/{name}/versions/{version}",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name", "version": "version"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/rollback",
+        block_module="blocks.prompt.rollback",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}, sensitive=True),
+    HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}, sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/build", block_module="blocks.prompt.advanced.build", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/context-vars", block_module="blocks.prompt.advanced.context_vars", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/conditional",
+        block_module="blocks.prompt.advanced.conditional",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/inherit",
+        block_module="blocks.prompt.advanced.inherit",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/preview", block_module="blocks.prompt.advanced.preview", sensitive=True),
+]
+
+
+def prompt_http_route_specs() -> List[HttpRouteSpec]:
+    return list(_PROMPT_HTTP_ROUTE_SPECS)
 
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
@@ -1659,21 +1758,7 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         block_module="blocks.knowledge.delete",
         path_inject={"id": "id"},
     ),
-    HttpRouteSpec(
-        "PUT",
-        "/api/prompts/{name}",
-        block_module="blocks.prompt.update",
-        path_inject={"name": "name"},
-    ),
-    HttpRouteSpec(
-        "DELETE",
-        "/api/prompts/{name}",
-        block_module="blocks.prompt.delete",
-        path_inject={"name": "name"},
-    ),
-    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
-    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
-    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
+    *_PROMPT_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
     HttpRouteSpec(
@@ -1983,6 +2068,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient-debug", handler_name="_handle_static"),
@@ -2106,6 +2192,7 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             setattr(handler, "__rumi_route_pattern__", spec.pattern)
             setattr(handler, "__rumi_route_sensitive__", bool(spec.sensitive))
             setattr(handler, "__rumi_route_pre_auth__", bool(spec.pre_auth))
+            setattr(handler, "__rumi_route_local_only__", bool(spec.local_only))
         except Exception:
             pass
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))

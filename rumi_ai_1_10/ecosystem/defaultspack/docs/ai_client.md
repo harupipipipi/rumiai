@@ -57,6 +57,45 @@ Routing may recommend a different model profile when the input requires
 capabilities the selected profile lacks. Provider keys remain outside profile
 documents.
 
+## Tokenizer Contract
+
+Prompt token counts are model-profile scoped. Prompt Studio passes
+`model_profile_id` to the prompt APIs, and the chat sidebar prompt widget uses
+the currently selected conversation model. If that model changes, the widget
+re-requests the active prompt summary instead of keeping stale token counts.
+
+A model profile may optionally expose tokenizer metadata:
+
+```yaml
+metadata:
+  tokenizer:
+    kind: char_divisor
+    characters_per_token: 3.2
+    tokenizer_id: provider.model.approx
+```
+
+Supported metadata forms are pure counters only:
+
+- `metadata.tokenizer.kind: whitespace`, `char_divisor`, `byte_divisor`, or
+  `defaultspack`.
+- `metadata.tokenizer.encoding` / `tokenizer_id` for local tokenizer libraries
+  such as `tiktoken` when available.
+- `metadata.tokenizer_profile_id` or `metadata.tokenizer_model_profile_id` to
+  reuse another profile's tokenizer.
+- In-process provider/profile objects may expose a callable `count_tokens` or
+  `token_count`; JSON/YAML profiles must not embed executable code.
+
+If the selected profile has no tokenizer, defaultspack looks for another profile
+with the same `same_model_across_providers_key` and a tokenizer. When found, the
+prompt APIs mark the tokenizer source as `same_model_provider`. If no tokenizer
+is found, counts fall back to `defaultspack.approximate` and include
+`warning_code: missing_tokenizer`; UI surfaces show a warning because counts can
+be significantly off.
+
+Tokenizer metadata is informational. It cannot grant permissions, select tools,
+call providers, mutate chat state, or change the active model. Provider
+permissions, tool authority, routing, and prompt text remain separate contracts.
+
 ## Provider Discovery
 
 Provider discovery is manifest-first. OpenAI-compatible providers can be added

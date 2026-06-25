@@ -61,6 +61,7 @@ import { twMerge } from "tailwind-merge";
 
 import type {
   ModelProfile,
+  PromptUsageSummary,
   SettingsSection,
   SidebarAction,
   SidebarCategory,
@@ -75,6 +76,7 @@ import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
 import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
 import { LayerPortal } from "../ui/layers/LayerPortal";
+import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -797,6 +799,10 @@ export function RightSidebar({
   selectedProfile = null,
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
+  promptUsage = null,
+  promptProfileId,
+  conversationId = null,
+  showChatPromptUsage = true,
   yoloMode = false,
   workspaceTabs = [],
   activeWorkspaceTabId = null,
@@ -807,6 +813,10 @@ export function RightSidebar({
   onWorkspaceTabSelect,
   onWorkspaceTabClose,
   onWorkspaceTabCreate,
+  onLoadPromptActive,
+  onTogglePromptEdge,
+  onToggleChatPromptUsage,
+  onOpenPromptStudio,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -822,6 +832,10 @@ export function RightSidebar({
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  promptUsage?: PromptUsageSummary | null;
+  promptProfileId?: string;
+  conversationId?: string | null;
+  showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
@@ -832,6 +846,10 @@ export function RightSidebar({
   onWorkspaceTabSelect?: (tabId: string) => void;
   onWorkspaceTabClose?: (tabId: string) => void;
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
+  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
+  onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -886,6 +904,8 @@ export function RightSidebar({
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
   const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
   const panelWidthPx = clampPanelWidth(panelWidth);
+  const hasPromptWidget = Boolean(onLoadPromptActive && onTogglePromptEdge);
+  const promptRailCount = Number(promptUsage?.active_count ?? promptUsage?.segments?.filter((segment) => segment.status === "active").length ?? promptUsage?.active_segments?.length ?? 0);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
   const placementManifestMap = useMemo(
@@ -942,17 +962,19 @@ export function RightSidebar({
       "__company_workspace__",
       "__coding_widget__",
       "__workspace_tabs__",
+      "__prompt_usage__",
     ]);
-    if (requestedId && (items.some((item) => item.id === requestedId) || specialPanelIds.has(requestedId))) {
+    if (requestedId && (items.some((item) => item.id === requestedId) || (requestedId !== "__prompt_usage__" && specialPanelIds.has(requestedId)) || (requestedId === "__prompt_usage__" && hasPromptWidget))) {
       setActivePanel(requestedId);
     }
-  }, [activeItemId, items]);
+  }, [activeItemId, hasPromptWidget, items]);
 
   useEffect(() => {
     if (!activePanel) return;
     if (activePanel === "__tool_manager__") return;
     if (activePanel === "__tool_filter_log__") return;
     if (activePanel === "__runtime_status__") return;
+    if (activePanel === "__prompt_usage__" && hasPromptWidget) return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
     if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
@@ -962,7 +984,7 @@ export function RightSidebar({
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap, workspaceTabs.length]);
+  }, [activePanel, codingPanel, companyPanel, hasPromptWidget, items, placementManifestMap, workspaceTabs.length]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -1086,7 +1108,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1167,6 +1189,7 @@ export function RightSidebar({
   const isToolManagerActive = activePanel === "__tool_manager__";
   const isToolFilterLogActive = activePanel === "__tool_filter_log__";
   const isRuntimeStatusActive = activePanel === "__runtime_status__";
+  const isPromptUsageActive = activePanel === "__prompt_usage__" && hasPromptWidget;
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
   const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
@@ -1515,7 +1538,7 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1529,8 +1552,8 @@ export function RightSidebar({
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1640,6 +1663,19 @@ export function RightSidebar({
               />
             ) : isPlacementPanelActive && activePlacementManifest ? (
               renderPlacementPanel(activePlacementManifest.id)
+            ) : isPromptUsageActive && onLoadPromptActive && onTogglePromptEdge ? (
+              <PromptSidebarWidget
+                profileId={promptProfileId}
+                conversationId={conversationId}
+                modelProfileId={selectedProfile?.profile_id ?? selectedProfile?.qualified_model_id ?? selectedProfile?.model_id ?? undefined}
+                modelLabel={selectedProfile?.display_name ?? selectedProfile?.model_id ?? undefined}
+                initialUsage={promptUsage}
+                loadPromptActive={onLoadPromptActive}
+                togglePromptEdge={onTogglePromptEdge}
+                showChatPromptUsage={showChatPromptUsage}
+                onToggleChatPromptUsage={onToggleChatPromptUsage}
+                onOpenStudio={onOpenPromptStudio}
+              />
             ) : isToolFilterLogActive ? (
               <ToolFilterLogWidget entries={toolFilterEntries} />
             ) : isRuntimeStatusActive ? (
@@ -1982,6 +2018,29 @@ export function RightSidebar({
                       <span className="absolute -top-0.5 -right-0.5 rounded-full bg-emerald-500 px-0.5 text-[7px] font-bold leading-tight text-black">
                         {workspaceTabs.length}
                       </span>
+                    </button>
+                  )}
+                  {hasPromptWidget && (
+                    <button
+                      type="button"
+                      tabIndex={buttonTabIndex}
+                      onClick={() => setActivePanel((current) => (current === "__prompt_usage__" ? null : "__prompt_usage__"))}
+                      className={cn(
+                        RAIL_BUTTON_CLASS,
+                        isPromptUsageActive
+                          ? "bg-cyan-500/15 text-cyan-200 ring-1 ring-cyan-500/30"
+                          : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                      )}
+                      title="Current prompts"
+                      aria-label="Current prompts"
+                      aria-pressed={isPromptUsageActive}
+                    >
+                      <FileText size={17} className="h-[17px] w-[17px] shrink-0" />
+                      {promptRailCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 rounded-full bg-cyan-400 px-0.5 text-[7px] font-bold leading-tight text-black">
+                          {Math.min(promptRailCount, 99)}
+                        </span>
+                      )}
                     </button>
                   )}
                   <SidebarSearchControl

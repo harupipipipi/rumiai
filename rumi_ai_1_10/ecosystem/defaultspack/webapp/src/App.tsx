@@ -24,10 +24,11 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
 import {
   AUTHORITY_WAITING_TEXT,
   authorityApprovalTitle,
@@ -55,6 +56,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
@@ -66,7 +68,6 @@ type ComposerCandidateMenuState = {
   candidates: ModelCommandCandidate[];
 } | null;
 
-type WorkspacePanelMode = "composer" | "calendar";
 type BackendConnectionState = "online" | "degraded" | "offline";
 
 const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
@@ -1367,6 +1368,9 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
   const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
   const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
+  const promptUsage = metadata.prompt_usage && typeof metadata.prompt_usage === "object" && !Array.isArray(metadata.prompt_usage)
+    ? metadata.prompt_usage as NonNullable<ChatUiMessage["metadata"]>["promptUsage"]
+    : undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
@@ -1399,6 +1403,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
             : undefined,
           pendingAuthorityApproval,
           ...displayMetadata,
+          promptUsage,
         },
   };
 }
@@ -2197,6 +2202,7 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
     createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
   ]);
@@ -2329,6 +2335,10 @@ function ChatApp() {
       };
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
+  const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
+    ? latestActiveMetadata.prompt_usage as PromptUsageSummary
+    : null;
+  const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -5188,6 +5198,18 @@ function ChatApp() {
   const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
     openKanbanScope({ type: "group", id: group.id }, group.title);
   };
+
+  const openPromptStudio = (promptId?: string) => {
+    const url = new URL(window.location.href);
+    url.pathname = "/prompts";
+    url.search = "";
+    if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
+    if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
+    if (promptId) url.searchParams.set("prompt_id", promptId);
+    const modelProfileId = profileIdentity(activeProfile) || activeModelId;
+    if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
+    window.location.href = `${url.pathname}${url.search}${url.hash}`;
+  };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -5475,11 +5497,13 @@ function ChatApp() {
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
+                showPromptUsageInMessages={showPromptUsageInMessages}
                 onSuggestionClick={(text) => setInput(text)}
                 onOpenToolPreview={(previewId) => {
                   setActivePreviewId(previewId);
                   setShowPreview(true);
                 }}
+                onLoadPromptTrace={promptResources.getTraceUsage}
               />
             )}
 
@@ -5640,6 +5664,14 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            promptUsage={activePromptUsage}
+            promptProfileId={activePromptProfileId}
+            conversationId={activeConversationId}
+            showChatPromptUsage={showPromptUsageInMessages}
+            onLoadPromptActive={promptResources.getActiveSummary}
+            onTogglePromptEdge={promptResources.toggleEdge}
+            onToggleChatPromptUsage={setShowPromptUsageInMessages}
+            onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}
@@ -5764,6 +5796,9 @@ export default function App() {
 
   if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
+  }
+  if (pathname === "/prompts") {
+    return <PromptStudio />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;

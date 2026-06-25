@@ -20,6 +20,28 @@ user-owned and wins over snapshots. Every effective prompt response includes
 `source_type`, `source`, `source_chain`, `content`, and `final_content` so flow
 steps can audit which layer produced the final text.
 
+## Pack Trust Boundary
+
+Pack-provided prompts are model-visible only when their source pack is approved
+and hash-verified by the host approval manager. Untrusted pack prompts are
+skipped by prompt listing/resolution. The AI Input Graph also fails closed:
+if a pack-sourced prompt reaches runtime from an older path or test hook, its
+edge is inactive and the disabled segment records
+`prompt_source_pack_untrusted`.
+
+The shipped prompt-only trusted set is intentionally small:
+`defaultspack`, `rumi_default_tools_pack`, and
+`rumi_operations_company_pack`. Extension and component prompt manifests must
+also resolve from inside the claimed shipped pack root, so a manifest cannot
+gain trust only by spoofing `source_pack_id`. This trust only allows passive
+prompt text to enter model input; it does not grant tool, provider, filesystem,
+terminal, browser, or chat-state authority.
+
+User-owned profile overrides remain editable prompt text, but they do not grant
+permissions, attach tools, call providers, or mutate chat state. Trusting a pack
+allows its prompt text to be considered as passive model input; it still does
+not grant execution authority.
+
 ## Functions
 
 - `defaults.prompt.load_effective` returns the selected prompt text and source
@@ -47,3 +69,7 @@ If a tool is needed, author a `rumi_function` or `capability` tool facade.
 Prompt files are data. Python prompt hooks that read files, call providers, or
 touch host capabilities do not belong in prompt authoring; that logic must live
 behind trusted functions and explicit capability grants.
+
+Prompt visibility, active graph toggles, editor overrides, diffs, versions, and
+chat response trace inspection are documented in
+[prompt-workspace.md](prompt-workspace.md).

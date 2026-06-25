@@ -69,6 +69,30 @@ Vision bridge and compatibility utility routing are available through:
 - `defaultspack:prompt_lint_prompt` / `defaults.prompt.lint_prompt`
 - `defaultspack:prompt_compact_prompt` / `defaults.prompt.compact_prompt`
 
+Prompt Workspace management is available through:
+
+- `defaultspack:prompt_active` / `defaults.prompt.active`
+- `defaultspack:prompt_trace_list` / `defaults.prompt.trace_list`
+- `defaultspack:prompt_trace_get` / `defaults.prompt.trace_get`
+- `defaultspack:prompt_toggle` / `defaults.prompt.toggle`
+- `defaultspack:prompt_preview_toggle` / `defaults.prompt.preview_toggle`
+- `defaultspack:prompt_editor_load` / `defaults.prompt.editor_load`
+- `defaultspack:prompt_editor_save` / `defaults.prompt.editor_save`
+- `defaultspack:prompt_create_override` / `defaults.prompt.create_override`
+- `defaultspack:prompt_test` / `defaults.prompt.test`
+- `defaultspack:prompt_diff` / `defaults.prompt.diff`
+- `defaultspack:prompt_versions` / `defaults.prompt.versions`
+- `defaultspack:prompt_rollback` / `defaults.prompt.rollback`
+
+See [prompt_workspace.md](prompt_workspace.md) for chat trace inspection,
+override priority, `disabled_edges`, and the passive prompt safety boundary.
+Prompt trace detail is redacted unless `include_text=true` is explicit, and
+all `/api/prompts/*` HTTP routes are local-only sensitive routes. Prompt Studio
+saves, overrides, and rollbacks require `expected_body_hash` or
+`expected_exists=false`; unconditional prompt writes are rejected with
+`PROMPT_WRITE_CONFLICT`. Versioned writes use atomic replacement plus rollback
+compensation to avoid phantom versions and unaudited rollback deletes.
+
 ## Flow Example
 
 ```yaml

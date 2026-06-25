@@ -269,9 +269,9 @@ def _path_inject(item: dict[str, Any]) -> dict[str, str]:
     if not isinstance(value, dict):
         return {}
     return {
-        str(source): str(target)
-        for source, target in value.items()
-        if str(source or "").strip() and str(target or "").strip()
+        str(key): str(target)
+        for key, target in value.items()
+        if str(key or "").strip() and str(target or "").strip()
     }
 
 
