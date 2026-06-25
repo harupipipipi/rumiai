@@ -7,6 +7,7 @@ from typing import Any
 
 from .ai_input_models import PromptSegment, ToolSchemaSegment
 from .ai_input_token_estimator import estimate_json_tokens, estimate_tokens
+from .pack_trust import is_pack_trusted
 from .profile_graph_models import normalize_profile_graph_selected
 from .profile_workspace import ProfileWorkspaceManager, profile_workspace_payload
 
@@ -39,6 +40,9 @@ def collect_prompt_segments(
             continue
         seen.add(prompt_id)
         text, source, source_type, metadata = _resolve_prompt_text(profile, prompt_id, manager)
+        trusted, trust_reason = _prompt_source_trust(source_type, metadata, profile)
+        if not trusted:
+            text = ""
         segment_id = f"prompt:{prompt_id}"
         if not text and include_text:
             text = ""
@@ -50,12 +54,15 @@ def collect_prompt_segments(
                 source_type=source_type,
                 tokens=estimate_tokens(text),
                 priority=50 + index,
-                enabled=True,
+                enabled=trusted,
+                reason="" if trusted else "prompt_source_pack_untrusted",
                 metadata={
                     "profile_id": profile_id,
                     "prompt_id": prompt_id,
                     "allow_disable": True,
                     **metadata,
+                    "source_pack_trusted": trusted,
+                    **({"source_pack_trust_reason": trust_reason} if trust_reason else {}),
                 },
             )
         )
@@ -82,6 +89,9 @@ def collect_tool_schema_segments(profile: dict[str, Any], available_tools: list[
         if not schema:
             schema = tool.get("schema") if isinstance(tool.get("schema"), dict) else {}
         enabled = not allowlist or tool_id in allowlist or name in allowlist
+        metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+        skill_ids = _string_list(tool.get("skills") or metadata.get("skills"))
+        skill_triggers = _string_list(metadata.get("skill_triggers"))
         segments.append(
             ToolSchemaSegment(
                 id=f"tool_schema:{tool_id or name}",
@@ -95,6 +105,13 @@ def collect_tool_schema_segments(profile: dict[str, Any], available_tools: list[
                     "allow_disable": True,
                     "source": _tool_source(tool),
                     "provider_name": tool_name_from_definition(tool),
+                    "tool_id": tool_id or name,
+                    "tool_name": name or tool_id,
+                    "display_name": str(tool.get("display_name") or metadata.get("display_name") or name or tool_id),
+                    "description": str(tool.get("description") or metadata.get("description") or ""),
+                    "source_pack_id": str(tool.get("source_pack_id") or metadata.get("source_pack_id") or ""),
+                    "skills": skill_ids,
+                    "skill_triggers": skill_triggers,
                 },
             )
         )
@@ -256,10 +273,30 @@ def _resolve_prompt_text(
         str(effective.get("source") or f"profile.prompt:{prompt_id}"),
         str(effective.get("source_type") or "profile_prompt"),
         {
+            **(effective.get("metadata") if isinstance(effective.get("metadata"), dict) else {}),
             "resolved_prompt_id": effective.get("prompt_id"),
+            "source_pack_id": effective.get("source_pack_id"),
+            "source_pack_trusted": effective.get("source_pack_trusted"),
+            "source_pack_trust_reason": effective.get("source_pack_trust_reason"),
             "source_chain": effective.get("source_chain") if isinstance(effective.get("source_chain"), list) else [],
         },
     )
+
+
+def _prompt_source_trust(
+    source_type: str,
+    metadata: dict[str, Any],
+    profile: dict[str, Any],
+) -> tuple[bool, str | None]:
+    if source_type not in {"pack_default", "component", "extension", "profile_snapshot"}:
+        return True, None
+    source_pack_id = str(metadata.get("source_pack_id") or "").strip()
+    if not source_pack_id and source_type == "profile_snapshot":
+        source_pack_id = str(profile.get("base_pack") or "").strip()
+    if not source_pack_id:
+        return False, "missing_source_pack_id"
+    trusted, reason = is_pack_trusted(source_pack_id)
+    return trusted, reason
 
 
 def _tool_allowlist(policy: dict[str, Any]) -> set[str]:
@@ -273,6 +310,19 @@ def _string_set(value: Any) -> set[str]:
     if not isinstance(value, list):
         return set()
     return {str(item).strip() for item in value if str(item).strip()}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        value = [part.strip() for part in value.replace("\n", ",").split(",")]
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def _result_count(value: Any) -> int:

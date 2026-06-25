@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from ..components import get_domain_component_registry
+from .trust import prompt_pack_source_is_trusted
 
 
 def _component_file(manifest: dict[str, Any], entrypoint: str) -> Path | None:
@@ -45,6 +46,9 @@ def component_prompt_manifests() -> dict[str, dict[str, Any]]:
         manifest = component.as_dict()
         prompt_id = str(manifest.get("prompt_id") or manifest.get("id") or "").strip()
         if not prompt_id:
+            continue
+        source_pack_id = str(manifest.get("source_pack_id") or "").strip()
+        if not prompt_pack_source_is_trusted(source_pack_id, manifest.get("source_path", "")):
             continue
         prompts[prompt_id] = manifest
     return prompts

@@ -95,7 +95,7 @@ def discover_extensions(
 
             seen.add(dedupe_key)
             manifest["source_path"] = str(manifest_path)
-            if source_pack_id:
+            if source_pack_id and not str(manifest.get("source_pack_id") or "").strip():
                 manifest["source_pack_id"] = source_pack_id
             result.extensions.append(
                 DiscoveredExtension(

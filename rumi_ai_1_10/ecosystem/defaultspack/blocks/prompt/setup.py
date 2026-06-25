@@ -18,41 +18,48 @@ def run(context):
     interface_registry = context["interface_registry"]
     source_component = context.get("_source_component", "defaultspack:prompt:prompt")
 
-    def _lazy(module_path, func_name="run"):
+    def _lazy(module_path, func_name="run", defaults=None, *, sensitive=False, pre_auth=False, local_only=False):
         """Return a lazy handler that imports the module on first call."""
+        route_defaults = dict(defaults or {})
+
         def handler(request_data, context):
             import importlib
             mod = importlib.import_module(module_path)
             fn = getattr(mod, func_name)
-            return fn(request_data, context)
+            payload = dict(request_data or {})
+            payload.update(route_defaults)
+            return fn(payload, context)
+        try:
+            setattr(handler, "__rumi_route_sensitive__", bool(sensitive))
+            setattr(handler, "__rumi_route_pre_auth__", bool(pre_auth))
+            setattr(handler, "__rumi_route_local_only__", bool(local_only))
+        except Exception:
+            pass
         return handler
 
-    routes = [
-        # --- 既存ルート ---
-        ("PUT", "/api/prompts/{name}", _lazy("blocks.prompt.update"), {"name": "name"}),
-        ("DELETE", "/api/prompts/{name}", _lazy("blocks.prompt.delete"), {"name": "name"}),
-        ("POST", "/api/prompts/convert", _lazy("blocks.prompt.convert"), {}),
-        ("POST", "/api/prompts/lint", _lazy("blocks.prompt.lint_prompt"), {}),
-        ("POST", "/api/prompts/compact", _lazy("blocks.prompt.compact_prompt"), {}),
-        # --- advanced ルート ---
-        ("POST", "/api/prompts/build", _lazy("blocks.prompt.advanced.build"), {}),
-        ("GET", "/api/prompts/context-vars", _lazy("blocks.prompt.advanced.context_vars"), {}),
-        ("POST", "/api/prompts/{name}/conditional", _lazy("blocks.prompt.advanced.conditional"), {"name": "name"}),
-        ("POST", "/api/prompts/{name}/inherit", _lazy("blocks.prompt.advanced.inherit"), {"name": "name"}),
-        ("GET", "/api/prompts/{name}/versions", _lazy("blocks.prompt.advanced.version"), {"name": "name"}),
-        ("POST", "/api/prompts/{name}/versions", _lazy("blocks.prompt.advanced.version"), {"name": "name"}),
-        ("PUT", "/api/prompts/{name}/versions/{version}", _lazy("blocks.prompt.advanced.version"), {"name": "name", "version": "version"}),
-        ("POST", "/api/prompts/preview", _lazy("blocks.prompt.advanced.preview"), {}),
-    ]
+    from transport.registry import prompt_http_route_specs
 
-    for method, pattern, handler, path_inject in routes:
+    for spec in prompt_http_route_specs():
+        module_path = spec.legacy_block_module or spec.block_module or spec.fallback_block_module
+        if not module_path:
+            continue
+        handler = _lazy(
+            module_path,
+            defaults=spec.defaults,
+            sensitive=spec.sensitive,
+            pre_auth=spec.pre_auth,
+            local_only=spec.local_only,
+        )
         interface_registry.register(
             "io.http.route",
             {
-                "method": method,
-                "pattern": pattern,
+                "method": spec.method,
+                "pattern": spec.pattern,
                 "handler": handler,
-                "path_inject": path_inject,
+                "path_inject": dict(spec.path_inject),
+                "sensitive": bool(spec.sensitive),
+                "pre_auth": bool(spec.pre_auth),
+                "local_only": bool(spec.local_only),
             },
             meta={"_source_component": source_component},
         )
