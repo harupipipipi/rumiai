@@ -1,0 +1,15 @@
+{
+  "function_id": "prompt_trace_list",
+  "description": "List saved prompt usage traces.",
+  "tags": ["prompt", "trace"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": ["defaults.prompt.trace_list", "defaultspack.prompt.trace_list", "defaults.prompt.trace.list", "defaultspack.prompt.trace.list"],
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "properties": {"status": {"type": "string"}, "data": {}, "error": {"type": "object"}}},
+  "extensions": {"defaultspack": {"block_module": "blocks.prompt.trace", "default_args": {}}}
+}

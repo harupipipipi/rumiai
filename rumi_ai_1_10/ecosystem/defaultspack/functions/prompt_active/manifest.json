@@ -1,0 +1,15 @@
+{
+  "function_id": "prompt_active",
+  "description": "Summarize active prompt segments for a profile or chat.",
+  "tags": ["prompt"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": ["defaults.prompt.active", "defaultspack.prompt.active"],
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "properties": {"status": {"type": "string"}, "data": {}, "error": {"type": "object"}}},
+  "extensions": {"defaultspack": {"block_module": "blocks.prompt.active", "default_args": {}}}
+}

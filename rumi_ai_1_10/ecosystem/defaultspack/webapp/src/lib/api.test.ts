@@ -871,6 +871,87 @@ test("approveAuthorityApproval serializes bundled related permissions", async ()
   assert.deepEqual(requestBody?.related_permissions, ["api_key.use"]);
 });
 
+test("testPromptStudio posts draft input and selected tools", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        profile_id: "prompt-profile",
+        prompt_id: "default_chat",
+        segments: [],
+        matched_skills: [],
+        verdicts: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.testPromptStudio({
+      profile_id: "prompt-profile",
+      prompt_id: "default_chat",
+      draft: "Use the calculator when arithmetic is requested.",
+      user_text: "計算して",
+      selected_tools: ["calculator"],
+      model_profile_id: "openai/gpt-5.1",
+      model: "openai/gpt-5.1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/prompts/test");
+  assert.deepEqual(requestBody, {
+    profile_id: "prompt-profile",
+    prompt_id: "default_chat",
+    draft: "Use the calculator when arithmetic is requested.",
+    user_text: "計算して",
+    selected_tools: ["calculator"],
+    model_profile_id: "openai/gpt-5.1",
+    model: "openai/gpt-5.1",
+  });
+});
+
+test("rollbackPrompt posts conflict precondition body hash", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        prompt_id: "default_chat",
+        rolled_back: true,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.rollbackPrompt({
+      profile_id: "default-profile",
+      prompt_id: "default_chat",
+      version_id: "version-2",
+      expected_body_hash: "3d6eb9f8b9f1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/prompts/default_chat/rollback");
+  assert.deepEqual(requestBody, {
+    profile_id: "default-profile",
+    prompt_id: "default_chat",
+    version_id: "version-2",
+    expected_body_hash: "3d6eb9f8b9f1",
+  });
+});
+
 test("searchConversations serializes spotlight search filters", async () => {
   let requestUrl = "";
   let requestBody: any = null;

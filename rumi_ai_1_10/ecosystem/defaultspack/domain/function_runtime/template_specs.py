@@ -148,6 +148,7 @@ def template_route_items(defaultspack_root: str | Path | None = None) -> list[di
                 "path": route_path,
                 "block_module": block_module,
                 "default_args": _default_args(item),
+                "path_inject": _path_inject(item),
                 "pre_auth": bool(item.get("pre_auth")),
                 "sensitive": bool(item.get("sensitive")),
                 "template_id": item.get("template_id"),
@@ -251,6 +252,17 @@ def _block_module_from_item(item: dict[str, Any]) -> str | None:
 def _default_args(item: dict[str, Any]) -> dict[str, Any]:
     value = item.get("default_args")
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _path_inject(item: dict[str, Any]) -> dict[str, str]:
+    value = item.get("path_inject")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): str(target)
+        for key, target in value.items()
+        if str(key or "").strip() and str(target or "").strip()
+    }
 
 
 def _risk(item: dict[str, Any], *, role: str) -> str:

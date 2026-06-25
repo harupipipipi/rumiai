@@ -32,7 +32,11 @@ def test_prompt_resolver_reads_component_backed_prompts():
     assert resolver.render("coding", {}) == resolver.resolve_prompt_text("coding")
 
 
-def test_prompt_resolver_reads_pack_backed_prompt_when_source_pack_is_known():
+def test_prompt_resolver_reads_pack_backed_prompt_when_source_pack_is_known(monkeypatch):
+    monkeypatch.setattr(
+        "domain.prompt.resolver.prompt_pack_is_trusted",
+        lambda pack_id: str(pack_id) in {"defaultspack", "rumi_operations_company_pack"},
+    )
     resolver = PromptResolver()
 
     content = resolver.resolve_prompt_text(

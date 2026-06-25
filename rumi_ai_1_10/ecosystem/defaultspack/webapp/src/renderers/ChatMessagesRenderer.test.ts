@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import React from "react";
+import React, { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
@@ -274,6 +274,43 @@ test("authority waiting message is not replaced by the settled assistant continu
   });
 
   assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-waiting", "authority-continuation"]);
+});
+
+test("prompt usage disclosure can be hidden from chat messages", () => {
+  const promptMessage = message({
+    id: "assistant-with-prompts",
+    rawText: "done",
+    content: [{ type: "text", text: "done" }],
+    metadata: {
+      promptUsage: {
+        active_count: 1,
+        token_estimate: { total: 12 },
+        segments: [{ id: "prompt:default_chat", label: "default_chat", status: "active", tokens: 12 }],
+      },
+    },
+  });
+  const baseProps = {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [promptMessage],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  };
+
+  const visible = renderToStaticMarkup(createElement(ChatMessagesRenderer, baseProps));
+  const hidden = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    ...baseProps,
+    showPromptUsageInMessages: false,
+  }));
+
+  assert.match(visible, /Prompt used/);
+  assert.doesNotMatch(hidden, /Prompt used/);
 });
 
 test("long terminal-style output is detected for compact display", () => {

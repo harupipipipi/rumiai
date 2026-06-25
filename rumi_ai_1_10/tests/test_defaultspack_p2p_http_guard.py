@@ -52,3 +52,21 @@ def test_p2p_http_routes_require_sensitive_auth(monkeypatch):
         "X-Rumi-CSRF": "1",
     }
     assert handler._sensitive_request_error("POST", "/api/integrations/p2p/events") is None
+
+
+def test_prompt_routes_reject_token_authenticated_remote_clients(monkeypatch):
+    from transport.http import _RequestHandler
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", "local-secret")
+    handler = _RequestHandler.__new__(_RequestHandler)
+    handler.headers = {"Authorization": "Bearer local-secret"}
+    handler.client_address = ("203.0.113.7", 54321)
+
+    assert handler._sensitive_request_error("GET", "/api/prompts") == (
+        403,
+        "sensitive local route requires a loopback client",
+        "LOCAL_ONLY_REQUIRED",
+    )
+
+    handler.client_address = ("127.0.0.1", 54321)
+    assert handler._sensitive_request_error("GET", "/api/prompts") is None

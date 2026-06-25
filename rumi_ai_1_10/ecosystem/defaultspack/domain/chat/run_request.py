@@ -643,6 +643,46 @@ def prepare_chat_run(
         _append_system_context_message(standard_messages, skill_instructions)
         request_context["matched_skill_instructions"] = matched_skills
         tool_context["matched_skill_instructions"] = matched_skills
+        try:
+            from core_runtime.ai_input_token_estimator import estimate_tokens
+            from core_runtime.ai_input_trace_store import AiInputTraceStore
+            from domain.prompt.usage import append_runtime_prompt_segment, compact_prompt_usage_for_metadata
+
+            skill_segment = {
+                "id": "skill:runtime.matched_instructions",
+                "edge_id": "",
+                "prompt_id": "runtime.matched_instructions",
+                "label": "Matched skill instructions",
+                "kind": "skill",
+                "port": "system",
+                "status": "active",
+                "source": "RuntimeSkillTriggerService",
+                "source_type": "skill",
+                "tokens": int(estimate_tokens(skill_instructions)),
+                "reason": "Matched skills were triggered by the current message or selected tools.",
+                "allow_disable": False,
+                "editable": False,
+                "readonly_reason": "Runtime skill instructions are controlled by skill definitions.",
+                "preview": " ".join(skill_instructions.split())[:280],
+                "text": skill_instructions,
+                "metadata": {"matched_skills": matched_skills},
+            }
+            request_context["prompt_usage"] = compact_prompt_usage_for_metadata(
+                append_runtime_prompt_segment(request_context.get("prompt_usage"), skill_segment)
+            )
+            trace_info = request_context.get("ai_input_trace") if isinstance(request_context.get("ai_input_trace"), dict) else {}
+            trace_id = str(trace_info.get("trace_id") or "").strip()
+            trace_profile_id = str(trace_info.get("profile_id") or request_context.get("profile_id") or "").strip()
+            if trace_id and trace_profile_id:
+                trace_store = AiInputTraceStore()
+                trace = trace_store.get_trace(trace_profile_id, trace_id)
+                if isinstance(trace, dict):
+                    runtime_segments = trace.get("runtime_prompt_segments") if isinstance(trace.get("runtime_prompt_segments"), list) else []
+                    runtime_segments.append(skill_segment)
+                    trace["runtime_prompt_segments"] = runtime_segments
+                    trace_store.save_trace(trace_profile_id, trace)
+        except Exception:
+            pass
 
     provider_input_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
     planned_request = plan_model_request(
@@ -719,6 +759,7 @@ def _apply_effective_ai_input_to_request_context(
     try:
         from core_runtime.ai_input_graph_builder import build_runtime_ai_input_trace
         from core_runtime.ai_input_trace_store import AiInputTraceStore
+        from domain.prompt.usage import compact_prompt_usage_for_metadata, prompt_usage_from_trace
     except Exception:
         return request_context, ""
 
@@ -748,6 +789,10 @@ def _apply_effective_ai_input_to_request_context(
         "allowed_tool_ids": allowed_tool_ids,
         "gate_decisions": trace.get("gate_decisions", []),
     }
+    try:
+        updated["prompt_usage"] = compact_prompt_usage_for_metadata(prompt_usage_from_trace(trace, include_text=False))
+    except Exception:
+        pass
     try:
         AiInputTraceStore().save_trace(str(active_profile.get("profile_id") or ""), trace)
     except Exception:
