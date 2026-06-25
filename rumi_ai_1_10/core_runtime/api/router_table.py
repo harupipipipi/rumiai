@@ -114,6 +114,8 @@ class APIRouteTableMixin:
                 "pack_id": pack_id,
                 "owner_pack_id": str(route.get("owner_pack_id") or pack_id),
                 "permission_id": str(route.get("permission_id") or ""),
+                "provider_id": str(route.get("provider_id") or ""),
+                "frontend_id": str(route.get("frontend_id") or ""),
                 "audience": str(route.get("audience") or "kernel_api"),
                 "core_only": bool(route.get("core_only", False)),
                 "resource_template": dict(route.get("resource_template") or {}),
@@ -218,6 +220,13 @@ class APIRouteTableMixin:
         if entry is None:
             return False
 
+        entry_for_auth = dict(entry)
+        entry_for_auth["resource_template"] = self._resolve_api_route_resource_template(
+            entry.get("resource_template") if isinstance(entry.get("resource_template"), dict) else {},
+            path_params=path_params,
+            body=body,
+            query=query,
+        )
         principal = getattr(self, "_authenticated_principal", None)
         if principal is not None:
             if entry.get("core_only") and not principal.core_role:
@@ -227,7 +236,7 @@ class APIRouteTableMixin:
                 principal=principal,
                 method=method_upper,
                 path=path,
-                route_entry=entry,
+                route_entry=entry_for_auth,
             )
             if not authorization.allowed:
                 self._send_response(
@@ -348,3 +357,33 @@ class APIRouteTableMixin:
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    @staticmethod
+    def _resolve_api_route_resource_template(
+        template: dict[str, Any],
+        *,
+        path_params: dict[str, str],
+        body: Optional[dict[str, Any]],
+        query: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        sources = {
+            "path": path_params or {},
+            "params": path_params or {},
+            "body": body if isinstance(body, dict) else {},
+            "query": query if isinstance(query, dict) else {},
+        }
+        resolved: dict[str, Any] = {}
+        for key, value in template.items():
+            if not str(key).strip():
+                continue
+            if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+                ref = value[1:-1].strip()
+                source_name, _, source_key = ref.partition(".")
+                if source_key and source_name in sources:
+                    resolved[str(key)] = sources[source_name].get(source_key, "")
+                    continue
+                if ref in path_params:
+                    resolved[str(key)] = path_params.get(ref, "")
+                    continue
+            resolved[str(key)] = value
+        return resolved

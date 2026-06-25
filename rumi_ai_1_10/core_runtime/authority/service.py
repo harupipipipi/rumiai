@@ -9,6 +9,7 @@ from urllib.parse import urlsplit, urlunsplit
 from .config_lattice import (
     AuthorityConfigError,
     AUTHORITY_RESOURCE_CONFIG_FIELDS,
+    authority_constraints_from_config,
     authority_config_from_resource,
     meet_authority_configs,
     validate_authority_config,
@@ -133,10 +134,6 @@ class AuthorityService:
         if permission_id not in AUTHORITY_PERMISSION_IDS:
             return self._decision(False, permission_id, principal_id, resource, "Unknown authority permission", risk_level)
 
-        if self._resource_always_allowed(permission_id, resource):
-            self._audit_check("allowed_builtin", principal_id, permission_id, resource)
-            return self._decision(True, permission_id, principal_id, resource, "Built-in/local resource allowed", "low")
-
         mode = self.mode
         if mode == "off":
             self._audit_check("allowed_off", principal_id, permission_id, resource)
@@ -215,9 +212,12 @@ class AuthorityService:
         expires_in_seconds: int | None = None,
         related_permissions: list[str] | tuple[str, ...] | None = None,
         ui_operator: dict[str, Any] | None = None,
+        actor_principal: Any = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if not self._actor_can_access_request(request, actor_principal=actor_principal):
             return {"success": False, "error": "Authority request not found", "status_code": 404}
         if request.status != "pending":
             return {"success": False, "error": f"Authority request is {request.status}", "status_code": 409}
@@ -229,6 +229,12 @@ class AuthorityService:
         scope = str(scope or "once").strip().lower()
         if scope not in AUTHORITY_APPROVAL_SCOPES:
             return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
+        if self._actor_mobile_approver(actor_principal) and scope != "once":
+            return {
+                "success": False,
+                "error": "Mobile approver tokens may only issue one-shot approvals",
+                "status_code": 403,
+            }
         confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
         if self._typed_confirmation_required(request):
             if scope != "once":
@@ -469,15 +475,24 @@ class AuthorityService:
         reason: str = "",
         persist: bool = False,
         ui_operator: dict[str, Any] | None = None,
+        actor_principal: Any = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if not self._actor_can_access_request(request, actor_principal=actor_principal):
             return {"success": False, "error": "Authority request not found", "status_code": 404}
         if request.status != "pending":
             return {"success": False, "error": f"Authority request is {request.status}", "status_code": 409}
         if self._request_store.request_expired(request):
             self._request_store.set_request_status(request.request_id, "expired")
             return {"success": False, "error": "Authority request expired", "status_code": 409}
+        if self._actor_mobile_approver(actor_principal) and persist:
+            return {
+                "success": False,
+                "error": "Mobile approver tokens may not create persistent denies",
+                "status_code": 403,
+            }
         operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
         if not operator_ok:
             self._request_store.audit(
@@ -510,15 +525,75 @@ class AuthorityService:
             "deny": deny_record,
         }
 
-    def list_requests(self, status: str = "all") -> dict[str, Any]:
-        requests = [self._request_view(item) for item in self._request_store.list_requests(status)]
+    def list_requests(
+        self,
+        status: str = "all",
+        *,
+        profile_id: str | None = None,
+        actor_principal: Any = None,
+    ) -> dict[str, Any]:
+        requests = [
+            self._request_view(item)
+            for item in self._request_store.list_requests(status)
+            if self._actor_can_access_request(
+                item,
+                profile_id=profile_id,
+                actor_principal=actor_principal,
+            )
+        ]
         return {"requests": requests, "pending": [item for item in requests if item.get("status") == "pending"], "count": len(requests)}
 
-    def get_request(self, request_id: str) -> dict[str, Any]:
+    def get_request(
+        self,
+        request_id: str,
+        *,
+        profile_id: str | None = None,
+        actor_principal: Any = None,
+    ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if not self._actor_can_access_request(
+            request,
+            profile_id=profile_id,
+            actor_principal=actor_principal,
+        ):
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
         return {"success": True, "request": self._request_view(request)}
+
+    @classmethod
+    def _actor_can_access_request(
+        cls,
+        request: AuthorityRequest,
+        *,
+        profile_id: str | None = None,
+        actor_principal: Any = None,
+    ) -> bool:
+        expected_profile = str(profile_id or "").strip() or cls._actor_profile_id(actor_principal)
+        if not expected_profile:
+            return True
+        target_profile = str(request.profile_id or "").strip()
+        if not target_profile:
+            target_profile = parse_principal_parts(request.principal_id).get("profile", "")
+        return bool(target_profile and target_profile == expected_profile)
+
+    @staticmethod
+    def _actor_profile_id(actor_principal: Any) -> str:
+        if actor_principal is None:
+            return ""
+        if isinstance(actor_principal, dict):
+            if bool(actor_principal.get("core_role")):
+                return ""
+            return str(actor_principal.get("profile_id") or "").strip()
+        if bool(getattr(actor_principal, "core_role", False)):
+            return ""
+        return str(getattr(actor_principal, "profile_id", "") or "").strip()
+
+    @staticmethod
+    def _actor_mobile_approver(actor_principal: Any) -> bool:
+        if isinstance(actor_principal, dict):
+            return str(actor_principal.get("role") or "").strip() == "mobile_approver"
+        return str(getattr(actor_principal, "role", "") or "").strip() == "mobile_approver"
 
     def one_shot_approval_issued(
         self,
@@ -584,22 +659,16 @@ class AuthorityService:
             return None
         profile_chain = self._profile_principal_chain(candidates[0] if candidates else "")
         if profile_chain:
-            profile_match, profile_has_grant = self._matching_profile_chain_grant(profile_chain, permission_id, resource)
-            if profile_match is not None or profile_has_grant:
-                return profile_match
-            profile_chain_set = set(profile_chain)
-        else:
-            profile_chain_set = set()
+            profile_match, _profile_has_grant = self._matching_profile_chain_grant(profile_chain, permission_id, resource)
+            return profile_match
         for candidate in candidates:
-            if candidate in profile_chain_set:
-                continue
             permission_state, config = self._permission_state_for_principal(candidate, permission_id)
             if permission_state == "disabled":
                 return None
             if permission_state != "enabled":
                 continue
             try:
-                config = validate_authority_config(config)
+                config = authority_constraints_from_config(config)
             except AuthorityConfigError:
                 return None
             if self._resource_allowed(config, resource):
@@ -619,11 +688,11 @@ class AuthorityService:
             if permission_state == "disabled":
                 return None, True
             if permission_state != "enabled":
-                continue
+                return None, True
             configs.append(config)
             matched_principal = principal_id
         if not configs:
-            return None, False
+            return None, True
         try:
             effective_config = meet_authority_configs(*configs)
         except AuthorityConfigError:
@@ -749,6 +818,10 @@ class AuthorityService:
             definition = get_host_permission_definition(permission_id)
             if definition is not None:
                 return definition.risk_level
+            return "high"
+        if permission_id in {"auth.token.issue", "auth.token.revoke", "authority.grant.manage"}:
+            return "critical"
+        if permission_id.endswith(".manage"):
             return "high"
         if permission_id == "network.egress" and resource.get("domain") == "*":
             return "high"

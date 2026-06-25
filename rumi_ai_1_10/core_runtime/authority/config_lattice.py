@@ -129,10 +129,27 @@ def validate_authority_config(config: Mapping[str, Any] | None) -> dict[str, Any
     return normalized
 
 
+def authority_constraints_from_config(config: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Return only Authority v2 constraint facets from a persisted grant config.
+
+    Persisted grants may carry legacy metadata such as ``{"mode": "builtin"}``.
+    That metadata must not invalidate the grant, but it also must not
+    participate in the Authority v2 lattice.
+    """
+
+    if config is None:
+        return {}
+    if not isinstance(config, Mapping):
+        raise AuthorityConfigError("Authority config must be an object")
+    return validate_authority_config(
+        {key: value for key, value in config.items() if str(key) in AUTHORITY_CONFIG_FACETS}
+    )
+
+
 def meet_authority_configs(*configs: Mapping[str, Any] | None) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for config in configs:
-        result = _meet_two_authority_configs(result, validate_authority_config(config))
+        result = _meet_two_authority_configs(result, authority_constraints_from_config(config))
     return result
 
 

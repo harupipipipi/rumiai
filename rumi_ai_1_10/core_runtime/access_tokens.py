@@ -29,6 +29,16 @@ from .paths import USER_DATA_DIR
 
 TOKEN_PREFIX = "rumi_at_"
 DEFAULT_ACCESS_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60
+ACCESS_TOKEN_ROLE_POLICIES: dict[str, dict[str, tuple[str, ...] | str]] = {
+    "mobile_client": {
+        "surface_id": "mobile",
+        "audiences": ("kernel_api",),
+    },
+    "mobile_approver": {
+        "surface_id": "mobile-approver",
+        "audiences": ("kernel_api",),
+    },
+}
 
 _TOKEN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{12,64}$")
 _TOKEN_RE = re.compile(
@@ -88,6 +98,31 @@ def _clean_audiences(audiences: Iterable[str] | str | None) -> list[str]:
         if cleaned and cleaned not in output:
             output.append(cleaned)
     return output
+
+
+def access_token_issue_policy(
+    *,
+    role: str,
+    surface_id: str | None = None,
+    audiences: Iterable[str] | str | None = None,
+) -> dict[str, Any]:
+    normalized_role = str(role or "").strip() or "mobile_client"
+    policy = ACCESS_TOKEN_ROLE_POLICIES.get(normalized_role)
+    if policy is None:
+        raise ValueError("Unsupported access token role")
+    expected_surface = str(policy["surface_id"])
+    requested_surface = str(surface_id or "").strip()
+    if requested_surface and requested_surface != expected_surface:
+        raise ValueError(f"{normalized_role} tokens must use surface_id={expected_surface}")
+    expected_audiences = tuple(str(item) for item in policy["audiences"])
+    requested_audiences = tuple(_clean_audiences(audiences))
+    if requested_audiences and requested_audiences != expected_audiences:
+        raise ValueError(f"{normalized_role} tokens must use audiences={list(expected_audiences)}")
+    return {
+        "role": normalized_role,
+        "surface_id": expected_surface,
+        "audiences": expected_audiences,
+    }
 
 
 def _format_input_ts(value: datetime | str) -> str:
@@ -608,6 +643,7 @@ def reset_scoped_access_token_manager_for_tests(
 __all__ = [
     "AccessTokenManager",
     "AccessTokenMetadata",
+    "ACCESS_TOKEN_ROLE_POLICIES",
     "AuthenticatedPrincipal",
     "DEFAULT_ACCESS_TOKEN_TTL_SECONDS",
     "IssuedAccessToken",
@@ -615,6 +651,7 @@ __all__ = [
     "ScopedAccessTokenManager",
     "ScopedOpaqueAccessTokenManager",
     "TOKEN_PREFIX",
+    "access_token_issue_policy",
     "get_scoped_access_token_manager",
     "reset_scoped_access_token_manager_for_tests",
 ]

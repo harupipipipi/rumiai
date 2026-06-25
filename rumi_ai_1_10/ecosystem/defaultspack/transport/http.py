@@ -16,7 +16,11 @@ import http.server
 import urllib.parse
 from pathlib import Path
 
-from core_runtime.api.safe_headers import sanitized_forwarded_headers
+from core_runtime.api.safe_headers import (
+    RESERVED_REQUEST_CONTEXT_KEYS,
+    sanitized_forwarded_headers,
+    strip_reserved_request_context,
+)
 
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
@@ -142,6 +146,24 @@ class DefaultsHttpServer:
                             entry.get("fallback_block_module") or ""
                         ).strip()
                         path_inject = entry.get("path_inject", {})
+                        route_authority = {
+                            "permission_id": str(entry.get("permission_id") or "").strip(),
+                            "owner_pack_id": str(entry.get("owner_pack_id") or entry.get("pack_id") or "defaultspack").strip(),
+                            "provider_id": str(entry.get("provider_id") or "").strip(),
+                            "frontend_id": str(entry.get("frontend_id") or "").strip(),
+                            "function_id": str(entry.get("function_id") or "").strip(),
+                            "audience": str(entry.get("audience") or "kernel_api").strip(),
+                            "resource_template": dict(entry.get("resource_template") or {})
+                            if isinstance(entry.get("resource_template"), dict)
+                            else {},
+                        }
+                        if entry.get("core_only", False):
+                            route_authority["core_only"] = True
+                        route_authority = {
+                            key: value
+                            for key, value in route_authority.items()
+                            if value not in ("", {}, None)
+                        }
                         method_key = str(method or "").upper()
                         pattern_key = str(pattern or "")
                         mapped_flow = _CHAT_TURN_HTTP_FALLBACKS.get((method_key, pattern_key))
@@ -172,17 +194,19 @@ class DefaultsHttpServer:
 
                             _flow_handler._defaultspack_flow_route_handler = True
                             route_entries.append(
-                                (method, pattern, _flow_handler, path_inject, index)
+                                (method, pattern, _flow_handler, path_inject, index, route_authority)
                             )
                         elif method and pattern and callable(handler):
-                            route_entries.append((method, pattern, handler, path_inject, index))
-                    for method, pattern, handler, path_inject, index in sorted(
+                            route_entries.append((method, pattern, handler, path_inject, index, route_authority))
+                    for method, pattern, handler, path_inject, index, route_authority in sorted(
                         route_entries,
                         key=lambda item: http_route_sort_key(item[0], item[1], item[4]),
                     ):
                         compiled = compile_http_route_pattern(pattern)
+                        target = getattr(handler, "__func__", handler)
                         try:
-                            setattr(handler, "__rumi_route_pattern__", pattern)
+                            setattr(target, "__rumi_route_pattern__", pattern)
+                            setattr(target, "__rumi_route_authority__", route_authority)
                         except Exception:
                             pass
                         registry_routes.append(
@@ -935,18 +959,23 @@ class DefaultsHttpServer:
             from core_runtime.authority import get_authority_service
 
             return ok(
-                get_authority_service().list_requests(str(request_data.get("status") or "all"))
+                get_authority_service().list_requests(
+                    str(request_data.get("status") or "all"),
+                    actor_principal=request_data.get("_authenticated_principal"),
+                )
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
     def _handle_authority_request(self, request_data, path_params):
-        del request_data
         request_id = str((path_params or {}).get("request_id") or "").strip()
         try:
             from core_runtime.authority import get_authority_service
 
-            result = get_authority_service().get_request(request_id)
+            result = get_authority_service().get_request(
+                request_id,
+                actor_principal=request_data.get("_authenticated_principal"),
+            )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
         if not result.get("success"):
@@ -1092,6 +1121,7 @@ class DefaultsHttpServer:
 
             result = get_authority_service().approve_request(
                 request_id,
+                actor_principal=request_data.get("_authenticated_principal"),
                 **approval_kwargs,
             )
         except Exception as exc:
@@ -1115,6 +1145,7 @@ class DefaultsHttpServer:
                 reason=str(request_data.get("reason") or ""),
                 persist=bool(request_data.get("persist") or request_data.get("remember")),
                 ui_operator=ui_operator,
+                actor_principal=request_data.get("_authenticated_principal"),
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
@@ -1492,21 +1523,26 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             parsed_url = urllib.parse.urlsplit(self.path)
             path = parsed_url.path
-            request_data = {
+            query_params = {
                 key: values[-1]
                 for key, values in urllib.parse.parse_qs(
                     parsed_url.query, keep_blank_values=True
                 ).items()
-                if values
+                if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
             }
-            request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+            request_data = dict(query_params)
+            server_context = {
+                "_path": path,
+                "_query_params": dict(query_params),
+                "_headers": sanitized_forwarded_headers(self.headers),
+            }
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
                     raw_text = raw_body.decode("utf-8", errors="replace")
-                    request_data["_raw_body"] = raw_text
-                    request_data["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
+                    server_context["_raw_body"] = raw_text
+                    server_context["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
                     content_type = str(self.headers.get("Content-Type", "")).lower()
                     if "application/x-www-form-urlencoded" in content_type:
                         body_data = {
@@ -1525,7 +1561,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         if not isinstance(body_data, dict):
                             self._send_json(400, error("JSON body must be an object"))
                             return
-                    request_data.update(body_data)
+                    request_data.update(strip_reserved_request_context(body_data))
+            request_data.update(server_context)
+            request_data["_method"] = method
+            request_data["_actual_method"] = method
 
             handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(
                 method, path
@@ -1569,6 +1608,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 # Inject path parameters into request_data per route config
                 if path_inject and path_params:
                     for url_param, data_key in path_inject.items():
+                        if str(data_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
                         request_data[data_key] = path_params.get(url_param, "")
                 request_data["_method"] = method
                 request_data["_actual_method"] = method

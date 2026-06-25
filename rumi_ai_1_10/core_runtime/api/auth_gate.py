@@ -144,11 +144,21 @@ class AuthGateMixin:
         self._request_auth_mode = None
         return False
 
-    def _authorize_authenticated_route(self, method: str, path: str) -> bool:
+    def _authorize_authenticated_route(
+        self,
+        method: str,
+        path: str,
+        route_entry: dict[str, Any] | None = None,
+    ) -> bool:
         principal = getattr(self, "_authenticated_principal", None)
         if principal is None or principal.core_role:
             return True
-        authorization = authorize_route(principal=principal, method=method, path=path)
+        authorization = authorize_route(
+            principal=principal,
+            method=method,
+            path=path,
+            route_entry=route_entry,
+        )
         if authorization.allowed:
             return True
         self._send_response(

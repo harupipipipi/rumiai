@@ -402,13 +402,26 @@ class TestCheckAuth:
         assert response.success is False
         assert status == 403
 
-    def test_mobile_approver_is_limited_to_authority_request_routes(self) -> None:
+    def test_mobile_approver_is_limited_to_authority_request_routes(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("a" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        for principal_id in (
+            "profile:work",
+            "profile:work__surface:mobile-approver",
+            "profile:work__surface:mobile-approver__device:phone-1",
+        ):
+            grants.grant_permission(principal_id, "authority.request.approve", {})
 
         principal = AuthenticatedPrincipal(
             token_id="tok",
             profile_id="work",
-            surface_id="mobile",
+            surface_id="mobile-approver",
             device_id="phone-1",
             role="mobile_approver",
             audiences=("kernel_api",),
@@ -424,6 +437,36 @@ class TestCheckAuth:
         ) is True
         assert packs_handler._authorize_authenticated_route("GET", "/api/packs") is False
         response, status = packs_handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
+
+    def test_mobile_approver_requires_grant_for_authority_request_routes(self, tmp_path, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("b" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile-approver",
+                device_id="phone-1",
+                role="mobile_approver",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route(
+            "POST",
+            "/api/authority/requests/req-1/approve",
+        ) is False
+        response, status = handler._send_response.call_args.args
         assert response.success is False
         assert status == 403
 
@@ -596,6 +639,146 @@ class TestCheckAuth:
         request_data = handler._defaultspack_request_data("GET")
 
         assert request_data["_headers"] == {"X-Test": "kept"}
+
+    def test_defaultspack_request_data_body_cannot_overwrite_reserved_server_context(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        handler = _make_handler(
+            path="/api/test?status=query",
+            headers=_make_headers(X_Test="kept"),
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="phone-1",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        request_data = handler._defaultspack_request_data(
+            "POST",
+            body={
+                "_headers": {"Authorization": "Bearer forged"},
+                "_authenticated_principal": {"profile_id": "evil"},
+                "_method": "GET",
+                "_actual_method": "GET",
+                "_path": "/forged",
+                "_query_params": {"status": "body"},
+                "_raw_body": "forged",
+                "status": "body",
+            },
+        )
+
+        assert request_data["status"] == "body"
+        assert request_data["_headers"] == {"X-Test": "kept"}
+        assert request_data["_authenticated_principal"]["profile_id"] == "work"
+        assert request_data["_method"] == "POST"
+        assert request_data["_actual_method"] == "POST"
+        assert request_data["_path"] == "/api/test"
+        assert request_data["_query_params"] == {"status": "query"}
+        assert "_raw_body" not in request_data
+
+    def test_auth_issue_access_token_rejects_non_mobile_roles(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            AuthenticatedPrincipal,
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="issue-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal.legacy_root(),
+        )
+
+        try:
+            handler._auth_issue_access_token(
+                {
+                    "profile_id": "work",
+                    "surface_id": "desktop",
+                    "device_id": "desktop-1",
+                    "role": "owner",
+                    "audiences": ["core_api"],
+                }
+            )
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 400
+
+    def test_auth_issue_access_token_applies_mobile_role_policy(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            AuthenticatedPrincipal,
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="issue-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal.legacy_root(),
+        )
+
+        try:
+            handler._auth_issue_access_token(
+                {
+                    "profile_id": "work",
+                    "device_id": "phone-1",
+                    "role": "mobile_approver",
+                }
+            )
+            response = handler._send_response.call_args.args[0]
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
+        assert response.success is True
+        assert response.data["role"] == "mobile_approver"
+        assert response.data["surface_id"] == "mobile-approver"
+        assert response.data["audiences"] == ["kernel_api"]
+
+    def test_auth_issue_access_token_rejects_surface_and_audience_widening(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            AuthenticatedPrincipal,
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="issue-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal.legacy_root(),
+        )
+
+        try:
+            handler._auth_issue_access_token(
+                {
+                    "profile_id": "work",
+                    "surface_id": "desktop",
+                    "device_id": "phone-1",
+                    "role": "mobile_client",
+                    "audiences": ["kernel_api", "core_api"],
+                }
+            )
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 400
 
 
 # ---------------------------------------------------------------------------

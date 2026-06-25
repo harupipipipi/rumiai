@@ -19,6 +19,19 @@ SENSITIVE_FORWARDED_HEADERS = frozenset(
     }
 )
 
+RESERVED_REQUEST_CONTEXT_KEYS = frozenset(
+    {
+        "_headers",
+        "_authenticated_principal",
+        "_method",
+        "_actual_method",
+        "_path",
+        "_query_params",
+        "_raw_body",
+        "_raw_body_base64",
+    }
+)
+
 
 def sanitized_forwarded_headers(headers: Any) -> dict[str, str]:
     try:
@@ -32,3 +45,13 @@ def sanitized_forwarded_headers(headers: Any) -> dict[str, str]:
             continue
         result[name] = str(value)
     return result
+
+
+def strip_reserved_request_context(data: Any) -> dict[str, Any]:
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): value
+        for key, value in data.items()
+        if str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
+    }

@@ -67,11 +67,25 @@ def route_resource(method: str, path: str, route_entry: dict[str, Any] | None = 
     resource = {"kind": "api_route", "method": str(method or "").upper(), "path": str(path or "")}
     if route_entry:
         pack_id = str(route_entry.get("pack_id") or "").strip()
+        owner_pack_id = str(route_entry.get("owner_pack_id") or pack_id).strip()
         function_id = str(route_entry.get("function_id") or "").strip()
+        provider_id = str(route_entry.get("provider_id") or "").strip()
+        frontend_id = str(route_entry.get("frontend_id") or "").strip()
+        resource_template = route_entry.get("resource_template")
+        if isinstance(resource_template, dict):
+            for key, value in resource_template.items():
+                if str(key).strip() and value not in (None, ""):
+                    resource[str(key)] = value
         if pack_id:
             resource["pack_id"] = pack_id
+        if owner_pack_id:
+            resource["owner_pack_id"] = owner_pack_id
         if function_id:
             resource["function_id"] = function_id
+        if provider_id:
+            resource["provider_id"] = provider_id
+        if frontend_id:
+            resource["frontend_id"] = frontend_id
     return resource
 
 
@@ -90,6 +104,9 @@ def authorize_route(
     permission_id = route_permission(method, path, route_entry)
     if not permission_id:
         return RouteAuthorization(False, 403, "Route is not available to scoped tokens")
+    audience = str((route_entry or {}).get("audience") or "").strip()
+    if audience and "*" not in principal.audiences and audience not in principal.audiences:
+        return RouteAuthorization(False, 403, "Token audience cannot access this route", permission_id)
 
     approver_permissions = {
         "authority.request.list",
@@ -98,17 +115,19 @@ def authorize_route(
         "authority.request.deny",
     }
     if principal.role == "mobile_approver":
-        if permission_id in approver_permissions:
-            return RouteAuthorization(True, permission_id=permission_id)
-        return RouteAuthorization(False, 403, "Approver token cannot access this route", permission_id)
+        if permission_id not in approver_permissions:
+            return RouteAuthorization(False, 403, "Approver token cannot access this route", permission_id)
     if permission_id in {"authority.request.approve", "authority.request.deny"}:
-        return RouteAuthorization(False, 403, "Approver role required", permission_id)
+        if principal.role != "mobile_approver":
+            return RouteAuthorization(False, 403, "Approver role required", permission_id)
 
     resource = route_resource(method, path, route_entry)
     manager = get_capability_grant_manager()
     checks = []
     for facet_principal in principal.facet_principal_ids(
-        owner_pack_id=str(resource.get("pack_id") or ""),
+        owner_pack_id=str(resource.get("owner_pack_id") or resource.get("pack_id") or ""),
+        provider_id=str(resource.get("provider_id") or ""),
+        frontend_id=str(resource.get("frontend_id") or ""),
     ):
         check = manager.check_authority(facet_principal, permission_id)
         if not check.allowed:

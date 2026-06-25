@@ -16,14 +16,20 @@ class AuthorityHandlersMixin:
 
     def _authority_requests(self, status: str = "all") -> dict:
         try:
-            return _authority_service().list_requests(status)
+            return _authority_service().list_requests(
+                status,
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
         except Exception as exc:
             _log_internal_error("authority_requests", exc)
             return {"error": _SAFE_ERROR_MSG}
 
     def _authority_request(self, request_id: str) -> dict:
         try:
-            return _authority_service().get_request(request_id)
+            return _authority_service().get_request(
+                request_id,
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
         except Exception as exc:
             _log_internal_error("authority_request", exc)
             return {"success": False, "error": _SAFE_ERROR_MSG}
@@ -66,6 +72,7 @@ class AuthorityHandlersMixin:
                 expires_in_seconds=body.get("expires_in_seconds"),
                 related_permissions=related_permissions if isinstance(related_permissions, (list, tuple)) else None,
                 ui_operator=body.get("ui_operator") if isinstance(body.get("ui_operator"), dict) else None,
+                actor_principal=getattr(self, "_authenticated_principal", None),
             )
         except Exception as exc:
             _log_internal_error("authority_approve", exc)
@@ -78,6 +85,7 @@ class AuthorityHandlersMixin:
                 reason=str(body.get("reason") or ""),
                 persist=bool(body.get("persist") or body.get("remember")),
                 ui_operator=body.get("ui_operator") if isinstance(body.get("ui_operator"), dict) else None,
+                actor_principal=getattr(self, "_authenticated_principal", None),
             )
         except Exception as exc:
             _log_internal_error("authority_deny", exc)

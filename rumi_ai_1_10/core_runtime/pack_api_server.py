@@ -38,7 +38,11 @@ from .validation import (
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
-from .api.safe_headers import sanitized_forwarded_headers
+from .api.safe_headers import (
+    RESERVED_REQUEST_CONTEXT_KEYS,
+    sanitized_forwarded_headers,
+    strip_reserved_request_context,
+)
 from .api.route_errors import (
     APIRouteFunctionError,
     api_route_function_error_status,
@@ -793,19 +797,26 @@ class PackAPIHandler(
         body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         parsed_url = urlparse(self.path)
-        request_data: dict[str, Any] = {
+        query_params: dict[str, Any] = {
             key: values[-1]
             for key, values in parse_qs(parsed_url.query, keep_blank_values=True).items()
-            if values
+            if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
         }
-        request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+        request_data: dict[str, Any] = dict(query_params)
+        if body:
+            request_data.update(strip_reserved_request_context(body))
+        for url_param, data_key in (path_inject or {}).items():
+            if str(data_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                continue
+            request_data[data_key] = (path_params or {}).get(url_param, "")
         principal = getattr(self, "_authenticated_principal", None)
+        request_data["_path"] = parsed_url.path
+        request_data["_query_params"] = dict(query_params)
+        request_data["_headers"] = sanitized_forwarded_headers(self.headers)
         if principal is not None:
             request_data["_authenticated_principal"] = principal.to_dict()
-        if body:
-            request_data.update(body)
-        for url_param, data_key in (path_inject or {}).items():
-            request_data[data_key] = (path_params or {}).get(url_param, "")
+        else:
+            request_data.pop("_authenticated_principal", None)
         request_data["_method"] = method.upper()
         request_data["_actual_method"] = method.upper()
         return request_data
@@ -853,6 +864,11 @@ class PackAPIHandler(
             )
             if handler is None:
                 return False
+            route_entry = dict(getattr(handler, "__rumi_route_authority__", {}) or {})
+            route_entry.setdefault("pack_id", "defaultspack")
+            route_entry.setdefault("owner_pack_id", "defaultspack")
+            if not self._authorize_authenticated_route(method, path, route_entry):
+                return True
             request_data = self._defaultspack_request_data(
                 method,
                 path_params=path_params or {},
@@ -1098,21 +1114,27 @@ class PackAPIHandler(
     def _auth_issue_access_token(self, body: dict[str, Any]) -> None:
         if not self._require_core_principal():
             return
-        from .access_tokens import DEFAULT_ACCESS_TOKEN_TTL_SECONDS, get_scoped_access_token_manager
+        from .access_tokens import (
+            DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+            access_token_issue_policy,
+            get_scoped_access_token_manager,
+        )
 
-        audiences = body.get("audiences")
-        if audiences is None:
-            audiences = ["kernel_api"]
         expires_in_seconds = body.get("expires_in_seconds")
         if expires_in_seconds is None:
             expires_in_seconds = DEFAULT_ACCESS_TOKEN_TTL_SECONDS
         try:
+            policy = access_token_issue_policy(
+                role=str(body.get("role") or "mobile_client"),
+                surface_id=str(body.get("surface_id") or ""),
+                audiences=body.get("audiences"),
+            )
             issued = get_scoped_access_token_manager().issue_token(
                 profile_id=str(body.get("profile_id") or "main"),
-                surface_id=str(body.get("surface_id") or ""),
+                surface_id=str(policy["surface_id"]),
                 device_id=str(body.get("device_id") or ""),
-                role=str(body.get("role") or "mobile_client"),
-                audiences=audiences,
+                role=str(policy["role"]),
+                audiences=policy["audiences"],
                 expires_in_seconds=expires_in_seconds,
             )
         except (TypeError, ValueError) as exc:
@@ -1636,9 +1658,9 @@ class PackAPIHandler(
 
             if self._dispatch_api_route("GET", path, query=query):
                 return
-            if not self._authorize_authenticated_route("GET", path):
-                return
             if self._dispatch_defaultspack_http_route("GET", path):
+                return
+            if not self._authorize_authenticated_route("GET", path):
                 return
 
             if path == "/api/authority/requests":
@@ -1812,9 +1834,9 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body, query=query):
                 return
-            if not self._authorize_authenticated_route("POST", path):
-                return
             if self._dispatch_defaultspack_http_route("POST", path, body):
+                return
+            if not self._authorize_authenticated_route("POST", path):
                 return
 
             if path == "/api/authority/check":
@@ -2276,9 +2298,9 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("PUT", path, body, query=query):
                 return
-            if not self._authorize_authenticated_route("PUT", path):
-                return
             if self._dispatch_defaultspack_http_route("PUT", path, body):
+                return
+            if not self._authorize_authenticated_route("PUT", path):
                 return
 
             match = self._match_pack_route(path, "PUT")
@@ -2330,9 +2352,9 @@ class PackAPIHandler(
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("DELETE", path, query=query):
                 return
-            if not self._authorize_authenticated_route("DELETE", path):
-                return
             if self._dispatch_defaultspack_http_route("DELETE", path):
+                return
+            if not self._authorize_authenticated_route("DELETE", path):
                 return
 
             if path.startswith("/api/authority/grants/"):
