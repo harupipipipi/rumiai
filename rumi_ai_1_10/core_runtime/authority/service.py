@@ -14,6 +14,9 @@ from .config_lattice import (
     meet_authority_configs,
     validate_authority_config,
 )
+from .approval_attestation import verify_mobile_approval_attestation
+from .approval_challenge_store import ApprovalChallengeStore
+from .device_key_registry import DeviceKeyRegistry
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
 from .request_store import AuthorityRequestStore, sanitize_authority_resource
@@ -36,12 +39,123 @@ class AuthorityService:
         host_privilege_manager: Any = None,
         hmac_key_manager: Any = None,
         request_store: AuthorityRequestStore | None = None,
+        approval_challenge_store: ApprovalChallengeStore | None = None,
+        device_key_registry: DeviceKeyRegistry | None = None,
     ) -> None:
         self._capability_grant_manager = capability_grant_manager
         self._secrets_grant_manager = secrets_grant_manager
         self._network_grant_manager = network_grant_manager
         self._host_privilege_manager = host_privilege_manager
         self._request_store = request_store or AuthorityRequestStore(hmac_key_manager=hmac_key_manager)
+        self._approval_challenge_store = approval_challenge_store or ApprovalChallengeStore(
+            hmac_key_manager=hmac_key_manager
+        )
+        self._device_key_registry = device_key_registry or DeviceKeyRegistry()
+
+    def register_device_key(
+        self,
+        *,
+        profile_id: str,
+        device_id: str,
+        public_key: str | bytes,
+    ) -> dict[str, Any]:
+        record = self._device_key_registry.register_device_key(
+            profile_id=profile_id,
+            device_id=device_id,
+            public_key=public_key,
+        )
+        self._request_store.audit(
+            "authority_device_key_registered",
+            {
+                "profile_id": record.profile_id,
+                "device_id": record.device_id,
+                "key_id": record.key_id,
+            },
+        )
+        return {"success": True, "device_key": record.to_dict()}
+
+    def create_approval_challenge(
+        self,
+        request_id: str,
+        *,
+        decision: str = "approve",
+        scope: str = "once",
+        actor_principal: Any = None,
+        expires_in_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        request = self._request_store.get_request(request_id)
+        if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if not self._actor_mobile_approver(actor_principal):
+            return {"success": False, "error": "Mobile approver role required", "status_code": 403}
+        if not self._actor_can_access_request(request, actor_principal=actor_principal):
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        if request.status != "pending":
+            return {"success": False, "error": f"Authority request is {request.status}", "status_code": 409}
+        if self._request_store.request_expired(request):
+            self._request_store.set_request_status(request.request_id, "expired")
+            return {"success": False, "error": "Authority request expired", "status_code": 409}
+
+        decision = str(decision or "").strip().lower()
+        if decision not in {"approve", "deny"}:
+            return {"success": False, "error": "Approval challenge decision is invalid", "status_code": 400}
+        scope = str(scope or "once").strip().lower()
+        if decision == "approve" and scope != "once":
+            return {
+                "success": False,
+                "error": "Mobile approver tokens may only issue one-shot approvals",
+                "status_code": 403,
+            }
+        if decision == "deny" and scope not in {"once", ""}:
+            return {
+                "success": False,
+                "error": "Mobile deny challenges cannot be persistent",
+                "status_code": 403,
+            }
+        if not self._mobile_actor_has_route_grant(
+            actor_principal,
+            "authority.request.approve" if decision == "approve" else "authority.request.deny",
+        ):
+            return {"success": False, "error": "Mobile approver grant is not valid", "status_code": 403}
+
+        profile_id = self._actor_profile_id(actor_principal)
+        device_id = self._actor_device_id(actor_principal)
+        token_id = self._actor_token_id(actor_principal)
+        if not profile_id or not device_id or not token_id:
+            return {"success": False, "error": "Mobile approver token is incomplete", "status_code": 403}
+        if self._device_key_registry.get_device_key(profile_id=profile_id, device_id=device_id) is None:
+            return {"success": False, "error": "Mobile device key is not registered", "status_code": 403}
+
+        challenge = self._approval_challenge_store.issue_challenge(
+            request=request,
+            profile_id=profile_id,
+            device_id=device_id,
+            token_id=token_id,
+            resource_hash=self._request_store.resource_hash(request.resource),
+            decision=decision,
+            scope="once",
+            expires_in_seconds=expires_in_seconds,
+        )
+        self._request_store.audit(
+            "authority_approval_challenge_issued",
+            {
+                "request_id": request.request_id,
+                "challenge_id": challenge.challenge_id,
+                "decision": decision,
+                "profile_id": profile_id,
+                "device_id": device_id,
+                "token_id": token_id,
+                "resource_hash": challenge.resource_hash,
+            },
+        )
+        return {
+            "success": True,
+            "request_id": request.request_id,
+            "challenge": challenge.payload_for_signature(),
+            "payload_hash": challenge.payload_hash,
+            "signature_algorithm": "ed25519",
+            "signing_payload": "payload_hash_bytes",
+        }
 
     @property
     def mode(self) -> str:
@@ -213,6 +327,7 @@ class AuthorityService:
         related_permissions: list[str] | tuple[str, ...] | None = None,
         ui_operator: dict[str, Any] | None = None,
         actor_principal: Any = None,
+        attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -235,6 +350,35 @@ class AuthorityService:
                 "error": "Mobile approver tokens may only issue one-shot approvals",
                 "status_code": 403,
             }
+        mobile_attestation_audit: dict[str, Any] = {}
+        if self._actor_mobile_approver(actor_principal):
+            if not self._mobile_actor_has_route_grant(actor_principal, "authority.request.approve"):
+                return {"success": False, "error": "Mobile approver grant is not valid", "status_code": 403}
+            attestation_result = verify_mobile_approval_attestation(
+                request=request,
+                actor_principal=actor_principal,
+                decision="approve",
+                scope=scope,
+                attestation=attestation,
+                challenge_store=self._approval_challenge_store,
+                device_key_registry=self._device_key_registry,
+                request_store=self._request_store,
+            )
+            if not attestation_result.ok:
+                self._request_store.audit(
+                    "authority_mobile_attestation_rejected",
+                    {
+                        "request_id": request.request_id,
+                        "reason": attestation_result.error,
+                        **attestation_result.audit,
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": attestation_result.error,
+                    "status_code": attestation_result.status_code,
+                }
+            mobile_attestation_audit = attestation_result.audit
         confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
         if self._typed_confirmation_required(request):
             if scope != "once":
@@ -258,14 +402,17 @@ class AuthorityService:
                     "error": "Typed confirmation is required for this host operation",
                     "status_code": 400,
                 }
-        operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
-        if not operator_ok:
-            self._request_store.audit(
-                "authority_ui_operator_rejected",
-                {"request_id": request.request_id, "reason": operator_error},
-            )
-            return {"success": False, "error": operator_error, "status_code": 403}
-        operator_audit = ui_operator_audit_record(operator_payload)
+        if self._actor_mobile_approver(actor_principal):
+            operator_audit = dict(mobile_attestation_audit)
+        else:
+            operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_ui_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
+            operator_audit = ui_operator_audit_record(operator_payload)
         expires = int(expires_in_seconds or 86400)
         if scope == "once":
             token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
@@ -476,6 +623,7 @@ class AuthorityService:
         persist: bool = False,
         ui_operator: dict[str, Any] | None = None,
         actor_principal: Any = None,
+        attestation: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         request = self._request_store.get_request(request_id)
         if request is None:
@@ -493,13 +641,43 @@ class AuthorityService:
                 "error": "Mobile approver tokens may not create persistent denies",
                 "status_code": 403,
             }
-        operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
-        if not operator_ok:
-            self._request_store.audit(
-                "authority_ui_operator_rejected",
-                {"request_id": request.request_id, "reason": operator_error},
+        if self._actor_mobile_approver(actor_principal):
+            if not self._mobile_actor_has_route_grant(actor_principal, "authority.request.deny"):
+                return {"success": False, "error": "Mobile approver grant is not valid", "status_code": 403}
+            attestation_result = verify_mobile_approval_attestation(
+                request=request,
+                actor_principal=actor_principal,
+                decision="deny",
+                scope="once",
+                attestation=attestation,
+                challenge_store=self._approval_challenge_store,
+                device_key_registry=self._device_key_registry,
+                request_store=self._request_store,
             )
-            return {"success": False, "error": operator_error, "status_code": 403}
+            if not attestation_result.ok:
+                self._request_store.audit(
+                    "authority_mobile_attestation_rejected",
+                    {
+                        "request_id": request.request_id,
+                        "reason": attestation_result.error,
+                        **attestation_result.audit,
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": attestation_result.error,
+                    "status_code": attestation_result.status_code,
+                }
+            operator_audit = dict(attestation_result.audit)
+        else:
+            operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
+            if not operator_ok:
+                self._request_store.audit(
+                    "authority_ui_operator_rejected",
+                    {"request_id": request.request_id, "reason": operator_error},
+                )
+                return {"success": False, "error": operator_error, "status_code": 403}
+            operator_audit = ui_operator_audit_record(operator_payload)
         self._request_store.set_request_status(request.request_id, "denied")
         deny_record = None
         if persist:
@@ -515,7 +693,7 @@ class AuthorityService:
                 "request_id": request.request_id,
                 "persist": bool(persist),
                 "reason": reason,
-                **ui_operator_audit_record(operator_payload),
+                **operator_audit,
             },
         )
         return {
@@ -590,10 +768,53 @@ class AuthorityService:
         return str(getattr(actor_principal, "profile_id", "") or "").strip()
 
     @staticmethod
+    def _actor_device_id(actor_principal: Any) -> str:
+        if isinstance(actor_principal, dict):
+            return str(actor_principal.get("device_id") or "").strip()
+        return str(getattr(actor_principal, "device_id", "") or "").strip()
+
+    @staticmethod
+    def _actor_token_id(actor_principal: Any) -> str:
+        if isinstance(actor_principal, dict):
+            return str(actor_principal.get("token_id") or "").strip()
+        return str(getattr(actor_principal, "token_id", "") or "").strip()
+
+    @staticmethod
     def _actor_mobile_approver(actor_principal: Any) -> bool:
         if isinstance(actor_principal, dict):
             return str(actor_principal.get("role") or "").strip() == "mobile_approver"
         return str(getattr(actor_principal, "role", "") or "").strip() == "mobile_approver"
+
+    def _mobile_actor_has_route_grant(self, actor_principal: Any, permission_id: str) -> bool:
+        manager = self._capability_grant_manager
+        if manager is None or not callable(getattr(manager, "check_authority", None)):
+            return False
+        profile_id = self._actor_profile_id(actor_principal)
+        if not profile_id:
+            return False
+        profile = f"profile:{profile_id}"
+        principals = [profile]
+        surface_id = "mobile-approver"
+        device_id = self._actor_device_id(actor_principal)
+        surface = f"{profile}__surface:{surface_id}"
+        principals.append(surface)
+        if device_id:
+            principals.append(f"{surface}__device:{device_id}")
+        configs: list[dict[str, Any]] = []
+        for principal_id in principals:
+            try:
+                check = manager.check_authority(principal_id, permission_id)
+            except Exception:
+                return False
+            if not getattr(check, "allowed", False):
+                return False
+            config = getattr(check, "config", None)
+            configs.append(dict(config) if isinstance(config, dict) else {})
+        try:
+            meet_authority_configs(*configs)
+        except AuthorityConfigError:
+            return False
+        return True
 
     def one_shot_approval_issued(
         self,

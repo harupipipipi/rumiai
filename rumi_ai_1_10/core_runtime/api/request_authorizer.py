@@ -20,7 +20,7 @@ class RouteAuthorization:
     permission_id: str = ""
 
 
-_AUTHORITY_REQUEST_RE = re.compile(r"^/api/authority/requests/([^/]+)(?:/(approve|deny))?$")
+_AUTHORITY_REQUEST_RE = re.compile(r"^/api/authority/requests/([^/]+)(?:/(challenge|approve|deny))?$")
 
 
 def route_permission(method: str, path: str, route_entry: dict[str, Any] | None = None) -> str:
@@ -44,6 +44,8 @@ def route_permission(method: str, path: str, route_entry: dict[str, Any] | None 
         action = match.group(2)
         if method == "GET" and action is None:
             return "authority.request.read"
+        if method == "POST" and action == "challenge":
+            return "authority.request.approve"
         if method == "POST" and action == "approve":
             return "authority.request.approve"
         if method == "POST" and action == "deny":

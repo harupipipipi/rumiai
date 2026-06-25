@@ -73,9 +73,23 @@ class AuthorityHandlersMixin:
                 related_permissions=related_permissions if isinstance(related_permissions, (list, tuple)) else None,
                 ui_operator=body.get("ui_operator") if isinstance(body.get("ui_operator"), dict) else None,
                 actor_principal=getattr(self, "_authenticated_principal", None),
+                attestation=body.get("attestation") if isinstance(body.get("attestation"), dict) else None,
             )
         except Exception as exc:
             _log_internal_error("authority_approve", exc)
+            return {"success": False, "error": _SAFE_ERROR_MSG}
+
+    def _authority_challenge(self, request_id: str, body: dict) -> dict:
+        try:
+            return _authority_service().create_approval_challenge(
+                request_id,
+                decision=str(body.get("decision") or "approve"),
+                scope=str(body.get("scope") or "once"),
+                expires_in_seconds=body.get("expires_in_seconds"),
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
+        except Exception as exc:
+            _log_internal_error("authority_challenge", exc)
             return {"success": False, "error": _SAFE_ERROR_MSG}
 
     def _authority_deny(self, request_id: str, body: dict) -> dict:
@@ -86,6 +100,7 @@ class AuthorityHandlersMixin:
                 persist=bool(body.get("persist") or body.get("remember")),
                 ui_operator=body.get("ui_operator") if isinstance(body.get("ui_operator"), dict) else None,
                 actor_principal=getattr(self, "_authenticated_principal", None),
+                attestation=body.get("attestation") if isinstance(body.get("attestation"), dict) else None,
             )
         except Exception as exc:
             _log_internal_error("authority_deny", exc)

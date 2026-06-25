@@ -1615,6 +1615,11 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         handler_name="_handle_authority_approve",
     ),
     HttpRouteSpec(
+        "POST",
+        "/api/authority/requests/{request_id}/challenge",
+        handler_name="_handle_authority_challenge",
+    ),
+    HttpRouteSpec(
         "POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"
     ),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),

@@ -1855,6 +1855,18 @@ class PackAPIHandler(
                 else:
                     self._send_response(APIResponse(False, error="Not found"), 404)
 
+            elif path.startswith("/api/authority/requests/") and path.endswith("/challenge"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 5:
+                    request_id = unquote(parts[3])
+                    result = self._authority_challenge(request_id, body)
+                    if result.get("success"):
+                        self._send_response(APIResponse(True, result))
+                    else:
+                        self._send_response(APIResponse(False, error=result.get("error", "Authority challenge failed")), result.get("status_code", 400))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+
             elif path.startswith("/api/authority/requests/") and path.endswith("/deny"):
                 parts = path.strip("/").split("/")
                 if len(parts) == 5:

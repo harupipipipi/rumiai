@@ -398,6 +398,10 @@ class TestCheckAuth:
             "POST",
             "/api/authority/requests/req-1/approve",
         ) is False
+        assert handler._authorize_authenticated_route(
+            "POST",
+            "/api/authority/requests/req-1/challenge",
+        ) is False
         response, status = handler._send_response.call_args.args
         assert response.success is False
         assert status == 403
@@ -434,6 +438,10 @@ class TestCheckAuth:
         assert approve_handler._authorize_authenticated_route(
             "POST",
             "/api/authority/requests/req-1/approve",
+        ) is True
+        assert approve_handler._authorize_authenticated_route(
+            "POST",
+            "/api/authority/requests/req-1/challenge",
         ) is True
         assert packs_handler._authorize_authenticated_route("GET", "/api/packs") is False
         response, status = packs_handler._send_response.call_args.args

@@ -64,6 +64,7 @@ class _MockHandlerDef:
     handler_dir: Path = Path("/fake")
     entrypoint: str = "handler.py:handle"
     is_builtin: bool = False
+    pack_id: str = ""
 
 
 @dataclass
@@ -757,6 +758,7 @@ class TestHandlerSubprocessEntrypointCompatibility(unittest.TestCase):
             handler_py_path=str(handler_path),
             handler_dir=handler_dir,
             entrypoint="handler.py",
+            is_builtin=True,
         )
         success = CapabilityResponse(success=True, output={"ok": True})
 

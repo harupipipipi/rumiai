@@ -56,6 +56,7 @@ class _MockFunctionEntry:
     caller_requires: Optional[List[str]] = None
     docker_image: str = ""
     command: Optional[List[str]] = None
+    is_builtin: bool = False
 
     def __post_init__(self):
         if self.manifest is None:
@@ -106,8 +107,8 @@ class TestDockerFallbackBlocked:
                             start_time=time.time(),
                         )
         assert not resp.success
-        assert resp.error_type == "docker_unavailable"
-        assert "RUMI_ALLOW_HOST_FALLBACK" in resp.error
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
+        assert resp.output["execution_boundary"] == "managed_sandbox"
 
 
 class TestDockerFallbackAllowed:
@@ -141,8 +142,9 @@ class TestDockerFallbackAllowed:
                         request_id="req_002",
                         start_time=time.time(),
                     )
-        assert resp.success
-        mock_host.assert_called_once()
+        assert resp.success is False
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
+        mock_host.assert_not_called()
 
 
 class TestDockerStrictBoundary:
@@ -177,8 +179,7 @@ class TestDockerStrictBoundary:
                     )
 
         assert resp.success is False
-        assert resp.error_type == "docker_unavailable"
-        assert "strict function isolation" in resp.error
+        assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
         mock_host.assert_not_called()
 
 
@@ -343,7 +344,7 @@ class TestCommandFunctionHostExecutionGuard:
         """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
         monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True)
+        entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True, is_builtin=True)
         resp = executor._execute_command_function(
             principal_id="test_principal",
             entry=entry,
@@ -371,6 +372,7 @@ class TestCommandFunctionPathTraversal:
             command=[str(outside_command)],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -386,7 +388,7 @@ class TestCommandFunctionPathTraversal:
     def test_command_requires_absolute_executable_path(self, monkeypatch):
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
-        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True)
+        entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True, is_builtin=True)
 
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -412,6 +414,7 @@ class TestCommandFunctionPathTraversal:
             command=[sys.executable, "-c", "print('pwned')"],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -438,6 +441,7 @@ class TestCommandFunctionPathTraversal:
             command=[sys.executable, str(outside_script)],
             function_dir=str(func_dir),
             host_execution=True,
+            is_builtin=True,
         )
         resp = executor._execute_command_function(
             principal_id="test_principal",

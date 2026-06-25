@@ -1114,6 +1114,8 @@ class DefaultsHttpServer:
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
         }
+        if isinstance(request_data.get("attestation"), dict):
+            approval_kwargs["attestation"] = request_data.get("attestation")
         if related_permissions:
             approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
         try:
@@ -1123,6 +1125,24 @@ class DefaultsHttpServer:
                 request_id,
                 actor_principal=request_data.get("_authenticated_principal"),
                 **approval_kwargs,
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
+
+    def _handle_authority_challenge(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().create_approval_challenge(
+                request_id,
+                decision=str(request_data.get("decision") or "approve"),
+                scope=str(request_data.get("scope") or "once"),
+                expires_in_seconds=request_data.get("expires_in_seconds"),
+                actor_principal=request_data.get("_authenticated_principal"),
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
@@ -1146,6 +1166,11 @@ class DefaultsHttpServer:
                 persist=bool(request_data.get("persist") or request_data.get("remember")),
                 ui_operator=ui_operator,
                 actor_principal=request_data.get("_authenticated_principal"),
+                **(
+                    {"attestation": request_data.get("attestation")}
+                    if isinstance(request_data.get("attestation"), dict)
+                    else {}
+                ),
             )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
