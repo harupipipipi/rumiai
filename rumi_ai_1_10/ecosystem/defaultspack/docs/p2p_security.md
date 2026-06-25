@@ -54,21 +54,24 @@ local user through the existing local secret and approval flows.
 
 ## Mobile Pairing Contracts
 
-Rumi Mobile uses P2P pairing state to bootstrap a scoped mobile API token. The
-recommended QR payload is `kind: "rumi_pair_v2"` with `pairingId`, `code`,
-mobile-reachable `baseUrls`, and `expiresAt`.
+Rumi Mobile uses P2P pairing state to bootstrap scoped split mobile API tokens.
+The recommended QR payload is `kind: "rumi_mobile_pair_v1"` with `pairingId`,
+claim `code`, one-time `pickupSecret`, mobile-reachable `baseUrls`, role
+metadata, and `expiresAt`.
 
 - The phone claims a pending pairing with
   `POST /api/mobile/v1/pairings/{id}/claim`, including the pairing code,
   `device_id`, label, public key, and requested scopes. The PC operator must
   still approve.
-- Device tokens use the `dtk_` prefix and are accepted only on
-  `/api/mobile/v1/...` routes whose contract declares the required device
-  scope. A device token must not authenticate PC/admin, pack, file, terminal,
-  git, browser, or generic defaultspack routes.
+- Client device tokens use the `dtk_` prefix and are accepted only on
+  `/api/mobile/v1/...` routes whose contract declares the required client
+  scope. Approver tokens are separate and accepted only on `/api/authority/*`
+  request list/read/challenge/approve/deny routes. A mobile token must not
+  authenticate PC/admin, pack, file, terminal, git, browser, or generic
+  defaultspack routes.
 - `GET /api/mobile/v1/pairings/{id}/status` may reveal status to the PC, but it
-  returns a device token to the phone only when the request includes both the
-  original pairing code and the claimed `device_id`.
+  returns split device tokens to the phone only once, and only when the request
+  includes both the QR-only pickup secret and the claimed `device_id`.
 - Credential transfer is encrypted and device-bound. Creation requires a target
   device, `ciphertext`, and `nonce`; plaintext or wrapper-only payloads fail
   closed. Get/ack calls require the authenticated device to match the transfer.

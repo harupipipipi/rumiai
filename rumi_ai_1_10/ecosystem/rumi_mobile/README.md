@@ -16,8 +16,8 @@ canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
   No server is required to chat.
 - OpenAI-compatible streaming client (`/chat/completions` SSE).
 - QR import:
-  - **スマホをペアリング**: scan a `rumi_pair_v2` QR to claim a PC pairing
-    session and receive a scoped mobile device token after PC approval.
+  - **スマホをペアリング**: scan a `rumi_mobile_pair_v1` QR to claim a PC
+    pairing session and pick up scoped split mobile tokens after PC approval.
   - **API/モデル取り込み**: scan a `rumi_api` QR to fill API URL/key/model.
   - **PC接続 (Legacy)**: scan a `rumi_pc` QR to fill the Kernel API URL and
     bearer token for compatibility testing.
@@ -52,13 +52,16 @@ selection from the same menu, backed by the stored API/model config.
 The PC side (defaultspack webapp **Settings → アプリ**) emits JSON QR codes:
 
 ```jsonc
-// Recommended PC pairing QR (kind=rumi_pair_v2)
+// Recommended PC pairing QR (kind=rumi_mobile_pair_v1)
 {
-  "kind": "rumi_pair_v2",
-  "version": 2,
+  "kind": "rumi_mobile_pair_v1",
+  "version": 1,
   "pairingId": "pair-...",
   "code": "ABCD-2345",
+  "pickupSecret": "pup_...",
   "baseUrls": ["http://192.168.1.10:8765"],
+  "manifestUrl": "http://192.168.1.10:8765/api/mobile/v1/manifest",
+  "roles": ["mobile_client", "mobile_approver"],
   "serverPublicKey": "",
   "expiresAt": 1781830000000
 }
@@ -87,28 +90,31 @@ back to `QrUrl` for plain `http(s)://` links (e.g. Cloudflare Pages URLs).
    **スマホをペアリング**. If the QR panel says no LAN URL was detected, enter
    `http://<PC LAN IP>:8765`; `localhost`, `127.0.0.1`, and `0.0.0.0` are not
    reachable from a real phone.
-3. Scan the `rumi_pair_v2` QR from the mobile app. The app claims
+3. Scan the `rumi_mobile_pair_v1` QR from the mobile app. The app claims
    `/api/mobile/v1/pairings/{id}/claim` with the QR code, the mobile
    `device_id`, label, public key, and requested scopes.
 4. Approve the claimed device in the control panel. Mobile polls
-   `/api/mobile/v1/pairings/{id}/status?code=...&device_id=...` and stores the
-   returned `dtk_...` device token in secure storage.
+   `/api/mobile/v1/pairings/{id}/status?pickup_secret=...&device_id=...` and
+   stores the returned split `dtk_...` client/approver tokens in secure storage.
 5. Confirm the paired phone can load PC chat state, create/send a test message,
    and still cannot call non-mobile API routes with the `dtk_...` token.
 
 The legacy **PC接続QR** flow is still useful for compatibility checks, but it
-places a full bearer token in the QR payload. Prefer `rumi_pair_v2` for normal
-pairing tests.
+places a full bearer token in the QR payload. Prefer `rumi_mobile_pair_v1` for
+normal pairing tests.
 
 ## Security contracts from PR #364
 
-- `dtk_...` device tokens are mobile-only. The backend accepts them only on
+- `dtk_...` client tokens are mobile-only. The backend accepts them only on
   `/api/mobile/v1/...` routes, and only when the route declares a matching
-  device scope such as `chat.read`, `chat.write`, `tools.observe`,
-  `tools.approve`, or `credentials.request`.
-- Pairing status is observable by the PC, but token pickup requires both the
-  original pairing code and the claimed `device_id`. A status response without
-  both values must not include `device_token`.
+  device scope such as `chat.read`, `chat.write`, `tools.observe`, or
+  `credentials.request`.
+- `dtk_...` approver tokens are separate and accepted only on
+  `/api/authority/*` request list/read/challenge/approve/deny routes.
+- Pairing status is observable by the PC, but token pickup requires the QR-only
+  pickup secret and the claimed `device_id`. A status response without both
+  values must not include `device_token`, and pickup is consumed after the first
+  successful token delivery.
 - Credential transfer is fail-closed. PC-created transfers must name a paired
   device and include encrypted `ciphertext` plus `nonce`; plaintext keys,
   `api_key` fallback fields, and `plaintext`/`base64-wrapper` algorithms are
@@ -137,7 +143,7 @@ pairing tests.
   cloudflared tunnel --protocol http2 --url http://127.0.0.1:8765
   ```
 
-  Use the printed `https://...trycloudflare.com` origin in the `rumi_pair_v2`
+  Use the printed `https://...trycloudflare.com` origin in the `rumi_mobile_pair_v1`
   QR. Cloudflare Pages can host docs/install pages, but it does not expose a
   local Mac/PC Kernel API by itself.
 

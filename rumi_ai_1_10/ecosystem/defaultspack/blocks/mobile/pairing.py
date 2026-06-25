@@ -3,8 +3,8 @@
 モバイル専用のペアリングフロー:
   1. PC が /api/p2p/pairing/start でセッション作成 (既存)
   2. スマホが POST /api/mobile/v1/pairings/{id}/claim で端末情報を送る
-  3. PC が POST /api/mobile/v1/pairings/{id}/approve で承認 → device token 発行
-  4. スマホが GET /api/mobile/v1/pairings/{id}/status で結果をポーリング
+  3. PC が POST /api/mobile/v1/pairings/{id}/approve で承認
+  4. スマホが pickup_secret 付き status で一回だけ device token を受け取る
   5. GET /api/mobile/v1/devices / DELETE /api/mobile/v1/devices/{id} で管理
 """
 
@@ -18,8 +18,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
-from domain.p2p.device_store import DeviceStore, DEFAULT_SCOPES, ALL_SCOPES
-from domain.p2p.pairing import PairingManager, hmac_compare_code
+from domain.p2p.device_store import DeviceStore
+from domain.p2p.pairing import PairingManager
 
 
 def _merged(input_data: dict) -> dict:
@@ -110,17 +110,7 @@ def approve(input_data, context=None):
     if not result.get("ok"):
         return error(str(result.get("reason") or "approve failed"), str(result.get("code") or "APPROVE_FAILED"))
 
-    # Issue scoped device token
-    device_store = DeviceStore(s.store_path)
     profile_id = _profile_id(input_data, context)
-    device, token, approval_token = device_store.issue_tokens(
-        result["device_id"],
-        label=result.get("device_label") or "",
-        public_key=result.get("device_public_key") or "",
-        scopes=result.get("scopes"),
-        pairing_id=pairing_id,
-        profile_id=profile_id,
-    )
     key_registration = _register_authority_device_key(
         profile_id=profile_id,
         device_id=result["device_id"],
@@ -128,14 +118,14 @@ def approve(input_data, context=None):
     )
     return ok({
         "pairing": result["pairing"],
-        "device": device.as_dict(),
-        "device_token": token,  # plaintext — returned only once
-        "approval_token": approval_token,
-        "client_access_token": token,
-        "approver_access_token": approval_token,
-        "approval_scopes": list(device.approval_scopes),
+        "device": {
+            "device_id": result["device_id"],
+            "label": result.get("device_label") or "",
+            "public_key": result.get("device_public_key") or "",
+        },
         "profile_id": profile_id,
         "device_key": key_registration,
+        "token_delivery": "mobile_pickup_once",
     })
 
 
@@ -169,38 +159,41 @@ def status(input_data, context=None):
     result: dict = dict(pairing)
     result["pairing"] = pairing
     result["pc_label"] = _pc_label()
-    if session.status == "approved" and session.claimed_device_id:
-        result["approved_device_id"] = session.claimed_device_id
-
-    # After PC approval, the mobile may pick up a device token only if it
-    # presents the original pairing code and the claimed device id.
-    requested_code = str(args.get("code") or "").strip()
+    # After PC approval, the mobile may pick up split device tokens only once,
+    # and only with the QR-only pickup secret. The pairing code stays useful
+    # for claim, but is not a bearer-equivalent token pickup credential.
+    requested_secret = str(
+        args.get("pickup_secret")
+        or args.get("pickupSecret")
+        or args.get("token_pickup_secret")
+        or ""
+    ).strip()
     requested_device_id = str(args.get("device_id") or "").strip()
-    can_pick_up_token = (
-        bool(requested_code)
-        and bool(requested_device_id)
-        and hmac_compare_code(requested_code, session.code)
-        and hmac_compare_code(requested_device_id, session.claimed_device_id)
-    )
-    if session.status == "approved" and session.claimed_device_id and can_pick_up_token:
-        try:
-            ds = DeviceStore(s.store_path)
-            device = ds.get_device(session.claimed_device_id)
-            if device and device.active and device.pairing_id == pairing_id:
+    if session.status == "approved" and session.claimed_device_id and requested_secret and requested_device_id:
+        pickup = manager.consume_token_pickup(
+            pairing_id,
+            pickup_secret=requested_secret,
+            device_id=requested_device_id,
+        )
+        if pickup.get("ok"):
+            try:
+                ds = DeviceStore(s.store_path)
                 profile_id = _profile_id(input_data, context)
                 device, token, approval_token = ds.issue_tokens(
-                    session.claimed_device_id,
-                    label=session.claimed_device_label,
-                    public_key=session.claimed_device_public_key,
-                    scopes=session.capabilities,
+                    pickup["device_id"],
+                    label=pickup.get("device_label") or "",
+                    public_key=pickup.get("device_public_key") or "",
+                    scopes=pickup.get("scopes"),
                     pairing_id=pairing_id,
                     profile_id=profile_id,
                 )
                 key_registration = _register_authority_device_key(
                     profile_id=profile_id,
-                    device_id=session.claimed_device_id,
-                    public_key=session.claimed_device_public_key,
+                    device_id=pickup["device_id"],
+                    public_key=pickup.get("device_public_key") or "",
                 )
+                result["pairing"] = pickup["pairing"]
+                result["token_pickup_consumed_at"] = pickup["pairing"].get("token_pickup_consumed_at")
                 result["device_token"] = token
                 result["approval_token"] = approval_token
                 result["client_access_token"] = token
@@ -213,8 +206,8 @@ def status(input_data, context=None):
                 result["confirmation_code"] = device.confirmation_code
                 result["pc_base_url"] = _detect_base_url(input_data, context)
                 result["pc_label"] = _pc_label()
-        except Exception:
-            pass
+            except Exception:
+                pass
     return ok(result)
 
 

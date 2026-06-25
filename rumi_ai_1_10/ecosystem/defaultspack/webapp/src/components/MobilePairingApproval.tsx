@@ -8,7 +8,7 @@ import type { MobilePairingStatus } from "../features/mobile/resources/mobileApi
 
 type MobilePairingApprovalProps = {
   pairingId: string;
-  onApproved?: (pairingId: string, deviceToken?: string) => void;
+  onApproved?: (pairingId: string) => void;
   onRejected?: (pairingId: string) => void;
   onExpired?: (pairingId: string) => void;
   onClose?: () => void;
@@ -69,7 +69,7 @@ export function MobilePairingApproval({
 
         if (result.status === "approved") {
           stopPolling();
-          onApproved?.(pairingId, result.client_access_token ?? result.device_token);
+          onApproved?.(pairingId);
         } else if (result.status === "rejected") {
           stopPolling();
           onRejected?.(pairingId);
@@ -95,17 +95,8 @@ export function MobilePairingApproval({
     setBusy("approve");
     setError("");
     try {
-      const result = await mobileApiResources.approvePairing(pairingId);
-      const clientToken = result.client_access_token ?? result.device_token;
-      const approverToken = result.approver_access_token ?? result.approval_token;
-      if (clientToken || approverToken) {
-        console.log("[pairing] split device tokens received (not displayed)", {
-          pairingId,
-          hasDeviceToken: Boolean(clientToken),
-          hasApprovalToken: Boolean(approverToken),
-        });
-      }
-      onApproved?.(pairingId, clientToken);
+      await mobileApiResources.approvePairing(pairingId);
+      onApproved?.(pairingId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "承認に失敗しました");
     } finally {

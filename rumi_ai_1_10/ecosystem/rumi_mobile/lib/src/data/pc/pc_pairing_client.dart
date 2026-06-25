@@ -150,6 +150,7 @@ class PcPairingClient {
     PcConnection pc, {
     required String pairingId,
     String? code,
+    String? pickupSecret,
     String? deviceId,
   }) async {
     if (!_hasBaseUrl(pc)) {
@@ -162,6 +163,8 @@ class PcPairingClient {
         .replace(
           queryParameters: {
             if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
+            if (pickupSecret != null && pickupSecret.trim().isNotEmpty)
+              'pickup_secret': pickupSecret.trim(),
             if (deviceId != null && deviceId.trim().isNotEmpty)
               'device_id': deviceId.trim(),
           },

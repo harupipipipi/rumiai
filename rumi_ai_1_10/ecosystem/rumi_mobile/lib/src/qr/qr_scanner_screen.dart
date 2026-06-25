@@ -247,7 +247,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
                   label: const Text('ペアリングv2'),
                   onPressed: () {
                     _controller.text =
-                        '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"pair-abc","code":"7KMX-PQ2F","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"","expiresAt":1781830000000}';
+                        '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"pair-abc","code":"7KMX-PQ2F","pickupSecret":"pup_sample","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"","expiresAt":1781830000000}';
                   },
                 ),
               ],

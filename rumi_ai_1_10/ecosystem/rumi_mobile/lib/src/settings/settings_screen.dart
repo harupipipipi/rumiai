@@ -291,7 +291,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final statusResp = await client.pollStatus(
           pc,
           pairingId: pairingId,
-          code: payload.code,
+          pickupSecret: payload.pickupSecret,
           deviceId: _deviceIdentity!.deviceId,
         );
         if (statusResp.isAccepted && !statusResp.hasDeviceToken) {

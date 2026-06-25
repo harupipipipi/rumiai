@@ -45,6 +45,7 @@ type MobilePairQrPayload = {
   version: 1;
   pairingId: string;
   code: string;
+  pickupSecret: string;
   baseUrls: string[];
   manifestUrl: string;
   roles: ("mobile_client" | "mobile_approver")[];
@@ -299,6 +300,7 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
     version: 1,
     pairingId: pairing.pairing_id,
     code: pairing.code,
+    pickupSecret: pairing.pickup_secret ?? "",
     baseUrls: qrBaseUrls,
     manifestUrl: `${qrBaseUrls[0].replace(/\/+$/, "")}/api/mobile/v1/manifest`,
     roles: ["mobile_client", "mobile_approver"],
@@ -309,7 +311,7 @@ function PairingV2Section({ kernelBaseUrl }: { kernelBaseUrl?: string }) {
   const qrValue = qrPayload ? JSON.stringify(qrPayload) : "";
   const qr = useQrDataUrl(qrValue);
 
-  const isExpired = pairing ? pairing.expires_at * 1000 < Date.now() : false;
+  const isExpired = pairing ? pairing.expires_at < Date.now() : false;
   const isFinished = pairing?.status === "approved" || pairing?.status === "rejected" || isExpired;
 
   return (

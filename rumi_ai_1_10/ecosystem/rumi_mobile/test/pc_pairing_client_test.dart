@@ -169,8 +169,10 @@ void main() {
       'pollStatus sends GET to /api/mobile/v1/pairings/{id}/status',
       () async {
         String? requestedPath;
+        Map<String, String>? requestedQuery;
         final client = MockClient((request) async {
           requestedPath = request.url.path;
+          requestedQuery = request.url.queryParameters;
           return _ok({
             'pairing': {
               'pairing_id': 'p1',
@@ -182,10 +184,17 @@ void main() {
         });
 
         final pairingClient = PcPairingClient(client: client);
-        final resp = await pairingClient.pollStatus(_pc, pairingId: 'p1');
+        final resp = await pairingClient.pollStatus(
+          _pc,
+          pairingId: 'p1',
+          pickupSecret: 'pup_123',
+          deviceId: 'mobile-abc123',
+        );
         pairingClient.close();
 
         expect(requestedPath, '/api/mobile/v1/pairings/p1/status');
+        expect(requestedQuery?['pickup_secret'], 'pup_123');
+        expect(requestedQuery?['device_id'], 'mobile-abc123');
         expect(resp.isAccepted, isTrue);
         expect(resp.deviceToken, 'dt-123');
       },

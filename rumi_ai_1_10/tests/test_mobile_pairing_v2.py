@@ -173,7 +173,7 @@ def test_pairing_claim_requires_matching_code():
     assert result["code"] == "PAIRING_CODE_MISMATCH"
 
 
-def test_mobile_pairing_status_requires_code_and_device_for_token():
+def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     from domain.p2p.pairing import PairingManager
     from blocks.mobile.pairing import run
 
@@ -202,6 +202,8 @@ def test_mobile_pairing_status_requires_code_and_device_for_token():
     }, None)
     assert approved["status"] == "ok"
     assert approved["data"]["pairing"]["status"] == "approved"
+    assert "device_token" not in approved["data"]
+    assert "client_access_token" not in approved["data"]
 
     without_code = run({
         "action": "status",
@@ -219,10 +221,76 @@ def test_mobile_pairing_status_requires_code_and_device_for_token():
         "device_id": "mobile-1",
     }, None)
     assert with_code["status"] == "ok"
-    assert with_code["data"]["device_token"].startswith("dtk_")
-    assert with_code["data"]["approval_token"] == ""
-    assert with_code["data"]["approval_scopes"] == []
-    assert with_code["data"]["scopes"] == ["chat.read", "chat.write"]
+    assert "device_token" not in with_code["data"]
+
+    with_secret = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": session.token_pickup_secret,
+        "device_id": "mobile-1",
+    }, None)
+    assert with_secret["status"] == "ok"
+    assert with_secret["data"]["device_token"].startswith("dtk_")
+    assert with_secret["data"]["approval_token"] == ""
+    assert with_secret["data"]["approval_scopes"] == []
+    assert with_secret["data"]["scopes"] == ["chat.read", "chat.write"]
+
+    replay = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": session.token_pickup_secret,
+        "device_id": "mobile-1",
+    }, None)
+    assert replay["status"] == "ok"
+    assert "device_token" not in replay["data"]
+
+
+def test_pairing_start_returns_mobile_pickup_secret():
+    from blocks.p2p import pairing_start
+
+    tmp = tempfile.mkdtemp()
+
+    result = pairing_start.run({
+        "store_path": tmp,
+        "_headers": {"Host": "192.168.1.44:8765"},
+    }, None)
+
+    assert result["status"] == "ok"
+    assert result["data"]["pairing"]["pickup_secret"].startswith("pup_")
+
+
+def test_mobile_pairing_status_rejects_wrong_pickup_secret_without_rotating():
+    from domain.p2p.device_store import DeviceStore
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    assert run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+    }, None)["status"] == "ok"
+    assert run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)["status"] == "ok"
+
+    wrong = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": "pup_wrong",
+        "device_id": "mobile-1",
+    }, None)
+    assert wrong["status"] == "ok"
+    assert "device_token" not in wrong["data"]
+    assert DeviceStore(tmp).get_device("mobile-1") is None
 
 
 def test_mobile_pairing_status_splits_normal_and_approval_tokens():
@@ -262,7 +330,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
         "action": "status",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
-        "code": session.code,
+        "pickup_secret": session.token_pickup_secret,
         "device_id": "mobile-1",
     }, None)
 

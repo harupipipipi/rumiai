@@ -217,6 +217,7 @@ class PairingV2Payload {
   const PairingV2Payload({
     required this.pairingId,
     required this.code,
+    required this.pickupSecret,
     required this.baseUrls,
     required this.serverPublicKey,
     required this.expiresAt,
@@ -226,6 +227,7 @@ class PairingV2Payload {
 
   final String pairingId;
   final String code;
+  final String pickupSecret;
   final List<String> baseUrls;
   final String serverPublicKey;
   final int expiresAt;
@@ -248,6 +250,10 @@ class PairingV2Payload {
       pairingId:
           json['pairingId'] as String? ?? json['pairing_id'] as String? ?? '',
       code: json['code'] as String? ?? '',
+      pickupSecret:
+          json['pickupSecret'] as String? ??
+          json['pickup_secret'] as String? ??
+          '',
       baseUrls: rawBaseUrls.map((e) => e.toString()).toList(),
       serverPublicKey:
           json['serverPublicKey'] as String? ??

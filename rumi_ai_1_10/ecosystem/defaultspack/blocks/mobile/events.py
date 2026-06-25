@@ -1,13 +1,10 @@
 """blocks.mobile.events — イベント・承認のポーリング取得.
 
-モバイルがPC上のツール実行状況や承認要求を取得するためのエンドポイント。
-SSEストリーミングの補完として、ポーリングベースでイベントを取得できる。
+モバイルがPC上のツール実行状況を取得するためのエンドポイント。
+承認操作は challenge/attestation 付きの /api/authority/* に一本化する。
 
 ルート:
   GET  /api/mobile/v1/events?after={cursor}    → イベント一覧
-  GET  /api/mobile/v1/approvals                → 承認待ち一覧
-  POST /api/mobile/v1/approvals/{id}/approve   → 承認
-  POST /api/mobile/v1/approvals/{id}/deny      → 拒否
 """
 
 from __future__ import annotations
@@ -48,61 +45,11 @@ def list_events(input_data, context=None):
         return ok({"events": [], "cursor": cursor})
 
 
-def list_approvals(input_data, context=None):
-    del input_data, context
-    try:
-        from core_runtime.authority import get_authority_service
-        service = get_authority_service()
-        requests = service.list_requests(status="pending")
-        return ok({"approvals": requests})
-    except Exception:
-        return ok({"approvals": []})
-
-
-def approve_approval(input_data, context=None):
-    args = _merged(input_data)
-    request_id = str(args.get("request_id") or args.get("id") or "").strip()
-    if not request_id:
-        return error("request_id is required", "INVALID_INPUT")
-    scope = str(args.get("scope") or "once").strip()
-    try:
-        from core_runtime.authority import get_authority_service
-        service = get_authority_service()
-        result = service.approve_request(
-            request_id,
-            scope=scope,
-            config=args.get("config") if isinstance(args.get("config"), dict) else None,
-            expires_in_seconds=int(args.get("expires_in_seconds") or 300),
-        )
-        return ok({"result": result})
-    except Exception as exc:
-        return error(str(exc), "APPROVE_FAILED")
-
-
-def deny_approval(input_data, context=None):
-    args = _merged(input_data)
-    request_id = str(args.get("request_id") or args.get("id") or "").strip()
-    if not request_id:
-        return error("request_id is required", "INVALID_INPUT")
-    reason = str(args.get("reason") or "denied from mobile").strip()
-    persist = bool(args.get("persist", False))
-    try:
-        from core_runtime.authority import get_authority_service
-        service = get_authority_service()
-        result = service.deny_request(request_id, reason=reason, persist=persist)
-        return ok({"result": result})
-    except Exception as exc:
-        return error(str(exc), "DENY_FAILED")
-
-
 def run(input_data, context=None):
     args = _merged(input_data)
     action = str(args.get("action") or "").strip().lower()
     handlers = {
         "list_events": list_events,
-        "list_approvals": list_approvals,
-        "approve": approve_approval,
-        "deny": deny_approval,
     }
     handler = handlers.get(action)
     if handler is None:

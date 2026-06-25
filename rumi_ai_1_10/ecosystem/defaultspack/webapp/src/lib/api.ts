@@ -919,6 +919,7 @@ export type P2PPairing = {
   confirmation_code?: string;
   requested_scopes?: string[];
   base_urls?: string[];
+  pickup_secret?: string;
   reason?: string;
 };
 
@@ -951,12 +952,7 @@ export type MobilePairingStatus = {
   confirmation_code?: string;
   requested_scopes?: string[];
   expires_at?: number;
-  approved_device_id?: string;
-  device_token?: string;
-  approval_token?: string;
-  client_access_token?: string;
-  approver_access_token?: string;
-  approval_scopes?: string[];
+  token_pickup_consumed_at?: number;
 };
 
 export type CredentialTransferPayload = {
@@ -3693,7 +3689,7 @@ export const api = {
   },
 
   approveMobilePairing(pairingId: string) {
-    return request<{ ok: boolean; device_token?: string; approval_token?: string; client_access_token?: string; approver_access_token?: string; approval_scopes?: string[]; device?: MobileDevice }>(
+    return request<{ ok: boolean; token_delivery?: string; device?: MobileDevice }>(
       `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
       { method: "POST", body: JSON.stringify({}) },
     );

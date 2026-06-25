@@ -1141,6 +1141,9 @@ class AuthorityService:
         model_id = str(resource.get("model_id") or resource.get("model_ref") or "")
         function_id = str(resource.get("function_id") or "")
         pack_id = str(resource.get("pack_id") or "")
+        target_pack_id = str(resource.get("target_pack_id") or "")
+        pack_request_id = str(resource.get("pack_request_id") or "")
+        pack_request_mode = str(resource.get("mode") or "")
         app_name = str(resource.get("app_display_name") or "")
         provider_display_name = str(resource.get("provider_display_name") or provider_id or "")
         model_display_name = str(resource.get("model_display_name") or model_id or "")
@@ -1163,6 +1166,7 @@ class AuthorityService:
             "model.invoke": "Model/API",
             "api_key.use": "API key",
             "network.egress": "Network access",
+            "pack.approve": "Pack approval",
         }.get(request.permission_id, host_definition.label if host_definition is not None else request.permission_id)
         access_summary = ""
         host_execution_summary: dict[str, Any] = {}
@@ -1189,6 +1193,14 @@ class AuthorityService:
                     stream_label=stream_label,
                     summary=host_execution_summary,
                 )
+        if request.permission_id == "pack.approve" and resource.get("kind") == "defaultspack.pack_request":
+            target_label = target_pack_id or pack_id or "pack"
+            title = f"{target_label} のpack requestを承認しますか？"
+            summary = (
+                f"{target_label} への {pack_request_mode or 'pack'} request"
+                f"{f' ({pack_request_id})' if pack_request_id else ''} を確認します。"
+            )
+            access_summary = pack_request_mode or "pack request"
         if has_rich_provider_metadata and request.permission_id in {"model.invoke", "api_key.use", "network.egress"}:
             app_label = app_name or "defaultspack"
             provider_label = provider_display_name or provider_id or "provider"
@@ -1215,6 +1227,9 @@ class AuthorityService:
             "model_id": model_id or None,
             "function_id": function_id or None,
             "pack_id": pack_id or None,
+            "target_pack_id": target_pack_id or None,
+            "pack_request_id": pack_request_id or None,
+            "pack_request_mode": pack_request_mode or None,
             "app_display_name": app_name or None,
             "provider_display_name": provider_display_name or None,
             "model_display_name": model_display_name or None,

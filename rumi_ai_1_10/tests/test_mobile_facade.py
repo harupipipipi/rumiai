@@ -225,6 +225,23 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         == "chat.write"
     )
     assert required_device_scope("GET", "/api/packs") == ""
+    assert required_device_scope("GET", "/api/mobile/v1/approvals") == ""
+    assert required_device_scope("POST", "/api/mobile/v1/approvals/auth_1/approve") == ""
+
+
+def test_mobile_manifest_does_not_expose_legacy_approval_facade():
+    from blocks.mobile.manifest import run
+    from domain.mobile.contract import iter_mobile_route_contracts
+
+    contract_paths = {route.pattern for route in iter_mobile_route_contracts()}
+    assert "/api/mobile/v1/approvals" not in contract_paths
+    assert "/api/mobile/v1/approvals/{id}/approve" not in contract_paths
+    assert "/api/mobile/v1/approvals/{id}/deny" not in contract_paths
+
+    manifest = run({}, None)["data"]
+    route_paths = {route["path"] for route in manifest["routes"]}
+    assert "/api/mobile/v1/approvals" not in route_paths
+    assert not manifest["authority_routes"]
 
 
 def test_mobile_commands_execute_uses_pc_slash_registry():

@@ -10,6 +10,7 @@ void main() {
     final p = payload as QrPairingV2;
     expect(p.payload.pairingId, 'p1');
     expect(p.payload.code, 'abc');
+    expect(p.payload.pickupSecret, '');
     expect(p.payload.baseUrls, ['http://192.168.1.10:8765']);
     expect(p.payload.serverPublicKey, 'pk-1');
     expect(p.payload.isExpired, isFalse);
@@ -17,11 +18,12 @@ void main() {
 
   test('parses rumi_mobile_pair_v1 payload', () {
     final payload = parseQrPayload(
-      '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"p1","code":"abc","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"pk-1","expiresAt":9999999999999}',
+      '{"kind":"rumi_mobile_pair_v1","version":1,"pairingId":"p1","code":"abc","pickupSecret":"pup_123","baseUrls":["http://192.168.1.10:8765"],"manifestUrl":"http://192.168.1.10:8765/api/mobile/v1/manifest","roles":["mobile_client","mobile_approver"],"serverPublicKey":"pk-1","expiresAt":9999999999999}',
     );
     expect(payload, isA<QrPairingV2>());
     final p = payload as QrPairingV2;
     expect(p.payload.pairingId, 'p1');
+    expect(p.payload.pickupSecret, 'pup_123');
     expect(
       p.payload.manifestUrl,
       'http://192.168.1.10:8765/api/mobile/v1/manifest',

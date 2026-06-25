@@ -971,7 +971,11 @@ class DefaultsHttpServer:
         del path_params
         try:
             from core_runtime.authority import get_authority_service
+            from ecosystem.defaultspack.backend.pack_extension.authority_bridge import (
+                sync_pending_pack_requests_to_authority,
+            )
 
+            sync_pending_pack_requests_to_authority()
             return ok(get_authority_service().list_requests(
                 str(request_data.get("status") or "all"),
                 actor_principal=request_data.get("_authenticated_principal"),
@@ -1161,7 +1165,32 @@ class DefaultsHttpServer:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
         if not result.get("success"):
             return self._authority_http_error(result)
+        try:
+            from ecosystem.defaultspack.backend.pack_extension.authority_bridge import (
+                apply_pack_decision_for_authority_request,
+            )
+
+            bridge = apply_pack_decision_for_authority_request(
+                request_id,
+                decision="approve",
+                reviewer=self._authority_reviewer_label(request_data),
+                notes=str(request_data.get("decision_notes") or request_data.get("notes") or ""),
+            )
+            if not bridge.get("skipped"):
+                result["pack_request_result"] = bridge
+        except Exception as exc:
+            result["pack_request_result"] = {"success": False, "error": str(exc)}
         return ok(result)
+
+    @staticmethod
+    def _authority_reviewer_label(request_data) -> str:
+        principal = request_data.get("_authenticated_principal")
+        if isinstance(principal, dict):
+            role = str(principal.get("role") or "").strip()
+            device_id = str(principal.get("device_id") or "").strip()
+            if role or device_id:
+                return ":".join(value for value in (role, device_id) if value)
+        return "authority"
 
     def _handle_authority_deny(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
@@ -1185,6 +1214,21 @@ class DefaultsHttpServer:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
         if not result.get("success"):
             return self._authority_http_error(result)
+        try:
+            from ecosystem.defaultspack.backend.pack_extension.authority_bridge import (
+                apply_pack_decision_for_authority_request,
+            )
+
+            bridge = apply_pack_decision_for_authority_request(
+                request_id,
+                decision="deny",
+                reviewer=self._authority_reviewer_label(request_data),
+                notes=str(request_data.get("reason") or ""),
+            )
+            if not bridge.get("skipped"):
+                result["pack_request_result"] = bridge
+        except Exception as exc:
+            result["pack_request_result"] = {"success": False, "error": str(exc)}
         return ok(result)
 
     def _handle_health(self, request_data, path_params):

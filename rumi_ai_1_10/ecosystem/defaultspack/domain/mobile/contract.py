@@ -293,32 +293,6 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
         device_scope="tools.observe",
         feature="tools",
     ),
-    MobileRouteContract(
-        "GET",
-        "/api/mobile/v1/approvals",
-        block_module="blocks.mobile.events",
-        defaults={"action": "list_approvals"},
-        device_scope="tools.observe",
-        feature="approvals",
-    ),
-    MobileRouteContract(
-        "POST",
-        "/api/mobile/v1/approvals/{id}/approve",
-        block_module="blocks.mobile.events",
-        path_inject={"id": "request_id"},
-        defaults={"action": "approve"},
-        device_scope="tools.approve",
-        feature="approvals",
-    ),
-    MobileRouteContract(
-        "POST",
-        "/api/mobile/v1/approvals/{id}/deny",
-        block_module="blocks.mobile.events",
-        path_inject={"id": "request_id"},
-        defaults={"action": "deny"},
-        device_scope="tools.approve",
-        feature="approvals",
-    ),
 )
 
 
@@ -362,7 +336,7 @@ def mobile_capability_flags() -> dict[str, bool]:
     return {
         "chat": "chat" in features and {"chat.read", "chat.write"} <= scopes,
         "tools": "tools" in features or "tools.observe" in scopes,
-        "approvals": "approvals" in features and "tools.approve" in scopes,
+        "approvals": True,
         "credential_transfer": "credential_transfer" in features
         and "credentials.request" in scopes,
     }

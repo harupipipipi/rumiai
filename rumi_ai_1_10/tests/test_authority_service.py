@@ -841,6 +841,32 @@ def test_authority_signed_deny_and_request_views(tmp_path, monkeypatch):
     assert store.get_request(decision.request_id).status == "denied"
 
 
+def test_authority_pack_request_display_metadata(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:default__surface:defaultspack__node:pack-review",
+        permission_id="pack.approve",
+        resource={
+            "kind": "defaultspack.pack_request",
+            "pack_id": "defaultspack",
+            "target_pack_id": "samplepack",
+            "pack_request_id": "pack_req_1",
+            "mode": "forced_patch",
+        },
+        profile_id="default",
+        node_id="pack-review",
+    )
+
+    listed = service.list_requests("pending")
+    metadata = listed["pending"][0]["display_metadata"]
+
+    assert listed["pending"][0]["request_id"] == decision.request_id
+    assert metadata["permission_label"] == "Pack approval"
+    assert metadata["target_pack_id"] == "samplepack"
+    assert metadata["pack_request_id"] == "pack_req_1"
+    assert "samplepack" in metadata["title"]
+
+
 def test_authority_request_resource_redacts_secret_like_keys(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
 

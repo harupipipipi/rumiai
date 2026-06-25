@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import hmac
 import secrets
 import time
@@ -46,6 +47,14 @@ def hmac_compare_code(left: str, right: str) -> bool:
     )
 
 
+def _hash_pickup_secret(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
+
+
+def _new_pickup_secret() -> str:
+    return "pup_" + secrets.token_urlsafe(32)
+
+
 @dataclass
 class PairingSession:
     pairing_id: str
@@ -67,6 +76,9 @@ class PairingSession:
     claimed_device_public_key: str = ""
     claimed_capabilities: list[str] = field(default_factory=list)
     claimed_at: int = 0
+    token_pickup_secret_hash: str = ""
+    token_pickup_consumed_at: int = 0
+    token_pickup_secret: str = field(default="", repr=False, compare=False)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "PairingSession":
@@ -89,6 +101,8 @@ class PairingSession:
             claimed_device_public_key=str(value.get("claimed_device_public_key") or ""),
             claimed_capabilities=_string_list(value.get("claimed_capabilities")),
             claimed_at=int(value.get("claimed_at") or 0),
+            token_pickup_secret_hash=str(value.get("token_pickup_secret_hash") or ""),
+            token_pickup_consumed_at=int(value.get("token_pickup_consumed_at") or 0),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -112,7 +126,13 @@ class PairingSession:
             "claimed_capabilities": list(self.claimed_capabilities),
             "requested_scopes": list(self.claimed_capabilities),
             "claimed_at": int(self.claimed_at),
+            "token_pickup_consumed_at": int(self.token_pickup_consumed_at),
         }
+
+    def to_storage_dict(self) -> dict[str, Any]:
+        data = self.as_dict()
+        data["token_pickup_secret_hash"] = self.token_pickup_secret_hash
+        return data
 
     def expired(self, now: int | None = None) -> bool:
         return int(self.expires_at) <= int(now if now is not None else _now_ms())
@@ -138,12 +158,15 @@ class PairingManager:
     ) -> PairingSession:
         ttl = int(ttl_seconds or (settings.pairing_ttl_seconds if settings is not None else 300))
         now = _now_ms()
+        pickup_secret = _new_pickup_secret()
         session = PairingSession(
             pairing_id="pair-" + uuid.uuid4().hex,
             code=self._new_unique_code(),
             status=PAIRING_PENDING,
             expires_at=now + max(1, ttl) * 1000,
             created_at=now,
+            token_pickup_secret_hash=_hash_pickup_secret(pickup_secret),
+            token_pickup_secret=pickup_secret,
             peer_id=str(peer_id or "").strip(),
             peer_fingerprint=str(peer_fingerprint or "").strip(),
             peer_label=str(peer_label or "").strip(),
@@ -305,6 +328,45 @@ class PairingManager:
             "scopes": resolved_scopes,
         }
 
+    def consume_token_pickup(
+        self,
+        pairing_id: str,
+        *,
+        pickup_secret: str,
+        device_id: str,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        sessions = self._sessions()
+        session = sessions.get(str(pairing_id or "").strip())
+        if session is None:
+            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+        now = int(now_ms if now_ms is not None else _now_ms())
+        if session.status != PAIRING_APPROVED:
+            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
+        if session.expired(now):
+            session.status = PAIRING_EXPIRED
+            session.reason = "expired"
+            self._replace(session)
+            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+        if session.token_pickup_consumed_at:
+            return {"ok": False, "reason": "token pickup was already used", "code": "TOKEN_PICKUP_CONSUMED"}
+        if not str(device_id or "").strip() or not hmac_compare_code(device_id, session.claimed_device_id):
+            return {"ok": False, "reason": "device_id does not match", "code": "DEVICE_MISMATCH"}
+        expected_hash = str(session.token_pickup_secret_hash or "")
+        provided_hash = _hash_pickup_secret(str(pickup_secret or "").strip())
+        if not expected_hash or not hmac.compare_digest(expected_hash, provided_hash):
+            return {"ok": False, "reason": "pickup secret does not match", "code": "PICKUP_SECRET_MISMATCH"}
+        session.token_pickup_consumed_at = now
+        self._replace(session)
+        return {
+            "ok": True,
+            "pairing": session.as_dict(),
+            "device_id": session.claimed_device_id,
+            "device_label": session.claimed_device_label,
+            "device_public_key": session.claimed_device_public_key,
+            "scopes": list(session.capabilities),
+        }
+
     def list_pairings(self) -> list[dict[str, Any]]:
         self.cleanup_expired()
         return [session.as_dict() for session in self._sessions().values()]
@@ -369,7 +431,7 @@ class PairingManager:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._data["schema_version"] = 1
         self._data["updated_at"] = _now_ms()
-        self._data["pairings"] = {session_id: session.as_dict() for session_id, session in sessions.items()}
+        self._data["pairings"] = {session_id: session.to_storage_dict() for session_id, session in sessions.items()}
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(self.path)
