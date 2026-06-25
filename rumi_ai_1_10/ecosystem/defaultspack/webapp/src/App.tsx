@@ -4,6 +4,7 @@ import { Hand, Loader2 } from "lucide-react";
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { AdaptiveRuntimePage } from "./adaptive";
 import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambientTriggerClient";
 import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
@@ -5759,6 +5760,9 @@ export default function App() {
   }
   if (pathname === "/host-permissions") {
     return <HostPermissionsPage />;
+  }
+  if (pathname === "/adaptive" || pathname === "/operating-profile") {
+    return <AdaptiveRuntimePage />;
   }
   if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
     return <ChatApp />;
