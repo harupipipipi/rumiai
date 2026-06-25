@@ -17,25 +17,34 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import logging
 import os
 import re
+import shutil
 import shlex
 import subprocess
 import sys
 import tempfile
-import time
 import threading
-import shutil
-import uuid
-import logging
+import time
 import types
-from urllib.parse import urlsplit, urlunsplit
-from .flow_context_security import sanitize_user_flow_context
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
+
+from .execution_boundary import (
+    ExecutionBoundary,
+    SANDBOX_RUNTIME_UNAVAILABLE,
+    profile_runtime_name,
+)
+from .flow_context_security import sanitize_user_flow_context
+from .pack_function_policy import permission_id_for_entry
+from .rate_limit_store import PersistentRateLimitStore
 
 # function.call: core_pack 判定用
 try:
@@ -81,15 +90,6 @@ sys.modules["core_runtime.crypto_utils"] = _crypto_utils
 sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 # def compute_file_sha256 is provided by crypto_utils and re-exported here.
 compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _imported_compute_file_sha256)
-from .pack_function_policy import permission_id_for_entry
-from .rate_limit_store import PersistentRateLimitStore
-from .execution_boundary import (
-    ExecutionBoundary,
-    SANDBOX_RUNTIME_UNAVAILABLE,
-    profile_runtime_name,
-)
-
-from typing import Any, Dict, List, Optional
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
@@ -2745,8 +2745,11 @@ class CapabilityExecutor:
             builder.volume(f"{function_dir.resolve()}:/function:ro")
             builder.volume(f"{input_file}:/input.json:ro")
             builder.volume(f"{runner_path}:/tmp/function_runner.py:ro")
-            builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
-            builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_FUNCTION_ID", function_id)
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.type", "function")
+            builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
             builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
@@ -2989,7 +2992,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -3056,7 +3060,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -3076,7 +3081,8 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
             return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
-        if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
+        if not hasattr(_flow_call_stack_local, "stack"):
+            _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
         if flow_id in call_stack:
             return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
@@ -3210,12 +3216,19 @@ class CapabilityExecutor:
             audit = get_audit_logger()
             details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
                         "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}
-            if trusted is not None: details["trusted"] = trusted
-            if grant_allowed is not None: details["grant_allowed"] = grant_allowed
-            if grant_reason is not None: details["grant_reason"] = grant_reason
-            if detail_reason is not None: details["detail_reason"] = detail_reason
-            if extra_details: details.update(extra_details)
-            if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            if trusted is not None:
+                details["trusted"] = trusted
+            if grant_allowed is not None:
+                details["grant_allowed"] = grant_allowed
+            if grant_reason is not None:
+                details["grant_reason"] = grant_reason
+            if detail_reason is not None:
+                details["detail_reason"] = detail_reason
+            if extra_details:
+                details.update(extra_details)
+            if response.error:
+                details["error"] = response.error
+                details["error_type"] = response.error_type
             rejection_reason = str(detail_reason or grant_reason or response.error or "")
             audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
                                         success=response.success, details=details,
