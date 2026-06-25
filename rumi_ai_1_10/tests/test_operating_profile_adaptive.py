@@ -73,6 +73,43 @@ def test_explicit_answers_override_preset_defaults_but_not_ceilings():
     assert profile.policy.level_for("terminal").value == "ask"
 
 
+def test_operating_profile_persists_multidimensional_model_and_split_git_policy():
+    profile = compile_operating_profile(
+        {
+            "profile_id": "p2c",
+            "preset": "max_local_autonomy",
+            "use_cases": {"coding": True, "automation": True},
+            "phase_autonomy": {"plan": "allow", "implement": "ask", "publish": "ask"},
+            "responsibility_matrix": {
+                "frontend": {"assistant": "implement", "user": "review"},
+                "backend": {"assistant": "implement", "user": "review"},
+            },
+            "review_topology": {"required_for": ["git_push"], "reviewers": ["local_user"]},
+            "privacy_policy": {"mode": "local_first", "redact_secrets": True},
+            "memory_policy": {"mode": "project_summaries", "retention": "profile_scoped"},
+            "skill_learning_policy": {"enabled": True, "review_required": True},
+            "budget_policy": {"context_tokens": 12000, "max_parallel_actions": 2},
+            "project_overrides": {"repo-a": {"terminal": "ask"}},
+            "actions": {"git_commit": "allow", "git_push": "ask", "git_merge": "allow"},
+        }
+    )
+
+    data = profile.to_dict()
+    assert data["use_cases"] == {"automation": True, "coding": True}
+    assert data["phase_autonomy"]["implement"] == "ask"
+    assert data["responsibility_matrix"]["frontend"]["assistant"] == "implement"
+    assert data["review_topology"]["required_for"] == ["git_push"]
+    assert data["privacy_policy"]["redact_secrets"] is True
+    assert data["memory_policy"]["mode"] == "project_summaries"
+    assert data["skill_learning_policy"]["enabled"] is True
+    assert data["budget_policy"]["context_tokens"] == 12000
+    assert data["project_overrides"]["repo-a"]["terminal"] == "ask"
+    assert profile.policy.level_for("git_write").value == "allow"
+    assert profile.policy.level_for("git_commit").value == "allow"
+    assert profile.policy.level_for("git_push").value == "ask"
+    assert profile.policy.level_for("git_merge").value == "allow"
+
+
 def test_malicious_pack_recommendation_cannot_widen_answers_or_system_ceiling():
     profile = compile_operating_profile(
         {

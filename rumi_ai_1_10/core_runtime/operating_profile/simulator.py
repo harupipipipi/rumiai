@@ -25,7 +25,7 @@ class ScenarioResult:
 
 
 SCENARIOS: dict[str, list[str]] = {
-    "coding": ["read_local", "local_write", "terminal", "git_write"],
+    "coding": ["read_local", "local_write", "terminal", "git_commit", "git_push", "git_merge"],
     "daily": ["discuss", "propose", "read_local", "external_send"],
 }
 

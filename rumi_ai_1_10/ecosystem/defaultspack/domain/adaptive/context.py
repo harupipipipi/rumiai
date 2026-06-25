@@ -34,6 +34,13 @@ SECRET_KEY_PARTS = (
 )
 
 NON_SECRET_POLICY_KEYS = {
+    "context_token",
+    "context_tokens",
+    "max_context_tokens",
+    "reserved_tokens",
+    "used_tokens",
+    "redact_secret",
+    "redact_secrets",
     "secret_access",
     "secret_use",
     "secrets_access",

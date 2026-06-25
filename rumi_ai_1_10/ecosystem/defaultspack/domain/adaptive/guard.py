@@ -15,6 +15,9 @@ FREEZE_BLOCKED_ACTIONS = {
     "local_write",
     "terminal",
     "git_write",
+    "git_commit",
+    "git_push",
+    "git_merge",
     "browser_control",
     "computer_control",
     "external_send",
@@ -25,7 +28,9 @@ _RISK_TO_ACTION = {
     "file_write": "local_write",
     "file_delete": "local_write",
     "git_write": "git_write",
-    "git_push": "git_write",
+    "git_commit": "git_commit",
+    "git_push": "git_push",
+    "git_merge": "git_merge",
     "shell": "terminal",
     "browser": "browser_control",
     "computer": "computer_control",
@@ -85,6 +90,12 @@ def action_for_function(function_id: str) -> str | None:
     if name.startswith("coding_git_"):
         if name.endswith("_get") or name.endswith("_status") or name.endswith("_diff"):
             return "read_local"
+        if "commit" in name:
+            return "git_commit"
+        if "push" in name:
+            return "git_push"
+        if "merge" in name:
+            return "git_merge"
         return "git_write"
     if name.startswith("browser_"):
         return "browser_control"
@@ -119,7 +130,13 @@ def action_for_tool(
         return "local_write"
     if any(part in name for part in ("terminal", "shell", "exec")):
         return "terminal"
-    if any(part in name for part in ("git_commit", "git_push", "git_branch")):
+    if "git_commit" in name:
+        return "git_commit"
+    if "git_push" in name:
+        return "git_push"
+    if "git_merge" in name:
+        return "git_merge"
+    if any(part in name for part in ("git_write", "git_branch")):
         return "git_write"
     if "secret" in name or "credential" in name:
         return "secrets_access"

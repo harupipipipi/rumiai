@@ -175,6 +175,17 @@ def test_active_operating_profile_denies_tool_and_public_function_dispatch(
     assert function_result["error"]["code"] == "ADAPTIVE_PROFILE_DENIED"
 
 
+def test_adaptive_guard_splits_git_commit_push_and_merge_actions() -> None:
+    from domain.adaptive.guard import action_for_function, action_for_tool
+
+    assert action_for_function("coding_git_commit") == "git_commit"
+    assert action_for_function("coding_git_push") == "git_push"
+    assert action_for_function("coding_git_merge") == "git_merge"
+    assert action_for_tool("git_commit", {}, {}) == "git_commit"
+    assert action_for_tool("git_push", {}, {}) == "git_push"
+    assert action_for_tool("git_merge", {}, {}) == "git_merge"
+
+
 def test_adaptive_generated_functions_register_into_shared_registry() -> None:
     from core_runtime.function_registry import FunctionRegistry
     from domain.function_runtime.bridge import ensure_defaultspack_functions_registered

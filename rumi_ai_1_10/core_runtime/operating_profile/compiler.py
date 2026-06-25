@@ -73,6 +73,15 @@ def compile_operating_profile(
         answers=normalized.to_dict(),
         recommended_packs=recommended_pack_ids,
         provenance=provenance,
+        use_cases=normalized.use_cases,
+        phase_autonomy=normalized.phase_autonomy,
+        responsibility_matrix=normalized.responsibility_matrix,
+        review_topology=normalized.review_topology,
+        privacy_policy=normalized.privacy_policy,
+        memory_policy=normalized.memory_policy,
+        skill_learning_policy=normalized.skill_learning_policy,
+        budget_policy=normalized.budget_policy,
+        project_overrides=normalized.project_overrides,
     )
 
 
