@@ -1130,7 +1130,8 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
 
     events = list(result["events"])
     assert events[-1]["type"] == "done"
-    assert captured["tools"] == ["computer_use", "browser_computer"]
+    assert captured["tools"][:2] == ["computer_use", "browser_computer"]
+    assert captured["tools"][2:] == ["assistant_progress"]
     ChatStore._instance = None
 
 
@@ -2021,8 +2022,9 @@ def test_chat_send_drops_unknown_selected_tool_ids(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert "missing_tool" not in captured["tools"]
-    assert [tool["function"]["name"] for tool in captured["tools"]] == ["coding_file_read"]
+    tool_names = [tool["function"]["name"] for tool in captured["tools"]]
+    assert "missing_tool" not in tool_names
+    assert tool_names == ["coding_file_read", "assistant_progress"]
     ChatStore._instance = None
     ToolRegistry._instance = None
 
@@ -2063,7 +2065,8 @@ def test_chat_send_preserves_dict_tool_definitions(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert captured["tools"] == [tool_def]
+    assert captured["tools"][0] == tool_def
+    assert captured["tools"][1]["function"]["name"] == "assistant_progress"
     ChatStore._instance = None
 
 
