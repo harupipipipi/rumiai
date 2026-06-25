@@ -115,7 +115,7 @@ def test_vision_model_allows_image_tools(monkeypatch, tmp_path):
         {},
     )
 
-    assert [tool["function"]["name"] for tool in prepared.provider_tools] == ["vision_tool"]
+    assert [tool["function"]["name"] for tool in prepared.provider_tools] == ["vision_tool", "assistant_progress"]
     assert prepared.metadata["tool_filter_result"][0]["status"] == "allowed"
 
 
