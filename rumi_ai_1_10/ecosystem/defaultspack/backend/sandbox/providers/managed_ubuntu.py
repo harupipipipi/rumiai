@@ -26,12 +26,40 @@ class ManagedUbuntuProvider:
         else:
             version = _command_version(command_path)
         if self.provider_id == "bwrap_host":
-            if shutil.which("systemd-run") is None:
-                missing.append("command:systemd-run")
+            from ..isolation import diagnose_sandbox_environment
+
+            sandbox_diagnostics = diagnose_sandbox_environment()
+            for check in sandbox_diagnostics.get("checks", []):
+                if not isinstance(check, dict) or check.get("ok"):
+                    continue
+                name = str(check.get("name") or "managed_sandbox")
+                if name == "bubblewrap":
+                    missing.append("command:bwrap")
+                elif name == "systemd_user_scope":
+                    missing.append("systemd:user_scope")
+                elif name == "immutable_root":
+                    missing.append("rootfs:immutable_root")
+                else:
+                    missing.append(name)
+                diagnostics.append(
+                    Diagnostic(
+                        code=str(check.get("code") or "SANDBOX_RUNTIME_UNAVAILABLE"),
+                        message=str(check.get("message") or "Managed sandbox requirement is not satisfied"),
+                        severity="warning",
+                        details={
+                            "check": name,
+                            "path": check.get("path"),
+                            "marker": check.get("marker"),
+                            "returncode": check.get("returncode"),
+                            "stderr": check.get("stderr"),
+                        },
+                    )
+                )
             if not _unprivileged_userns_available():
                 missing.append("kernel:unprivileged_userns")
         missing_caps = sorted(request.required_capabilities - RUNTIME_CAPABILITIES)
         missing.extend(missing_caps)
+        missing = list(dict.fromkeys(missing))
         if missing:
             diagnostics.append(
                 Diagnostic(

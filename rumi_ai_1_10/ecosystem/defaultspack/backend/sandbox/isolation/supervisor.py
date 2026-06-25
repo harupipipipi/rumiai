@@ -16,7 +16,7 @@ from ..errors import (
     SANDBOX_RUNTIME_UNAVAILABLE,
 )
 from .bubblewrap_builder import build_bubblewrap_argv
-from .cgroup import build_systemd_run_argv
+from .cgroup import build_systemd_run_argv, probe_systemd_user_scope
 from .spec import BubblewrapSandboxSpec, CgroupLimits, WorkspaceMount
 
 
@@ -34,16 +34,26 @@ class ManagedSandboxSupervisor:
         self.provider_registry = provider_registry
 
     def available(self) -> bool:
-        return shutil.which("bwrap") is not None and shutil.which("systemd-run") is not None
+        return bool(diagnose_sandbox_environment()["ready"])
 
     def execute_capability(self, request: dict[str, Any]) -> dict[str, Any]:
-        if shutil.which("bwrap") is None:
-            return self._unavailable(request, "Managed Bubblewrap sandbox runtime is unavailable")
-        if shutil.which("systemd-run") is None:
+        diagnostics = diagnose_sandbox_environment(request)
+        if not diagnostics["ready"]:
+            failed = _first_failed_sandbox_check(diagnostics)
+            message = str(failed.get("message") or "Managed sandbox runtime is unavailable")
+            code = str(failed.get("code") or SANDBOX_RUNTIME_UNAVAILABLE)
+            if code == SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE:
+                return self._unavailable(
+                    request,
+                    message,
+                    error_type=SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE,
+                    diagnostics=diagnostics,
+                )
             return self._unavailable(
                 request,
-                "Managed cgroup resource controller is unavailable",
-                error_type=SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE,
+                message,
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+                diagnostics=diagnostics,
             )
 
         timeout = _bounded_timeout(request.get("timeout_seconds"))
@@ -203,8 +213,9 @@ class ManagedSandboxSupervisor:
         message: str,
         *,
         error_type: str = SANDBOX_RUNTIME_UNAVAILABLE,
+        diagnostics: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload = {
             "success": False,
             "ok": False,
             "error": message,
@@ -217,6 +228,101 @@ class ManagedSandboxSupervisor:
                 "calling_convention": request.get("calling_convention"),
             },
         }
+        if diagnostics is not None:
+            payload["diagnostics"] = diagnostics
+        return payload
+
+
+def diagnose_sandbox_environment(request: dict[str, Any] | None = None) -> dict[str, Any]:
+    request = request if isinstance(request, dict) else {}
+    checks: list[dict[str, Any]] = []
+
+    bwrap_path = shutil.which("bwrap")
+    checks.append(
+        {
+            "name": "bubblewrap",
+            "ok": bwrap_path is not None,
+            "path": bwrap_path,
+            "code": SANDBOX_RUNTIME_UNAVAILABLE,
+            "message": (
+                "Bubblewrap sandbox runtime is available"
+                if bwrap_path is not None
+                else "Bubblewrap sandbox runtime is not installed"
+            ),
+        }
+    )
+
+    systemd_probe = probe_systemd_user_scope()
+    systemd_check: dict[str, Any] = {
+        "name": "systemd_user_scope",
+        "ok": systemd_probe.ok,
+        "path": systemd_probe.path,
+        "code": SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE,
+        "message": systemd_probe.message,
+    }
+    if systemd_probe.returncode is not None:
+        systemd_check["returncode"] = systemd_probe.returncode
+    if systemd_probe.stderr:
+        systemd_check["stderr"] = systemd_probe.stderr
+    checks.append(systemd_check)
+
+    try:
+        immutable_root = _immutable_root(request)
+        checks.append(
+            {
+                "name": "immutable_root",
+                "ok": True,
+                "path": str(immutable_root),
+                "marker": str(immutable_root / SANDBOX_ROOT_MARKER),
+                "code": SANDBOX_RUNTIME_UNAVAILABLE,
+                "message": "Immutable sandbox root is configured",
+            }
+        )
+    except Exception as exc:
+        checks.append(
+            {
+                "name": "immutable_root",
+                "ok": False,
+                "path": str(request.get("immutable_root") or os.environ.get("RUMI_SANDBOX_IMMUTABLE_ROOT") or ""),
+                "marker": SANDBOX_ROOT_MARKER,
+                "code": SANDBOX_RUNTIME_UNAVAILABLE,
+                "message": _sandbox_root_error_message(exc),
+            }
+        )
+
+    return {
+        "ready": all(bool(check.get("ok")) for check in checks),
+        "checks": checks,
+    }
+
+
+def _first_failed_sandbox_check(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    checks = diagnostics.get("checks") if isinstance(diagnostics, dict) else []
+    if isinstance(checks, list):
+        for check in checks:
+            if isinstance(check, dict) and not bool(check.get("ok")):
+                return check
+    return {
+        "name": "managed_sandbox",
+        "ok": False,
+        "code": SANDBOX_RUNTIME_UNAVAILABLE,
+        "message": "Managed sandbox runtime is unavailable",
+    }
+
+
+def _sandbox_root_error_message(exc: Exception) -> str:
+    text = str(exc)
+    prefix = "SANDBOX_RUNTIME_UNAVAILABLE:"
+    if text.startswith(prefix):
+        text = text[len(prefix):].strip()
+    if "not configured" in text:
+        return (
+            "Immutable sandbox root is not configured; set "
+            "RUMI_SANDBOX_IMMUTABLE_ROOT or pass a server-side immutable_root"
+        )
+    if text:
+        return f"Immutable sandbox root is invalid: {text}"
+    return "Immutable sandbox root is invalid"
 
 
 def _runner_payload(*, module_path: str, callable_name: str, context: dict[str, Any], args: dict[str, Any]) -> str:

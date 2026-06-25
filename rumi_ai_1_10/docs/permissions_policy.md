@@ -24,6 +24,18 @@ Non-core code does not run directly on the host. Capability execution classifies
 
 Profile runtime names are derived from a stable hash such as `rumi-profile-<sha256(profile_id)[:16]>`, never from raw profile IDs. The implemented managed sandbox slice stages regular function files into a temporary `/workspace`, rejects symlinks, hardlinks, devices, fifos, sockets, oversized trees, and oversized files before Bubblewrap starts, clears inherited environment variables, disables nested user namespaces, runs with network off, and applies systemd cgroup limits. The immutable root must be configured explicitly with `RUMI_SANDBOX_IMMUTABLE_ROOT` or a server-side request root, must not be `/`, must not be group/other writable, and must contain a non group/other writable `.rumi-sandbox-root` marker.
 
+This PR provides the managed sandbox runner core, not durable rootfs provisioning. Developer or operator environments must prepare a minimal immutable rootfs before third-party pack execution is enabled. A minimal Linux setup looks like:
+
+```bash
+sudo mkdir -p /opt/rumi/sandbox-root/{usr,bin,lib,lib64,tmp,home}
+sudo touch /opt/rumi/sandbox-root/.rumi-sandbox-root
+sudo chmod 0755 /opt/rumi/sandbox-root
+sudo chmod 0644 /opt/rumi/sandbox-root/.rumi-sandbox-root
+export RUMI_SANDBOX_IMMUTABLE_ROOT=/opt/rumi/sandbox-root
+```
+
+The rootfs must contain the interpreter and libraries needed by the staged runner, for example `python3` and its runtime libraries, using the distribution's normal packaging or a prepared image extraction flow. `bootstrap.py --cli doctor` reports Bubblewrap availability, the configured root marker, and whether `systemd-run --user --scope true` can actually create a user scope. Execution treats a failed user-systemd probe as `SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE`, not as a host fallback trigger.
+
 The sandbox does not yet provide egress proxying, a secret broker, durable per-profile rootfs provisioning, desktop window sandboxing, or pack-controlled port forwarding. Host operations must flow through HostIntent and the viewer broker with one-shot authority; broker bearer tokens, signing secrets, and ambient provider API keys are not inherited into sandbox environments.
 
 Legacy bearer/HMAC LAN compatibility remains local-only by default. Remote callers must use scoped tokens and still pass route authority, local policy, approval, and audit checks.

@@ -391,6 +391,173 @@ def test_sandbox_rejects_host_root_as_default_immutable_root(tmp_path, monkeypat
         marked_writable.chmod(0o700)
 
 
+def test_systemd_user_scope_probe_requires_working_user_systemd(monkeypatch):
+    from ecosystem.defaultspack.backend.sandbox.isolation.cgroup import probe_systemd_user_scope
+
+    captured: dict[str, object] = {}
+
+    def fake_which(name):
+        return "/usr/bin/systemd-run" if name == "systemd-run" else None
+
+    def fake_run(command, **kwargs):
+        captured["command"] = list(command)
+        captured["kwargs"] = dict(kwargs)
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="No medium found\n")
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = probe_systemd_user_scope()
+
+    assert result.ok is False
+    assert result.path == "/usr/bin/systemd-run"
+    assert result.returncode == 1
+    assert result.stderr == "No medium found"
+    assert captured["command"] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "true"]
+    assert captured["kwargs"]["timeout"] == 3.0
+
+
+def test_sandbox_doctor_reports_rootfs_and_controller_readiness(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.backend.sandbox.isolation import supervisor as supervisor_module
+
+    root = tmp_path / "rootfs"
+    root.mkdir()
+    (root / ".rumi-sandbox-root").write_text("ok\n", encoding="utf-8")
+
+    def fake_which(name):
+        return f"/usr/bin/{name}" if name in {"bwrap", "systemd-run"} else None
+
+    def fake_run(command, **kwargs):
+        assert command[:4] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet"]
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    ready = supervisor_module.diagnose_sandbox_environment({"immutable_root": str(root)})
+    assert ready["ready"] is True
+    assert {check["name"]: check["ok"] for check in ready["checks"]} == {
+        "bubblewrap": True,
+        "systemd_user_scope": True,
+        "immutable_root": True,
+    }
+
+    missing_root = supervisor_module.diagnose_sandbox_environment({})
+    assert missing_root["ready"] is False
+    root_check = next(check for check in missing_root["checks"] if check["name"] == "immutable_root")
+    assert root_check["ok"] is False
+    assert "RUMI_SANDBOX_IMMUTABLE_ROOT" in root_check["message"]
+
+
+def test_setup_doctor_includes_managed_sandbox_readiness(tmp_path, monkeypatch):
+    import ecosystem.defaultspack.backend.sandbox.isolation as isolation_module
+    from rumi_setup.core.recovery import Recovery
+
+    monkeypatch.setattr(
+        isolation_module,
+        "diagnose_sandbox_environment",
+        lambda: {
+            "ready": False,
+            "checks": [
+                {
+                    "name": "immutable_root",
+                    "ok": False,
+                    "path": "",
+                    "marker": ".rumi-sandbox-root",
+                    "code": "SANDBOX_RUNTIME_UNAVAILABLE",
+                    "message": "Immutable sandbox root is not configured",
+                }
+            ],
+        },
+    )
+
+    issues = Recovery(str(tmp_path))._check_managed_sandbox()
+
+    assert issues == [
+        {
+            "id": "managed_sandbox_immutable_root_unavailable",
+            "severity": "warn",
+            "message": "Immutable sandbox root is not configured",
+            "auto_fix": False,
+            "details": {
+                "path": "",
+                "code": "SANDBOX_RUNTIME_UNAVAILABLE",
+                "marker": ".rumi-sandbox-root",
+            },
+        }
+    ]
+
+
+def test_bwrap_provider_doctor_requires_working_user_systemd(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.backend.sandbox import models
+    from ecosystem.defaultspack.backend.sandbox.providers import managed_ubuntu
+
+    root = tmp_path / "rootfs"
+    root.mkdir()
+    (root / ".rumi-sandbox-root").write_text("ok\n", encoding="utf-8")
+
+    def fake_which(name):
+        return f"/usr/bin/{name}" if name in {"bwrap", "systemd-run"} else None
+
+    def fake_run(command, **kwargs):
+        if command == ["/usr/bin/bwrap", "--version"]:
+            return subprocess.CompletedProcess(command, 0, stdout="bubblewrap 0.9.0\n", stderr="")
+        if command[:4] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet"]:
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr="no user bus")
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setenv("RUMI_SANDBOX_IMMUTABLE_ROOT", str(root))
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("shutil.which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(managed_ubuntu, "_unprivileged_userns_available", lambda: True)
+
+    status = managed_ubuntu.BwrapHostProvider().doctor(models.RuntimeRequirements(profile_id="work"))
+
+    assert status.ready is False
+    assert "systemd:user_scope" in status.missing_requirements
+    assert any(
+        diagnostic.code == "SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE"
+        and diagnostic.details["check"] == "systemd_user_scope"
+        for diagnostic in status.diagnostics
+    )
+
+
+def test_sandbox_execution_reports_controller_probe_failure(tmp_path, monkeypatch):
+    from ecosystem.defaultspack.backend.sandbox.errors import SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE
+    from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+
+    root = tmp_path / "rootfs"
+    root.mkdir()
+    (root / ".rumi-sandbox-root").write_text("ok\n", encoding="utf-8")
+
+    def fake_which(name):
+        return f"/usr/bin/{name}" if name in {"bwrap", "systemd-run"} else None
+
+    def fake_run(command, **kwargs):
+        assert command[:4] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet"]
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="no user bus")
+
+    monkeypatch.setattr("shutil.which", fake_which)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = ManagedSandboxSupervisor().execute_capability(
+        {
+            "profile_runtime": "rumi-profile-test",
+            "principal_id": "profile:work",
+            "pack_id": "third_party_pack",
+            "function_id": "run",
+            "calling_convention": "subprocess",
+            "immutable_root": str(root),
+        }
+    )
+
+    assert result["success"] is False
+    assert result["error_type"] == SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE
+    assert "systemd-run --user scope probe failed" in result["error"]
+    assert result["diagnostics"]["ready"] is False
+
+
 def test_sandbox_wrapper_opens_seccomp_fd_inside_cgroup_command(tmp_path):
     from ecosystem.defaultspack.backend.sandbox.isolation import supervisor as supervisor_module
 
@@ -445,6 +612,9 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
         return f"/usr/bin/{name}" if name in {"bwrap", "systemd-run"} else None
 
     def fake_run(command, **kwargs):
+        if "--scope" in command and command[-1] == "true":
+            captured["probe_command"] = list(command)
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
         captured["command"] = list(command)
         captured["kwargs"] = dict(kwargs)
         wrapper_payload = json.loads(Path(command[-1]).read_text(encoding="utf-8"))
@@ -493,6 +663,7 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
     assert result["execution_boundary"] == "managed_sandbox"
     assert result["sandbox_stage"]["files"] == 1
     assert command[0] == "systemd-run"
+    assert captured["probe_command"] == ["/usr/bin/systemd-run", "--user", "--scope", "--quiet", "true"]
     assert any(str(item).startswith("--property=MemoryMax=") for item in command)
     assert captured["bwrap_argv"][0] == "bwrap"
     assert "--clearenv" in captured["bwrap_argv"]
@@ -503,9 +674,13 @@ def test_managed_sandbox_supervisor_runs_payload_under_bwrap_and_cgroup(tmp_path
 
 def test_actual_bwrap_systemd_run_exec_when_available(tmp_path, monkeypatch):
     from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+    from ecosystem.defaultspack.backend.sandbox.isolation.cgroup import probe_systemd_user_scope
 
     if shutil.which("bwrap") is None or shutil.which("systemd-run") is None:
         pytest.skip("Bubblewrap/systemd-run are not installed")
+    systemd_probe = probe_systemd_user_scope()
+    if not systemd_probe.ok:
+        pytest.skip(f"user systemd is not available: {systemd_probe.message}")
     sandbox_root_env = os.environ.get("RUMI_SANDBOX_IMMUTABLE_ROOT", "")
     if not sandbox_root_env:
         pytest.skip("RUMI_SANDBOX_IMMUTABLE_ROOT is not configured")
