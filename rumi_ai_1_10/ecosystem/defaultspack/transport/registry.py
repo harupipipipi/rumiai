@@ -23,6 +23,7 @@ class HttpRouteSpec:
     defaults: Dict[str, Any] = field(default_factory=dict)
     pre_auth: bool = False
     sensitive: bool = False
+    local_only: bool = False
     block_module: str = ""
     function_name: str = ""
     fallback_block_module: str = ""
@@ -49,6 +50,9 @@ class HttpRouteSpec:
             object.__setattr__(self, "fallback_block_module", resolved_legacy_block)
         object.__setattr__(self, "function_id", resolved_function_id)
         object.__setattr__(self, "legacy_block_module", resolved_legacy_block)
+        if str(self.pattern or "").startswith("/api/prompts"):
+            object.__setattr__(self, "sensitive", True)
+            object.__setattr__(self, "local_only", True)
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
@@ -256,6 +260,7 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
         if not function_id or not method or not pattern.startswith("/"):
             continue
         sensitive = bool(item.get("sensitive")) or pattern.startswith("/api/prompts")
+        local_only = bool(item.get("local_only")) or pattern.startswith("/api/prompts")
         specs.append(
             HttpRouteSpec(
                 method,
@@ -267,6 +272,7 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 path_inject=dict(item.get("path_inject") or {}),
                 pre_auth=bool(item.get("pre_auth")),
                 sensitive=sensitive,
+                local_only=local_only,
             )
         )
     return specs
@@ -2171,6 +2177,7 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             setattr(handler, "__rumi_route_pattern__", spec.pattern)
             setattr(handler, "__rumi_route_sensitive__", bool(spec.sensitive))
             setattr(handler, "__rumi_route_pre_auth__", bool(spec.pre_auth))
+            setattr(handler, "__rumi_route_local_only__", bool(spec.local_only))
         except Exception:
             pass
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))

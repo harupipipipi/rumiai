@@ -29,6 +29,14 @@ if a pack-sourced prompt reaches runtime from an older path or test hook, its
 edge is inactive and the disabled segment records
 `prompt_source_pack_untrusted`.
 
+The shipped prompt-only trusted set is intentionally small:
+`defaultspack`, `rumi_default_tools_pack`, and
+`rumi_operations_company_pack`. Extension and component prompt manifests must
+also resolve from inside the claimed shipped pack root, so a manifest cannot
+gain trust only by spoofing `source_pack_id`. This trust only allows passive
+prompt text to enter model input; it does not grant tool, provider, filesystem,
+terminal, browser, or chat-state authority.
+
 User-owned profile overrides remain editable prompt text, but they do not grant
 permissions, attach tools, call providers, or mutate chat state. Trusting a pack
 allows its prompt text to be considered as passive model input; it still does

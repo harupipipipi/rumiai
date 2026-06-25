@@ -742,6 +742,7 @@ def test_body_only_user_prompt_save_preserves_description_and_variables(monkeypa
             "profile_id": "prompt-profile",
             "prompt_id": "editable.system",
             "body": "Updated body only",
+            "expected_body_hash": _sha256("Original body"),
         }
     )
 
@@ -749,6 +750,24 @@ def test_body_only_user_prompt_save_preserves_description_and_variables(monkeypa
     assert fake_manager.updated is not None
     assert fake_manager.updated["description"] == "Keep this description"
     assert fake_manager.updated["variables"] == [{"name": "topic", "type": "string", "required": True}]
+
+
+def test_user_prompt_save_requires_conflict_precondition(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    fake_manager = _EditablePromptManager()
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: fake_manager)
+
+    with pytest.raises(PromptWriteConflict):
+        save_prompt(
+            {
+                "profile_id": "prompt-profile",
+                "prompt_id": "editable.system",
+                "body": "Unconditional write",
+            }
+        )
+
+    assert fake_manager.updated is None
+    assert fake_manager.prompt["body"] == "Original body"
 
 
 def test_stale_user_prompt_save_is_rejected_before_update(monkeypatch, tmp_path: Path) -> None:
@@ -770,6 +789,55 @@ def test_stale_user_prompt_save_is_rejected_before_update(monkeypatch, tmp_path:
     assert fake_manager.prompt["body"] == "Original body"
 
 
+def test_user_prompt_save_rolls_back_when_version_record_fails(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    fake_manager = _EditablePromptManager()
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: fake_manager)
+
+    def fail_record_version(**kwargs):
+        del kwargs
+        raise RuntimeError("version store unavailable")
+
+    monkeypatch.setattr("domain.prompt.editor._record_version", fail_record_version)
+
+    with pytest.raises(RuntimeError):
+        save_prompt(
+            {
+                "profile_id": "prompt-profile",
+                "prompt_id": "editable.system",
+                "body": "Updated without durable version",
+                "expected_body_hash": _sha256("Original body"),
+            }
+        )
+
+    assert fake_manager.prompt["body"] == "Original body"
+    assert fake_manager.prompt["description"] == "Keep this description"
+
+
+def test_profile_override_save_rolls_back_when_version_record_fails(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
+
+    def fail_record_version(**kwargs):
+        del kwargs
+        raise RuntimeError("version store unavailable")
+
+    monkeypatch.setattr("domain.prompt.editor._record_version", fail_record_version)
+
+    with pytest.raises(RuntimeError):
+        save_prompt(
+            {
+                "profile_id": "prompt-profile",
+                "prompt_id": "locked.system",
+                "body": "Override without durable version",
+                "expected_exists": False,
+            }
+        )
+
+    override_path = ProfileWorkspaceManager().paths_for_profile("prompt-profile").prompts_dir / "locked.system.system.md"
+    assert not override_path.exists()
+
+
 def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Path) -> None:
     _setup_profile(monkeypatch, tmp_path)
     monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
@@ -778,6 +846,7 @@ def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Pa
             "profile_id": "prompt-profile",
             "prompt_id": "locked.system",
             "body": "Temporary override",
+            "expected_exists": False,
         }
     )
     override_path = Path(saved["path"])
@@ -787,6 +856,7 @@ def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Pa
             "profile_id": "prompt-profile",
             "prompt_id": "locked.system",
             "version_id": saved["version"]["version_id"],
+            "expected_body_hash": _sha256("Temporary override"),
         }
     )
 
@@ -796,6 +866,39 @@ def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Pa
     assert any(item["reason"] == f"rollback:{saved['version']['version_id']}" for item in versions)
     rollback_version = next(item for item in versions if item["reason"] == f"rollback:{saved['version']['version_id']}")
     assert rollback_version["metadata"]["removed_override"] is True
+
+
+def test_first_override_rollback_requires_audit_before_delete(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
+    saved = save_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "locked.system",
+            "body": "Temporary override",
+            "expected_exists": False,
+        }
+    )
+    override_path = Path(saved["path"])
+
+    def fail_record_version(**kwargs):
+        del kwargs
+        raise RuntimeError("audit store unavailable")
+
+    monkeypatch.setattr("domain.prompt.editor._record_version", fail_record_version)
+
+    with pytest.raises(RuntimeError):
+        rollback_prompt(
+            {
+                "profile_id": "prompt-profile",
+                "prompt_id": "locked.system",
+                "version_id": saved["version"]["version_id"],
+                "expected_body_hash": _sha256("Temporary override"),
+            }
+        )
+
+    assert override_path.is_file()
+    assert override_path.read_text(encoding="utf-8") == "Temporary override"
 
 
 def test_user_prompt_rollback_records_audit_version(monkeypatch, tmp_path: Path) -> None:
@@ -987,6 +1090,7 @@ def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -
         for spec in prompt_specs
     }
     canonical_sensitive = {(spec.method, spec.pattern): spec.sensitive for spec in prompt_specs}
+    canonical_local_only = {(spec.method, spec.pattern): spec.local_only for spec in prompt_specs}
     fallback = {
         (spec.method, spec.pattern, spec.legacy_block_module or spec.block_module or spec.fallback_block_module)
         for spec in _FALLBACK_HTTP_ROUTE_SPECS
@@ -997,12 +1101,20 @@ def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -
         for spec in _FALLBACK_HTTP_ROUTE_SPECS
         if str(spec.pattern).startswith("/api/prompts")
     }
+    fallback_local_only = {
+        (spec.method, spec.pattern): spec.local_only
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+        if str(spec.pattern).startswith("/api/prompts")
+    }
 
     assert canonical
     assert canonical == fallback
     assert canonical_sensitive
     assert all(canonical_sensitive.values())
+    assert canonical_local_only
+    assert all(canonical_local_only.values())
     assert fallback_sensitive == canonical_sensitive
+    assert fallback_local_only == canonical_local_only
     assert all("/control" not in pattern for _, pattern, _ in canonical)
     assert ("POST", "/api/prompts/editor", "blocks.prompt.control") not in canonical
     assert ("GET", "/api/prompts/editor", "blocks.prompt.editor_load") in canonical

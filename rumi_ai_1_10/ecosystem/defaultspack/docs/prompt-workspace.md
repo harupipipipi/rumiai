@@ -45,9 +45,11 @@ grant tool, terminal, browser, provider, or filesystem authority.
 
 ## HTTP Routes
 
-All `/api/prompts/*` routes are marked sensitive. Local HTTP access therefore
-goes through the same bearer-token guard as other sensitive defaultspack routes,
-and browser-origin mutations require `X-Rumi-CSRF`.
+All `/api/prompts/*` routes are marked sensitive and local-only. The HTTP
+transport rejects non-loopback clients even when they present a valid bearer
+token, so remote or tunnel requests cannot inspect or mutate prompt state.
+Local HTTP access still goes through the bearer-token guard, and browser-origin
+mutations require `X-Rumi-CSRF`.
 
 - `GET /api/prompts/active`
 - `GET /api/prompts/traces`
@@ -94,11 +96,17 @@ Each save records a version entry. Rollback restores the selected version's
 previous body and records a new rollback version.
 
 Prompt Studio sends the loaded `body_hash` as `expected_body_hash` for editable
-prompts. First-time overrides assert that the override file is still missing.
+prompts. First-time overrides assert that the override file is still missing
+with `expected_exists=false`. Save, override, and rollback calls must include
+one of those preconditions; the backend rejects unconditional writes with
+`PROMPT_WRITE_CONFLICT`.
+
 The backend serializes writes with a per-prompt lock, checks the expected state,
-uses collision-resistant version IDs, and writes both version records and prompt
-files by atomic replacement. Stale saves fail with `PROMPT_WRITE_CONFLICT`
-instead of overwriting newer prompt text.
+uses collision-resistant version IDs, and writes version records and prompt
+files by atomic replacement. The write path includes compensation: a version
+failure after a body write restores the prior body, and a body-write failure
+does not create a version. First-override rollback records its audit version
+before deleting the override file.
 
 ## Studio Test Bench
 

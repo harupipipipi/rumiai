@@ -35,7 +35,7 @@ from typing import Any
 from ..extensions.runtime import get_extension_registry, get_extensions_root
 from .component_prompts import component_prompt_records
 from .template import PromptTemplate
-from .trust import prompt_pack_is_trusted
+from .trust import prompt_pack_is_trusted, prompt_pack_source_is_trusted
 
 
 # ---------------------------------------------------------------------------
@@ -175,7 +175,7 @@ class PromptManager:
                     or manifest.get("_source_pack_id")
                     or extensions_root.parent.name
                 ).strip()
-                if not prompt_pack_is_trusted(source_pack_id):
+                if not prompt_pack_source_is_trusted(source_pack_id, manifest.get("source_path", "")):
                     continue
                 template_file = str(
                     (manifest.get("config", {}) or {}).get("template_file", "prompt.md")

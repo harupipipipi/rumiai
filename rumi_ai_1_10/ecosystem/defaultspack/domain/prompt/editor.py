@@ -114,20 +114,8 @@ def save_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
             )
             return create_profile_override(override_request)
         previous_body = str(existing.get("body") or existing.get("content") or "")
-        _assert_expected_body(data, current_body=previous_body, current_exists=True)
-        version = _record_version(
-            profile_id=profile_id,
-            prompt_id=prompt_id,
-            scope="user_prompt",
-            previous_body=previous_body,
-            next_body=body,
-            reason=str(data.get("reason") or "manual_save"),
-            metadata={
-                "source_type": "user_data",
-                "previous_hash": _body_hash(previous_body),
-                "next_hash": _body_hash(body),
-            },
-        )
+        _assert_expected_body(data, current_body=previous_body, current_exists=True, require_precondition=True)
+        previous_prompt = copy.deepcopy(existing)
         updated = manager.update_prompt(
             str(existing.get("name") or prompt_id),
             {
@@ -142,6 +130,23 @@ def save_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
                 },
             },
         )
+        try:
+            version = _record_version(
+                profile_id=profile_id,
+                prompt_id=prompt_id,
+                scope="user_prompt",
+                previous_body=previous_body,
+                next_body=body,
+                reason=str(data.get("reason") or "manual_save"),
+                metadata={
+                    "source_type": "user_data",
+                    "previous_hash": _body_hash(previous_body),
+                    "next_hash": _body_hash(body),
+                },
+            )
+        except Exception:
+            _restore_user_prompt(manager, prompt_id, previous_prompt)
+            raise
     return {
         "action": "saved",
         "profile_id": profile_id,
@@ -165,26 +170,30 @@ def create_profile_override(input_data: dict[str, Any] | None = None) -> dict[st
     with _prompt_write_lock(profile_id, prompt_id, "profile_override"):
         previous_exists = path.is_file()
         previous_body = path.read_text(encoding="utf-8") if previous_exists else ""
-        _assert_expected_body(data, current_body=previous_body, current_exists=previous_exists)
-        version = _record_version(
-            profile_id=profile_id,
-            prompt_id=prompt_id,
-            scope="profile_override",
-            previous_body=previous_body,
-            next_body=body,
-            reason=str(data.get("reason") or "manual_override"),
-            metadata={
-                **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
-                "source_type": "profile_override",
-                "path": str(path),
-                "previous_exists": previous_exists,
-                "previous_hash": _body_hash(previous_body),
-                "next_hash": _body_hash(body),
-                "description": data.get("description") or "",
-                "variables": data.get("variables") if isinstance(data.get("variables"), list) else [],
-            },
-        )
+        _assert_expected_body(data, current_body=previous_body, current_exists=previous_exists, require_precondition=True)
         _atomic_write_text(path, body)
+        try:
+            version = _record_version(
+                profile_id=profile_id,
+                prompt_id=prompt_id,
+                scope="profile_override",
+                previous_body=previous_body,
+                next_body=body,
+                reason=str(data.get("reason") or "manual_override"),
+                metadata={
+                    **(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}),
+                    "source_type": "profile_override",
+                    "path": str(path),
+                    "previous_exists": previous_exists,
+                    "previous_hash": _body_hash(previous_body),
+                    "next_hash": _body_hash(body),
+                    "description": data.get("description") or "",
+                    "variables": data.get("variables") if isinstance(data.get("variables"), list) else [],
+                },
+            )
+        except Exception:
+            _restore_profile_override(path, previous_body, previous_exists)
+            raise
     return {
         "action": "override_saved",
         "profile_id": profile_id,
@@ -247,20 +256,8 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
         with _prompt_write_lock(profile_id, prompt_id, "user_prompt"):
             existing = manager.get_prompt_by_name(prompt_id) or manager.get_prompt(prompt_id)
             previous = str((existing or {}).get("body") or (existing or {}).get("content") or "")
-            _assert_expected_body(data, current_body=previous, current_exists=existing is not None)
-            audit_version = _record_version(
-                profile_id=profile_id,
-                prompt_id=prompt_id,
-                scope="user_prompt",
-                previous_body=previous,
-                next_body=body,
-                reason=f"rollback:{version_id}",
-                metadata={
-                    "rolled_back_from": version_id,
-                    "previous_hash": _body_hash(previous),
-                    "next_hash": _body_hash(body),
-                },
-            )
+            _assert_expected_body(data, current_body=previous, current_exists=existing is not None, require_precondition=True)
+            previous_prompt = copy.deepcopy(existing) if isinstance(existing, dict) else {}
             prompt = manager.update_prompt(
                 prompt_id,
                 {
@@ -272,6 +269,23 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
                     },
                 },
             )
+            try:
+                audit_version = _record_version(
+                    profile_id=profile_id,
+                    prompt_id=prompt_id,
+                    scope="user_prompt",
+                    previous_body=previous,
+                    next_body=body,
+                    reason=f"rollback:{version_id}",
+                    metadata={
+                        "rolled_back_from": version_id,
+                        "previous_hash": _body_hash(previous),
+                        "next_hash": _body_hash(body),
+                    },
+                )
+            except Exception:
+                _restore_user_prompt(manager, prompt_id, previous_prompt)
+                raise
         return {
             "action": "rolled_back",
             "profile_id": profile_id,
@@ -285,11 +299,9 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
     with _prompt_write_lock(profile_id, prompt_id, "profile_override"):
         path_was_file = path.is_file()
         previous = path.read_text(encoding="utf-8") if path_was_file else ""
-        _assert_expected_body(data, current_body=previous, current_exists=path_was_file)
+        _assert_expected_body(data, current_body=previous, current_exists=path_was_file, require_precondition=True)
         version_metadata = version.get("metadata") if isinstance(version.get("metadata"), dict) else {}
         if use_previous and version_metadata.get("previous_exists") is False:
-            if path.is_file():
-                path.unlink()
             audit_version = _record_version(
                 profile_id=profile_id,
                 prompt_id=prompt_id,
@@ -305,6 +317,8 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
                     "next_hash": _body_hash(""),
                 },
             )
+            if path.is_file():
+                path.unlink()
             return {
                 "action": "rolled_back",
                 "profile_id": profile_id,
@@ -315,20 +329,24 @@ def rollback_prompt(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
                 "body_hash": _body_hash(""),
                 "version": audit_version,
             }
-        audit_version = _record_version(
-            profile_id=profile_id,
-            prompt_id=prompt_id,
-            scope="profile_override",
-            previous_body=previous,
-            next_body=body,
-            reason=f"rollback:{version_id}",
-            metadata={
-                "rolled_back_from": version_id,
-                "previous_hash": _body_hash(previous),
-                "next_hash": _body_hash(body),
-            },
-        )
         _atomic_write_text(path, body)
+        try:
+            audit_version = _record_version(
+                profile_id=profile_id,
+                prompt_id=prompt_id,
+                scope="profile_override",
+                previous_body=previous,
+                next_body=body,
+                reason=f"rollback:{version_id}",
+                metadata={
+                    "rolled_back_from": version_id,
+                    "previous_hash": _body_hash(previous),
+                    "next_hash": _body_hash(body),
+                },
+            )
+        except Exception:
+            _restore_profile_override(path, previous, path_was_file)
+            raise
     return {
         "action": "rolled_back",
         "profile_id": profile_id,
@@ -1249,13 +1267,18 @@ def _assert_expected_body(
     *,
     current_body: str,
     current_exists: bool,
+    require_precondition: bool = False,
 ) -> None:
     expected_exists = _expected_exists(data)
+    expected_hash = _expected_body_hash(data)
+    if require_precondition and expected_exists is None and not expected_hash:
+        raise PromptWriteConflict(
+            "Prompt write requires expected_body_hash or expected_exists; reload Prompt Studio and try again."
+        )
     if expected_exists is not None and bool(expected_exists) != bool(current_exists):
         raise PromptWriteConflict("Prompt changed before save; reload Prompt Studio and try again.")
     if expected_exists is False and not current_exists:
         return
-    expected_hash = _expected_body_hash(data)
     if expected_hash and expected_hash != _body_hash(current_body):
         raise PromptWriteConflict("Prompt changed before save; reload Prompt Studio and try again.")
 
@@ -1280,6 +1303,37 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     _atomic_write_text(path, json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+
+
+def _restore_profile_override(path: Path, previous_body: str, previous_exists: bool) -> None:
+    if previous_exists:
+        _atomic_write_text(path, previous_body)
+    elif path.is_file():
+        path.unlink()
+
+
+def _restore_user_prompt(manager: Any, prompt_id: str, previous_prompt: dict[str, Any]) -> None:
+    if not isinstance(previous_prompt, dict) or not previous_prompt:
+        return
+    name = str(previous_prompt.get("name") or prompt_id)
+    manager.update_prompt(
+        name,
+        {
+            "body": str(previous_prompt.get("body") or previous_prompt.get("content") or ""),
+            "content": str(previous_prompt.get("body") or previous_prompt.get("content") or ""),
+            "description": str(previous_prompt.get("description") or ""),
+            "variables": (
+                list(previous_prompt.get("variables") or [])
+                if isinstance(previous_prompt.get("variables"), list)
+                else []
+            ),
+            "metadata": (
+                dict(previous_prompt.get("metadata"))
+                if isinstance(previous_prompt.get("metadata"), dict)
+                else {}
+            ),
+        },
+    )
 
 
 def _record_version(

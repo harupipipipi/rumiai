@@ -25,8 +25,10 @@ trace storage with `defaults.prompt.trace_get` or
 does not return raw `effective_input`. Full segment text is returned only when
 the caller explicitly passes `include_text=true`.
 
-All `/api/prompts/*` HTTP routes are sensitive local routes. Reads require the
-local bearer token when local auth is configured. Mutations with a browser
+All `/api/prompts/*` HTTP routes are sensitive local-only routes. The transport
+rejects non-loopback clients even when they present a valid bearer token, so
+remote or tunnel requests cannot inspect or mutate prompt state. Reads require
+the local bearer token when local auth is configured. Mutations with a browser
 Origin also require the `X-Rumi-CSRF` header.
 
 ## Command Center
@@ -56,11 +58,16 @@ component, snapshot, and extension prompts are read-only. Saving a read-only
 prompt creates a profile override instead of modifying the original.
 
 Prompt Studio saves include the loaded `body_hash` as `expected_body_hash`.
-The backend takes a per-prompt lock, verifies the expected hash or expected
-missing override state, writes the version entry and prompt body with atomic
-file replacement, and rejects stale saves with a prompt write conflict.
-Rollbacks are also versioned so restoring a user prompt or removing a first
-override leaves an audit trail.
+First-time overrides send `expected_exists=false`. The backend requires one of
+those preconditions for every save, override, and rollback; clients that omit
+them receive `PROMPT_WRITE_CONFLICT` instead of an unconditional write.
+
+Writes take a per-prompt lock, verify the expected hash or expected missing
+override state, and use atomic file replacement. The body and version record are
+committed with compensation: if version recording fails after a body write, the
+previous prompt body is restored; if body writing fails, no version is recorded.
+First-override rollback records its audit version before deleting the override
+file, so a missing audit cannot silently remove a prompt.
 
 The Test tab runs a local Studio test without calling a model. It accepts test
 input text and selected tool ids, then shows:
