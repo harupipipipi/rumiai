@@ -83,11 +83,15 @@ void main() {
     ));
     await tester.pumpAndSettle(const Duration(seconds: 3));
 
-    await tester.tap(find.byTooltip('設定'));
+    await tester.tap(find.byTooltip('チャット一覧'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('設定'));
     await tester.pumpAndSettle();
 
-    expect(find.text('AI API (ローカル動作)'), findsOneWidget);
-    expect(find.text('PC接続'), findsOneWidget);
+    expect(find.text('このスマホのAI API'), findsOneWidget);
+    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
+    await tester.pumpAndSettle();
+    expect(find.text('PC接続'), findsWidgets);
     expect(find.text('PCタスク完了通知'), findsOneWidget);
   });
 

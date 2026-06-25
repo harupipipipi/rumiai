@@ -54,7 +54,7 @@ class Space {
 
   static Space fromPairedDevice(PairedDevice device) {
     return Space(
-      id: 'pc:${device.deviceId}',
+      id: 'pc:${device.connectionId}',
       label: device.displayPcLabel,
       kind: SpaceKind.pc,
       deviceId: device.deviceId,

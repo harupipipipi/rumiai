@@ -47,6 +47,8 @@ void main() {
             'local': false,
             'catalog_only': false,
             'default_model': 'gpt-5.4',
+            'default_base_url': 'https://api.openai.com/v1',
+            'default_model_for': {'chat': 'gpt-5.4'},
             'capabilities': ['chat', 'tool_calls'],
             'env_vars': ['OPENAI_API_KEY'],
             'base_url_envs': ['OPENAI_BASE_URL'],
@@ -107,6 +109,9 @@ void main() {
       expect(catalog.providers.length, 1);
       expect(catalog.providers.first.providerId, 'openai');
       expect(catalog.providers.first.configured, isTrue);
+      expect(
+          catalog.providers.first.defaultBaseUrl, 'https://api.openai.com/v1');
+      expect(catalog.providers.first.defaultModelFor['chat'], 'gpt-5.4');
       expect(catalog.models.first.modelId, 'gpt-5.4');
       expect(catalog.models.first.maxContext, 128000);
       expect(catalog.templates.first.name, '要約');

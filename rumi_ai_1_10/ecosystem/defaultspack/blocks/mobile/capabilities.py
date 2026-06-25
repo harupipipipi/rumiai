@@ -48,6 +48,20 @@ def _provider_summary(provider: dict) -> dict:
         "local": bool(provider.get("local")),
         "catalog_only": bool(provider.get("catalog_only")),
         "default_model": str(provider.get("default_model") or provider.get("provider_metadata", {}).get("default_model") or ""),
+        "default_base_url": str(
+            provider.get("default_base_url")
+            or provider.get("metadata", {}).get("default_base_url")
+            or provider.get("availability", {}).get("base_url_hint")
+            or provider.get("provider_metadata", {}).get("default_base_url")
+            or ""
+        ),
+        "default_model_for": dict(
+            provider.get("default_model_for")
+            if isinstance(provider.get("default_model_for"), dict)
+            else provider.get("metadata", {}).get("default_model_for")
+            if isinstance(provider.get("metadata", {}).get("default_model_for"), dict)
+            else {}
+        ),
         "capabilities": list(provider.get("capabilities") or []),
         "env_vars": list(provider.get("env_vars") or provider.get("provider_metadata", {}).get("env_vars") or []),
         "base_url_envs": list(provider.get("base_url_envs") or provider.get("provider_metadata", {}).get("base_url_envs") or []),

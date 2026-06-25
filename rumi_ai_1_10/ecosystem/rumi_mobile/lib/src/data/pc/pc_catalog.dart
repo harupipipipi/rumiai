@@ -8,6 +8,8 @@ class ProviderEntry {
     required this.local,
     required this.catalogOnly,
     required this.defaultModel,
+    required this.defaultBaseUrl,
+    required this.defaultModelFor,
     required this.capabilities,
     required this.envVars,
     required this.baseUrlEnvs,
@@ -22,6 +24,8 @@ class ProviderEntry {
   final bool local;
   final bool catalogOnly;
   final String defaultModel;
+  final String defaultBaseUrl;
+  final Map<String, String> defaultModelFor;
   final List<String> capabilities;
   final List<String> envVars;
   final List<String> baseUrlEnvs;
@@ -39,6 +43,9 @@ class ProviderEntry {
       local: json['local'] as bool? ?? false,
       catalogOnly: json['catalog_only'] as bool? ?? false,
       defaultModel: json['default_model'] as String? ?? '',
+      defaultBaseUrl: json['default_base_url'] as String? ?? '',
+      defaultModelFor: (json['default_model_for'] as Map? ?? const {})
+          .map((key, value) => MapEntry(key.toString(), value.toString())),
       capabilities: (json['capabilities'] as List? ?? [])
           .map((e) => e.toString())
           .toList(),
@@ -60,6 +67,8 @@ class ProviderEntry {
         'local': local,
         'catalog_only': catalogOnly,
         'default_model': defaultModel,
+        'default_base_url': defaultBaseUrl,
+        'default_model_for': defaultModelFor,
         'capabilities': capabilities,
         'env_vars': envVars,
         'base_url_envs': baseUrlEnvs,

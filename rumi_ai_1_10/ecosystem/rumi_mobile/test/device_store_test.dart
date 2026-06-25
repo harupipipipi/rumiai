@@ -92,6 +92,34 @@ void main() {
     expect(await store.loadPairedDevices(), isEmpty);
   });
 
+  test('keeps multiple PCs paired to the same mobile device id', () async {
+    final store = MobileDeviceStore(storage: _FakeSecureStorage());
+    final secondPc = PairedDevice(
+      deviceId: _validDevice.deviceId,
+      deviceToken: 'dtk-second',
+      approvalToken: 'dtk-approve-second',
+      label: _validDevice.label,
+      scopes: _validDevice.scopes,
+      approvalScopes: _validDevice.approvalScopes,
+      pcBaseUrl: 'http://192.168.11.26:8765',
+      pcLabel: 'Studio Mac',
+      pairingId: 'pair-2',
+    );
+
+    await store.savePairedDevice(_validDevice);
+    await store.savePairedDevice(secondPc);
+
+    final devices = await store.loadPairedDevices();
+    expect(devices, hasLength(2));
+    expect(
+        devices.map((d) => d.connectionId), containsAll(['pair-1', 'pair-2']));
+
+    await store.removePairedDevice(_validDevice.connectionId);
+    final remaining = await store.loadPairedDevices();
+    expect(remaining, hasLength(1));
+    expect(remaining.single.pcLabel, 'Studio Mac');
+  });
+
   test('legacy pc connection does not resurrect paired state', () async {
     final storage = _FakeSecureStorage();
     final store = MobileDeviceStore(storage: storage);

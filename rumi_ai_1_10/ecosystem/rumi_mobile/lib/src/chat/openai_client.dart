@@ -23,6 +23,10 @@ class OpenAiClient {
     if (!config.isConfigured) {
       throw const OpenAiException('APIのURLとキーを設定してください。');
     }
+    if (config.providerId == 'anthropic') {
+      yield* _streamAnthropic(config: config, history: history);
+      return;
+    }
 
     final uri = _chatCompletionsUri(config.baseUrl);
     final body = jsonEncode({
@@ -89,6 +93,72 @@ class OpenAiClient {
     return messages;
   }
 
+  Stream<String> _streamAnthropic({
+    required ApiConfig config,
+    required List<ChatMessage> history,
+  }) async* {
+    final uri = _anthropicMessagesUri(config.baseUrl);
+    final body = jsonEncode({
+      'model': config.model,
+      'messages': _buildAnthropicMessages(history),
+      'stream': true,
+      'max_tokens': 4096,
+      if (config.systemPrompt.trim().isNotEmpty)
+        'system': config.systemPrompt.trim(),
+    });
+
+    final request = http.Request('POST', uri);
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'x-api-key': config.apiKey.trim(),
+      'anthropic-version': '2023-06-01',
+    });
+    request.body = body;
+
+    final streamed =
+        await _http.send(request).timeout(const Duration(seconds: 30));
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final text = await streamed.stream.bytesToString();
+      throw OpenAiException(
+        _friendlyHttpError(streamed.statusCode, text),
+        statusCode: streamed.statusCode,
+      );
+    }
+
+    final buffer = StringBuffer();
+    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+      if (_cancelled) break;
+      buffer.write(chunk);
+      while (true) {
+        final eventEnd = buffer.toString().indexOf('\n\n');
+        if (eventEnd < 0) break;
+        final block = buffer.toString().substring(0, eventEnd);
+        final remaining = buffer.toString().substring(eventEnd + 2);
+        buffer.clear();
+        buffer.write(remaining);
+        final delta = _parseAnthropicDelta(block);
+        if (delta.isNotEmpty) yield delta;
+      }
+    }
+  }
+
+  List<Map<String, String>> _buildAnthropicMessages(List<ChatMessage> history) {
+    final messages = <Map<String, String>>[];
+    for (final message in history) {
+      if (message.content.trim().isEmpty) continue;
+      if (message.role == ChatRole.system) continue;
+      messages.add({
+        'role': message.role == ChatRole.user ? 'user' : 'assistant',
+        'content': message.content,
+      });
+    }
+    if (messages.isEmpty || messages.first['role'] != 'user') {
+      messages.insert(0, {'role': 'user', 'content': ''});
+    }
+    return messages;
+  }
+
   String _parseDelta(String json) {
     try {
       final decoded = jsonDecode(json) as Map<String, dynamic>;
@@ -117,6 +187,50 @@ class OpenAiClient {
     final path = _trimTrailingSlash(uri.path);
     if (path.endsWith('/chat/completions')) return uri;
     return uri.replace(path: '$path/chat/completions');
+  }
+
+  Uri _anthropicMessagesUri(String baseUrl) {
+    var trimmed = baseUrl.trim();
+    if (trimmed.isEmpty) {
+      throw const OpenAiException('APIのURLを設定してください。');
+    }
+    if (!trimmed.contains('://')) trimmed = 'https://$trimmed';
+    final uri = Uri.parse(trimmed);
+    if (uri.host.isEmpty) {
+      throw OpenAiException('APIのURLが不正です: $baseUrl');
+    }
+    final path = _trimTrailingSlash(uri.path);
+    if (path.endsWith('/messages')) return uri;
+    if (path.endsWith('/v1')) return uri.replace(path: '$path/messages');
+    return uri.replace(path: '$path/v1/messages');
+  }
+
+  String _parseAnthropicDelta(String block) {
+    for (final line in block.split(RegExp(r'\r?\n'))) {
+      final trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      final data = trimmed.substring(5).trim();
+      if (data.isEmpty || data == '[DONE]') continue;
+      try {
+        final decoded = jsonDecode(data) as Map<String, dynamic>;
+        final type = decoded['type'] as String? ?? '';
+        if (type == 'content_block_delta') {
+          final delta = decoded['delta'] as Map<String, dynamic>? ?? const {};
+          final text = delta['text'];
+          return text is String ? text : '';
+        }
+        if (type == 'error') {
+          final error = decoded['error'] as Map<String, dynamic>? ?? const {};
+          throw OpenAiException(
+              error['message'] as String? ?? 'Anthropic error');
+        }
+      } on OpenAiException {
+        rethrow;
+      } catch (_) {
+        return '';
+      }
+    }
+    return '';
   }
 
   String _friendlyHttpError(int code, String body) {

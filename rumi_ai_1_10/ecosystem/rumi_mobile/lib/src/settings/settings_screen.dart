@@ -31,10 +31,11 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late ApiConfig _config;
+  List<MobileProviderConfig> _providerConfigs = [];
   late PcConnection? _pc;
   MobileNotificationSettings _notificationSettings =
       MobileNotificationSettings.defaults;
-  PairedDevice? _pairedDevice;
+  List<PairedDevice> _pairedDevices = [];
   DeviceIdentity? _deviceIdentity;
   bool _loading = true;
   bool _saving = false;
@@ -79,17 +80,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final api = await widget.configStore.loadApi();
+    final providerConfigs = await widget.configStore.loadProviderConfigs();
     final pc = await widget.configStore.loadPc();
     final notificationSettings =
         await widget.configStore.loadNotificationSettings();
     final paired = await widget.deviceStore.loadPairedDevice();
+    final pairedDevices = await widget.deviceStore.loadPairedDevices();
     final identity = await widget.deviceStore.loadOrCreateIdentity();
     if (!mounted) return;
     setState(() {
       _config = api;
+      _providerConfigs = providerConfigs;
       _pc = pc;
       _notificationSettings = notificationSettings;
-      _pairedDevice = paired;
+      _pairedDevices = pairedDevices;
+      if (_pc == null && paired != null) {
+        _pc = paired.toPcConnection();
+      }
       _deviceIdentity = identity;
       _syncControllers();
       _loading = false;
@@ -314,9 +321,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             approvalToken: approvalToken,
           );
           await widget.configStore.savePc(newPc);
+          final pairedDevices = await widget.deviceStore.loadPairedDevices();
           if (!mounted) return;
           setState(() {
-            _pairedDevice = device;
+            _pairedDevices = pairedDevices;
             _pc = newPc;
             _pcUrl.text = pc.baseUrl;
             _pcToken.text = token;
@@ -339,20 +347,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast('ペアリングがタイムアウトしました');
   }
 
-  Future<void> _unpair() async {
-    await widget.deviceStore.clear();
-    await widget.configStore.savePc(null);
+  Future<void> _selectPairedDevice(PairedDevice device) async {
+    await widget.deviceStore.savePairedDevice(device);
+    final pc = device.toPcConnection();
+    await widget.configStore.savePc(pc);
     if (!mounted) return;
     setState(() {
-      _pairedDevice = null;
-      _pc = null;
-      _pcUrl.text = '';
-      _pcToken.text = '';
+      _pc = pc;
+      _pcUrl.text = pc.baseUrl;
+      _pcToken.text = pc.token;
+    });
+    widget.onDevicePaired?.call(device);
+    _toast('${device.displayPcLabel} に切り替えました');
+  }
+
+  Future<void> _unpair(PairedDevice device) async {
+    await widget.deviceStore.removePairedDevice(device.connectionId);
+    final devices = await widget.deviceStore.loadPairedDevices();
+    final removingActive =
+        _pc?.baseUrl == device.pcBaseUrl && _pc?.token == device.deviceToken;
+    PcConnection? nextPc = _pc;
+    PairedDevice? nextDevice;
+    if (removingActive) {
+      nextDevice = devices.isNotEmpty ? devices.first : null;
+      nextPc = nextDevice?.toPcConnection();
+      await widget.configStore.savePc(nextPc);
+      if (nextDevice != null) {
+        await widget.deviceStore.savePairedDevice(nextDevice);
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _pairedDevices = devices;
+      _pc = nextPc;
+      _pcUrl.text = nextPc?.baseUrl ?? '';
+      _pcToken.text = nextPc?.token ?? '';
       _pcBootstrap = null;
       _pcCatalog = null;
     });
-    widget.onDevicePaired?.call(null);
-    _toast('PCとの接続を解除しました');
+    if (removingActive) {
+      widget.onDevicePaired?.call(nextDevice);
+    }
+    _toast('${device.displayPcLabel} との接続を解除しました');
   }
 
   void _toast(String message) {
@@ -376,10 +412,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     try {
       final bootstrap = await client.fetchBootstrap(pc);
       final catalog = await client.fetchCapabilities(pc);
+      final providerConfigs = _mergeProviderCatalog(catalog);
+      await widget.configStore.saveProviderConfigs(providerConfigs);
       if (!mounted) return;
       setState(() {
         _pcBootstrap = bootstrap;
         _pcCatalog = catalog;
+        _providerConfigs = providerConfigs;
         _fetchingCatalog = false;
       });
       _toast(
@@ -393,6 +432,216 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
     } finally {
       client.close();
+    }
+  }
+
+  List<MobileProviderConfig> _mergeProviderCatalog(PcCatalog catalog) {
+    final existingByProvider = {
+      for (final config in _providerConfigs) config.providerId: config,
+    };
+    final merged = <MobileProviderConfig>[];
+    for (final provider in catalog.providers) {
+      if (!_shouldShowMobileProvider(provider)) continue;
+      final existing = existingByProvider.remove(provider.providerId);
+      final model = existing?.model.trim().isNotEmpty == true
+          ? existing!.model
+          : _defaultModelForProvider(provider, catalog);
+      final baseUrl = existing?.baseUrl.trim().isNotEmpty == true
+          ? existing!.baseUrl
+          : _defaultBaseUrlForProvider(provider);
+      final openaiCompatible = provider.openaiCompatible ||
+          _usesOpenAiCompatibleFallback(provider) ||
+          _baseUrlLooksOpenAiCompatible(baseUrl);
+      merged.add(
+        MobileProviderConfig(
+          providerId: provider.providerId,
+          displayName: provider.displayName.isNotEmpty
+              ? provider.displayName
+              : provider.providerId,
+          label: existing?.label ?? '',
+          apiKey: existing?.apiKey ?? '',
+          baseUrl: baseUrl,
+          model: model,
+          openaiCompatible: openaiCompatible,
+          local: provider.local,
+          catalogOnly: provider.catalogOnly,
+        ),
+      );
+    }
+    merged.addAll(existingByProvider.values);
+    merged.sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
+    return merged;
+  }
+
+  bool _shouldShowMobileProvider(ProviderEntry provider) {
+    final providerId = provider.providerId.trim();
+    if (providerId.isEmpty) return false;
+    if (providerId == 'stub' || providerId == 'rumi') return false;
+    if (provider.local && provider.defaultBaseUrl.startsWith('local://')) {
+      return false;
+    }
+    return true;
+  }
+
+  String _defaultModelForProvider(ProviderEntry provider, PcCatalog catalog) {
+    final chatDefault = provider.defaultModelFor['chat']?.trim() ?? '';
+    if (chatDefault.isNotEmpty) return chatDefault;
+    final providerDefault = provider.defaultModel.trim();
+    if (providerDefault.isNotEmpty) return providerDefault;
+    final profiles = catalog.profiles
+        .where((profile) => profile.providerId == provider.providerId)
+        .toList();
+    if (profiles.isNotEmpty) return profiles.first.modelId;
+    final models = catalog.modelsForProvider(provider.providerId);
+    if (models.isNotEmpty) return models.first.modelId;
+    return ApiConfig.defaults.model;
+  }
+
+  String _defaultBaseUrlForProvider(ProviderEntry provider) {
+    final catalogUrl = provider.defaultBaseUrl.trim();
+    if (catalogUrl.isNotEmpty) return catalogUrl;
+    switch (provider.providerId) {
+      case 'openai':
+        return 'https://api.openai.com/v1';
+      case 'google':
+      case 'gemini':
+        return 'https://generativelanguage.googleapis.com/v1beta/openai';
+      case 'anthropic':
+        return 'https://api.anthropic.com';
+      case 'openrouter':
+        return 'https://openrouter.ai/api/v1';
+      default:
+        return '';
+    }
+  }
+
+  bool _usesOpenAiCompatibleFallback(ProviderEntry provider) {
+    return provider.providerId == 'google' || provider.providerId == 'gemini';
+  }
+
+  bool _baseUrlLooksOpenAiCompatible(String baseUrl) {
+    final lower = baseUrl.trim().toLowerCase();
+    if (lower.isEmpty || lower.startsWith('local://')) return false;
+    return lower.contains('/openai') ||
+        lower.endsWith('/v1') ||
+        lower.contains('/v1/');
+  }
+
+  bool _isActiveMobileProvider(MobileProviderConfig provider) {
+    return _config.providerId == provider.providerId &&
+        _config.baseUrl == provider.baseUrl &&
+        _config.model == provider.model;
+  }
+
+  Future<void> _activateMobileProvider(MobileProviderConfig provider) async {
+    if (!provider.isConfigured) {
+      await _editMobileProvider(provider);
+      return;
+    }
+    final next = provider.toApiConfig(
+      systemPrompt: _systemPrompt.text.trim(),
+      temperature: _config.temperature,
+    );
+    await widget.configStore.saveApi(next);
+    if (!mounted) return;
+    setState(() {
+      _config = next;
+      _syncControllers();
+    });
+    widget.onApiChanged(next);
+    _toast('${provider.effectiveLabel} をこのスマホのAPIにしました');
+  }
+
+  Future<void> _editMobileProvider(MobileProviderConfig provider) async {
+    final label = TextEditingController(text: provider.label);
+    final apiKey = TextEditingController(text: provider.apiKey);
+    final saved = await showModalBottomSheet<MobileProviderConfig>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 16,
+            right: 16,
+            top: 4,
+            bottom: MediaQuery.viewInsetsOf(context).bottom + 20,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                provider.displayName.isNotEmpty
+                    ? provider.displayName
+                    : provider.providerId,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: label,
+                decoration: const InputDecoration(
+                  labelText: 'ラベル',
+                  prefixIcon: Icon(Icons.label_outline),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: apiKey,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'API Key',
+                  prefixIcon: Icon(Icons.key_outlined),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('キャンセル'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('保存'),
+                      onPressed: () {
+                        Navigator.pop(
+                          context,
+                          provider.copyWith(
+                            label: label.text.trim(),
+                            apiKey: apiKey.text.trim(),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    label.dispose();
+    apiKey.dispose();
+    if (saved == null) return;
+    final nextProviders = [
+      for (final existing in _providerConfigs)
+        if (existing.providerId != saved.providerId) existing,
+      saved,
+    ]..sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
+    await widget.configStore.saveProviderConfigs(nextProviders);
+    if (!mounted) return;
+    setState(() => _providerConfigs = nextProviders);
+    if (saved.isConfigured) {
+      await _activateMobileProvider(saved);
+    } else {
+      _toast('API Keyを保存しました');
     }
   }
 
@@ -426,6 +675,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast('${selected.displayName} を選択しました。保存してください。');
   }
 
+  bool _isActivePairedDevice(PairedDevice device) {
+    final pc = _pc;
+    return pc != null &&
+        pc.baseUrl == device.pcBaseUrl &&
+        pc.token == device.deviceToken;
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -439,8 +695,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             _SectionTitle(
               icon: Icons.psychology_outlined,
-              title: 'AI API (ローカル動作)',
-              subtitle: 'OpenAI互換のエンドポイント。スマホ単体でチャットできます。',
+              title: 'このスマホのAI API',
+              subtitle: 'PCから取得したproviderごとにAPI Keyを保存できます。',
+            ),
+            const SizedBox(height: 12),
+            if (_providerConfigs.isNotEmpty) ...[
+              for (final provider in _providerConfigs) ...[
+                _MobileProviderCard(
+                  provider: provider,
+                  active: _isActiveMobileProvider(provider),
+                  onUse: () => unawaited(_activateMobileProvider(provider)),
+                  onEdit: () => unawaited(_editMobileProvider(provider)),
+                ),
+                const SizedBox(height: 10),
+              ],
+              const SizedBox(height: 6),
+            ] else ...[
+              const _ProviderHintCard(),
+              const SizedBox(height: 12),
+            ],
+            Text(
+              'OpenAI互換を直接設定',
+              style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: 12),
             TextField(
@@ -532,96 +808,102 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
             const SizedBox(height: 12),
-            if (_pairedDevice != null) ...[
-              _PairedDeviceCard(device: _pairedDevice!, onUnpair: _unpair),
-              const SizedBox(height: 12),
+            if (_pairedDevices.isNotEmpty) ...[
+              for (final device in _pairedDevices) ...[
+                _PairedDeviceCard(
+                  device: device,
+                  active: _isActivePairedDevice(device),
+                  onUse: () => unawaited(_selectPairedDevice(device)),
+                  onUnpair: () => unawaited(_unpair(device)),
+                ),
+                const SizedBox(height: 12),
+              ],
             ],
-            if (_pairedDevice == null) ...[
-              if (_pairingInProgress) ...[
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).cardTheme.color,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Theme.of(context).dividerTheme.color ??
-                          Colors.transparent,
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      const CircularProgressIndicator(),
-                      const SizedBox(height: 12),
-                      const Text('PC側の承認を待っています...'),
-                      if (_pairingError != null) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          _pairingError!,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ],
-                    ],
+            if (_pairingInProgress) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).cardTheme.color,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: Theme.of(context).dividerTheme.color ??
+                        Colors.transparent,
                   ),
                 ),
-              ] else ...[
-                FilledButton.icon(
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('PCにQRでペアリング'),
-                  onPressed: _scanPc,
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Center(
-                  child: Text(
-                    'または',
-                    style: TextStyle(fontSize: 12, color: Colors.grey),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                TextField(
-                  controller: _pcUrl,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Kernel API URL',
-                    hintText: 'http://192.168.x.x:8765',
-                    prefixIcon: Icon(Icons.dns_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _pcToken,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Bearer token',
-                    prefixIcon: Icon(Icons.vpn_key_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
+                child: Column(
                   children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('PC接続QRをスキャン'),
-                        onPressed: _scanPc,
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 12),
+                    const Text('PC側の承認を待っています...'),
+                    if (_pairingError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        _pairingError!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.error,
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: FilledButton.icon(
-                        icon: const Icon(Icons.save_outlined),
-                        label: const Text('保存'),
-                        onPressed: _save,
-                      ),
-                    ),
+                    ],
                   ],
                 ),
-              ],
+              ),
+              const SizedBox(height: 12),
+            ] else ...[
+              FilledButton.icon(
+                icon: const Icon(Icons.qr_code_scanner),
+                label: Text(_pairedDevices.isEmpty ? 'PCにQRでペアリング' : 'PCを追加'),
+                onPressed: _scanPc,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(46),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Center(
+                child: Text(
+                  'または',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _pcUrl,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(
+                  labelText: 'Kernel API URL',
+                  hintText: 'http://192.168.x.x:8765',
+                  prefixIcon: Icon(Icons.dns_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _pcToken,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Bearer token',
+                  prefixIcon: Icon(Icons.vpn_key_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.qr_code_scanner),
+                      label: const Text('PC接続QRをスキャン'),
+                      onPressed: _scanPc,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton.icon(
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('保存'),
+                      onPressed: _save,
+                    ),
+                  ),
+                ],
+              ),
             ],
             if (_pairingError != null && !_pairingInProgress) ...[
               const SizedBox(height: 8),
@@ -700,8 +982,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
 }
 
 class _PairedDeviceCard extends StatelessWidget {
-  const _PairedDeviceCard({required this.device, required this.onUnpair});
+  const _PairedDeviceCard({
+    required this.device,
+    required this.active,
+    required this.onUse,
+    required this.onUnpair,
+  });
   final PairedDevice device;
+  final bool active;
+  final VoidCallback onUse;
   final VoidCallback onUnpair;
 
   @override
@@ -721,11 +1010,15 @@ class _PairedDeviceCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.check_circle, size: 18, color: scheme.primary),
+              Icon(
+                active ? Icons.check_circle : Icons.desktop_windows_outlined,
+                size: 18,
+                color: active ? scheme.primary : scheme.onSurfaceVariant,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'PC接続済み',
+                  active ? '使用中のPC' : 'PC接続済み',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
               ),
@@ -757,16 +1050,170 @@ class _PairedDeviceCard extends StatelessWidget {
             ),
           ],
           const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              icon: const Icon(Icons.link_off, size: 16),
-              label: const Text('切断'),
-              onPressed: onUnpair,
-              style: TextButton.styleFrom(foregroundColor: scheme.error),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (!active)
+                TextButton.icon(
+                  icon: const Icon(Icons.check, size: 16),
+                  label: const Text('使用'),
+                  onPressed: onUse,
+                ),
+              TextButton.icon(
+                icon: const Icon(Icons.link_off, size: 16),
+                label: const Text('切断'),
+                onPressed: onUnpair,
+                style: TextButton.styleFrom(foregroundColor: scheme.error),
+              ),
+            ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MobileProviderCard extends StatelessWidget {
+  const _MobileProviderCard({
+    required this.provider,
+    required this.active,
+    required this.onUse,
+    required this.onEdit,
+  });
+
+  final MobileProviderConfig provider;
+  final bool active;
+  final VoidCallback onUse;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final configured = provider.isConfigured;
+    final supported = provider.baseUrl.trim().isNotEmpty &&
+        (provider.openaiCompatible || provider.providerId == 'anthropic');
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: active
+              ? scheme.primary.withValues(alpha: 0.45)
+              : Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                active ? Icons.check_circle : Icons.cloud_outlined,
+                size: 18,
+                color: active ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  provider.effectiveLabel,
+                  style: Theme.of(context).textTheme.titleSmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              _StatusPill(
+                label: configured ? 'Key保存済み' : '未設定',
+                active: configured,
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            [
+              if (provider.displayName.isNotEmpty) provider.displayName,
+              provider.model,
+            ].where((part) => part.trim().isNotEmpty).join(' · '),
+            style: Theme.of(context).textTheme.bodySmall,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (!supported) ...[
+            const SizedBox(height: 4),
+            Text(
+              'このproviderはスマホ単体の送信URLをPCから取得できていません',
+              style: TextStyle(fontSize: 12, color: scheme.error),
+            ),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                icon: const Icon(Icons.key_outlined, size: 16),
+                label: const Text('API Key'),
+                onPressed: onEdit,
+              ),
+              TextButton.icon(
+                icon: const Icon(Icons.check, size: 16),
+                label: const Text('使用'),
+                onPressed: configured && supported && !active ? onUse : null,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProviderHintCard extends StatelessWidget {
+  const _ProviderHintCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.cloud_download_outlined),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text('PC接続後に「PCからプロバイダー/モデルを取得」を押すとprovider一覧が入ります。'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  const _StatusPill({required this.label, required this.active});
+
+  final String label;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = active ? scheme.primary : scheme.onSurfaceVariant;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 11, color: color),
       ),
     );
   }
