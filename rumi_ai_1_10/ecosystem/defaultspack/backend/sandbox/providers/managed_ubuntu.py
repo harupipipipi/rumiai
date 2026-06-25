@@ -594,6 +594,105 @@ class ManagedUbuntuProvider:
         raise NotImplementedError
 
 
+class BwrapHostProvider:
+    """Diagnostic provider for the managed sandbox Bubblewrap/systemd boundary.
+
+    It is intentionally separate from the managed Ubuntu desktop providers:
+    Bubblewrap is the strong untrusted-pack execution boundary, while Lima/WSL
+    managed Ubuntu remains a convenience desktop/runtime with shared guest
+    namespaces.
+    """
+
+    provider_id = "bwrap_host"
+
+    def doctor(self, request: RuntimeRequirements) -> RuntimeProviderStatus:
+        del request
+        diagnostics: list[Diagnostic] = []
+        missing: list[str] = []
+        try:
+            from ..isolation import diagnose_sandbox_environment
+
+            sandbox_diagnostics = diagnose_sandbox_environment()
+        except Exception as exc:
+            sandbox_diagnostics = {"ready": False, "checks": []}
+            missing.append("managed_sandbox")
+            diagnostics.append(
+                Diagnostic(
+                    code="SANDBOX_RUNTIME_UNAVAILABLE",
+                    message=f"Managed sandbox diagnostics failed: {exc}",
+                    severity="error",
+                )
+            )
+
+        for check in sandbox_diagnostics.get("checks", []):
+            if not isinstance(check, Mapping) or check.get("ok"):
+                continue
+            name = str(check.get("name") or "managed_sandbox")
+            if name == "bubblewrap":
+                requirement = "command:bwrap"
+            elif name == "systemd_user_scope":
+                requirement = "systemd:user_scope"
+            elif name == "immutable_root":
+                requirement = "rootfs:immutable_root"
+            else:
+                requirement = name
+            missing.append(requirement)
+            diagnostics.append(
+                Diagnostic(
+                    code=str(check.get("code") or "SANDBOX_RUNTIME_UNAVAILABLE"),
+                    message=str(check.get("message") or "Managed sandbox requirement is not satisfied"),
+                    severity="warning",
+                    details={
+                        "check": name,
+                        "path": check.get("path"),
+                        "marker": check.get("marker"),
+                        "returncode": check.get("returncode"),
+                        "stderr": check.get("stderr"),
+                    },
+                )
+            )
+        if not _unprivileged_userns_available():
+            missing.append("kernel:unprivileged_userns")
+            diagnostics.append(
+                Diagnostic(
+                    code="SANDBOX_RUNTIME_UNAVAILABLE",
+                    message="Unprivileged user namespaces are unavailable.",
+                    severity="warning",
+                    details={"check": "unprivileged_userns"},
+                )
+            )
+        missing = list(dict.fromkeys(missing))
+        command_path = shutil.which("bwrap")
+        return RuntimeProviderStatus(
+            provider_id=self.provider_id,
+            platform="linux",
+            available=platform.system().lower() == "linux" and command_path is not None,
+            installed=command_path is not None,
+            ready=platform.system().lower() == "linux" and command_path is not None and not missing,
+            version=_command_version(command_path) if command_path else None,
+            capabilities=frozenset({"sandbox.exec", "sandbox.files", "sandbox.overlay_workspace", "sandbox.network_policy", "sandbox.resource_limits"})
+            if command_path
+            else frozenset(),
+            missing_requirements=tuple(missing),
+            requires_user_action=bool(missing),
+            user_action=None if not missing else "Install Bubblewrap/systemd user scope and configure RUMI_SANDBOX_IMMUTABLE_ROOT.",
+            diagnostics=tuple(diagnostics),
+        )
+
+    def ensure(self, request: EnsureRuntimeRequest, progress: ProgressSink) -> OperationResult:
+        del progress
+        status = self.doctor(request.requirements)
+        return OperationResult(
+            ok=status.ready,
+            provider_id=self.provider_id,
+            operation_id="bwrap-host-ensure",
+            status="completed" if status.ready else "failed",
+            diagnostics=status.diagnostics,
+            requires_user_action=not status.ready,
+            user_action=status.user_action,
+        )
+
+
 class MacLimaProvider(ManagedUbuntuProvider):
     provider_id = "mac_lima"
     _host_platform = "darwin"
@@ -1035,6 +1134,29 @@ def _subprocess_runner(command: Sequence[str], input_text: str | None, timeout: 
         stdout=str(completed.stdout or ""),
         stderr=str(completed.stderr or ""),
     )
+
+
+def _command_version(command_path: str) -> str | None:
+    try:
+        result = subprocess.run(
+            [command_path, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return None
+    text = (result.stdout or result.stderr or "").strip()
+    return text.splitlines()[0] if text else None
+
+
+def _unprivileged_userns_available() -> bool:
+    try:
+        with open("/proc/sys/kernel/unprivileged_userns_clone", encoding="utf-8") as handle:
+            value = handle.read().strip()
+    except OSError:
+        return platform.system().lower() != "linux"
+    return value not in {"0", "false", "False"}
 
 
 def _write_lima_config() -> str:

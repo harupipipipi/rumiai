@@ -1128,11 +1128,15 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "mode": "native_x11" if ready else "native_pending",
             "vm": False,
             "container": False,
+            "security_boundary": False,
             "host_process_namespace": True,
             "host_filesystem_shared": True,
             "host_network_shared": True,
             "summary": "Linux native provider uses a Rumi-owned Xvfb/Openbox display. It is not VM isolation.",
-            "warnings": ["Use WSL/Lima/container providers for stronger process and filesystem isolation."],
+            "warnings": [
+                "Linux native desktops share host namespaces and are not an untrusted pack boundary.",
+                "Use Docker for container-level workspace, process, and network isolation.",
+            ],
         }
     if provider_id == "docker":
         return {
@@ -1150,6 +1154,9 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "mode": "lima_vm" if ready else "lima_pending",
             "vm": True,
             "container": False,
+            "security_boundary": False,
+            "separate_workdirs": True,
+            "shared_guest_identity": True,
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
@@ -1158,9 +1165,13 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "sandbox_network_namespace_shared": True,
             "sandbox_cgroup_scope": "not_claimed",
             "sandbox_operation_binding": "provider_instance_id",
-            "summary": "macOS provider uses one Rumi-owned Lima Ubuntu VM. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces.",
+            "process_cleanup": "best_effort",
+            "untrusted_pack_boundary": False,
+            "pack_isolation_boundary": "docker_or_profiled_provider_required",
+            "summary": "macOS provider uses one Rumi-owned Lima Ubuntu VM as a convenience desktop/runtime. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces; it is not a sandbox security boundary.",
             "warnings": [
                 "Managed Ubuntu does not claim cross-sandbox filesystem isolation or read-only mount enforcement.",
+                "Managed Ubuntu process cleanup is best effort after crashes or guest-side failures.",
                 "Use Docker for container-level workspace, process, and network isolation.",
             ],
         }
@@ -1169,6 +1180,9 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "mode": "wsl2_vm" if ready else "wsl2_pending",
             "vm": True,
             "container": False,
+            "security_boundary": False,
+            "separate_workdirs": True,
+            "shared_guest_identity": True,
             "host_process_namespace": False,
             "host_filesystem_shared": False,
             "host_network_shared": False,
@@ -1177,9 +1191,13 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "sandbox_network_namespace_shared": True,
             "sandbox_cgroup_scope": "not_claimed",
             "sandbox_operation_binding": "provider_instance_id",
-            "summary": "Windows provider uses one Rumi-owned WSL2 Ubuntu distribution. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces.",
+            "process_cleanup": "best_effort",
+            "untrusted_pack_boundary": False,
+            "pack_isolation_boundary": "docker_or_profiled_provider_required",
+            "summary": "Windows provider uses one Rumi-owned WSL2 Ubuntu distribution as a convenience desktop/runtime. Instances get separate work directories, but they share the guest Unix identity and kernel namespaces; it is not a sandbox security boundary.",
             "warnings": [
                 "Managed Ubuntu does not claim cross-sandbox filesystem isolation or read-only mount enforcement.",
+                "Managed Ubuntu process cleanup is best effort after crashes or guest-side failures.",
                 "Use Docker for container-level workspace, process, and network isolation.",
             ],
         }

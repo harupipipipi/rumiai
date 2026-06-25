@@ -1897,17 +1897,29 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     assert provider_ids == {"docker", "linux_native", "mac_lima", "windows_wsl"}
     assert mac_isolation["mode"] == "lima_vm"
     assert mac_isolation["vm"] is True
+    assert mac_isolation["security_boundary"] is False
+    assert mac_isolation["separate_workdirs"] is True
+    assert mac_isolation["shared_guest_identity"] is True
     assert mac_isolation["sandbox_workspace_shared"] is True
     assert mac_isolation["sandbox_process_namespace_shared"] is True
     assert mac_isolation["sandbox_operation_binding"] == "provider_instance_id"
     assert mac_isolation["sandbox_cgroup_scope"] == "not_claimed"
+    assert mac_isolation["process_cleanup"] == "best_effort"
+    assert mac_isolation["untrusted_pack_boundary"] is False
     assert "does not claim cross-sandbox filesystem isolation" in mac_isolation["warnings"][0]
+    assert "best effort" in mac_isolation["warnings"][1]
     assert windows_isolation["mode"] == "wsl2_vm"
     assert windows_isolation["vm"] is True
+    assert windows_isolation["security_boundary"] is False
+    assert windows_isolation["separate_workdirs"] is True
+    assert windows_isolation["shared_guest_identity"] is True
     assert windows_isolation["sandbox_workspace_shared"] is True
     assert windows_isolation["sandbox_process_namespace_shared"] is True
     assert windows_isolation["sandbox_operation_binding"] == "provider_instance_id"
+    assert windows_isolation["process_cleanup"] == "best_effort"
+    assert windows_isolation["untrusted_pack_boundary"] is False
     assert linux_isolation["mode"] == "native_x11"
+    assert linux_isolation["security_boundary"] is False
     assert docker_isolation["container"] is True
     assert docker_isolation["sandbox_process_namespace_shared"] is False
     assert docker_isolation["sandbox_cgroup_scope"] == "docker_container"

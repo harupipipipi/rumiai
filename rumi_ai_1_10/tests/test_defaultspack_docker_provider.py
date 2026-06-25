@@ -204,6 +204,7 @@ def test_docker_provider_uses_node_image_for_node_template(tmp_path) -> None:
     assert created["ok"] is True
     docker_run = fake.command_with("run")
     assert "node:20-bookworm-slim" in docker_run
+    assert not any("python3" in call for call, _input, _timeout in fake.calls)
 
 
 def test_docker_provider_rejects_port_forward_template_when_helper_missing(tmp_path) -> None:
@@ -211,7 +212,7 @@ def test_docker_provider_rejects_port_forward_template_when_helper_missing(tmp_p
     fake.python_available = False
     manager = _manager(tmp_path, fake)
 
-    created = manager.create(display=False, provider_id="docker", template_id="coding.node")
+    created = manager.create(display=False, provider_id="docker", template_id="coding.python")
 
     assert created["ok"] is False
     assert created["code"] == "DOCKER_PORT_FORWARD_HELPER_UNAVAILABLE"

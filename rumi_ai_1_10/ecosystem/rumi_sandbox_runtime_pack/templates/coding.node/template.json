@@ -4,7 +4,7 @@
   "id": "coding.node",
   "version": "1.0.0",
   "display_name": "Coding Node",
-  "summary": "Managed Node.js coding sandbox with writable overlay, preview ports, explicit network policy, and approved read-only secrets.",
+  "summary": "Managed Node.js coding sandbox with writable overlay, explicit network policy, and approved read-only secrets.",
   "source_pack_id": "rumi_sandbox_runtime_pack",
   "runtime": {
     "os": "linux",
@@ -13,7 +13,6 @@
       "sandbox.exec",
       "sandbox.files",
       "sandbox.overlay_workspace",
-      "sandbox.port_forward",
       "sandbox.network_policy",
       "sandbox.resource_limits"
     ],
@@ -21,8 +20,7 @@
       "sandbox.exec",
       "sandbox.files.read",
       "sandbox.files.write",
-      "sandbox.files.apply_patch",
-      "sandbox.port_forward"
+      "sandbox.files.apply_patch"
     ],
     "packages": [
       {
@@ -86,7 +84,6 @@
     "sandbox.files.read",
     "sandbox.files.write",
     "sandbox.files.apply_patch",
-    "sandbox.port.expose",
     "sandbox.diff.export"
   ],
   "user_overrides": {
@@ -95,7 +92,6 @@
       "name",
       "workspace.binding",
       "network.allowlist",
-      "ports",
       "secrets.read_only_ids"
     ]
   },
