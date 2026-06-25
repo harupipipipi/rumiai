@@ -30,3 +30,33 @@ class PlatformUrlLauncher {
     return ok ?? false;
   }
 }
+
+class PlatformNotifications {
+  const PlatformNotifications();
+
+  static const _channel = MethodChannel('ai.rumi.remote/notifications');
+
+  Future<bool> requestAuthorization() async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('requestAuthorization');
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> showPcTaskFinished({
+    required String title,
+    required String body,
+  }) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('showPcTaskFinished', {
+        'title': title,
+        'body': body,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+}

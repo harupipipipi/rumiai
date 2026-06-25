@@ -2,6 +2,7 @@ import AVFoundation
 import Flutter
 import Security
 import UIKit
+import UserNotifications
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -16,7 +17,9 @@ import UIKit
     registerSecureStorageChannel()
     registerPreferencesChannel()
     registerUrlLauncherChannel()
+    registerNotificationsChannel()
     registerQrScannerChannel()
+    UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
@@ -127,6 +130,64 @@ import UIKit
     }
   }
 
+  private func registerNotificationsChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "ai.rumi.remote/notifications",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      switch call.method {
+      case "requestAuthorization":
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, _ in
+          DispatchQueue.main.async {
+            result(granted)
+          }
+        }
+      case "showPcTaskFinished":
+        let args = call.arguments as? [String: Any]
+        let title = (args?["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let body = (args?["body"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.showNotification(
+          title: title?.isEmpty == false ? title! : "PCタスクが完了しました",
+          body: body?.isEmpty == false ? body! : "PCのタスクが完了しました",
+          result: result
+        )
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private func showNotification(title: String, body: String, result: @escaping FlutterResult) {
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+      guard granted, error == nil else {
+        DispatchQueue.main.async {
+          result(false)
+        }
+        return
+      }
+
+      let content = UNMutableNotificationContent()
+      content.title = title
+      content.body = body
+      content.sound = .default
+
+      let request = UNNotificationRequest(
+        identifier: "rumi-pc-task-finished-\(UUID().uuidString)",
+        content: content,
+        trigger: UNTimeIntervalNotificationTrigger(timeInterval: 0.1, repeats: false)
+      )
+      UNUserNotificationCenter.current().add(request) { error in
+        DispatchQueue.main.async {
+          result(error == nil)
+        }
+      }
+    }
+  }
+
   private func registerQrScannerChannel() {
     guard let controller = window?.rootViewController as? FlutterViewController else {
       return
@@ -157,6 +218,18 @@ import UIKit
       }
       scanner.modalPresentationStyle = .fullScreen
       controller.present(scanner, animated: true)
+    }
+  }
+
+  override func userNotificationCenter(
+    _ center: UNUserNotificationCenter,
+    willPresent notification: UNNotification,
+    withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+  ) {
+    if #available(iOS 14.0, *) {
+      completionHandler([.banner, .list, .sound])
+    } else {
+      completionHandler([.alert, .sound])
     }
   }
 }
