@@ -167,6 +167,31 @@ test("surfaces file edits without exposing the whole diff as the main activity",
   assert.equal(item.detail, "変更しました: App.tsx");
 });
 
+test("labels sandbox coding tools separately from host tools", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "sandbox_file_write",
+      arguments: { path: "src/App.tsx", content: "updated" },
+      result: {
+        status: "ok",
+        data: {
+          path: "src/App.tsx",
+          written: true,
+          host_modified: false,
+          sandbox_only: true,
+          diff_summary: "Sandbox changed 1 file(s): 1 modified.",
+        },
+      },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(groups[0].id, "sandbox/files");
+  assert.equal(groups[0].label, "Sandbox");
+  assert.equal(item.title, "Sandboxで編集: App.tsx");
+  assert.equal(item.detail, "Sandbox changed 1 file(s): 1 modified.");
+});
+
 test("updates streamed tool activity when a completion event arrives before the log", () => {
   const groups = buildToolActivityGroups([], [
     {

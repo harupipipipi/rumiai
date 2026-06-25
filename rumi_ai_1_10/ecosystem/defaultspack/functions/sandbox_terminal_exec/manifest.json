@@ -1,0 +1,45 @@
+{
+  "function_id": "sandbox_terminal_exec",
+  "description": "Execute a command inside a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "terminal"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.terminal.exec"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.terminal_exec",
+    "defaultspack.sandbox.terminal_exec",
+    "defaults.sandbox.terminal.exec",
+    "defaultspack.sandbox.terminal.exec"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_terminal_exec",
+      "default_args": {}
+    }
+  }
+}

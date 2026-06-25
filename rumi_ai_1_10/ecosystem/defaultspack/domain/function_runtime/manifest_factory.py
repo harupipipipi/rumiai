@@ -331,6 +331,58 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+SANDBOX_CODING_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "sandbox_terminal_exec",
+        "Execute a command inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "terminal"),
+        block="blocks.coding.sandbox_terminal_exec",
+        requires=("sandbox.terminal.exec",),
+        caller_requires=(),
+    ),
+    _spec(
+        "sandbox_file_read",
+        "Read a file from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_read",
+        requires=("sandbox.workspace.read",),
+        caller_requires=(),
+    ),
+    _spec(
+        "sandbox_file_write",
+        "Write a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_write",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+    ),
+    _spec(
+        "sandbox_file_patch",
+        "Patch a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_patch",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+    ),
+    _spec(
+        "sandbox_diff_preview",
+        "Preview sandbox-only workspace changes as a diff.",
+        ("sandbox", "coding", "diff"),
+        block="blocks.coding.sandbox_diff_preview",
+        requires=("sandbox.workspace.diff",),
+        caller_requires=(),
+    ),
+    _spec(
+        "sandbox_artifact_export",
+        "Export files from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "artifact"),
+        block="blocks.coding.sandbox_artifact_export",
+        requires=("sandbox.artifact.export",),
+        caller_requires=(),
+    ),
+)
+
+
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
 )
@@ -666,6 +718,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + SKILL_FUNCTIONS
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
+    + SANDBOX_CODING_FUNCTIONS
     + AGENT_FUNCTIONS
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS

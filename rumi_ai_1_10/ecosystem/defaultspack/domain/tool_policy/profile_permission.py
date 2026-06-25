@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.tool.schema_adapter import tool_name_from_definition
-from domain.tool.security import is_trusted_pack_id
+from domain.tool.security import is_sandbox_capability_tool, is_trusted_pack_id, untrusted_tool_security_rejection
 
 from .risk import resolve_tool_risk
 
@@ -279,6 +279,11 @@ def _special_mode(tool_def: Any, policy: dict[str, Any]) -> tuple[str, str, str]
     if not isinstance(tool_def, dict):
         mode = _mode(policy.get("unknown_tool_mode"), "ask")
         return mode, "unknown_tool_mode", "unknown tool"
+    security_rejection = untrusted_tool_security_rejection(tool_def)
+    if security_rejection is not None:
+        return "deny", "tool_security", security_rejection
+    if is_sandbox_capability_tool(tool_def):
+        return "allow", "sandbox_capability", "sandbox capability"
     if _is_explicitly_untrusted_tool(tool_def):
         mode = _mode(policy.get("untrusted_tool_mode"), "deny")
         if mode != "inherit":

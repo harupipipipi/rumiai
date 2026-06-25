@@ -1,0 +1,45 @@
+{
+  "function_id": "sandbox_file_write",
+  "description": "Write a file inside a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "file"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.workspace.write"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.file_write",
+    "defaultspack.sandbox.file_write",
+    "defaults.sandbox.file.write",
+    "defaultspack.sandbox.file.write"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_file_write",
+      "default_args": {}
+    }
+  }
+}

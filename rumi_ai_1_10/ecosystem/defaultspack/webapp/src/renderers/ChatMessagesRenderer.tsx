@@ -1,4 +1,4 @@
-import { AlertTriangle, Calculator, Check, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, Terminal, Wrench } from "lucide-react";
+import { AlertTriangle, Box, Calculator, Check, ChevronRight, Clock, Copy, ExternalLink, FileText, GitBranch, Globe2, Image as ImageIcon, Loader2, Monitor, Terminal, Wrench } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1056,6 +1056,7 @@ function AuthorityPendingNotice() {
 
 function toolActivityIcon(groupId: string) {
   if (groupId.includes("progress")) return Wrench;
+  if (groupId.includes("sandbox")) return Box;
   if (groupId.includes("web")) return Globe2;
   if (groupId.includes("browser")) return Monitor;
   if (groupId.includes("terminal")) return Terminal;

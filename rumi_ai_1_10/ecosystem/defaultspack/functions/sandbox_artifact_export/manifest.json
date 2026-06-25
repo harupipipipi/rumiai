@@ -1,0 +1,45 @@
+{
+  "function_id": "sandbox_artifact_export",
+  "description": "Export files from a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "artifact"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.artifact.export"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.artifact_export",
+    "defaultspack.sandbox.artifact_export",
+    "defaults.sandbox.artifact.export",
+    "defaultspack.sandbox.artifact.export"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_artifact_export",
+      "default_args": {}
+    }
+  }
+}

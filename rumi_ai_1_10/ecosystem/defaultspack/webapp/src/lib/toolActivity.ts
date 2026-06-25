@@ -54,6 +54,7 @@ export type ToolActivityArtifact = {
 };
 
 const FOLDER_RULES: Array<[RegExp, string, string]> = [
+  [/^sandbox_|sandbox/i, "sandbox/coding", "Sandbox"],
   [/calculator|calc|math/i, "calculation", "計算"],
   [/web|search/i, "web/search", "Web検索"],
   [/reddit/i, "web/reddit", "Reddit検索"],
@@ -106,6 +107,12 @@ function folderForTerminalCommand(args: Record<string, unknown>): { id: string; 
 
 function activityFolderFor(toolName: string, args: Record<string, unknown>): { id: string; label: string } {
   const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return { id: "sandbox/terminal", label: "Sandbox" };
+    if (lowerName.includes("diff")) return { id: "sandbox/diff", label: "Sandbox" };
+    if (lowerName.includes("artifact") || lowerName.includes("export")) return { id: "sandbox/artifacts", label: "Sandbox" };
+    return { id: "sandbox/files", label: "Sandbox" };
+  }
   if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
     return folderForTerminalCommand(args) ?? toolFolderFor(toolName);
   }
@@ -114,6 +121,16 @@ function activityFolderFor(toolName: string, args: Record<string, unknown>): { i
 
 function humanToolTitle(toolName: string, args: Record<string, unknown>, folderLabel: string, argumentSummary: string): string {
   const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    const path = pickString(args, ["path", "filename", "directory", "glob"]);
+    const label = path ? lastPathSegment(path) : "";
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return "Sandboxでコマンドを実行";
+    if (lowerName.includes("write") || lowerName.includes("patch")) return label ? `Sandboxで編集: ${label}` : "Sandboxでファイルを編集";
+    if (lowerName.includes("read")) return label ? `Sandboxで確認: ${label}` : "Sandboxでファイルを確認";
+    if (lowerName.includes("diff")) return "Sandboxの差分を確認";
+    if (lowerName.includes("artifact") || lowerName.includes("export")) return "Sandbox成果物をまとめる";
+    return "Sandboxで作業";
+  }
   if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
     return terminalActionTitle(pickString(args, ["command", "cmd"]));
   }
@@ -185,6 +202,10 @@ function isSupportedToolActivity(toolName: string, explicitSummary = ""): boolea
 export function summarizeToolArguments(toolName: string, args?: Record<string, unknown>): string {
   if (!args) return "";
   const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return pickString(args, ["command", "cmd"]);
+    return pickString(args, ["path", "filename", "directory", "glob", "sandbox_id"]);
+  }
   if (lowerName.includes("calculator") || lowerName.includes("calc")) {
     const expression = pickString(args, ["expression", "expr", "input", "query"]);
     if (expression) return expression;
@@ -288,6 +309,19 @@ function summarizeToolResult(toolName: string, result: unknown): string {
   const record = result as Record<string, unknown>;
   const data = normalizedToolResultData(record);
   const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    const diffSummary = pickString(data, ["diff_summary"]);
+    if (diffSummary) return diffSummary;
+    const artifactCount = Array.isArray(data.artifact_paths) ? data.artifact_paths.length : 0;
+    if (artifactCount) return `Sandbox成果物 ${artifactCount} 件`;
+    const path = pickString(data, ["path"]);
+    const label = path ? lastPathSegment(path) : "ファイル";
+    if (data.written === true) return `Sandbox内に保存: ${label}`;
+    if (data.patched === true) return `Sandbox内で変更: ${label}`;
+    if (typeof data.content === "string") return `Sandbox内で確認: ${label}`;
+    const exitCode = pickString(data, ["exit_code"]);
+    if (exitCode) return `Sandbox終了コード ${exitCode}`;
+  }
   if (lowerName.includes("file")) {
     const widget = isRecord(data.widget) ? data.widget : {};
     const fileData = { ...data, ...widget };

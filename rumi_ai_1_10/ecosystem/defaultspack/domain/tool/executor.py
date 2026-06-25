@@ -6,9 +6,11 @@ from .eligibility import rejection_result
 from .permission_resolver import ToolPermissionResolver
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
 from .security import (
+    is_sandbox_capability_tool,
     is_safe_first_party_memo_tool,
     is_trusted_pack_id,
     requires_approval_for_security,
+    untrusted_tool_security_rejection,
     unsupported_execution_reason,
 )
 from domain.tool_policy.audit import audit_tool_policy
@@ -158,6 +160,21 @@ class ToolExecutor:
                 ),
                 "is_error": True,
                 "widget": None,
+                "rejected_by_security": True,
+            }
+        untrusted_rejection = untrusted_tool_security_rejection(tool_def)
+        if untrusted_rejection is not None:
+            return {
+                "result": "Tool '{}' rejected by tool security policy: {}".format(
+                    tool_name,
+                    untrusted_rejection,
+                ),
+                "is_error": True,
+                "widget": {
+                    "type": "tool_execution_denied",
+                    "tool_name": tool_name,
+                    "reason": untrusted_rejection,
+                },
                 "rejected_by_security": True,
             }
 
@@ -418,6 +435,9 @@ class ToolExecutor:
             pack_id, _, function_id = qualified_name.partition(":")
             if pack_id:
                 if self._first_party_browser_computer_tool_for_function(pack_id, function_id):
+                    context["_tool_server_approved"] = True
+                    return None
+                if is_sandbox_capability_tool(tool_def) and pack_id == "defaultspack":
                     context["_tool_server_approved"] = True
                     return None
                 if is_trusted_pack_id(pack_id) and not _requires_approval(tool_def):

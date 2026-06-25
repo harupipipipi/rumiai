@@ -1,0 +1,45 @@
+{
+  "function_id": "sandbox_file_read",
+  "description": "Read a file from a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "file"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.workspace.read"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.file_read",
+    "defaultspack.sandbox.file_read",
+    "defaults.sandbox.file.read",
+    "defaultspack.sandbox.file.read"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_file_read",
+      "default_args": {}
+    }
+  }
+}
