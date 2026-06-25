@@ -117,6 +117,7 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="rumi_test_w255_")
         self.executor = _make_executor()
+        self.executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)

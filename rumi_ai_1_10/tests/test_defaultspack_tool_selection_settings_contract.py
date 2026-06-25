@@ -353,6 +353,122 @@ def test_settings_permissions_auto_confirm_block_and_service_overrides():
     assert resolver.resolve({"tool_id": "external_send", "action_class": "send", "requires_approval": True})["permission"] == "confirm"
 
 
+def test_profile_write_and_high_risk_flags_do_not_escalate_read_tools():
+    from domain.tool.permission_resolver import ToolPermissionResolver
+
+    resolver = ToolPermissionResolver(
+        {
+            "tools": {
+                "standard_permissions": {
+                    "read": "auto",
+                    "search": "auto",
+                    "update": "auto",
+                }
+            }
+        }
+    )
+    policy = {
+        "write_actions_require_approval": True,
+        "high_risk_tools_require_approval": True,
+    }
+
+    assert resolver.resolve({"tool_id": "coding_file_read", "action_class": "read"}, context={"profile_policy": policy})["permission"] == "auto"
+    assert resolver.resolve({"tool_id": "web_search", "action_class": "search"}, context={"profile_policy": policy})["permission"] == "auto"
+    assert resolver.resolve({"tool_id": "coding_file_write", "action_class": "update"}, context={"profile_policy": policy})["permission"] == "confirm"
+    assert resolver.resolve({"tool_id": "secret_scan", "action_class": "read", "risk": "critical"}, context={"profile_policy": policy})["permission"] == "confirm"
+
+
+def test_frontend_settings_block_wins_over_server_approval_full_access_and_safe_memo(monkeypatch):
+    from domain.tool import executor as executor_mod
+
+    class Resolver:
+        def resolve(self, tool, *, context=None):
+            return {
+                "tool_id": "memo_note_upsert",
+                "service_id": "memory",
+                "action_class": "update",
+                "permission": "block",
+                "minimum_permission": "auto",
+                "sources": [{"source": "tool:memo_note_upsert", "value": "block"}],
+            }
+
+    monkeypatch.setattr(executor_mod, "ToolPermissionResolver", lambda: Resolver())
+    monkeypatch.setattr(executor_mod, "_context_has_tool_server_approval", lambda context: True)
+    monkeypatch.setattr(executor_mod, "is_safe_first_party_memo_tool", lambda tool: True)
+
+    _, response = executor_mod._preflight_frontend_tool_permission(
+        "memo_note_upsert",
+        {"tool_id": "memo_note_upsert", "name": "memo_note_upsert", "action_class": "update"},
+        {"note": "x"},
+        {},
+        {"full_access": True},
+    )
+
+    assert response["is_error"] is True
+    assert response["rejected_by_tool_permission_policy"] is True
+    assert response["tool_permission_policy_decision"]["status"] == "denied"
+
+
+def test_frontend_settings_confirm_can_be_satisfied_by_server_approval(monkeypatch):
+    from domain.tool import executor as executor_mod
+
+    class Resolver:
+        def resolve(self, tool, *, context=None):
+            return {
+                "tool_id": "coding_file_write",
+                "service_id": "coding",
+                "action_class": "update",
+                "permission": "confirm",
+                "minimum_permission": "confirm",
+                "sources": [{"source": "tool:coding_file_write", "value": "confirm"}],
+            }
+
+    monkeypatch.setattr(executor_mod, "ToolPermissionResolver", lambda: Resolver())
+    monkeypatch.setattr(executor_mod, "_context_has_tool_server_approval", lambda context: True)
+
+    _, response = executor_mod._preflight_frontend_tool_permission(
+        "coding_file_write",
+        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "update"},
+        {"path": "app.py", "content": "x"},
+        {},
+        {},
+    )
+
+    assert response is None
+
+
+def test_frontend_settings_resolver_failure_fails_closed_for_write_tools(monkeypatch):
+    from domain.tool import executor as executor_mod
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+
+    class Resolver:
+        def resolve(self, tool, *, context=None):
+            raise RuntimeError("settings unavailable")
+
+    monkeypatch.setattr(executor_mod, "ToolPermissionResolver", lambda: Resolver())
+
+    _, write_response = executor_mod._preflight_frontend_tool_permission(
+        "coding_file_write",
+        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "update"},
+        {"path": "app.py", "content": "x"},
+        {"conversation_id": "conv-settings-fail-closed"},
+        {},
+    )
+    _, read_response = executor_mod._preflight_frontend_tool_permission(
+        "coding_file_read",
+        {"tool_id": "coding_file_read", "name": "coding_file_read", "action_class": "read"},
+        {"path": "app.py"},
+        {},
+        {},
+    )
+
+    assert write_response["widget"]["type"] == "approval_request"
+    assert write_response["widget"]["approval_required"] is True
+    assert read_response is None
+
+
 def test_full_tool_selection_trace_creates_hidden_child_conversation(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "conversations.json"))
 

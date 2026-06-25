@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import stat
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -26,9 +27,14 @@ from domain.coding.workspace_resolver import WorkspaceResolver
 MAX_SANDBOX_WORKSPACE_FILES = 4000
 MAX_SANDBOX_WORKSPACE_TOTAL_BYTES = 64 * 1024 * 1024
 MAX_SANDBOX_WORKSPACE_FILE_BYTES = 4 * 1024 * 1024
+MAX_SANDBOX_POST_RUN_FILES = 8000
+MAX_SANDBOX_POST_RUN_TOTAL_BYTES = 128 * 1024 * 1024
+MAX_SANDBOX_TREE_DEPTH = 64
 MAX_SANDBOX_DIFF_CHARS = 120_000
 MAX_SANDBOX_ARTIFACT_BYTES = 32 * 1024 * 1024
 SANDBOX_STATE_SCHEMA = 1
+_LOCK_REGISTRY_GUARD = threading.Lock()
+_LOCK_REGISTRY: dict[str, threading.RLock] = {}
 
 
 @dataclass(frozen=True)
@@ -43,12 +49,9 @@ class SandboxWorkspace:
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
-            "sandbox_id": self.sandbox_id,
-            "sandbox_workspace_root": str(self.work_root),
-            "sandbox_artifact_root": str(self.artifact_root),
-            "host_workspace_root": str(self.host_workspace_root),
             "workspace_id": self.workspace_id,
             "execution_boundary": "sandbox_workspace",
+            "sandbox_ephemeral": True,
         }
 
 
@@ -61,48 +64,57 @@ class SandboxWorkspaceManager:
     def prepare(self, input_data: dict[str, Any] | None, context: dict[str, Any] | None) -> SandboxWorkspace:
         args = input_data or {}
         ctx = context or {}
-        resolution = WorkspaceResolver().resolve(args, ctx, allow_cwd_fallback=True)
+        _reject_external_workspace_root(args)
+        _reject_external_sandbox_id(args)
+        resolution = WorkspaceResolver().resolve(_resolver_args(args), ctx, allow_cwd_fallback=False)
+        _validate_workspace_resolution(resolution, ctx)
         host_root = Path(resolution.root_path).expanduser().resolve()
         if not host_root.is_dir():
             raise ValueError("workspace root must exist")
-        sandbox_id = _sandbox_id(args, ctx, host_root)
+        owner = _sandbox_owner(ctx, resolution)
+        sandbox_id = _sandbox_id(ctx, host_root, owner)
         state_root = (self.state_dir / sandbox_id).resolve()
         base_root = state_root / "base"
         work_root = state_root / "work"
         artifact_root = state_root / "artifacts"
         manifest_path = state_root / "manifest.json"
-        reset = args.get("reset") is True or args.get("fresh") is True
-        existing_manifest = _read_json(manifest_path)
-        can_reuse = (
-            not reset
-            and base_root.is_dir()
-            and work_root.is_dir()
-            and existing_manifest.get("schema") == SANDBOX_STATE_SCHEMA
-            and existing_manifest.get("host_workspace_root") == str(host_root)
-        )
-        if not can_reuse:
-            if state_root.exists():
-                shutil.rmtree(state_root)
-            state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            stage_audit = _stage_workspace(host_root, base_root, include_paths=args.get("include_paths"))
-            shutil.copytree(base_root, work_root, symlinks=False)
-            artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            _write_json(
-                manifest_path,
-                {
-                    "schema": SANDBOX_STATE_SCHEMA,
-                    "sandbox_id": sandbox_id,
-                    "host_workspace_root": str(host_root),
-                    "workspace_id": resolution.workspace_id,
-                    "created_at": _now(),
-                    "updated_at": _now(),
-                    "stage_audit": stage_audit,
-                },
+        with _lock_for_sandbox(state_root):
+            reset = args.get("reset") is True or args.get("fresh") is True
+            existing_manifest = _read_json(manifest_path)
+            if existing_manifest:
+                _validate_existing_manifest(existing_manifest, owner, host_root)
+            can_reuse = (
+                not reset
+                and base_root.is_dir()
+                and work_root.is_dir()
+                and existing_manifest.get("schema") == SANDBOX_STATE_SCHEMA
+                and existing_manifest.get("host_workspace_root") == str(host_root)
+                and existing_manifest.get("owner") == owner
             )
-        else:
-            artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-            existing_manifest["updated_at"] = _now()
-            _write_json(manifest_path, existing_manifest)
+            if not can_reuse:
+                if state_root.exists():
+                    shutil.rmtree(state_root)
+                state_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                stage_audit = _stage_workspace(host_root, base_root, include_paths=args.get("include_paths"))
+                shutil.copytree(base_root, work_root, symlinks=False)
+                artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                _write_json(
+                    manifest_path,
+                    {
+                        "schema": SANDBOX_STATE_SCHEMA,
+                        "sandbox_id": sandbox_id,
+                        "host_workspace_root": str(host_root),
+                        "workspace_id": resolution.workspace_id,
+                        "owner": owner,
+                        "created_at": _now(),
+                        "updated_at": _now(),
+                        "stage_audit": stage_audit,
+                    },
+                )
+            else:
+                artifact_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+                existing_manifest["updated_at"] = _now()
+                _write_json(manifest_path, existing_manifest)
         return SandboxWorkspace(
             sandbox_id=sandbox_id,
             state_root=state_root,
@@ -149,9 +161,10 @@ class SandboxWorkspaceManager:
         return {**payload, **workspace.to_public_dict()}
 
     def write_file(self, workspace: SandboxWorkspace, path: Any, content: Any) -> dict[str, Any]:
+        text = _bounded_content(content)
         ops = FileOps(workspace.work_root)
-        before_diff = ops.diff_text(path, str(content))
-        size = ops.write_file(path, str(content))
+        before_diff = ops.diff_text(path, text)
+        size = ops.write_file(path, text)
         preview = self.diff_preview(workspace)
         return {
             "path": str(path),
@@ -165,6 +178,7 @@ class SandboxWorkspaceManager:
         }
 
     def patch_file(self, workspace: SandboxWorkspace, path: Any, old: Any, new: Any) -> dict[str, Any]:
+        _bounded_content(new)
         ops = FileOps(workspace.work_root)
         result = ops.apply_patch_text(path, str(old), str(new))
         preview = self.diff_preview(workspace)
@@ -203,6 +217,9 @@ class SandboxWorkspaceManager:
             **workspace.to_public_dict(),
         }
 
+    def validate_post_run(self, workspace: SandboxWorkspace) -> dict[str, Any]:
+        return _audit_post_run_tree(workspace.work_root)
+
     def export_artifacts(self, workspace: SandboxWorkspace, paths: Any = None) -> dict[str, Any]:
         changed = self.diff_preview(workspace)["changed_files"]
         requested = _artifact_paths(paths, changed)
@@ -216,25 +233,26 @@ class SandboxWorkspaceManager:
             source = jail.resolve_user_path(raw_path)
             rel = jail.relative(source)
             jail.ensure_allowed(rel, operation="artifact_export")
-            if not source.exists():
+            source_kind = _safe_path_kind(source)
+            if source_kind is None:
                 continue
             target = export_root / rel
-            if source.is_dir():
+            if source_kind == "dir":
                 bytes_used, files = _copy_artifact_tree(source, target, total_bytes)
                 total_bytes += bytes_used
                 copied.extend(files)
-            else:
-                size = source.stat().st_size
+            elif source_kind == "file":
+                file_stat = _safe_regular_stat(source)
+                size = file_stat.st_size if file_stat else 0
                 if total_bytes + size > MAX_SANDBOX_ARTIFACT_BYTES:
                     raise ValueError("sandbox artifact export is too large")
                 target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-                shutil.copy2(source, target)
+                _safe_copy_regular_file(source, target)
                 total_bytes += size
-                copied.append({"path": rel, "artifact_path": str(target), "size": size})
+                copied.append({"path": rel, "artifact_ref": rel, "size": size})
         return {
             "artifact_id": export_id,
-            "artifact_root": str(export_root),
-            "artifact_paths": [item["artifact_path"] for item in copied],
+            "artifact_paths": [item["path"] for item in copied],
             "files": copied,
             "total_bytes": total_bytes,
             "host_modified": False,
@@ -250,29 +268,110 @@ def _default_state_dir() -> Path:
     return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "sandbox_coding"
 
 
-def _sandbox_id(args: dict[str, Any], context: dict[str, Any], host_root: Path) -> str:
-    raw = (
-        args.get("sandbox_id")
-        or args.get("sandbox_workspace_id")
-        or context.get("sandbox_id")
-        or context.get("conversation_id")
-        or context.get("chat_id")
+def _lock_for_sandbox(state_root: Path) -> threading.RLock:
+    key = str(state_root.expanduser().resolve())
+    with _LOCK_REGISTRY_GUARD:
+        lock = _LOCK_REGISTRY.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _LOCK_REGISTRY[key] = lock
+        return lock
+
+
+def _reject_external_workspace_root(args: dict[str, Any]) -> None:
+    for key in ("workspace_root", "cwd"):
+        if args.get(key) not in (None, ""):
+            raise ValueError(f"{key} must come from trusted server context")
+
+
+def _reject_external_sandbox_id(args: dict[str, Any]) -> None:
+    for key in ("sandbox_id", "sandbox_workspace_id"):
+        if args.get(key) not in (None, ""):
+            raise ValueError(f"{key} is assigned by the server")
+
+
+def _resolver_args(args: dict[str, Any]) -> dict[str, Any]:
+    return {"workspace_id": args.get("workspace_id")} if args.get("workspace_id") not in (None, "") else {}
+
+
+def _validate_workspace_resolution(resolution: Any, context: dict[str, Any]) -> None:
+    host_root = Path(resolution.root_path).expanduser().resolve()
+    if host_root == Path("/").resolve():
+        raise ValueError("workspace root cannot be filesystem root")
+    try:
+        if host_root == Path.home().resolve():
+            raise ValueError("workspace root cannot be the user home directory")
+    except RuntimeError:
+        pass
+    if getattr(resolution, "workspace_id", None) and not bool(getattr(resolution, "trusted", False)):
+        raise ValueError("workspace must be trusted before sandbox coding can stage it")
+    record = getattr(resolution, "record", None)
+    metadata = record.get("metadata") if isinstance(record, dict) and isinstance(record.get("metadata"), dict) else {}
+    owner = str(metadata.get("owner_profile_id") or metadata.get("profile_id") or "").strip()
+    profile_id = _profile_id(context)
+    if owner and profile_id and owner != profile_id:
+        raise ValueError("workspace belongs to a different profile")
+
+
+def _sandbox_owner(context: dict[str, Any], resolution: Any) -> dict[str, Any]:
+    return {
+        "profile_id": _profile_id(context),
+        "conversation_id": str(context.get("conversation_id") or context.get("chat_id") or "").strip(),
+        "workspace_id": str(getattr(resolution, "workspace_id", "") or "").strip(),
+    }
+
+
+def _profile_id(context: dict[str, Any]) -> str:
+    principal = context.get("_authenticated_principal")
+    if isinstance(principal, dict) and str(principal.get("profile_id") or "").strip():
+        return str(principal.get("profile_id") or "").strip()
+    for key in ("profile_id", "principal_id"):
+        value = str(context.get(key) or "").strip()
+        if value:
+            return value.split(":", 1)[1].split("__", 1)[0] if value.startswith("profile:") else value
+    return "default"
+
+
+def _sandbox_id(context: dict[str, Any], host_root: Path, owner: dict[str, Any]) -> str:
+    session_id = _sandbox_session_id(context)
+    seed = json.dumps(
+        {
+            "host_root": str(host_root),
+            "owner": owner,
+            "pack_id": str(context.get("pack_id") or context.get("_source_pack_id") or ""),
+            "session_id": session_id,
+        },
+        sort_keys=True,
     )
-    if isinstance(raw, str) and raw.strip():
-        candidate = raw.strip()
-    else:
-        seed = "|".join(
-            str(value or "")
-            for value in (
-                host_root,
-                context.get("principal_id"),
-                context.get("pack_id"),
-                context.get("_source_pack_id"),
-            )
-        )
-        candidate = "sbx_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:24]
+    candidate = "sbx_" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
     safe = "".join(ch if ch.isalnum() or ch in "_.:-" else "_" for ch in candidate)[:96]
     return safe if safe.startswith("sbx_") else "sbx_" + safe
+
+
+def _sandbox_session_id(context: dict[str, Any]) -> str:
+    for key in ("_sandbox_session_id",):
+        value = str(context.get(key) or "").strip()
+        if _is_safe_opaque_id(value):
+            return value
+    value = "sess_" + uuid.uuid4().hex
+    try:
+        context["_sandbox_session_id"] = value
+    except Exception:
+        pass
+    return value
+
+
+def _is_safe_opaque_id(value: str) -> bool:
+    return bool(value) and len(value) <= 96 and "/" not in value and "\x00" not in value
+
+
+def _validate_existing_manifest(manifest: dict[str, Any], owner: dict[str, Any], host_root: Path) -> None:
+    if manifest.get("schema") != SANDBOX_STATE_SCHEMA:
+        return
+    if manifest.get("owner") != owner:
+        raise ValueError("sandbox workspace belongs to a different owner")
+    if manifest.get("host_workspace_root") != str(host_root):
+        raise ValueError("sandbox workspace root changed; create a new sandbox")
 
 
 def _stage_workspace(source_root: Path, target_root: Path, *, include_paths: Any = None) -> dict[str, int]:
@@ -317,12 +416,8 @@ def _selected_stage_roots(source_root: Path, include_paths: Any) -> list[Path]:
 
 
 def _stage_file(source_root: Path, source: Path, target_root: Path, audit: dict[str, int]) -> None:
-    try:
-        stat_result = source.stat()
-    except OSError:
-        audit["skipped"] += 1
-        return
-    if not stat.S_ISREG(stat_result.st_mode) or stat_result.st_nlink > 1:
+    stat_result = _safe_regular_stat(source)
+    if stat_result is None:
         audit["skipped"] += 1
         return
     size = int(stat_result.st_size)
@@ -336,10 +431,41 @@ def _stage_file(source_root: Path, source: Path, target_root: Path, audit: dict[
     rel = source.relative_to(source_root)
     target = target_root / rel
     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    _safe_copy_regular_file(source, target)
     os.chmod(target, stat_result.st_mode & 0o700)
     audit["files"] += 1
     audit["bytes"] += size
+
+
+def _audit_post_run_tree(root: Path) -> dict[str, Any]:
+    audit = {"files": 0, "bytes": 0, "max_depth": 0}
+    for current, dirs, files in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        rel_dir = current_path.relative_to(root)
+        depth = 0 if rel_dir == Path(".") else len(rel_dir.parts)
+        if depth > MAX_SANDBOX_TREE_DEPTH:
+            raise ValueError("sandbox workspace tree is too deep")
+        audit["max_depth"] = max(audit["max_depth"], depth)
+        safe_dirs: list[str] = []
+        for name in dirs:
+            child = current_path / name
+            if _safe_path_kind(child) != "dir":
+                raise ValueError("sandbox workspace contains symlink or special directory: " + (rel_dir / name).as_posix())
+            safe_dirs.append(name)
+        dirs[:] = safe_dirs
+        for name in files:
+            path = current_path / name
+            rel = (rel_dir / name).as_posix()
+            stat_result = _safe_regular_stat(path)
+            if stat_result is None:
+                raise ValueError("sandbox workspace contains symlink, special, linked, or oversized file: " + rel)
+            audit["files"] += 1
+            audit["bytes"] += int(stat_result.st_size)
+            if audit["files"] > MAX_SANDBOX_POST_RUN_FILES:
+                raise ValueError("sandbox workspace has too many files after execution")
+            if audit["bytes"] > MAX_SANDBOX_POST_RUN_TOTAL_BYTES:
+                raise ValueError("sandbox workspace is too large after execution")
+    return audit
 
 
 def _should_skip_rel(rel: str) -> bool:
@@ -368,6 +494,60 @@ def _is_special_or_link(path: Path) -> bool:
     return not (stat.S_ISREG(mode) or stat.S_ISDIR(mode)) or stat.S_ISLNK(mode)
 
 
+def _safe_path_kind(path: Path) -> str | None:
+    try:
+        mode = path.lstat().st_mode
+    except OSError:
+        return None
+    if stat.S_ISLNK(mode) or stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode) or stat.S_ISCHR(mode) or stat.S_ISBLK(mode):
+        return None
+    if stat.S_ISDIR(mode):
+        return "dir"
+    if stat.S_ISREG(mode):
+        return "file"
+    return None
+
+
+def _safe_regular_stat(path: Path) -> os.stat_result | None:
+    try:
+        stat_result = path.lstat()
+    except OSError:
+        return None
+    if not stat.S_ISREG(stat_result.st_mode) or stat_result.st_nlink > 1:
+        return None
+    if stat_result.st_size > MAX_SANDBOX_WORKSPACE_FILE_BYTES:
+        return None
+    return stat_result
+
+
+def _safe_read_regular_file(path: Path, *, max_bytes: int) -> bytes:
+    stat_result = _safe_regular_stat(path)
+    if stat_result is None:
+        raise ValueError("not a safe regular file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened_stat = os.fstat(fd)
+        if not stat.S_ISREG(opened_stat.st_mode) or opened_stat.st_nlink > 1:
+            raise ValueError("not a safe regular file")
+        if opened_stat.st_size > max_bytes:
+            raise ValueError("file is too large")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            raw = handle.read(max_bytes + 1)
+        if len(raw) > max_bytes:
+            raise ValueError("file is too large")
+        return raw
+    finally:
+        os.close(fd)
+
+
+def _safe_copy_regular_file(source: Path, target: Path) -> None:
+    raw = _safe_read_regular_file(source, max_bytes=MAX_SANDBOX_WORKSPACE_FILE_BYTES)
+    if len(raw) > MAX_SANDBOX_WORKSPACE_FILE_BYTES:
+        raise ValueError("file is too large")
+    target.write_bytes(raw)
+
+
 def _changed_files(base_root: Path, work_root: Path) -> list[dict[str, Any]]:
     base_files = _file_map(base_root)
     work_files = _file_map(work_root)
@@ -376,11 +556,14 @@ def _changed_files(base_root: Path, work_root: Path) -> list[dict[str, Any]]:
         base = base_files.get(rel)
         work = work_files.get(rel)
         if base is None:
-            changed.append({"path": rel, "status": "added", "size": work.stat().st_size if work else 0})
+            work_stat = _safe_regular_stat(work) if work else None
+            changed.append({"path": rel, "status": "added", "size": work_stat.st_size if work_stat else 0})
         elif work is None:
-            changed.append({"path": rel, "status": "deleted", "size": base.stat().st_size})
+            base_stat = _safe_regular_stat(base)
+            changed.append({"path": rel, "status": "deleted", "size": base_stat.st_size if base_stat else 0})
         elif _sha256(base) != _sha256(work):
-            changed.append({"path": rel, "status": "modified", "size": work.stat().st_size})
+            work_stat = _safe_regular_stat(work)
+            changed.append({"path": rel, "status": "modified", "size": work_stat.st_size if work_stat else 0})
     return changed
 
 
@@ -390,19 +573,23 @@ def _file_map(root: Path) -> dict[str, Path]:
         return result
     for current, dirs, files in os.walk(root, followlinks=False):
         current_path = Path(current)
-        dirs[:] = [name for name in dirs if not _should_skip_rel((current_path / name).relative_to(root).as_posix())]
+        dirs[:] = [
+            name
+            for name in dirs
+            if not _should_skip_rel((current_path / name).relative_to(root).as_posix())
+            and _safe_path_kind(current_path / name) == "dir"
+        ]
         for name in files:
             path = current_path / name
-            if path.is_file():
+            if _safe_regular_stat(path) is not None:
                 result[path.relative_to(root).as_posix()] = path
     return result
 
 
 def _sha256(path: Path) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
+    raw = _safe_read_regular_file(path, max_bytes=MAX_SANDBOX_WORKSPACE_FILE_BYTES)
+    digest.update(raw)
     return digest.hexdigest()
 
 
@@ -434,10 +621,8 @@ def _unified_diff_for_change(base_root: Path, work_root: Path, change: dict[str,
 
 def _read_text_for_diff(path: Path) -> str | None:
     try:
-        if not path.is_file() or path.stat().st_size > MAX_SANDBOX_WORKSPACE_FILE_BYTES:
-            return None
-        raw = path.read_bytes()
-    except OSError:
+        raw = _safe_read_regular_file(path, max_bytes=MAX_SANDBOX_WORKSPACE_FILE_BYTES)
+    except (OSError, ValueError):
         return None
     if b"\0" in raw:
         return None
@@ -470,26 +655,39 @@ def _artifact_paths(paths: Any, changed: list[dict[str, Any]]) -> list[str]:
     return [str(value) for value in values if str(value).strip()]
 
 
+def _bounded_content(content: Any) -> str:
+    text = str(content)
+    if len(text.encode("utf-8")) > MAX_SANDBOX_WORKSPACE_FILE_BYTES:
+        raise ValueError("sandbox file content is too large")
+    return text
+
+
 def _copy_artifact_tree(source: Path, target: Path, current_bytes: int) -> tuple[int, list[dict[str, Any]]]:
     copied: list[dict[str, Any]] = []
     total = 0
     for current, dirs, files in os.walk(source, topdown=True, followlinks=False):
         current_path = Path(current)
         rel_dir = current_path.relative_to(source)
-        dirs[:] = [name for name in dirs if not _should_skip_rel((rel_dir / name).as_posix())]
+        dirs[:] = [
+            name
+            for name in dirs
+            if not _should_skip_rel((rel_dir / name).as_posix())
+            and _safe_path_kind(current_path / name) == "dir"
+        ]
         for name in files:
             item = current_path / name
-            if not item.is_file():
+            item_stat = _safe_regular_stat(item)
+            if item_stat is None:
                 continue
             rel = rel_dir / name
-            size = item.stat().st_size
+            size = item_stat.st_size
             if current_bytes + total + size > MAX_SANDBOX_ARTIFACT_BYTES:
                 raise ValueError("sandbox artifact export is too large")
             dest = target / rel
             dest.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            shutil.copy2(item, dest)
+            _safe_copy_regular_file(item, dest)
             total += size
-            copied.append({"path": rel.as_posix(), "artifact_path": str(dest), "size": size})
+            copied.append({"path": rel.as_posix(), "artifact_ref": rel.as_posix(), "size": size})
     return total, copied
 
 
@@ -526,8 +724,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.chmod(path, 0o600)
+    tmp = path.with_name(path.name + ".tmp-" + uuid.uuid4().hex[:8])
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
 
 
 def _now() -> str:

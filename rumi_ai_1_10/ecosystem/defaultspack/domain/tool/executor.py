@@ -5,6 +5,7 @@ from .autonomy import autonomous_tool_execution_allowed
 from .eligibility import rejection_result
 from .permission_resolver import ToolPermissionResolver
 from .schema_adapter import is_tool_rejected_by_policy, policy_from_context
+from .service_catalog import infer_action_class
 from .security import (
     is_sandbox_capability_tool,
     is_safe_first_party_memo_tool,
@@ -21,6 +22,7 @@ from domain.tool_policy.internal_context import (
     tool_server_approval_context_is_internal,
 )
 from domain.tool_policy.profile_permission import resolve_profile_tool_permission
+from domain.tool_policy.risk import resolve_tool_risk
 from pathlib import Path
 import inspect
 import json
@@ -95,6 +97,20 @@ _STALE_APPROVAL_TOKEN_CODES = {
     "APPROVAL_NOT_APPROVED",
     "APPROVAL_REQUEST_MISSING",
     "APPROVAL_TOKEN_USED",
+}
+_FRONTEND_PERMISSION_FAIL_CLOSED_ACTIONS = {"create", "update", "send", "execute", "computer", "delete"}
+_FRONTEND_PERMISSION_FAIL_CLOSED_RISKS = {
+    "file_write",
+    "file_delete",
+    "shell",
+    "computer",
+    "credential",
+    "git_write",
+    "git_push",
+    "external_message",
+    "scheduler_create",
+    "capability_mutation",
+    "pack_install",
 }
 
 
@@ -1797,36 +1813,55 @@ def _preflight_profile_tool_permission(tool_name, tool_def, arguments, context, 
 def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context, policy):
     if not isinstance(policy, dict):
         policy = {}
-    if _context_has_tool_server_approval(context):
-        return context, None
-    if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
-        return context, None
-    if str(policy.get("action_approval_mode") or "").strip().lower() == "full" or _truthy(policy.get("full_access")):
-        return context, None
     try:
         resolution = ToolPermissionResolver().resolve(tool_def, context=context if isinstance(context, dict) else {})
     except Exception:
+        if _frontend_permission_resolver_failure_requires_approval(tool_def, tool_name):
+            decision = _frontend_permission_decision(
+                tool_name,
+                tool_def,
+                {
+                    "action_class": infer_action_class(tool_def if isinstance(tool_def, dict) else {}),
+                    "permission": "confirm",
+                    "minimum_permission": "confirm",
+                    "service_id": None,
+                    "sources": [{"source": "frontend_settings_error", "value": "confirm"}],
+                },
+                "confirm",
+                reason="confirmation required because Settings permission resolution failed",
+            )
+            _audit_frontend_tool_permission(context, decision, decision.get("resolution"))
+            return context, _approval_required_tool_response(tool_def, arguments or {}, context)
         return context, None
     permission = str(resolution.get("permission") or "auto").strip().lower()
+    if permission == "block":
+        decision = _frontend_permission_decision(
+            tool_name,
+            tool_def,
+            resolution,
+            permission,
+            reason="blocked by Settings",
+        )
+        _audit_frontend_tool_permission(context, decision, resolution)
+        return context, _tool_permission_denied_result(tool_def, arguments, decision)
+    if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
+        return context, None
     if permission == "auto":
         return context, None
-    decision = {
-        "tool_name": tool_name,
-        "action": resolution.get("action_class"),
-        "status": "denied" if permission == "block" else "approval_required",
-        "mode": permission,
-        "risk": resolution.get("minimum_permission"),
-        "risk_level": "high" if permission == "block" else "medium",
-        "matched_by": "frontend_settings",
-        "matched_value": resolution.get("service_id"),
-        "reason": "blocked by Settings" if permission == "block" else "confirmation required by Settings",
-        "audit_required": True,
-    }
-    _audit_frontend_tool_permission(context, decision, resolution)
-    if permission == "block":
-        return context, _tool_permission_denied_result(tool_def, arguments, decision)
     if permission != "confirm":
         return context, None
+    if _context_has_tool_server_approval(context):
+        return context, None
+    if str(policy.get("action_approval_mode") or "").strip().lower() == "full" or _truthy(policy.get("full_access")):
+        return context, None
+    decision = _frontend_permission_decision(
+        tool_name,
+        tool_def,
+        resolution,
+        permission,
+        reason="confirmation required by Settings",
+    )
+    _audit_frontend_tool_permission(context, decision, resolution)
     approved_context, approval_error = _context_with_frontend_tool_permission_token(
         context,
         tool_def,
@@ -1838,6 +1873,37 @@ def _preflight_frontend_tool_permission(tool_name, tool_def, arguments, context,
     if isinstance(approved_context, dict) and approved_context.get("_frontend_tool_permission_approved") is True:
         return approved_context, None
     return context, _approval_required_tool_response(tool_def, arguments or {}, context)
+
+
+def _frontend_permission_decision(tool_name, tool_def, resolution, permission, *, reason):
+    permission = str(permission or "auto").strip().lower()
+    resolution = resolution if isinstance(resolution, dict) else {}
+    decision = {
+        "tool_name": tool_name,
+        "action": resolution.get("action_class") or infer_action_class(tool_def if isinstance(tool_def, dict) else {}),
+        "status": "denied" if permission == "block" else "approval_required",
+        "mode": permission,
+        "risk": resolution.get("minimum_permission"),
+        "risk_level": "high" if permission == "block" else "medium",
+        "matched_by": "frontend_settings",
+        "matched_value": resolution.get("service_id"),
+        "reason": reason,
+        "audit_required": True,
+        "resolution": dict(resolution),
+    }
+    return decision
+
+
+def _frontend_permission_resolver_failure_requires_approval(tool_def, tool_name):
+    tool = tool_def if isinstance(tool_def, dict) else {}
+    action_class = infer_action_class(tool)
+    if action_class in _FRONTEND_PERMISSION_FAIL_CLOSED_ACTIONS:
+        return True
+    try:
+        risk = resolve_tool_risk(tool, tool_name)
+    except Exception:
+        risk = ""
+    return str(risk or "").strip().lower() in _FRONTEND_PERMISSION_FAIL_CLOSED_RISKS
 
 
 def _context_with_frontend_tool_permission_token(context, tool_def, arguments, decision):
@@ -2400,6 +2466,8 @@ def _has_internal_runtime_handle(context):
 def _function_call_context(context, tool_def):
     if not isinstance(context, dict):
         return {}
+    if isinstance(tool_def, dict) and is_sandbox_capability_tool(tool_def):
+        return _sandbox_function_call_context(context)
     forwarded = {}
     for key in (
         "workspace_id",
@@ -2436,6 +2504,26 @@ def _function_call_context(context, tool_def):
             value = context.get(key)
             if isinstance(value, (str, int, float)) and str(value).strip():
                 forwarded[key] = value
+    return forwarded
+
+
+def _sandbox_function_call_context(context):
+    forwarded = {}
+    for key in (
+        "workspace_id",
+        "workspace_root",
+        "conversation_id",
+        "chat_id",
+        "profile_id",
+        "principal_id",
+        "run_id",
+        "request_id",
+    ):
+        if key in context and _json_safe_value(context.get(key)):
+            forwarded[key] = context.get(key)
+    session_id = str(context.get("_sandbox_session_id") or "").strip()
+    if session_id and "/" not in session_id and "\x00" not in session_id:
+        forwarded["_sandbox_session_id"] = session_id
     return forwarded
 
 

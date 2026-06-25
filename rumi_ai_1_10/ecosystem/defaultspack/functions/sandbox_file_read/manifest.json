@@ -22,7 +22,40 @@
   ],
   "input_schema": {
     "type": "object",
-    "additionalProperties": true
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "path": {
+        "type": "string"
+      },
+      "start_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "end_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_output_chars": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "path"
+    ]
   },
   "output_schema": {
     "type": "object",

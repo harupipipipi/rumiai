@@ -24,10 +24,11 @@
     "schema": {
       "parameters": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
+          "workspace_id": {"type": "string"},
           "paths": {"type": "array", "items": {"type": "string"}},
-          "sandbox_id": {"type": "string"},
-          "workspace_root": {"type": "string"}
+          "include_paths": {"type": "array", "items": {"type": "string"}}
         }
       }
     },

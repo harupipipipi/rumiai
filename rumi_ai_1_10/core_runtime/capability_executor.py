@@ -1991,18 +1991,108 @@ class CapabilityExecutor:
         request_id: str,
         grant_config: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        source = request_context if isinstance(request_context, dict) else {}
+        context = {
+            key: self._sandbox_public_value(source[key])
+            for key in (
+                "conversation_id",
+                "chat_id",
+                "message_id",
+                "source_message_id",
+                "workspace_id",
+                "locale",
+                "timezone",
+                "language",
+                "run_source",
+                "source",
+            )
+            if key in source and not self._sandbox_context_key_is_sensitive(key)
+        }
         context.update(
             {
-                "principal_id": principal_id,
+                "principal_id": str(principal_id or ""),
+                "profile_id": self._principal_profile_id(principal_id, request_context),
                 "pack_id": str(getattr(entry, "pack_id", "") or ""),
                 "function_id": str(getattr(entry, "function_id", "") or ""),
                 "request_id": request_id,
                 "ts": self._now_ts(),
-                "grant_config": dict(grant_config or {}),
+                "grant_config": self._sandbox_public_grant_config(grant_config),
             }
         )
         return context
+
+    @classmethod
+    def _sandbox_public_grant_config(cls, grant_config: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(grant_config, dict):
+            return {}
+        public_keys = {
+            "allowed_kinds",
+            "allowed_models",
+            "allowed_packs",
+            "allowed_path_globs",
+            "allowed_providers",
+            "allowed_target_packs",
+            "expires_at_epoch",
+            "max_daily_sends_per_scope",
+            "max_output_bytes",
+            "max_payload_bytes",
+            "max_sends_per_scope",
+            "model_ids",
+            "provider_ids",
+            "send_scope_level",
+            "timeout",
+        }
+        return {
+            key: cls._sandbox_public_value(value)
+            for key, value in grant_config.items()
+            if isinstance(key, str)
+            and key in public_keys
+            and not cls._sandbox_context_key_is_sensitive(key)
+        }
+
+    @classmethod
+    def _sandbox_public_value(cls, value: Any, *, depth: int = 0) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if depth >= 4:
+            return None
+        if isinstance(value, (list, tuple)):
+            return [cls._sandbox_public_value(item, depth=depth + 1) for item in list(value)[:64]]
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, item in list(value.items())[:64]:
+                if not isinstance(key, str) or cls._sandbox_context_key_is_sensitive(key):
+                    continue
+                sanitized = cls._sandbox_public_value(item, depth=depth + 1)
+                if sanitized is not None:
+                    result[key] = sanitized
+            return result
+        return str(value)
+
+    @staticmethod
+    def _sandbox_context_key_is_sensitive(key: str) -> bool:
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            return True
+        if normalized.startswith("_"):
+            return True
+        return any(
+            marker in normalized
+            for marker in (
+                "api_key",
+                "approval",
+                "auth",
+                "bearer",
+                "credential",
+                "csrf",
+                "keychain",
+                "local_auth",
+                "password",
+                "secret",
+                "session",
+                "token",
+            )
+        )
 
     def _managed_sandbox_response_if_required(
         self,
@@ -2083,8 +2173,10 @@ class CapabilityExecutor:
             )
         if isinstance(result, CapabilityResponse):
             return result
-        if isinstance(result, dict):
-            success = bool(result.get("success", result.get("ok", False)))
+        if isinstance(result, dict) and result and (
+            isinstance(result.get("success"), bool) or isinstance(result.get("ok"), bool)
+        ):
+            success = result.get("success") if isinstance(result.get("success"), bool) else result.get("ok")
             return CapabilityResponse(
                 success=success,
                 output=result.get("output", result),
@@ -2093,8 +2185,18 @@ class CapabilityExecutor:
                 latency_ms=(time.time() - start_time) * 1000,
             )
         return CapabilityResponse(
-            success=True,
-            output=result,
+            success=False,
+            output={
+                "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                "required": True,
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                "calling_convention": str(calling_convention or ""),
+                "request_id": request_id,
+            },
+            error="Managed sandbox returned an invalid response",
+            error_type="managed_sandbox_error",
             latency_ms=(time.time() - start_time) * 1000,
         )
 
@@ -2629,45 +2731,27 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
-        if force_docker:
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention="python_docker",
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
+        sandbox_resp = self._managed_sandbox_response_if_required(
+            entry=entry,
+            principal_id=principal_id,
+            args=args,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            calling_convention=(
+                "python_docker"
+                if force_docker
+                else str(getattr(entry, "calling_convention", None) or runtime)
+            ),
+            timeout_seconds=timeout_seconds,
+            grant_config=grant_config,
+        )
+        if sandbox_resp is not None:
+            return sandbox_resp
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
             logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
-            fallback_requires_sandbox = (
-                self._approval_manager is None or self._permission_manager is None
-            )
-            if fallback_requires_sandbox:
-                sandbox_resp = self._managed_sandbox_response_if_required(
-                    entry=entry,
-                    principal_id=principal_id,
-                    args=args,
-                    request_id=request_id,
-                    start_time=start_time,
-                    request_context=request_context,
-                    calling_convention=(
-                        "python_docker"
-                        if force_docker
-                        else str(getattr(entry, "calling_convention", None) or runtime)
-                    ),
-                    timeout_seconds=timeout_seconds,
-                    grant_config=grant_config,
-                )
-                if sandbox_resp is not None:
-                    return sandbox_resp
             if force_docker:
                 return CapabilityResponse(success=False, error="Docker is not available for python_docker function execution.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()

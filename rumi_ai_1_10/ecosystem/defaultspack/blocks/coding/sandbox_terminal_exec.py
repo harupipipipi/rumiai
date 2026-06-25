@@ -36,25 +36,30 @@ def run(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> di
                 "timeout_seconds": input_data.get("timeout") or input_data.get("timeout_seconds") or 30,
                 "network_enabled": False,
                 "provider_id": input_data.get("provider_id"),
-                "lima_instance": input_data.get("lima_instance"),
             }
         )
-        if not result.get("success", result.get("ok", False)):
-            return error(
-                str(result.get("error") or "sandbox terminal failed"),
-                code=str(result.get("error_type") or result.get("code") or "SANDBOX_ERROR"),
-            )
+        quota = manager.validate_post_run(workspace)
         preview = manager.diff_preview(workspace, max_chars=input_data.get("max_diff_chars"))
+        payload = {
+            **result,
+            "host_modified": False,
+            "sandbox_only": True,
+            "post_run_audit": quota,
+            "changed_files": preview.get("changed_files", []),
+            "changed_file_count": preview.get("changed_file_count", 0),
+            "diff": preview.get("diff", ""),
+            "diff_truncated": preview.get("diff_truncated", False),
+            "diff_summary": preview.get("diff_summary", ""),
+            **workspace.to_public_dict(),
+        }
+        if not result.get("success", result.get("ok", False)):
+            return _error_with_details(
+                str(result.get("error") or result.get("stderr") or "sandbox terminal failed"),
+                code=str(result.get("error_type") or result.get("code") or "SANDBOX_ERROR"),
+                details=payload,
+            )
         return ok(
-            {
-                **result,
-                "host_modified": False,
-                "sandbox_only": True,
-                "changed_files": preview.get("changed_files", []),
-                "changed_file_count": preview.get("changed_file_count", 0),
-                "diff_summary": preview.get("diff_summary", ""),
-                **workspace.to_public_dict(),
-            }
+            payload
         )
     except ValueError as exc:
         return error(str(exc), code="INVALID_INPUT")
@@ -67,3 +72,14 @@ def _supervisor(context: dict[str, Any] | None) -> ManagedSandboxSupervisor:
     if isinstance(injected, ManagedSandboxSupervisor):
         return injected
     return ManagedSandboxSupervisor()
+
+
+def _error_with_details(message: str, *, code: str, details: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "error": {
+            "code": code,
+            "message": message,
+            "details": details,
+        },
+    }

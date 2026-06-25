@@ -15,6 +15,8 @@ from domain.tool.schema_adapter import tool_name_from_definition
 
 
 PERMISSION_MODES = {"auto", "confirm", "block"}
+WRITE_APPROVAL_ACTION_CLASSES = {"create", "update", "send", "execute", "computer", "delete"}
+HIGH_RISK_LEVELS = {"high", "critical"}
 DEFAULT_ACTION_PERMISSIONS: dict[str, str] = {
     "read": "auto",
     "search": "auto",
@@ -61,7 +63,7 @@ class ToolPermissionResolver:
             steps.append({"source": f"tool:{tool_id}", "value": tool_override})
             effective = _apply_hard_minimum(tool_override, hard_minimum)
 
-        profile_mode = _profile_policy_mode(tool_id, service_id, context.get("profile_policy"))
+        profile_mode = _profile_policy_mode(tool, tool_id, service_id, action_class, context.get("profile_policy"))
         if profile_mode:
             steps.append({"source": "profile_policy", "value": profile_mode})
             effective = more_restrictive_permission(effective, profile_mode)
@@ -134,7 +136,7 @@ def _hard_minimum_permission(tool: dict[str, Any], action_class: str) -> str:
     risk = str(tool.get("risk") or metadata.get("risk") or "").strip().lower()
     if bool(tool.get("requires_approval") or metadata.get("requires_approval")):
         return "confirm"
-    if risk == "high":
+    if risk in HIGH_RISK_LEVELS:
         return "confirm"
     if action_class == "delete":
         return "confirm"
@@ -148,7 +150,7 @@ def _apply_hard_minimum(permission: str, hard_minimum: str) -> str:
     return value
 
 
-def _profile_policy_mode(tool_id: str, service_id: str, policy: Any) -> str:
+def _profile_policy_mode(tool: dict[str, Any], tool_id: str, service_id: str, action_class: str, policy: Any) -> str:
     if not isinstance(policy, dict):
         return ""
     deny = _string_set(policy.get("tool_denylist") or policy.get("disabled_tools") or policy.get("blocked_tools"))
@@ -157,9 +159,9 @@ def _profile_policy_mode(tool_id: str, service_id: str, policy: Any) -> str:
     allow = _string_set(policy.get("tool_allowlist"))
     if allow and tool_id not in allow and service_id not in allow:
         return "block"
-    if policy.get("write_actions_require_approval") is True:
+    if policy.get("write_actions_require_approval") is True and _write_approval_policy_applies(tool, action_class):
         return "confirm"
-    if policy.get("high_risk_tools_require_approval") is True:
+    if policy.get("high_risk_tools_require_approval") is True and _high_risk_policy_applies(tool):
         return "confirm"
     return ""
 
@@ -177,6 +179,26 @@ def _runtime_policy_mode(tool_id: str, service_id: str, context: dict[str, Any])
 
 def _tool_id(tool: dict[str, Any]) -> str:
     return str(tool.get("tool_id") or tool_name_from_definition(tool) or tool.get("name") or "").strip()
+
+
+def _write_approval_policy_applies(tool: dict[str, Any], action_class: str) -> bool:
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    if action_class in WRITE_APPROVAL_ACTION_CLASSES:
+        return True
+    if bool(tool.get("write_action") or metadata.get("write_action")):
+        return True
+    action_type = str(tool.get("action_type") or metadata.get("action_type") or "").strip().lower()
+    return action_type in {"write", "file_write", "delete", "create", "update", "patch", "commit", "push"}
+
+
+def _high_risk_policy_applies(tool: dict[str, Any]) -> bool:
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    execution = tool.get("execution") if isinstance(tool.get("execution"), dict) else {}
+    for container in (tool, metadata, execution):
+        for key in ("risk", "risk_level"):
+            if str(container.get(key) or "").strip().lower() in HIGH_RISK_LEVELS:
+                return True
+    return False
 
 
 def _string_set(value: Any) -> set[str]:

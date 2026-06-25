@@ -25,12 +25,12 @@
     "schema": {
       "parameters": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
+          "workspace_id": {"type": "string"},
           "path": {"type": "string"},
           "old": {"type": "string"},
           "new": {"type": "string"},
-          "sandbox_id": {"type": "string"},
-          "workspace_root": {"type": "string"},
           "include_paths": {"type": "array", "items": {"type": "string"}}
         },
         "required": ["path", "old", "new"]

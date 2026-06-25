@@ -23,7 +23,11 @@ def run_sandbox_action(
     try:
         manager = sandbox_manager(ctx)
         workspace = manager.prepare(args, ctx)
-        return ok(action(manager, workspace))
+        payload = action(manager, workspace)
+        audit = manager.validate_post_run(workspace)
+        if isinstance(payload, dict):
+            payload.setdefault("post_run_audit", audit)
+        return ok(payload)
     except PermissionError as exc:
         return error(str(exc), code="PATH_RESTRICTED")
     except FileNotFoundError as exc:
@@ -32,4 +36,3 @@ def run_sandbox_action(
         return error(str(exc), code="INVALID_INPUT")
     except Exception as exc:
         return error(str(exc), code="SANDBOX_ERROR")
-

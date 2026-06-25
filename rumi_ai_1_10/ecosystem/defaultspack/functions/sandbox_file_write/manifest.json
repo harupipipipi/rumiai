@@ -22,7 +22,28 @@
   ],
   "input_schema": {
     "type": "object",
-    "additionalProperties": true
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "path": {
+        "type": "string"
+      },
+      "content": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "content"
+    ]
   },
   "output_schema": {
     "type": "object",

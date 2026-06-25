@@ -24,10 +24,12 @@
     "schema": {
       "parameters": {
         "type": "object",
+        "additionalProperties": false,
         "properties": {
-          "sandbox_id": {"type": "string"},
-          "workspace_root": {"type": "string"},
-          "max_chars": {"type": "integer", "minimum": 1}
+          "workspace_id": {"type": "string"},
+          "max_chars": {"type": "integer", "minimum": 1},
+          "max_output_chars": {"type": "integer", "minimum": 1},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
         }
       }
     },

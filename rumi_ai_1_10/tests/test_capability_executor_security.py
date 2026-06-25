@@ -137,27 +137,108 @@ def test_managed_sandbox_context_seals_server_values_and_timeout(monkeypatch):
         request_id="req-sandbox",
         start_time=time.time(),
         request_context={
-            "safe": "kept",
+            "locale": "ja-JP",
+            "timezone": "Asia/Tokyo",
+            "conversation_id": "conv-1",
+            "safe": "dropped",
             "principal_id": "profile:evil",
             "pack_id": "evil_pack",
             "function_id": "evil_func",
             "request_id": "evil-request",
+            "authority": {"approval_tokens": ["sentinel-approval-token"]},
+            "approval_token": "sentinel-approval-token",
+            "_authenticated_principal": {"bearer_token": "sentinel-bearer"},
             "grant_config": {"provider_ids": ["evil"]},
         },
         calling_convention="subprocess",
         timeout_seconds=7,
-        grant_config={"provider_ids": ["openai"]},
+        grant_config={"provider_ids": ["openai"], "approval_tokens": ["sentinel-grant-token"]},
     )
 
     assert response.success is True
     assert captured["timeout_seconds"] == 7.0
     context = captured["context"]
-    assert context["safe"] == "kept"
+    assert context["locale"] == "ja-JP"
+    assert context["timezone"] == "Asia/Tokyo"
+    assert context["conversation_id"] == "conv-1"
+    assert "safe" not in context
+    assert "authority" not in context
+    assert "approval_token" not in context
+    assert "_authenticated_principal" not in context
     assert context["principal_id"] == "profile:work__graph:g__node:n"
     assert context["pack_id"] == "third_party_pack"
     assert context["function_id"] == "run"
     assert context["request_id"] == "req-sandbox"
     assert context["grant_config"] == {"provider_ids": ["openai"]}
+    assert "sentinel" not in json.dumps(captured, sort_keys=True)
+
+
+def test_untrusted_function_uses_managed_sandbox_before_host_fallback_when_managers_exist(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("RUMI_ALLOW_HOST_FALLBACK", "true")
+    executor = _make_test_executor()
+    executor._approval_manager = MagicMock()
+    executor._permission_manager = MagicMock()
+
+    func_dir = tmp_path / "test_func"
+    func_dir.mkdir()
+    main_py = func_dir / "main.py"
+    main_py.write_text('def run(ctx, args): return {"ok": True}', encoding="utf-8")
+    entry = _MockFunctionEntry(
+        pack_id="third_party_pack",
+        function_id="run",
+        qualified_name="third_party_pack:run",
+        runtime="python",
+        function_dir=str(func_dir),
+        main_py_path=str(main_py),
+    )
+
+    with patch.object(executor, "_is_docker_available", return_value=False):
+        with patch("core_runtime.capability_executor._DockerRunBuilder", None):
+            with patch.object(executor, "_execute_user_function_host") as mock_host:
+                resp = executor._execute_user_function(
+                    principal_id="profile:work",
+                    entry=entry,
+                    args={},
+                    request_id="req-no-host-fallback",
+                    start_time=time.time(),
+                )
+
+    assert resp.success is False
+    assert resp.error_type == "SANDBOX_RUNTIME_UNAVAILABLE"
+    assert resp.output["execution_boundary"] == "managed_sandbox"
+    mock_host.assert_not_called()
+
+
+@pytest.mark.parametrize("bad_result", [None, "", [], {}, {"output": {"ok": True}}, {"success": "yes"}])
+def test_managed_sandbox_invalid_supervisor_result_fails_closed(bad_result):
+    executor = _make_test_executor()
+
+    class BadSupervisor:
+        def execute_capability(self, request):
+            return bad_result
+
+    executor._entry_requires_managed_sandbox = MagicMock(return_value=True)
+    executor._development_host_boundary_allowed = MagicMock(return_value=False)
+    executor._managed_sandbox_supervisor = MagicMock(return_value=BadSupervisor())
+    entry = _MockFunctionEntry(pack_id="third_party_pack", function_id="run")
+
+    response = executor._managed_sandbox_response_if_required(
+        entry=entry,
+        principal_id="profile:work",
+        args={},
+        request_id="req-bad-supervisor",
+        start_time=time.time(),
+        request_context={},
+        calling_convention="python",
+        grant_config={},
+    )
+
+    assert response is not None
+    assert response.success is False
+    assert response.error_type == "managed_sandbox_error"
+    assert response.output["execution_boundary"] == "managed_sandbox"
 
 
 def test_permission_fallback_passes_context_timeout_and_grant_to_sandbox():

@@ -15,6 +15,7 @@ RUNTIME_CAPABILITIES = frozenset(
         "sandbox.workspace.read",
         "sandbox.workspace.write",
         "sandbox.workspace.diff",
+        "sandbox.network.request",
         "sandbox.artifact.export",
         "sandbox.overlay_workspace",
         "sandbox.network_policy",

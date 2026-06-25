@@ -30,6 +30,9 @@ MAX_SANDBOX_TERMINAL_OUTPUT_BYTES = 256 * 1024
 MAX_STAGE_FILES = 1024
 MAX_STAGE_TOTAL_BYTES = 16 * 1024 * 1024
 MAX_STAGE_FILE_BYTES = 2 * 1024 * 1024
+MAX_CODING_WORKSPACE_EXPORT_BYTES = 128 * 1024 * 1024
+MAX_CODING_WORKSPACE_EXPORT_FILES = 8000
+MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
 LIMA_NETWORK_ATTEST_ENV = "RUMI_SANDBOX_LIMA_NETWORK_ISOLATED"
 
@@ -228,7 +231,7 @@ class ManagedSandboxSupervisor:
 
     def _execute_coding_terminal_lima(self, request: dict[str, Any]) -> dict[str, Any]:
         limactl = shutil.which("limactl")
-        instance = str(request.get("lima_instance") or os.environ.get("RUMI_SANDBOX_LIMA_INSTANCE") or "").strip()
+        instance = str(os.environ.get("RUMI_SANDBOX_LIMA_INSTANCE") or "").strip()
         if limactl is None:
             return self._unavailable(
                 request,
@@ -285,14 +288,29 @@ class ManagedSandboxSupervisor:
                 timeout=timeout + 2,
                 close_fds=True,
             )
-            export_proc = subprocess.run(
-                [limactl, "shell", instance, "--", "tar", "-cf", "-", "-C", remote_root, "."],
-                capture_output=True,
-                timeout=timeout + 2,
-                close_fds=True,
-            )
-            if export_proc.returncode == 0:
-                _replace_directory_from_tar(workspace, export_proc.stdout)
+            with tempfile.TemporaryDirectory(prefix=f"{sandbox_id}-lima-export-") as export_tmp:
+                export_path = Path(export_tmp) / "workspace.tar"
+                with export_path.open("wb") as export_handle:
+                    export_proc = subprocess.run(
+                        [limactl, "shell", instance, "--", "tar", "-cf", "-", "-C", remote_root, "."],
+                        stdout=export_handle,
+                        stderr=subprocess.PIPE,
+                        timeout=timeout + 2,
+                        close_fds=True,
+                    )
+                if export_proc.returncode == 0:
+                    if export_path.stat().st_size > MAX_CODING_WORKSPACE_EXPORT_BYTES:
+                        return _coding_terminal_response(
+                            sandbox_id=sandbox_id,
+                            command=request.get("command") or request.get("argv"),
+                            returncode=1,
+                            stdout=_decode_bytes(proc.stdout),
+                            stderr="Lima sandbox export exceeded workspace size quota",
+                            timed_out=False,
+                            success=False,
+                            provider_id="lima_ubuntu",
+                        )
+                    _replace_directory_from_tar(workspace, export_path)
         except subprocess.TimeoutExpired:
             return _coding_terminal_response(
                 sandbox_id=sandbox_id,
@@ -651,8 +669,7 @@ def _coding_terminal_response(
 ) -> dict[str, Any]:
     clipped_stdout, stdout_truncated = _clip_output(stdout)
     clipped_stderr, stderr_truncated = _clip_output(stderr)
-    completed = returncode is not None and not timed_out
-    ok = completed if success is None else bool(success)
+    ok = returncode == 0 and not timed_out if success is None else bool(success)
     return {
         "success": ok,
         "ok": ok,
@@ -700,20 +717,36 @@ def _tar_directory(root: Path) -> bytes:
     return buffer.getvalue()
 
 
-def _replace_directory_from_tar(root: Path, archive_bytes: bytes) -> None:
+def _replace_directory_from_tar(root: Path, archive: bytes | Path) -> None:
     with tempfile.TemporaryDirectory(prefix="rumi-sandbox-export-") as tmp:
         target = Path(tmp) / "work"
         target.mkdir(mode=0o700)
-        with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:*") as archive:
-            for member in archive.getmembers():
+        target_root = target.resolve()
+        if isinstance(archive, Path):
+            tar_context = tarfile.open(archive, mode="r:*")
+        else:
+            tar_context = tarfile.open(fileobj=io.BytesIO(archive), mode="r:*")
+        with tar_context as tar:
+            file_count = 0
+            total_bytes = 0
+            for member in tar:
                 member_path = (target / member.name).resolve()
                 try:
-                    member_path.relative_to(target)
+                    member_path.relative_to(target_root)
                 except ValueError as exc:
                     raise ValueError("sandbox export attempted path traversal") from exc
                 if member.issym() or member.islnk() or member.isdev() or member.isfifo():
                     continue
-                archive.extract(member, target)
+                if member.isfile():
+                    file_count += 1
+                    total_bytes += int(member.size)
+                    if file_count > MAX_CODING_WORKSPACE_EXPORT_FILES:
+                        raise ValueError("sandbox export has too many files")
+                    if member.size > MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES:
+                        raise ValueError("sandbox export contains an oversized file")
+                    if total_bytes > MAX_CODING_WORKSPACE_EXPORT_BYTES:
+                        raise ValueError("sandbox export is too large")
+                tar.extract(member, target, filter="data")
         for item in root.iterdir():
             if item.is_dir():
                 shutil.rmtree(item)
