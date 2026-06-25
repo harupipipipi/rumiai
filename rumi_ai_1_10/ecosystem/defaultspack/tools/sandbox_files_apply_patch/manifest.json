@@ -1,0 +1,50 @@
+{
+  "id": "sandbox_files_apply_patch",
+  "description": "Apply an approved file patch inside an existing managed sandbox.",
+  "config": {
+    "tool_id": "sandbox_files_apply_patch",
+    "name": "Sandbox Files Apply Patch",
+    "summary": "Apply an approved file patch inside a managed sandbox.",
+    "tool_category": "sandbox",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["sandbox", "files", "agent_os"],
+    "ui": {
+      "group_id": "sandbox",
+      "group_label": "Sandbox",
+      "group_icon": "terminal",
+      "item_icon": "file-pen-line",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sandbox Files",
+      "composer_description": "Patch files inside an existing managed sandbox.",
+      "composer_icon": "file-pen-line"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "sandbox_id": { "type": "string" },
+          "path": { "type": "string" },
+          "content": { "type": "string" },
+          "content_base64": { "type": "string" },
+          "files": {
+            "type": "array",
+            "items": { "type": "object" }
+          },
+          "patch": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
+        },
+        "required": ["sandbox_id"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.sandbox_tools:sandbox_files_apply_patch"
+    }
+  }
+}

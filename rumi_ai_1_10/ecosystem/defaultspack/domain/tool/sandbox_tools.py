@@ -1,171 +1,145 @@
 from __future__ import annotations
 
-import os
-import re
+import base64
 import shlex
-import subprocess
 import sys
-import uuid
 from typing import Any
 
-from core_runtime.docker_run_builder import DockerRunBuilder
-from domain.coding.terminal import Terminal
+from domain.coding.terminal_policy import SHELL_ESCAPE_MARKERS
+from domain.tool_policy.internal_context import internal_tool_decision_allows
 
-from ._agent_os_common import err, now_slug, ok, write_text_file, workspace
+from ._agent_os_common import err, now_slug, ok, workspace
 
-DEFAULT_SANDBOX_IMAGE = os.environ.get("RUMI_SANDBOX_IMAGE") or "python:3.11-slim"
-DEFAULT_NODE_SANDBOX_IMAGE = os.environ.get("RUMI_NODE_SANDBOX_IMAGE") or "node:22-bookworm-slim"
-MAX_SANDBOX_OUTPUT = 1024 * 1024
-
-_IMAGE_COMPONENT = r"[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*"
-_DOMAIN_COMPONENT = r"(?:[a-z0-9]|[a-z0-9][a-z0-9-]*[a-z0-9])"
-_DOMAIN = rf"{_DOMAIN_COMPONENT}(?:\.{_DOMAIN_COMPONENT})*(?::[0-9]+)?"
-_TAG = r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}"
-_DIGEST_ALGORITHM = r"[A-Za-z][A-Za-z0-9]*(?:[+._-][A-Za-z][A-Za-z0-9]*)*"
-_DIGEST = rf"{_DIGEST_ALGORITHM}:[0-9a-fA-F]{{32,}}"
-_DOCKER_IMAGE_REF_RE = re.compile(
-    rf"^(?=.{{1,255}}$)(?:(?:{_DOMAIN})/)?"
-    rf"{_IMAGE_COMPONENT}(?:/{_IMAGE_COMPONENT})*"
-    rf"(?::{_TAG})?(?:@{_DIGEST})?$"
-)
+MANAGED_RUNTIME_NOT_READY = "MANAGED_RUNTIME_NOT_READY"
+MAX_SCRIPT_PATH_BYTES = 2 * 1024 * 1024
 
 
-def _normalize_command(command: Any) -> list[str]:
-    if isinstance(command, str):
-        return ["sh", "-lc", command]
-    if isinstance(command, (list, tuple)) and command:
-        return [str(part) for part in command]
-    raise ValueError("'command' must be a non-empty string or array")
-
-
-def _validate_docker_image_ref(image: Any) -> str:
-    image_ref = str(image or "")
-    if image_ref != image_ref.strip() or not _DOCKER_IMAGE_REF_RE.fullmatch(image_ref):
-        raise ValueError("invalid Docker image reference")
-    return image_ref
-
-
-def _container_workdir(ws: Any, cwd: Any) -> str:
-    resolved = ws.resolve(str(cwd or "."), must_exist=False, allow_root=True)
-    relative = ws.relative(resolved) if resolved != ws.root else ""
-    return "/workspace" + (("/" + relative) if relative else "")
-
-
-def _run_in_docker(*, ws: Any, command: Any, cwd: Any, timeout: int, image: str) -> dict[str, Any]:
-    container_command = _normalize_command(command)
-    container_name = f"rumi-sandbox-{uuid.uuid4().hex[:12]}"
-    docker_cmd = (
-        DockerRunBuilder(name=container_name)
-        .pids_limit(100)
-        .user(f"{os.getuid()}:{os.getgid()}")
-        .volume(f"{ws.root.resolve()}:/workspace:rw")
-        .workdir(_container_workdir(ws, cwd))
-        .label("rumi.managed", "true")
-        .label("rumi.type", "artifact_sandbox_exec")
-        .image(image)
-        .command(container_command)
-        .build()
-    )
-    completed = subprocess.run(
-        docker_cmd,
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-    )
-    stdout = completed.stdout[:MAX_SANDBOX_OUTPUT]
-    stderr = completed.stderr[:MAX_SANDBOX_OUTPUT]
-    if len(completed.stdout) > MAX_SANDBOX_OUTPUT:
-        stdout += "\n[stdout truncated]"
-    if len(completed.stderr) > MAX_SANDBOX_OUTPUT:
-        stderr += "\n[stderr truncated]"
-    return {
-        "command": command,
-        "cwd": _container_workdir(ws, cwd),
-        "containerized": True,
-        "image": image,
-        "network": "none",
-        "exit_code": completed.returncode,
-        "stdout": stdout,
-        "stderr": stderr,
-    }
-
-
-def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None, *, image: Any | None = None) -> dict[str, Any]:
-    command = arguments.get("command")
-    if not command:
+def sandbox_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    plan = _command_plan(arguments)
+    if plan.get("error"):
+        return err(plan["error"], plan["code"])
+    argv = plan["argv"]
+    if not argv:
         return err("'command' is required", "INVALID_INPUT")
-    if image is None and "image" in arguments:
-        return err("'image' is not accepted for sandbox_exec", "INVALID_SANDBOX_IMAGE")
-    try:
-        ws = workspace(context)
-        terminal = Terminal(str(ws.root))
-        risk = terminal.classify(command, cwd=arguments.get("cwd"))
-        if risk.get("classification") == "blocked":
-            return err("command is blocked by terminal policy", "SANDBOX_COMMAND_BLOCKED", risk=risk)
-        image = _validate_docker_image_ref(image or DEFAULT_SANDBOX_IMAGE)
-        result = _run_in_docker(
-            ws=ws,
-            command=command,
-            cwd=arguments.get("cwd"),
-            timeout=int(arguments.get("timeout") or 30),
-            image=image,
+    timeout_ms = _timeout_ms(arguments)
+    sandbox_id = str(arguments.get("sandbox_id") or "").strip()
+    if sandbox_id:
+        return _sandbox_exec_call(sandbox_id, arguments, argv, timeout_ms, context)
+
+    template_id = str(arguments.get("template_id") or "tool.ephemeral")
+    create = _sandbox_api().run(
+        {
+            "_handler": "sandboxes_create",
+            "template_id": template_id,
+            "provider_id": str(arguments.get("provider_id") or "auto"),
+            "name": str(arguments.get("name") or f"Ephemeral Sandbox {now_slug()}"),
+        },
+        context or {},
+    )
+    if create.get("status") != "ok":
+        return err(
+            "Managed sandbox runtime is not ready; sandbox_exec will not fall back to host execution.",
+            MANAGED_RUNTIME_NOT_READY,
+            argv=argv,
+            template_id=template_id,
+            provider_id=str(arguments.get("provider_id") or "auto"),
+            runtime_error=create.get("error"),
         )
-        return ok({"workspace": str(ws.root), "risk": risk, **result})
-    except FileNotFoundError as exc:
-        if getattr(exc, "filename", None) == "docker":
-            return err("Docker is required for sandbox execution and is not available", "SANDBOX_UNAVAILABLE")
-        return err(str(exc), "SANDBOX_EXEC_FAILED")
-    except subprocess.TimeoutExpired:
-        return err("sandbox execution timed out", "SANDBOX_TIMEOUT")
-    except ValueError as exc:
-        if str(exc) == "invalid Docker image reference":
-            return err(str(exc), "INVALID_SANDBOX_IMAGE")
-        return err(str(exc), "SANDBOX_EXEC_FAILED")
-    except Exception as exc:
-        return err(str(exc), "SANDBOX_EXEC_FAILED")
+    sandbox_id = str((create.get("data") or {}).get("sandbox_id") or "")
+    if not sandbox_id:
+        return err("Managed sandbox runtime did not return a sandbox id.", MANAGED_RUNTIME_NOT_READY, argv=argv, template_id=template_id)
+    try:
+        return _sandbox_exec_call(sandbox_id, arguments, argv, timeout_ms, context)
+    finally:
+        _sandbox_api().run(
+            {"_handler": "sandbox_delete", "sandbox_id": sandbox_id, "confirm_destructive": True},
+            context or {},
+        )
+
+
+def sandbox_files_apply_patch(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    sandbox_id = str(payload.get("sandbox_id") or "").strip()
+    if not sandbox_id:
+        return err("'sandbox_id' is required", "INVALID_INPUT")
+    payload["sandbox_id"] = sandbox_id
+    payload["_handler"] = "sandbox_files_apply_patch"
+    return _sandbox_api().run(payload, context or {})
+
+
+def sandbox_port_expose(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
+    payload = dict(arguments or {})
+    sandbox_id = str(payload.get("sandbox_id") or "").strip()
+    if not sandbox_id:
+        return err("'sandbox_id' is required", "INVALID_INPUT")
+    if payload.get("port") is None:
+        return err("'port' is required", "INVALID_INPUT")
+    payload["sandbox_id"] = sandbox_id
+    payload["_handler"] = "sandbox_port_expose"
+    return _sandbox_api().run(payload, context or {})
 
 
 def python_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
     code = arguments.get("code")
     script_path = arguments.get("script_path")
     if not code and not script_path:
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
-        ws = workspace(context)
+        if script_path:
+            ws = workspace(context)
+            resolved = ws.resolve(str(script_path), must_exist=True)
+            script_path = ws.relative(resolved)
         if code:
-            script = ws.resolve(f".sandbox/python-{now_slug()}.py")
-            write_text_file(script, str(code))
-            script_path = ws.relative(script)
-        else:
-            script_path = ws.relative(ws.resolve(str(script_path), must_exist=True))
-        command = ["python", str(script_path)]
-        return sandbox_exec(
-            {"command": command, "timeout": arguments.get("timeout") or 30},
-            context,
-            image=DEFAULT_SANDBOX_IMAGE,
-        )
+            return sandbox_exec(
+                {
+                    "argv": ["python", "-c", str(code)],
+                    "timeout": arguments.get("timeout") or 30,
+                    "template_id": arguments.get("template_id") or "coding.python",
+                    "provider_id": arguments.get("provider_id") or "auto",
+                },
+                context,
+            )
+        return _script_path_exec(arguments, context, runtime_argv=["python"], script_path=str(script_path), template_id="coding.python")
     except Exception as exc:
         return err(str(exc), "PYTHON_EXEC_FAILED")
 
 
 def node_exec(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
+    approval_error = _require_server_side_approval(context)
+    if approval_error is not None:
+        return approval_error
     code = arguments.get("code")
     script_path = arguments.get("script_path")
     if not code and not script_path:
         return err("'code' or 'script_path' is required", "INVALID_INPUT")
     try:
-        ws = workspace(context)
+        if script_path:
+            ws = workspace(context)
+            resolved = ws.resolve(str(script_path), must_exist=True)
+            script_path = ws.relative(resolved)
         if code:
-            script = ws.resolve(f".sandbox/node-{now_slug()}.js")
-            write_text_file(script, str(code))
-            script_path = ws.relative(script)
-        else:
-            script_path = ws.relative(ws.resolve(str(script_path), must_exist=True))
-        return sandbox_exec(
-            {"command": ["node", str(script_path)], "timeout": arguments.get("timeout") or 30},
-            context,
-            image=DEFAULT_NODE_SANDBOX_IMAGE,
-        )
+            return sandbox_exec(
+                {
+                    "argv": ["node", "-e", str(code)],
+                    "timeout": arguments.get("timeout") or 30,
+                    "template_id": arguments.get("template_id") or "coding.node",
+                    "provider_id": arguments.get("provider_id") or "auto",
+                },
+                context,
+            )
+        return _script_path_exec(arguments, context, runtime_argv=["node"], script_path=str(script_path), template_id="coding.node")
     except Exception as exc:
         return err(str(exc), "NODE_EXEC_FAILED")
 
@@ -183,3 +157,152 @@ def package_install_plan(arguments: dict[str, Any], context: dict[str, Any] | No
         "pnpm": ["pnpm", "add", *packages],
     }.get(manager, [manager, *packages])
     return ok({"manager": manager, "packages": packages, "command": command, "executes": False})
+
+
+def _require_server_side_approval(context: dict[str, Any] | None) -> dict[str, Any] | None:
+    if internal_tool_decision_allows(context):
+        return None
+    if isinstance(context, dict) and context.get("_tool_server_approval_token_valid") is True:
+        return None
+    policy = context.get("profile_policy") if isinstance(context, dict) else {}
+    if isinstance(policy, dict) and str(policy.get("yolo_mode")).lower() == "true":
+        return None
+    return err("sandbox execution requires a server-side approval decision", "SANDBOX_APPROVAL_REQUIRED")
+
+
+def _sandbox_api():
+    try:
+        from ecosystem.defaultspack.blocks.sandbox import api
+    except ModuleNotFoundError:
+        from blocks.sandbox import api  # type: ignore
+    return api
+
+
+def _script_path_exec(
+    arguments: dict[str, Any],
+    context: dict[str, Any] | None,
+    *,
+    runtime_argv: list[str],
+    script_path: str,
+    template_id: str,
+) -> dict[str, Any]:
+    ws = workspace(context)
+    resolved = ws.resolve(script_path, must_exist=True)
+    relative_path = ws.relative(resolved)
+    if resolved.stat().st_size > MAX_SCRIPT_PATH_BYTES:
+        return err("script_path is too large for sandbox staging", "SCRIPT_PATH_TOO_LARGE", script_path=relative_path)
+
+    api = _sandbox_api()
+    create = api.run(
+        {
+            "_handler": "sandboxes_create",
+            "template_id": str(arguments.get("template_id") or template_id),
+            "provider_id": str(arguments.get("provider_id") or "auto"),
+            "name": str(arguments.get("name") or f"Script Sandbox {now_slug()}"),
+        },
+        context or {},
+    )
+    if create.get("status") != "ok":
+        return err(
+            "Managed sandbox runtime is not ready; script_path will not fall back to host execution.",
+            MANAGED_RUNTIME_NOT_READY,
+            script_path=relative_path,
+            template_id=str(arguments.get("template_id") or template_id),
+            provider_id=str(arguments.get("provider_id") or "auto"),
+            runtime_error=create.get("error"),
+        )
+    sandbox_id = str((create.get("data") or {}).get("sandbox_id") or "")
+    if not sandbox_id:
+        return err("Managed sandbox runtime did not return a sandbox id.", MANAGED_RUNTIME_NOT_READY, script_path=relative_path)
+
+    try:
+        patch = api.run(
+            {
+                "_handler": "sandbox_files_apply_patch",
+                "sandbox_id": sandbox_id,
+                "files": [
+                    {
+                        "path": relative_path,
+                        "content_base64": base64.b64encode(resolved.read_bytes()).decode("ascii"),
+                    }
+                ],
+            },
+            context or {},
+        )
+        if patch.get("status") != "ok":
+            patch_error = patch.get("error") if isinstance(patch.get("error"), dict) else {}
+            return err(
+                "Managed sandbox runtime could not stage script_path.",
+                str(patch_error.get("code") or "SANDBOX_SCRIPT_STAGE_FAILED"),
+                script_path=relative_path,
+                runtime_error=patch.get("error"),
+            )
+        return _sandbox_exec_call(
+            sandbox_id,
+            {
+                **arguments,
+                "argv": [*runtime_argv, relative_path],
+                "cwd": arguments.get("cwd") or ".",
+            },
+            [*runtime_argv, relative_path],
+            _timeout_ms(arguments),
+            context,
+        )
+    finally:
+        api.run(
+            {"_handler": "sandbox_delete", "sandbox_id": sandbox_id, "confirm_destructive": True},
+            context or {},
+        )
+
+
+def _sandbox_exec_call(
+    sandbox_id: str,
+    arguments: dict[str, Any],
+    argv: list[str],
+    timeout_ms: int,
+    context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return _sandbox_api().run(
+        {
+            "_handler": "sandbox_exec",
+            "sandbox_id": sandbox_id,
+            "argv": argv,
+            "cwd": arguments.get("cwd") or ".",
+            "env": arguments.get("env") or {},
+            "stdin": arguments.get("stdin"),
+            "timeout_ms": timeout_ms,
+            "client_request_id": str(arguments.get("client_request_id") or f"sandbox-exec-{now_slug()}"),
+        },
+        context or {},
+    )
+
+
+def _timeout_ms(arguments: dict[str, Any]) -> int:
+    try:
+        if arguments.get("timeout_ms") is not None:
+            return int(arguments.get("timeout_ms"))
+        return int(arguments.get("timeout") or 60) * 1000
+    except (TypeError, ValueError):
+        return 60_000
+
+
+def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+    argv = arguments.get("argv")
+    if argv is None:
+        argv = arguments.get("command")
+    if isinstance(argv, (list, tuple)):
+        return {"argv": [str(part) for part in argv if str(part) != ""]}
+    if isinstance(argv, str):
+        stripped = argv.strip()
+        if not stripped:
+            return {"argv": []}
+        if any(marker in stripped for marker in SHELL_ESCAPE_MARKERS):
+            return {
+                "error": "sandbox_exec accepts argv arrays; shell syntax is not allowed in command strings",
+                "code": "SANDBOX_SHELL_STRING_REJECTED",
+            }
+        try:
+            return {"argv": shlex.split(stripped, posix=sys.platform != "win32")}
+        except ValueError as exc:
+            return {"error": f"invalid command string: {exc}", "code": "INVALID_INPUT"}
+    return {"error": "'command' must be a string or argv array", "code": "INVALID_INPUT"}

@@ -929,6 +929,222 @@
       "path": "/api/coding/workspaces/{workspace_id}/trust",
       "flow_id": "coding_workspace",
       "description": "Trust a coding workspace for mutations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/providers",
+      "function_id": "managed_runtime_providers",
+      "description": "List managed runtime providers"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/doctor",
+      "function_id": "managed_runtime_doctor_get",
+      "description": "Inspect managed runtime readiness"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/doctor",
+      "function_id": "managed_runtime_doctor",
+      "description": "Run managed runtime diagnostics"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/ensure",
+      "function_id": "managed_runtime_ensure",
+      "description": "Install or repair the selected managed runtime provider"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/update",
+      "function_id": "managed_runtime_update",
+      "description": "Update managed runtime provider packages"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/uninstall",
+      "function_id": "managed_runtime_uninstall",
+      "description": "Uninstall managed runtime provider state"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/operations",
+      "function_id": "managed_runtime_operations",
+      "description": "List managed runtime operations"
+    },
+    {
+      "method": "GET",
+      "path": "/api/runtime/operations/{operation_id}",
+      "function_id": "managed_runtime_operation_get",
+      "description": "Get a managed runtime operation"
+    },
+    {
+      "method": "POST",
+      "path": "/api/runtime/operations/{operation_id}/cancel",
+      "function_id": "managed_runtime_operation_cancel",
+      "description": "Cancel a managed runtime operation"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandbox/templates",
+      "function_id": "managed_runtime_sandbox_templates",
+      "description": "List managed sandbox templates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes",
+      "function_id": "managed_runtime_sandboxes_list",
+      "description": "List managed sandboxes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes",
+      "function_id": "managed_runtime_sandboxes_create",
+      "description": "Create a managed sandbox"
+    },
+    {
+      "method": "GET",
+      "path": "/api/sandboxes/{sandbox_id}",
+      "function_id": "managed_runtime_sandbox_get",
+      "description": "Get a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/start",
+      "function_id": "managed_runtime_sandbox_start",
+      "description": "Start a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/stop",
+      "function_id": "managed_runtime_sandbox_stop",
+      "description": "Stop a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/restart",
+      "function_id": "managed_runtime_sandbox_restart",
+      "description": "Restart a managed sandbox"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/sandboxes/{sandbox_id}",
+      "function_id": "managed_runtime_sandbox_delete",
+      "description": "Delete a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/exec",
+      "function_id": "managed_runtime_sandbox_exec",
+      "description": "Execute a command inside a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/files/apply-patch",
+      "function_id": "managed_runtime_sandbox_files_apply_patch",
+      "description": "Apply file changes inside a managed sandbox"
+    },
+    {
+      "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/ports",
+      "function_id": "managed_runtime_sandbox_port_expose",
+      "description": "Expose a managed sandbox port"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops",
+      "function_id": "managed_runtime_desktops_list",
+      "description": "List managed desktop seats"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops",
+      "function_id": "managed_runtime_desktops_create",
+      "description": "Create a managed desktop seat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}",
+      "function_id": "managed_runtime_desktop_get",
+      "description": "Get a managed desktop seat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/start",
+      "function_id": "managed_runtime_desktop_start",
+      "description": "Start a managed desktop seat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/stop",
+      "function_id": "managed_runtime_desktop_stop",
+      "description": "Stop a managed desktop seat"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/restart",
+      "function_id": "managed_runtime_desktop_restart",
+      "description": "Restart a managed desktop seat"
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/desktops/{seat_id}",
+      "function_id": "managed_runtime_desktop_delete",
+      "description": "Delete a managed desktop seat"
+    },
+    {
+      "method": "GET",
+      "path": "/api/desktops/{seat_id}/frame",
+      "function_id": "managed_runtime_desktop_frame",
+      "description": "Fetch a managed desktop frame"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/input",
+      "function_id": "managed_runtime_desktop_input",
+      "description": "Send human desktop input with a control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/ai-input",
+      "function_id": "managed_runtime_desktop_ai_input",
+      "description": "Send approved AI desktop input without taking the human lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/rules",
+      "function_id": "managed_runtime_desktop_rules_update",
+      "description": "Update desktop role, rules, or access policy"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-requests",
+      "function_id": "managed_runtime_desktop_access_request",
+      "description": "Request access to a protected desktop"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/access-requests/{request_id}/grant",
+      "function_id": "managed_runtime_desktop_access_grant",
+      "description": "Grant or deny a protected desktop access request"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/acquire",
+      "function_id": "managed_runtime_desktop_control_acquire",
+      "description": "Acquire a desktop human-control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/renew",
+      "function_id": "managed_runtime_desktop_control_renew",
+      "description": "Renew a desktop human-control lease"
+    },
+    {
+      "method": "POST",
+      "path": "/api/desktops/{seat_id}/control/release",
+      "function_id": "managed_runtime_desktop_control_release",
+      "description": "Release a desktop human-control lease"
     }
   ]
 }

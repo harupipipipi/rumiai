@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -766,22 +767,26 @@ def test_sandbox_exec_ignores_client_supplied_approval_flags(tmp_path):
     assert result["widget"]["approval_required"] is True
 
 
-def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
+def test_sandbox_exec_fails_closed_after_internal_tool_decision_until_managed_runtime_exists(tmp_path, monkeypatch):
     from domain.tool.executor import ToolExecutor
-    from domain.tool_policy.internal_context import seal_tool_context
     from domain.tool import sandbox_tools
+    from domain.coding.terminal import Terminal
+    from domain.tool_policy.internal_context import seal_tool_context
 
-    captured = {}
+    class MissingRuntimeApi:
+        def run(self, payload, context):
+            if payload.get("_handler") == "sandboxes_create":
+                return {
+                    "status": "error",
+                    "error": {"code": "MANAGED_RUNTIME_NOT_READY", "message": "runtime not ready"},
+                }
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
 
-    def fake_run(args, **kwargs):
-        captured["args"] = args
-        captured["kwargs"] = kwargs
-        return SimpleNamespace(returncode=0, stdout="/workspace\n", stderr="")
+    def forbidden_host_terminal(*args, **kwargs):
+        raise AssertionError("sandbox_exec must not fall back to host Terminal.execute")
 
-    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
-
+    monkeypatch.setattr(Terminal, "execute", forbidden_host_terminal)
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: MissingRuntimeApi())
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
         {"action": "allow", "allowed": True},
@@ -789,94 +794,496 @@ def test_sandbox_exec_runs_only_with_internal_tool_decision(tmp_path, monkeypatc
 
     result = ToolExecutor().execute("sandbox_exec", {"command": "pwd"}, context)
 
-    assert result["is_error"] is False
-    assert result["widget"]["data"]["stdout"] == "/workspace\n"
-    assert captured["args"][:3] == ["docker", "run", "--rm"]
-    assert "--network=none" in captured["args"]
-    assert "--read-only" in captured["args"]
-    assert f"{tmp_path / '.rumi' / 'artifacts'}:/workspace:rw" in captured["args"]
-    image_index = captured["args"].index(sandbox_tools.DEFAULT_SANDBOX_IMAGE)
-    assert captured["args"][image_index - 1] == "--"
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "MANAGED_RUNTIME_NOT_READY"
+    assert result["widget"]["error"]["argv"] == ["pwd"]
 
 
-def test_sandbox_exec_rejects_client_supplied_image_before_docker(tmp_path, monkeypatch):
+def test_sandbox_exec_creates_ephemeral_sandbox_when_no_sandbox_id(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": "sandbox-1"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = sandbox_tools.sandbox_exec({"argv": ["pwd"], "timeout": 5}, context)
+
+    assert result["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == ["sandboxes_create", "sandbox_exec", "sandbox_delete"]
+    assert fake_api.calls[0]["template_id"] == "tool.ephemeral"
+    assert fake_api.calls[1]["argv"] == ["pwd"]
+    assert fake_api.calls[1]["timeout_ms"] == 5000
+    assert fake_api.calls[2]["confirm_destructive"] is True
+
+
+def test_sandbox_exec_rejects_shell_strings_after_internal_tool_decision(tmp_path):
     from domain.tool.executor import ToolExecutor
     from domain.tool_policy.internal_context import seal_tool_context
-    from domain.tool import sandbox_tools
-
-    def fake_run(*args, **kwargs):
-        raise AssertionError("docker must not run with an invalid image reference")
-
-    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
 
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
         {"action": "allow", "allowed": True},
     )
 
-    result = ToolExecutor().execute(
-        "sandbox_exec",
-        {"command": "pwd", "image": "python:3.12-slim"},
+    result = ToolExecutor().execute("sandbox_exec", {"command": "echo ok && echo nope"}, context)
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "SANDBOX_SHELL_STRING_REJECTED"
+
+
+def test_sandbox_exec_command_string_preserves_quoted_whitespace(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": "sandbox-1"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = sandbox_tools.sandbox_exec({"command": "python -c \"print('a  b')\""}, context)
+
+    assert result["status"] == "ok"
+    exec_call = next(call for call in fake_api.calls if call["_handler"] == "sandbox_exec")
+    assert exec_call["argv"] == ["python", "-c", "print('a  b')"]
+
+
+def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload["_handler"] == "sandbox_files_apply_patch":
+                return {"status": "ok", "data": {"files_written": 1}}
+            if payload["_handler"] == "sandbox_port_expose":
+                return {"status": "ok", "data": {"target_url": "http://127.0.0.1:3000"}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    patched = sandbox_tools.sandbox_files_apply_patch(
+        {"sandbox_id": "sandbox-1", "path": "app.py", "content": "print('ok')\n"},
+        context,
+    )
+    exposed = sandbox_tools.sandbox_port_expose(
+        {"sandbox_id": "sandbox-1", "port": 3000, "protocol": "http"},
+        context,
+    )
+
+    assert patched["status"] == "ok"
+    assert exposed["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == ["sandbox_files_apply_patch", "sandbox_port_expose"]
+    assert fake_api.calls[0]["sandbox_id"] == "sandbox-1"
+    assert fake_api.calls[0]["path"] == "app.py"
+    assert fake_api.calls[1]["port"] == 3000
+    assert fake_api.calls[1]["protocol"] == "http"
+
+
+def test_sandbox_file_patch_and_port_tools_require_approval(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    patch = sandbox_tools.sandbox_files_apply_patch(
+        {"sandbox_id": "sandbox-1", "path": "app.py", "content": "print('ok')"},
+        {"workspace_root": str(tmp_path)},
+    )
+    port = sandbox_tools.sandbox_port_expose(
+        {"sandbox_id": "sandbox-1", "port": 3000},
+        {"workspace_root": str(tmp_path)},
+    )
+
+    assert patch["is_error"] is True
+    assert patch["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+    assert port["is_error"] is True
+    assert port["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
+def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": f"{payload['template_id']}-seat"}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    python_result = sandbox_tools.python_exec({"code": "print('ok')"}, context)
+    node_result = sandbox_tools.node_exec({"code": "console.log('ok')"}, context)
+
+    assert python_result["status"] == "ok"
+    assert node_result["status"] == "ok"
+    creates = [call for call in fake_api.calls if call["_handler"] == "sandboxes_create"]
+    execs = [call for call in fake_api.calls if call["_handler"] == "sandbox_exec"]
+    assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
+    assert execs[0]["argv"] == ["python", "-c", "print('ok')"]
+    assert execs[1]["argv"] == ["node", "-e", "console.log('ok')"]
+    deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
+    assert [call["confirm_destructive"] for call in deletes] == [True, True]
+
+
+def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    (tmp_path / "scripts").mkdir()
+    python_script = tmp_path / "scripts" / "hello.py"
+    node_script = tmp_path / "scripts" / "hello.js"
+    python_script.write_text("print('ok')\n", encoding="utf-8")
+    node_script.write_text("console.log('ok')\n", encoding="utf-8")
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload.get("_handler") == "sandboxes_create":
+                return {"status": "ok", "data": {"sandbox_id": f"{payload['template_id']}-seat"}}
+            if payload.get("_handler") == "sandbox_files_apply_patch":
+                return {"status": "ok", "data": {"files_written": 1, "sandbox_id": payload["sandbox_id"]}}
+            if payload.get("_handler") == "sandbox_exec":
+                return {"status": "ok", "data": {"sandbox_id": payload["sandbox_id"], "argv": payload["argv"]}}
+            if payload.get("_handler") == "sandbox_delete":
+                return {"status": "ok", "data": {"deleted": True, "sandbox_id": payload["sandbox_id"]}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"artifact_root": str(tmp_path), "workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    python_result = sandbox_tools.python_exec({"script_path": "scripts/hello.py", "timeout": 5}, context)
+    node_result = sandbox_tools.node_exec({"script_path": "scripts/hello.js", "timeout": 6}, context)
+
+    assert python_result["status"] == "ok"
+    assert node_result["status"] == "ok"
+    creates = [call for call in fake_api.calls if call["_handler"] == "sandboxes_create"]
+    patches = [call for call in fake_api.calls if call["_handler"] == "sandbox_files_apply_patch"]
+    execs = [call for call in fake_api.calls if call["_handler"] == "sandbox_exec"]
+    deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
+    assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
+    assert patches[0]["files"][0]["path"] == "scripts/hello.py"
+    assert base64.b64decode(patches[0]["files"][0]["content_base64"]).decode("utf-8") == "print('ok')\n"
+    assert patches[1]["files"][0]["path"] == "scripts/hello.js"
+    assert execs[0]["argv"] == ["python", "scripts/hello.py"]
+    assert execs[0]["timeout_ms"] == 5000
+    assert execs[1]["argv"] == ["node", "scripts/hello.js"]
+    assert execs[1]["timeout_ms"] == 6000
+    assert len(deletes) == 2
+    assert [call["confirm_destructive"] for call in deletes] == [True, True]
+
+
+def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((payload, context))
+            assert payload["_handler"] == "desktop_frame"
+            return {
+                "_binary": True,
+                "status_code": 200,
+                "content_type": "image/png",
+                "body": b"fake-png",
+                "headers": {
+                    "X-Rumi-Frame-Seq": "7",
+                    "X-Rumi-Frame-Width": "800",
+                    "X-Rumi-Frame-Height": "600",
+                    "X-Rumi-Captured-At": "2026-01-01T00:00:00Z",
+                },
+            }
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+
+    result = desktop_tools.desktop_frame({"desktop_id": "seat-1"}, {"agent_id": "agent-1"})
+
+    assert result["status"] == "ok"
+    assert result["data"]["seat_id"] == "seat-1"
+    assert result["data"]["data_base64"] == "ZmFrZS1wbmc="
+    assert result["data"]["frame_seq"] == 7
+    assert result["data"]["width"] == 800
+    assert result["data"]["height"] == 600
+    assert fake_api.calls[0][0]["owner_id"] == "agent-1"
+
+
+def test_desktop_input_tool_generates_client_action_id_when_manifest_omits_it(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            return {"status": "ok", "data": {"ok": True}}
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = desktop_tools.desktop_input({"desktop_id": "seat-1", "action": "click", "x": 1, "y": 2}, context)
+
+    assert result["status"] == "ok"
+    payload = fake_api.calls[0]
+    assert payload["_handler"] == "desktop_ai_input"
+    assert payload["seat_id"] == "seat-1"
+    assert str(payload["client_action_id"]).startswith("desktop-input-")
+
+
+def test_desktop_control_tools_forward_owner_and_lease_token(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append(payload)
+            if payload["_handler"] == "desktop_control_acquire":
+                return {"status": "ok", "data": {"lease_id": "lease-1", "lease_token": "token-1"}}
+            if payload["_handler"] == "desktop_control_renew":
+                return {"status": "ok", "data": {"lease_id": "lease-1"}}
+            if payload["_handler"] == "desktop_control_release":
+                return {"status": "ok", "data": {"released": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+
+    acquire = desktop_tools.desktop_control_acquire({"desktop_id": "seat-1"}, context)
+    renew = desktop_tools.desktop_control_renew({"seat_id": "seat-1", "lease_token": "token-1"}, context)
+    release = desktop_tools.desktop_control_release({"seat_id": "seat-1", "lease_token": "token-1"}, context)
+
+    assert acquire["status"] == "ok"
+    assert renew["status"] == "ok"
+    assert release["status"] == "ok"
+    assert [call["_handler"] for call in fake_api.calls] == [
+        "desktop_control_acquire",
+        "desktop_control_renew",
+        "desktop_control_release",
+    ]
+    assert all(call["seat_id"] == "seat-1" for call in fake_api.calls)
+    assert all(call["owner_id"] == "agent-1" for call in fake_api.calls)
+    assert fake_api.calls[1]["lease_token"] == "token-1"
+    assert fake_api.calls[2]["lease_token"] == "token-1"
+
+
+def test_desktop_control_tools_require_approval_and_token(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    without_approval = desktop_tools.desktop_control_acquire({"seat_id": "seat-1"}, {"workspace_root": str(tmp_path)})
+    approved_context = seal_tool_context(
+        {"workspace_root": str(tmp_path), "agent_id": "agent-1"},
+        {"action": "allow", "allowed": True},
+    )
+    missing_token = desktop_tools.desktop_control_renew({"seat_id": "seat-1"}, approved_context)
+
+    assert without_approval["is_error"] is True
+    assert without_approval["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+    assert missing_token["is_error"] is True
+    assert missing_token["widget"]["error"]["code"] == "INVALID_INPUT"
+
+
+def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):
+    from domain.tool.sandbox_tools import sandbox_exec
+
+    result = sandbox_exec({"argv": ["pwd"]}, {"workspace_root": str(tmp_path), "_tool_server_approved": True})
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
+def test_python_exec_script_path_must_stay_inside_workspace_even_when_approved(tmp_path):
+    from domain.tool.sandbox_tools import python_exec
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+    outside.write_text("print('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = python_exec({"script_path": f"../{outside.name}"}, context)
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
+
+
+def test_node_exec_script_path_must_stay_inside_workspace_even_when_code_is_present(tmp_path):
+    from domain.tool.sandbox_tools import node_exec
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.js"
+    outside.write_text("console.log('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    result = node_exec({"code": "console.log('inside')", "script_path": f"../{outside.name}"}, context)
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "NODE_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
+
+
+def test_python_exec_script_path_must_stay_inside_workspace_even_when_code_is_present(
+    tmp_path,
+    monkeypatch,
+):
+    from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-code.py"
+    outside.write_text("print('outside')", encoding="utf-8")
+    context = seal_tool_context(
+        {"workspace_root": str(tmp_path)},
+        {"action": "allow", "allowed": True},
+    )
+
+    def forbidden_sandbox_api():
+        raise AssertionError(
+            "python_exec must reject an escaped script_path before sandbox API calls"
+        )
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", forbidden_sandbox_api)
+
+    result = sandbox_tools.python_exec(
+        {"code": "print('inside')", "script_path": f"../{outside.name}"},
         context,
     )
 
     assert result["is_error"] is True
-    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
+    assert result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert "escapes artifact root" in result["widget"]["error"]["message"]
 
 
-def test_sandbox_exec_rejects_invalid_configured_image_before_docker(tmp_path, monkeypatch):
-    from domain.tool.executor import ToolExecutor
-    from domain.tool_policy.internal_context import seal_tool_context
+def test_python_and_node_exec_reject_absolute_script_paths_outside_workspace_before_runtime_api(
+    tmp_path,
+    monkeypatch,
+):
     from domain.tool import sandbox_tools
+    from domain.tool_policy.internal_context import seal_tool_context
 
-    def fake_run(*args, **kwargs):
-        raise AssertionError("docker must not run with an invalid image reference")
-
-    monkeypatch.setattr(sandbox_tools, "DEFAULT_SANDBOX_IMAGE", "--privileged")
-    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
-
+    outside_python = tmp_path.parent / f"{tmp_path.name}-absolute.py"
+    outside_node = tmp_path.parent / f"{tmp_path.name}-absolute.js"
+    outside_python.write_text("print('outside')", encoding="utf-8")
+    outside_node.write_text("console.log('outside')", encoding="utf-8")
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
         {"action": "allow", "allowed": True},
     )
 
-    result = ToolExecutor().execute(
-        "sandbox_exec",
-        {"command": "pwd"},
-        context,
+    def forbidden_sandbox_api():
+        raise AssertionError(
+            "script_path jail must reject escaped absolute paths before sandbox API calls"
+        )
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", forbidden_sandbox_api)
+
+    python_result = sandbox_tools.python_exec({"script_path": str(outside_python)}, context)
+    node_result = sandbox_tools.node_exec({"script_path": str(outside_node)}, context)
+
+    assert python_result["is_error"] is True
+    assert python_result["widget"]["error"]["code"] == "PYTHON_EXEC_FAILED"
+    assert (
+        "outside" in python_result["widget"]["error"]["message"]
+        or "artifact path" in python_result["widget"]["error"]["message"]
     )
-
-    assert result["is_error"] is True
-    assert result["widget"]["error"]["code"] == "INVALID_SANDBOX_IMAGE"
-
-
-def test_python_exec_uses_container_python_not_host_interpreter(tmp_path, monkeypatch):
-    from types import SimpleNamespace
-
-    from domain.tool.executor import ToolExecutor
-    from domain.tool_policy.internal_context import seal_tool_context
-    from domain.tool import sandbox_tools
-
-    captured = {}
-
-    def fake_run(args, **kwargs):
-        captured["args"] = args
-        return SimpleNamespace(returncode=0, stdout="ok\n", stderr="")
-
-    monkeypatch.setattr(sandbox_tools.subprocess, "run", fake_run)
-
-    context = seal_tool_context(
-        {"workspace_root": str(tmp_path)},
-        {"action": "allow", "allowed": True},
+    assert node_result["is_error"] is True
+    assert node_result["widget"]["error"]["code"] == "NODE_EXEC_FAILED"
+    assert (
+        "outside" in node_result["widget"]["error"]["message"]
+        or "artifact path" in node_result["widget"]["error"]["message"]
     )
-
-    result = ToolExecutor().execute("python_exec", {"code": "print('ok')"}, context)
-
-    assert result["is_error"] is False
-    docker_args = captured["args"]
-    assert "--network=none" in docker_args
-    assert "python" in docker_args
-    assert sys.executable not in docker_args
 
 
 def test_package_install_plan_never_executes_packages(tmp_path):

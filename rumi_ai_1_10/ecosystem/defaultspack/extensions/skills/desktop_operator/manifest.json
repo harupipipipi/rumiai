@@ -1,0 +1,38 @@
+{
+  "id": "desktop_operator",
+  "category": "skill",
+  "version": "1.0.0",
+  "enabled": true,
+  "display_name": "Desktop Operator",
+  "description": "Operational rules for creating and controlling managed desktops.",
+  "triggers": [
+    "desktop",
+    "desktops",
+    "ubuntu desktop",
+    "computer use",
+    "chrome",
+    "mouse",
+    "keyboard"
+  ],
+  "applies_to_tools": [
+    "desktop_list",
+    "desktop_create",
+    "desktop_frame",
+    "desktop_input",
+    "desktop_control_acquire",
+    "desktop_control_renew",
+    "desktop_control_release",
+    "desktop_rules_update",
+    "desktop_access_request",
+    "desktop_access_grant"
+  ],
+  "prompt_file": "instructions.md",
+  "metadata": {
+    "aliases": [
+      "desktop",
+      "computer_use",
+      "ubuntu_desktop"
+    ],
+    "source": "defaultspack"
+  }
+}
