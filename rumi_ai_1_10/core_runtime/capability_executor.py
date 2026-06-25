@@ -1432,26 +1432,17 @@ class CapabilityExecutor:
                                                  grant_config=grant_config,
                                                  timeout_seconds=timeout_seconds)
         if calling_convention == "subprocess":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=calling_convention,
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
                                           pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
@@ -1459,19 +1450,6 @@ class CapabilityExecutor:
                                                      request_id=request_id, start_time=start_time,
                                                      request_context=request_context)
         if calling_convention == "python_host":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=calling_convention,
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             return self._execute_host_function(
                 principal_id=principal_id,
                 entry=entry,
@@ -1483,19 +1461,6 @@ class CapabilityExecutor:
                 timeout_seconds=timeout_seconds,
             )
         if calling_convention == "python_docker":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=calling_convention,
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             return self._execute_user_function(
                 principal_id=principal_id,
                 entry=entry,
@@ -1508,19 +1473,6 @@ class CapabilityExecutor:
                 timeout_seconds=timeout_seconds,
             )
         if calling_convention == "binary":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=calling_convention,
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
             if guard_resp is not None:
                 return guard_resp
@@ -1535,19 +1487,6 @@ class CapabilityExecutor:
                 timeout_seconds=timeout_seconds,
             )
         if calling_convention == "command":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=calling_convention,
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
             if guard_resp is not None:
                 return guard_resp
@@ -1581,31 +1520,23 @@ class CapabilityExecutor:
                                                   grant_config=grant_config, args=args,
                                                   request_id=request_id, start_time=start_time)
         else:
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention=str(getattr(entry, "calling_convention", "") or "subprocess"),
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
             entrypoint = entry.entrypoint or "main.py:run"
             function_dir = Path(entry.function_dir) if entry.function_dir else Path(".")
             ep_file = entrypoint.rsplit(":", 1)[0] if ":" in entrypoint else entrypoint
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
                                           pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
-                                                     request_id=request_id, start_time=start_time)
+                                                     request_id=request_id, start_time=start_time,
+                                                     request_context=request_context)
 
     # ------------------------------------------------------------------
     # function.call dispatch
@@ -2176,7 +2107,7 @@ class CapabilityExecutor:
         del principal_id
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        if self._is_bundled_core_pack_entry(entry):
+        if self._is_core_builtin_trust_bypass_entry(entry):
             return False
         if self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint):
             return False
@@ -2190,7 +2121,7 @@ class CapabilityExecutor:
             function_dir=getattr(handler_def, "handler_dir", None),
             main_py_path=getattr(handler_def, "handler_py_path", None),
         )
-        if self._is_bundled_core_pack_entry(entry):
+        if self._is_core_builtin_trust_bypass_entry(entry):
             return False
         if pack_id and self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
             return False
@@ -2676,19 +2607,6 @@ class CapabilityExecutor:
         timeout_seconds=None,
     ):
         runtime = getattr(entry, 'runtime', 'python')
-        sandbox_resp = self._managed_sandbox_response_if_required(
-            entry=entry,
-            principal_id=principal_id,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            request_context=request_context,
-            calling_convention="python_docker" if force_docker else str(getattr(entry, "calling_convention", None) or runtime),
-            timeout_seconds=timeout_seconds,
-            grant_config=grant_config,
-        )
-        if sandbox_resp is not None:
-            return sandbox_resp
         if runtime == "binary":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
@@ -2711,10 +2629,45 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
+        if force_docker:
+            sandbox_resp = self._managed_sandbox_response_if_required(
+                entry=entry,
+                principal_id=principal_id,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                request_context=request_context,
+                calling_convention="python_docker",
+                timeout_seconds=timeout_seconds,
+                grant_config=grant_config,
+            )
+            if sandbox_resp is not None:
+                return sandbox_resp
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
             logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
+            fallback_requires_sandbox = (
+                self._approval_manager is None or self._permission_manager is None
+            )
+            if fallback_requires_sandbox:
+                sandbox_resp = self._managed_sandbox_response_if_required(
+                    entry=entry,
+                    principal_id=principal_id,
+                    args=args,
+                    request_id=request_id,
+                    start_time=start_time,
+                    request_context=request_context,
+                    calling_convention=(
+                        "python_docker"
+                        if force_docker
+                        else str(getattr(entry, "calling_convention", None) or runtime)
+                    ),
+                    timeout_seconds=timeout_seconds,
+                    grant_config=grant_config,
+                )
+                if sandbox_resp is not None:
+                    return sandbox_resp
             if force_docker:
                 return CapabilityResponse(success=False, error="Docker is not available for python_docker function execution.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()
@@ -2770,19 +2723,6 @@ class CapabilityExecutor:
             self._cleanup_temp_file(input_file, "Docker function input file")
 
     def _execute_user_function_host(self, principal_id, entry, args, request_id, start_time, timeout, grant_config=None, request_context=None):
-        sandbox_resp = self._managed_sandbox_response_if_required(
-            entry=entry,
-            principal_id=principal_id,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            request_context=request_context,
-            calling_convention="development_host",
-            timeout_seconds=timeout,
-            grant_config=grant_config,
-        )
-        if sandbox_resp is not None:
-            return sandbox_resp
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = self._build_runner_payload(str(entry.main_py_path), "run", context, args)
@@ -2800,19 +2740,6 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
-        sandbox_resp = self._managed_sandbox_response_if_required(
-            entry=entry,
-            principal_id=principal_id,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            request_context=request_context,
-            calling_convention="python_host",
-            timeout_seconds=timeout_seconds,
-            grant_config=grant_config,
-        )
-        if sandbox_resp is not None:
-            return sandbox_resp
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
@@ -2960,19 +2887,6 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
-        sandbox_resp = self._managed_sandbox_response_if_required(
-            entry=entry,
-            principal_id=principal_id,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            request_context=request_context,
-            calling_convention="binary",
-            timeout_seconds=timeout_seconds,
-            grant_config=grant_config,
-        )
-        if sandbox_resp is not None:
-            return sandbox_resp
         guard_resp = self._host_runtime_guard(entry, "binary", start_time)
         if guard_resp is not None:
             return guard_resp
@@ -3005,19 +2919,6 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
     def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
-        sandbox_resp = self._managed_sandbox_response_if_required(
-            entry=entry,
-            principal_id=principal_id,
-            args=args,
-            request_id=request_id,
-            start_time=start_time,
-            request_context=request_context,
-            calling_convention="command",
-            timeout_seconds=timeout_seconds,
-            grant_config=grant_config,
-        )
-        if sandbox_resp is not None:
-            return sandbox_resp
         guard_resp = self._host_runtime_guard(entry, "command", start_time)
         if guard_resp is not None:
             return guard_resp
