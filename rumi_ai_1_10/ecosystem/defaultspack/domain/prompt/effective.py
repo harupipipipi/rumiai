@@ -10,6 +10,7 @@ import yaml
 from ..capability.catalog import CapabilityCatalog
 from .renderer import render
 from .resolver import PromptResolver
+from .trust import is_trusted_prompt_pack
 
 
 _VARIABLE_PATTERN = re.compile(r"\{\{\s*([\w.]+)\s*\}\}")
@@ -221,7 +222,18 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
             )
         )
         content = snapshot_candidate.read_text(encoding="utf-8")
-        return _effective_payload(data, prompt_ids[0], "profile_snapshot", str(snapshot_candidate), content, source_chain)
+        trusted, trust_reason = is_trusted_prompt_pack(base_pack)
+        return _effective_payload(
+            data,
+            prompt_ids[0],
+            "profile_snapshot",
+            str(snapshot_candidate),
+            content if trusted else "",
+            source_chain,
+            source_pack_id=base_pack,
+            source_pack_trusted=trusted,
+            source_pack_trust_reason=trust_reason,
+        )
     source_chain.append(
         _chain_entry(
             source_type="profile_snapshot",
@@ -236,7 +248,9 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
     for prompt_id in prompt_ids:
         content, resolved_pack_id = resolver.resolve_prompt(prompt_id, source_pack_id=source_pack_id or None)
         if content is not None:
-            source = f"{(resolved_pack_id or source_pack_id or base_pack)}.{prompt_id}"
+            prompt_source_pack_id = resolved_pack_id or source_pack_id or base_pack
+            trusted, trust_reason = is_trusted_prompt_pack(prompt_source_pack_id)
+            source = f"{prompt_source_pack_id}.{prompt_id}"
             source_chain.append(
                 _chain_entry(
                     source_type="pack_default",
@@ -251,9 +265,12 @@ def resolve_effective_prompt(input_data: dict[str, Any] | None) -> dict[str, Any
                 prompt_id,
                 "pack_default",
                 source,
-                content,
+                content if trusted else "",
                 source_chain,
                 metadata=_prompt_manifest_metadata(resolver.get_manifest(prompt_id)),
+                source_pack_id=prompt_source_pack_id,
+                source_pack_trusted=trusted,
+                source_pack_trust_reason=trust_reason,
             )
 
     source_chain.append(
@@ -276,8 +293,11 @@ def _effective_payload(
     source_chain: list[dict[str, Any]],
     *,
     metadata: dict[str, Any] | None = None,
+    source_pack_id: str = "",
+    source_pack_trusted: bool | None = None,
+    source_pack_trust_reason: str | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "profile_id": data.get("profile_id"),
         "conversation_id": data.get("conversation_id"),
         "prompt_id": prompt_id,
@@ -288,6 +308,12 @@ def _effective_payload(
         "final_content": content,
         "metadata": dict(metadata or {}),
     }
+    if source_pack_id:
+        payload["source_pack_id"] = source_pack_id
+        payload["source_pack_trusted"] = bool(source_pack_trusted)
+        if source_pack_trust_reason:
+            payload["source_pack_trust_reason"] = source_pack_trust_reason
+    return payload
 
 
 def _prompt_manifest_metadata(manifest: dict[str, Any] | None) -> dict[str, Any]:
