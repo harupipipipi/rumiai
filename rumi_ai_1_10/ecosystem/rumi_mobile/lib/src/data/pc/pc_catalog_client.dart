@@ -26,10 +26,10 @@ class PcCatalogClient {
   }
 
   Map<String, String> _headers(PcConnection pc) => {
-    'Authorization': 'Bearer ${pc.token.trim()}',
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  };
+        'Authorization': 'Bearer ${pc.token.trim()}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      };
 
   Uri _uri(String baseUrl, String path) {
     var trimmed = baseUrl.trim();

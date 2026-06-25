@@ -86,8 +86,8 @@ class PcApprovalClient {
   PcApprovalClient({
     http.Client? client,
     required MobileDeviceStore deviceStore,
-  }) : _http = client ?? http.Client(),
-       _deviceStore = deviceStore;
+  })  : _http = client ?? http.Client(),
+        _deviceStore = deviceStore;
 
   final http.Client _http;
   final MobileDeviceStore _deviceStore;
@@ -225,10 +225,10 @@ class PcApprovalClient {
   }
 
   Map<String, String> _headers(PcConnection pc) => {
-    'Authorization': 'Bearer ${pc.approvalToken.trim()}',
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-  };
+        'Authorization': 'Bearer ${pc.approvalToken.trim()}',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+      };
 
   void _ensureConfigured(PcConnection pc) {
     if (_closed) {

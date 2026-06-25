@@ -67,8 +67,7 @@ QrPayload parseQrPayload(String raw) {
         case 'rumi_api':
           return QrApiImport(
             baseUrl: (json['baseUrl'] as String?)?.trim() ?? '',
-            apiKey:
-                (json['apiKey'] as String?)?.trim() ??
+            apiKey: (json['apiKey'] as String?)?.trim() ??
                 (json['api_key'] as String?)?.trim() ??
                 '',
             model: (json['model'] as String?)?.trim(),

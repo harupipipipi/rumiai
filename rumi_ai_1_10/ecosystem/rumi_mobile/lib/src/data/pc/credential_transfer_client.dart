@@ -46,7 +46,7 @@ class CredentialTransfer {
 
 class CredentialTransferClient {
   CredentialTransferClient({http.Client? client})
-    : _http = client ?? http.Client();
+      : _http = client ?? http.Client();
 
   final http.Client _http;
   bool _closed = false;
@@ -57,9 +57,9 @@ class CredentialTransferClient {
   }
 
   Map<String, String> _headers(String token) => {
-    'Authorization': 'Bearer $token',
-    'Accept': 'application/json',
-  };
+        'Authorization': 'Bearer $token',
+        'Accept': 'application/json',
+      };
 
   Uri _uri(String baseUrl, String path) {
     var trimmed = baseUrl.trim();
