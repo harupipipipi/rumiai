@@ -456,18 +456,10 @@ export function updateAdaptiveAutomation(
   automationId: string,
   patch: Partial<AdaptiveAutomation>,
 ): Promise<AdaptiveAutomation> {
-  return adaptiveApiRequest<Record<string, unknown>>("/api/prepared-actions/prepare", {
-    method: "POST",
-    body: JSON.stringify({ operation: "automation.update", arguments: { automationId, patch } }),
-  }).then((prepared) => {
-    const action = recordValue(prepared.prepared_action ?? prepared.action);
-    const actionId = String(action.action_id ?? action.id ?? "");
-    if (!actionId) throw new Error("adaptive API did not return a prepared action id");
-    return adaptiveApiRequest<Record<string, unknown>>("/api/prepared-actions/commit", {
-      method: "POST",
-      body: JSON.stringify({ action_id: actionId }),
-    });
-  }).then((committed) => toAutomation(recordValue(committed.execution_result ?? committed.automation), automationId));
+  return adaptiveApiRequest<Record<string, unknown>>(`/api/automations/${encodeURIComponent(automationId)}`, {
+    method: "PUT",
+    body: JSON.stringify({ patch }),
+  }).then((updated) => toAutomation(recordValue(updated.automation ?? updated), automationId));
 }
 
 export function fetchAdaptiveEvidence(): Promise<AdaptiveEvidenceBundle> {

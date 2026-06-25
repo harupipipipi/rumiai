@@ -2704,6 +2704,16 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.adaptive.activity.snapshot
+  defaults.adaptive.automation_update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.automation_update
+  defaults.adaptive.automation.update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.automation.update
   defaults.adaptive.context_code_search:
     owner: adaptive
     reason: legacy caller compatibility
@@ -2744,6 +2754,16 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.adaptive.context.repository.map
+  defaults.adaptive.continuation_resume:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.continuation_resume
+  defaults.adaptive.continuation.resume:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.continuation.resume
   defaults.adaptive.event_append:
     owner: adaptive
     reason: legacy caller compatibility
@@ -2754,6 +2774,26 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.adaptive.event.append
+  defaults.adaptive.event_ack:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_ack
+  defaults.adaptive.event.ack:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.ack
+  defaults.adaptive.event_dlq:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_dlq
+  defaults.adaptive.event.dlq:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.dlq
   defaults.adaptive.event_list:
     owner: adaptive
     reason: legacy caller compatibility
@@ -2764,6 +2804,16 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.adaptive.event.list
+  defaults.adaptive.event_outbox:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_outbox
+  defaults.adaptive.event.outbox:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.outbox
   defaults.adaptive.event_replay:
     owner: adaptive
     reason: legacy caller compatibility
@@ -2774,6 +2824,36 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.adaptive.event.replay
+  defaults.adaptive.event_retry:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_retry
+  defaults.adaptive.event.retry:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.retry
+  defaults.adaptive.event_subscribe:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_subscribe
+  defaults.adaptive.event.subscribe:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.subscribe
+  defaults.adaptive.event_subscription_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_subscription_list
+  defaults.adaptive.event.subscription.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.subscription.list
   defaults.adaptive.freeze_set:
     owner: adaptive
     reason: legacy caller compatibility

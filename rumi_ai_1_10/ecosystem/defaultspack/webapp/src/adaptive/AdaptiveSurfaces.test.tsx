@@ -15,7 +15,7 @@ import {
   updateOnboardingUseCase,
 } from "./OnboardingShell";
 import { OperatingProfilePage } from "./OperatingProfilePage";
-import { compileAdaptiveOnboardingAnswers } from "../lib/adaptiveApi";
+import { compileAdaptiveOnboardingAnswers, updateAdaptiveAutomation } from "../lib/adaptiveApi";
 import { demoActivityState, demoAutomationState, demoOnboardingState, demoOperatingProfile } from "./demoData";
 
 test("OnboardingShell renders the adaptive setup steps", () => {
@@ -106,6 +106,42 @@ test("onboarding API errors reject visibly instead of returning demo data", asyn
     () => compileAdaptiveOnboardingAnswers(onboardingAnswersFromState(demoOnboardingState)),
     /ADAPTIVE_FROZEN[\s\S]*adaptive runtime is frozen/,
   );
+});
+
+test("automation updates use the local automation route without high-risk prepared commit", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = (async (input, init) => {
+    calls.push({ input, init });
+    const url = String(input);
+    if (url === "/api/automations/automation_daily_context") {
+      return new Response(JSON.stringify({
+        status: "ok",
+        data: {
+          automation: {
+            id: "automation_daily_context",
+            name: "Daily context refresh",
+            description: "Refresh context",
+            trigger: "daily",
+            schedule: "local 09:00",
+            enabled: true,
+          },
+        },
+      }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ status: "error", message: `unexpected route ${url}` }), { status: 404 });
+  }) as typeof fetch;
+
+  const automation = await updateAdaptiveAutomation("automation_daily_context", { enabled: true });
+
+  assert.equal(automation.enabled, true);
+  assert.equal(calls.length, 1);
+  assert.equal(String(calls[0]?.input), "/api/automations/automation_daily_context");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), { patch: { enabled: true } });
 });
 
 test("ResourceBanner renders API errors without demo fallback copy", () => {

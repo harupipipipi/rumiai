@@ -27,13 +27,24 @@ Operation = Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]
 
 OPERATION_ALIASES: dict[str, str] = {
     "activity_snapshot": "activity.snapshot",
+    "automation_update": "automation.update",
     "context_code_search": "context.code_search",
     "context_evidence": "context.evidence",
     "context_file_read": "context.file_read",
     "context_repository_map": "context.repository_map",
     "event_append": "events.append",
+    "event_ack": "events.ack",
+    "event_dlq": "events.dlq",
     "event_list": "events.list",
+    "event_outbox": "events.outbox",
     "event_replay": "events.replay",
+    "event_retry": "events.retry",
+    "event_subscribe": "events.subscribe",
+    "event_subscription_list": "events.subscription.list",
+    "events_outbox": "events.outbox",
+    "events_subscribe": "events.subscribe",
+    "events_subscription_list": "events.subscription.list",
+    "continuation_resume": "continuation.resume",
     "freeze_set": "activity.freeze_state",
     "lease_acquire": "orchestration.lease.acquire",
     "lease_release": "orchestration.lease.release",
@@ -108,6 +119,7 @@ class AdaptiveService:
             "activity.freeze_snapshot": self.activity_freeze,
             "activity.freeze_state": self.freeze_set,
             "activity.snapshot": self.activity_snapshot,
+            "automation.update": self.automation_update,
             "context.bounded_read": self.context_bounded_read,
             "context.code_search": self.context_code_search,
             "context.evidence": self.context_evidence,
@@ -116,9 +128,16 @@ class AdaptiveService:
             "context.repository_map": self.context_repository_map,
             "context.repo_map": self.context_repo_map,
             "context.search": self.context_code_search,
+            "continuation.resume": self.continuation_resume,
+            "events.ack": self.events_ack,
             "events.append": self.events_append,
+            "events.dlq": self.events_dlq,
             "events.list": self.events_list,
+            "events.outbox": self.events_outbox,
             "events.replay": self.events_replay,
+            "events.retry": self.events_retry,
+            "events.subscribe": self.events_subscribe,
+            "events.subscription.list": self.events_subscription_list,
             "memory_conflict.add": self.memory_conflict_add,
             "memory_conflict.list": self.memory_conflicts_list,
             "memory_conflict.resolve": self.memory_conflict_resolve,
@@ -171,6 +190,8 @@ class AdaptiveService:
             "prepared_actions": self._prepared_actions(),
             "memory_conflicts": self._conflicts(),
             "events": self.events_list({"limit": 20}, {}).get("events", []),
+            "event_outbox": self._outbox_items(limit=20),
+            "event_subscriptions": self._event_subscriptions(),
         }
 
     def onboarding_schema(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -325,6 +346,9 @@ class AdaptiveService:
                 "open": len([item for item in actions if item.get("status") in {"prepared", "needs_review"}]),
             },
             "events": events,
+            "event_delivery_summary": self._event_delivery_summary(events),
+            "event_outbox": self._outbox_items(limit=20),
+            "event_subscriptions": self._event_subscriptions(),
             "memory_conflicts": conflicts,
             "memory_conflict_summary": {
                 "total": len(conflicts),
@@ -371,6 +395,16 @@ class AdaptiveService:
         self._append_event("adaptive.activity.freeze", {"freeze_id": freeze["freeze_id"], "reason": reason})
         return freeze
 
+    def automation_update(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        self._ensure_not_frozen("automation.update")
+        automation_id = str(args.get("automation_id") or args.get("automationId") or args.get("id") or "").strip()
+        if not automation_id:
+            raise AdaptiveError("INVALID_INPUT", "automation_id is required")
+        patch = args.get("patch") if isinstance(args.get("patch"), dict) else {}
+        automation = self._apply_automation_patch(automation_id, patch)
+        return {"profile_id": self.profile_id, "automation": automation}
+
     # Context
 
     def context_repo_map(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -381,17 +415,9 @@ class AdaptiveService:
         entries: list[dict[str, Any]] = []
         if start.is_file():
             return {"workspace_root": str(root), "entries": [_file_entry(root, start)], "truncated": False}
-        base_depth = len(start.relative_to(root).parts)
-        for path in start.rglob("*"):
+        for path in _bounded_walk(root, start, max_depth=max_depth, max_entries=max_entries):
             if len(entries) >= max_entries:
                 break
-            if _should_skip(path) or path_is_restricted(root, path):
-                if path.is_dir():
-                    continue
-                continue
-            depth = len(path.relative_to(root).parts) - base_depth
-            if depth > max_depth:
-                continue
             entries.append(_file_entry(root, path))
         return {"workspace_root": str(root), "base": _relative(root, start), "entries": entries, "truncated": len(entries) >= max_entries}
 
@@ -503,7 +529,8 @@ class AdaptiveService:
         max_results = coerce_int(args.get("max_results") or args.get("max_matches"), 50, minimum=1, maximum=200)
         max_file_bytes = coerce_int(args.get("max_file_bytes"), 1000000, minimum=1024, maximum=5000000)
         matcher = _compile_matcher(query, regex=regex, case_sensitive=case_sensitive)
-        paths = [start] if start.is_file() else start.rglob("*")
+        max_files = coerce_int(args.get("max_files"), 500, minimum=1, maximum=2000)
+        paths = [start] if start.is_file() else _bounded_walk(root, start, max_depth=8, max_entries=max_files)
         results: list[dict[str, Any]] = []
         searched_files = 0
         for path in paths:
@@ -643,6 +670,7 @@ class AdaptiveService:
         events = self.store.read_jsonl("events/events.jsonl", limit=limit if not event_type else None)
         if event_type:
             events = [event for event in events if event.get("event_type") == event_type][-limit:]
+        events = self._overlay_events(events)
         return {"profile_id": self.profile_id, "events": events}
 
     def events_replay(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
@@ -656,6 +684,7 @@ class AdaptiveService:
                     events = events[index + 1 :]
                     break
         events = events[:limit]
+        events = self._overlay_events(events)
         return {
             "profile_id": self.profile_id,
             "events": events,
@@ -667,6 +696,285 @@ class AdaptiveService:
                 for event in events
                 if isinstance(event.get("continuation"), dict)
             ],
+        }
+
+    def events_ack(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        event_id = self._event_id_from(args)
+        event = self._find_event(event_id)
+        subscriber_id = str(args.get("subscriber_id") or args.get("consumer_id") or args.get("subscriber") or "").strip()
+        acknowledged_at = now_iso()
+
+        def update(state: Any) -> dict[str, Any]:
+            deliveries = self._deliveries_from_state(state)
+            current = dict(deliveries.get(event_id) or {})
+            current.update(
+                {
+                    "ack_state": "acked",
+                    "delivery_status": "delivered",
+                    "acked_at": acknowledged_at,
+                    "updated_at": acknowledged_at,
+                }
+            )
+            if subscriber_id:
+                current["acknowledged_by"] = subscriber_id
+            deliveries[event_id] = current
+            return {"version": 1, "deliveries": deliveries}
+
+        self.store.update_json("events/state.json", {"version": 1, "deliveries": {}}, update)
+        self._append_event("adaptive.events.ack", {"event_id": event_id, "subscriber_id": subscriber_id})
+        return {"profile_id": self.profile_id, "acked": True, "event": self._overlay_event(event)}
+
+    def events_retry(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        event_id = str(args.get("event_id") or args.get("id") or "").strip()
+        outbox_id = str(args.get("outbox_id") or "").strip()
+        if not event_id and outbox_id:
+            matched = self._event_for_outbox(outbox_id)
+            event_id = str(matched.get("event_id") or "") if matched else ""
+        if not event_id and not outbox_id:
+            raise AdaptiveError("INVALID_INPUT", "event_id or outbox_id is required")
+
+        event = self._find_event(event_id) if event_id else None
+        delay = coerce_int(args.get("delay_seconds"), 0, minimum=0, maximum=86400)
+        retried_at = now_iso()
+        next_attempt_at = now_seconds() + delay if delay else None
+        delivery_state: dict[str, Any] = {}
+
+        if event_id:
+            def update_event(state: Any) -> dict[str, Any]:
+                nonlocal delivery_state
+                deliveries = self._deliveries_from_state(state)
+                current = dict(deliveries.get(event_id) or {})
+                retry_count = int(current.get("retry_count") or 0) + 1
+                current.update(
+                    {
+                        "ack_state": "pending",
+                        "delivery_status": "retry_pending",
+                        "retry_count": retry_count,
+                        "last_retry_at": retried_at,
+                        "updated_at": retried_at,
+                    }
+                )
+                if next_attempt_at is not None:
+                    current["next_attempt_at"] = next_attempt_at
+                current.pop("dlq_reason", None)
+                deliveries[event_id] = current
+                delivery_state = current
+                return {"version": 1, "deliveries": deliveries}
+
+            self.store.update_json("events/state.json", {"version": 1, "deliveries": {}}, update_event)
+
+        outbox_item = self._retry_outbox(outbox_id) if outbox_id else None
+        self._append_event(
+            "adaptive.events.retry",
+            {"event_id": event_id or None, "outbox_id": outbox_id or None, "delay_seconds": delay},
+        )
+        return {
+            "profile_id": self.profile_id,
+            "retry_scheduled": True,
+            "event": self._overlay_event(event) if event else None,
+            "delivery": delivery_state,
+            "outbox_item": outbox_item,
+        }
+
+    def events_dlq(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        event_id = self._event_id_from(args)
+        event = self._find_event(event_id)
+        outbox_id = str(args.get("outbox_id") or "").strip()
+        reason = str(args.get("reason") or args.get("dlq_reason") or "delivery failed").strip() or "delivery failed"
+        dead_lettered_at = now_iso()
+
+        def update_event(state: Any) -> dict[str, Any]:
+            deliveries = self._deliveries_from_state(state)
+            current = dict(deliveries.get(event_id) or {})
+            current.update(
+                {
+                    "ack_state": "failed",
+                    "delivery_status": "dead_letter",
+                    "dlq_reason": reason,
+                    "dead_lettered_at": dead_lettered_at,
+                    "updated_at": dead_lettered_at,
+                }
+            )
+            deliveries[event_id] = current
+            return {"version": 1, "deliveries": deliveries}
+
+        self.store.update_json("events/state.json", {"version": 1, "deliveries": {}}, update_event)
+
+        dlq_entry = {
+            "dlq_id": str(uuid.uuid4()),
+            "profile_id": self.profile_id,
+            "event_id": event_id,
+            "event": self._overlay_event(event),
+            "reason": reason,
+            "created_at": dead_lettered_at,
+        }
+
+        def update_dlq(state: Any) -> dict[str, Any]:
+            entries = state.get("entries") if isinstance(state, dict) and isinstance(state.get("entries"), list) else []
+            if not any(item.get("event_id") == event_id for item in entries):
+                entries.append(dlq_entry)
+            return {"version": 1, "entries": entries[-1000:]}
+
+        self.store.update_json("events/dlq.json", {"version": 1, "entries": []}, update_dlq)
+        outbox_item = self._dead_letter_outbox(outbox_id, reason) if outbox_id else None
+        self._append_event("adaptive.events.dlq", {"event_id": event_id, "outbox_id": outbox_id or None, "reason": reason})
+        return {
+            "profile_id": self.profile_id,
+            "dead_lettered": True,
+            "event": self._overlay_event(event),
+            "dlq_entry": dlq_entry,
+            "outbox_item": outbox_item,
+        }
+
+    def events_subscribe(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        subscriber_id = str(args.get("subscriber_id") or args.get("consumer_id") or args.get("subscriber") or "").strip()
+        if not subscriber_id:
+            raise AdaptiveError("INVALID_INPUT", "subscriber_id is required")
+        event_type = str(args.get("event_type") or args.get("type") or "*").strip() or "*"
+        subscription_id = str(args.get("subscription_id") or args.get("id") or "").strip()
+        cursor = str(args.get("cursor") or args.get("after_event_id") or "").strip() or None
+        ack_required = bool(args.get("ack_required", True))
+        now = now_iso()
+        response: dict[str, Any] = {}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal response
+            subscriptions = (
+                state.get("subscriptions")
+                if isinstance(state, dict) and isinstance(state.get("subscriptions"), list)
+                else []
+            )
+            subscription = next(
+                (
+                    item
+                    for item in subscriptions
+                    if (subscription_id and item.get("subscription_id") == subscription_id)
+                    or (
+                        item.get("subscriber_id") == subscriber_id
+                        and item.get("event_type") == event_type
+                    )
+                ),
+                None,
+            )
+            if subscription is None:
+                subscription = {
+                    "subscription_id": subscription_id or str(uuid.uuid4()),
+                    "profile_id": self.profile_id,
+                    "subscriber_id": subscriber_id,
+                    "event_type": event_type,
+                    "created_at": now,
+                }
+                subscriptions.append(subscription)
+            subscription.update(
+                {
+                    "cursor": cursor,
+                    "ack_required": ack_required,
+                    "status": str(args.get("status") or subscription.get("status") or "active"),
+                    "updated_at": now,
+                }
+            )
+            response = dict(subscription)
+            return {"version": 1, "subscriptions": subscriptions[-500:]}
+
+        self.store.update_json("events/subscriptions.json", {"version": 1, "subscriptions": []}, update)
+        self._append_event(
+            "adaptive.events.subscribe",
+            {"subscription_id": response.get("subscription_id"), "subscriber_id": subscriber_id, "event_type": event_type},
+        )
+        return {"profile_id": self.profile_id, "subscription": response}
+
+    def events_subscription_list(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        subscriber_id = str(args.get("subscriber_id") or args.get("consumer_id") or "").strip()
+        event_type = str(args.get("event_type") or args.get("type") or "").strip()
+        subscriptions = self._event_subscriptions()
+        if subscriber_id:
+            subscriptions = [item for item in subscriptions if item.get("subscriber_id") == subscriber_id]
+        if event_type:
+            subscriptions = [item for item in subscriptions if item.get("event_type") == event_type]
+        return {"profile_id": self.profile_id, "subscriptions": subscriptions}
+
+    def events_outbox(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        limit = coerce_int(args.get("limit"), 100, minimum=1, maximum=500)
+        status = str(args.get("status") or "").strip()
+        items = self._outbox_items(limit=limit, status=status or None)
+        return {"profile_id": self.profile_id, "outbox": items}
+
+    def continuation_resume(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
+        del ctx
+        self._ensure_not_frozen("continuation.resume")
+        continuation = args.get("continuation") if isinstance(args.get("continuation"), dict) else {}
+        event_id = str(args.get("event_id") or args.get("id") or "").strip()
+        if not event_id:
+            raise AdaptiveError("INVALID_INPUT", "event_id is required for continuation resume")
+        event = self._find_event(event_id)
+        event_continuation = event.get("continuation") if isinstance(event.get("continuation"), dict) else {}
+        if not event_continuation:
+            raise AdaptiveError("INVALID_INPUT", "event does not contain a resumable continuation")
+        if continuation and continuation != event_continuation:
+            raise AdaptiveError("INVALID_INPUT", "continuation payload does not match event")
+        continuation = event_continuation
+        outbox_id = str(continuation.get("outbox_id") or "").strip()
+        requested_outbox_id = str(args.get("outbox_id") or "").strip()
+        if requested_outbox_id and requested_outbox_id != outbox_id:
+            raise AdaptiveError("INVALID_INPUT", "outbox_id does not match event continuation")
+        resume_key = str(
+            args.get("idempotency_key")
+            or args.get("resume_key")
+            or continuation.get("resume_key")
+            or event_id
+            or ""
+        ).strip()
+
+        result = {
+            "resumed": True,
+            "event_id": event_id,
+            "outbox_id": outbox_id or None,
+            "continuation": redact(continuation),
+        }
+        response: dict[str, Any] = {}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal response
+            resumes = state.get("resumes") if isinstance(state, dict) and isinstance(state.get("resumes"), list) else []
+            existing = next((item for item in resumes if item.get("resume_key") == resume_key), None)
+            if existing is not None:
+                response = {"entry": dict(existing), "duplicate": True}
+                return {"version": 1, "resumes": resumes[-1000:]}
+            entry = {
+                "resume_id": str(uuid.uuid4()),
+                "profile_id": self.profile_id,
+                "resume_key": resume_key,
+                "status": "completed",
+                "result": result,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            resumes.append(entry)
+            response = {"entry": entry, "duplicate": False}
+            return {"version": 1, "resumes": resumes[-1000:]}
+
+        self.store.update_json("events/continuations.json", {"version": 1, "resumes": []}, update)
+        duplicate = bool(response.get("duplicate"))
+        outbox_item = None
+        if not duplicate:
+            if outbox_id:
+                outbox_item = self._complete_outbox(outbox_id)
+            self._mark_event_resumed(event_id)
+            self._append_event("adaptive.continuation.resume", {"resume_key": resume_key, "event_id": event_id, "outbox_id": outbox_id or None})
+        elif outbox_id:
+            outbox_item = self._outbox_item(outbox_id)
+        return {
+            "profile_id": self.profile_id,
+            "resumed": True,
+            "duplicate": duplicate,
+            "resume": response.get("entry"),
+            "outbox_item": outbox_item,
         }
 
     # Conflicts
@@ -933,6 +1241,163 @@ class AdaptiveService:
 
         self.store.update_json("events/outbox.json", {"version": 1, "items": []}, update)
         return item
+
+    def _outbox_items(self, *, limit: int = 100, status: str | None = None) -> list[dict[str, Any]]:
+        state = self.store.read_json("events/outbox.json", {"version": 1, "items": []})
+        items = state.get("items") if isinstance(state, dict) else []
+        if not isinstance(items, list):
+            return []
+        if status:
+            items = [item for item in items if isinstance(item, dict) and item.get("status") == status]
+        return [item for item in items if isinstance(item, dict)][-limit:]
+
+    def _outbox_item(self, outbox_id: str) -> dict[str, Any] | None:
+        for item in self._outbox_items(limit=1000):
+            if item.get("outbox_id") == outbox_id:
+                return item
+        return None
+
+    def _update_outbox_item(self, outbox_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        if not outbox_id:
+            raise AdaptiveError("INVALID_INPUT", "outbox_id is required")
+        result: dict[str, Any] = {}
+
+        def update(state: Any) -> dict[str, Any]:
+            nonlocal result
+            items = state.get("items") if isinstance(state, dict) and isinstance(state.get("items"), list) else []
+            for item in items:
+                if item.get("outbox_id") != outbox_id:
+                    continue
+                item.update(redact(updates))
+                item["updated_at"] = now_iso()
+                result = dict(item)
+                return {"version": 1, "items": items[-1000:]}
+            raise AdaptiveError("NOT_FOUND", "outbox item not found")
+
+        self.store.update_json("events/outbox.json", {"version": 1, "items": []}, update)
+        return result
+
+    def _retry_outbox(self, outbox_id: str) -> dict[str, Any]:
+        existing = self._outbox_item(outbox_id)
+        attempts = int((existing or {}).get("attempts") or 0) + 1
+        return self._update_outbox_item(
+            outbox_id,
+            {
+                "status": "pending",
+                "attempts": attempts,
+                "last_error": None,
+                "dead_letter_reason": None,
+            },
+        )
+
+    def _dead_letter_outbox(self, outbox_id: str, reason: str) -> dict[str, Any]:
+        return self._update_outbox_item(
+            outbox_id,
+            {
+                "status": "dead_letter",
+                "dead_letter_reason": reason,
+                "last_error": reason,
+            },
+        )
+
+    def _complete_outbox(self, outbox_id: str) -> dict[str, Any]:
+        return self._update_outbox_item(
+            outbox_id,
+            {
+                "status": "completed",
+                "completed_at": now_iso(),
+            },
+        )
+
+    def _deliveries_from_state(self, state: Any) -> dict[str, dict[str, Any]]:
+        raw = state.get("deliveries") if isinstance(state, dict) and isinstance(state.get("deliveries"), dict) else {}
+        return {str(key): dict(value) for key, value in raw.items() if isinstance(value, dict)}
+
+    def _delivery_state(self) -> dict[str, dict[str, Any]]:
+        state = self.store.read_json("events/state.json", {"version": 1, "deliveries": {}})
+        return self._deliveries_from_state(state)
+
+    def _overlay_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        deliveries = self._delivery_state()
+        return [self._overlay_event(event, deliveries=deliveries) for event in events]
+
+    def _overlay_event(
+        self,
+        event: dict[str, Any] | None,
+        *,
+        deliveries: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        if not isinstance(event, dict):
+            return {}
+        result = dict(event)
+        delivery = (deliveries or self._delivery_state()).get(str(result.get("event_id") or ""))
+        if delivery:
+            result.update(delivery)
+        return result
+
+    def _event_id_from(self, args: dict[str, Any]) -> str:
+        event_id = str(args.get("event_id") or args.get("id") or "").strip()
+        if not event_id:
+            raise AdaptiveError("INVALID_INPUT", "event_id is required")
+        return event_id
+
+    def _find_event(self, event_id: str) -> dict[str, Any]:
+        if not event_id:
+            raise AdaptiveError("INVALID_INPUT", "event_id is required")
+        for event in reversed(self.store.read_jsonl("events/events.jsonl")):
+            if event.get("event_id") == event_id or event.get("id") == event_id:
+                return event
+        raise AdaptiveError("NOT_FOUND", "event not found")
+
+    def _event_for_outbox(self, outbox_id: str) -> dict[str, Any] | None:
+        if not outbox_id:
+            return None
+        for event in reversed(self.store.read_jsonl("events/events.jsonl")):
+            continuation = event.get("continuation")
+            if isinstance(continuation, dict) and continuation.get("outbox_id") == outbox_id:
+                return event
+        return None
+
+    def _mark_event_resumed(self, event_id: str) -> None:
+        resumed_at = now_iso()
+
+        def update(state: Any) -> dict[str, Any]:
+            deliveries = self._deliveries_from_state(state)
+            current = dict(deliveries.get(event_id) or {})
+            current.update(
+                {
+                    "ack_state": "acked",
+                    "delivery_status": "resumed",
+                    "resumed_at": resumed_at,
+                    "updated_at": resumed_at,
+                }
+            )
+            deliveries[event_id] = current
+            return {"version": 1, "deliveries": deliveries}
+
+        self.store.update_json("events/state.json", {"version": 1, "deliveries": {}}, update)
+
+    def _event_subscriptions(self) -> list[dict[str, Any]]:
+        state = self.store.read_json("events/subscriptions.json", {"version": 1, "subscriptions": []})
+        subscriptions = state.get("subscriptions") if isinstance(state, dict) else []
+        return [item for item in subscriptions if isinstance(item, dict)] if isinstance(subscriptions, list) else []
+
+    def _event_delivery_summary(self, events: list[dict[str, Any]]) -> dict[str, int]:
+        summary = {"pending": 0, "acked": 0, "retry_pending": 0, "dead_letter": 0, "resumed": 0}
+        for event in events:
+            ack_state = str(event.get("ack_state") or "pending")
+            delivery_status = str(event.get("delivery_status") or "recorded")
+            if delivery_status == "resumed":
+                summary["resumed"] += 1
+            elif ack_state == "acked":
+                summary["acked"] += 1
+            elif delivery_status == "retry_pending":
+                summary["retry_pending"] += 1
+            elif delivery_status == "dead_letter":
+                summary["dead_letter"] += 1
+            else:
+                summary["pending"] += 1
+        return summary
 
     def _automations(self) -> list[dict[str, Any]]:
         state = self.store.read_json("automation/state.json", {"version": 1, "automations": []})
@@ -1392,6 +1857,32 @@ class AdaptiveRuntimeService(AdaptiveService):
 
 def _relative(root: Path, path: Path) -> str:
     return str(path.resolve().relative_to(root.resolve())).replace("\\", "/")
+
+
+def _bounded_walk(root: Path, start: Path, *, max_depth: int, max_entries: int) -> list[Path]:
+    if start.is_file():
+        return [start]
+    root = root.resolve()
+    start = start.resolve()
+    entries: list[Path] = []
+    stack: list[tuple[Path, int]] = [(start, 0)]
+    while stack and len(entries) < max_entries:
+        current, depth = stack.pop()
+        if depth >= max_depth:
+            continue
+        try:
+            children = sorted(current.iterdir(), key=lambda item: item.name.lower(), reverse=True)
+        except OSError:
+            continue
+        for child in children:
+            if _should_skip(child) or path_is_restricted(root, child):
+                continue
+            entries.append(child)
+            if len(entries) >= max_entries:
+                break
+            if child.is_dir():
+                stack.append((child, depth + 1))
+    return entries
 
 
 def _file_entry(root: Path, path: Path) -> dict[str, Any]:

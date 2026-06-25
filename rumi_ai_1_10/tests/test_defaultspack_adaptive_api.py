@@ -269,6 +269,17 @@ def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch
     assert secret_path["status"] == "error"
     assert secret_path["code"] == "PATH_RESTRICTED"
 
+    def fail_rglob(self: Path, pattern: str):
+        raise AssertionError(f"unbounded rglob must not be used: {self} {pattern}")
+
+    monkeypatch.setattr(Path, "rglob", fail_rglob)
+    bounded_map = dispatch("context_repository_map", {"workspace_id": "ws1", "max_entries": 1}, {})
+    assert bounded_map["status"] == "ok"
+    assert bounded_map["data"]["truncated"] is True
+    bounded_search = dispatch("context_code_search", {"workspace_id": "ws1", "query": "target", "max_matches": 1}, {})
+    assert bounded_search["status"] == "ok"
+    assert bounded_search["data"]["count"] == 1
+
 
 def test_prepared_actions_redact_secret_and_lease_roundtrip(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
@@ -333,6 +344,20 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     automation = next(item for item in activity["data"]["automations"] if item["id"] == "automation_daily_context")
     assert automation["enabled"] is True
 
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    updated = run_defaultspack_function(
+        "adaptive_automation_update",
+        {
+            "profile_id": "coding",
+            "automation_id": "automation_daily_context",
+            "patch": {"enabled": False},
+        },
+        {},
+    )
+    assert updated["status"] == "ok"
+    assert updated["data"]["automation"]["enabled"] is False
+
     store = AdaptiveStore("coding")
     store.write_json(
         "skills/candidates.json",
@@ -373,6 +398,96 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     replay = dispatch("event_replay", {"profile_id": "coding", "limit": 10}, {})
     assert replay["status"] == "ok"
     assert replay["data"]["next_cursor"]
+
+
+def test_adaptive_event_delivery_outbox_subscription_and_continuation_lifecycle(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from domain.adaptive.service import dispatch
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    subscription = dispatch(
+        "event_subscribe",
+        {"profile_id": "coding", "subscriber_id": "worker-a", "event_type": "adaptive.test"},
+        {},
+    )
+    assert subscription["status"] == "ok"
+    assert subscription["data"]["subscription"]["status"] == "active"
+    subscriptions = dispatch("event_subscription_list", {"profile_id": "coding", "subscriber_id": "worker-a"}, {})
+    assert subscriptions["status"] == "ok"
+    assert subscriptions["data"]["subscriptions"][0]["subscriber_id"] == "worker-a"
+
+    event = dispatch(
+        "event_append",
+        {"profile_id": "coding", "event_type": "adaptive.test", "payload": {"ok": True}},
+        {},
+    )
+    assert event["status"] == "ok"
+    event_id = event["data"]["event"]["event_id"]
+    acked = run_defaultspack_function(
+        "adaptive_event_ack",
+        {"profile_id": "coding", "event_id": event_id, "subscriber_id": "worker-a"},
+        {},
+    )
+    assert acked["status"] == "ok"
+    listed = dispatch("event_list", {"profile_id": "coding", "event_type": "adaptive.test"}, {})
+    delivered = next(item for item in listed["data"]["events"] if item["event_id"] == event_id)
+    assert delivered["ack_state"] == "acked"
+    assert delivered["delivery_status"] == "delivered"
+
+    retry = dispatch("event_retry", {"profile_id": "coding", "event_id": event_id}, {})
+    assert retry["status"] == "ok"
+    assert retry["data"]["event"]["delivery_status"] == "retry_pending"
+    dead_letter = dispatch("event_dlq", {"profile_id": "coding", "event_id": event_id, "reason": "test failure"}, {})
+    assert dead_letter["status"] == "ok"
+    assert dead_letter["data"]["event"]["delivery_status"] == "dead_letter"
+
+    prepared = dispatch(
+        "prepared_action_prepare",
+        {"profile_id": "coding", "action_type": "external.audit", "arguments": {"target": "local"}},
+        {},
+    )
+    assert prepared["status"] == "ok"
+    committed = dispatch(
+        "prepared_action_commit",
+        {"profile_id": "coding", "action_id": prepared["data"]["prepared_action"]["action_id"]},
+        {},
+    )
+    assert committed["status"] == "ok"
+    assert committed["data"]["execution_status"] == "queued"
+    outbox_id = committed["data"]["outbox_id"]
+    outbox = dispatch("event_outbox", {"profile_id": "coding"}, {})
+    assert outbox["status"] == "ok"
+    assert any(item["outbox_id"] == outbox_id and item["status"] == "pending" for item in outbox["data"]["outbox"])
+
+    replay = dispatch("event_replay", {"profile_id": "coding", "limit": 20}, {})
+    continuation_event = next(
+        item
+        for item in replay["data"]["events"]
+        if isinstance(item.get("continuation"), dict) and item["continuation"].get("outbox_id") == outbox_id
+    )
+    raw_resume = dispatch("continuation_resume", {"profile_id": "coding", "outbox_id": outbox_id}, {})
+    assert raw_resume["status"] == "error"
+    assert raw_resume["code"] == "INVALID_INPUT"
+
+    mismatched_resume = dispatch(
+        "continuation_resume",
+        {"profile_id": "coding", "event_id": continuation_event["event_id"], "outbox_id": "other-outbox"},
+        {},
+    )
+    assert mismatched_resume["status"] == "error"
+    assert mismatched_resume["code"] == "INVALID_INPUT"
+
+    resumed = dispatch("continuation_resume", {"profile_id": "coding", "event_id": continuation_event["event_id"]}, {})
+    assert resumed["status"] == "ok"
+    assert resumed["data"]["outbox_item"]["status"] == "completed"
+    duplicate = dispatch("continuation_resume", {"profile_id": "coding", "event_id": continuation_event["event_id"]}, {})
+    assert duplicate["status"] == "ok"
+    assert duplicate["data"]["duplicate"] is True
+    activity = dispatch("activity_snapshot", {"profile_id": "coding"}, {})
+    assert activity["status"] == "ok"
+    assert activity["data"]["event_delivery_summary"]["resumed"] == 1
 
 
 def test_adaptive_public_route_uses_function_id_operation_not_client_operation(

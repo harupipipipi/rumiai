@@ -150,6 +150,22 @@ def test_adaptive_function_routes_join_canonical_transport_registry():
         canonical[("POST", "/api/orchestration/leases/{id}/release")].function_name
         == "defaultspack:adaptive_lease_release"
     )
+    assert (
+        canonical[("PUT", "/api/automations/{id}")].path_inject
+        == {"id": "automation_id"}
+    )
+    assert (
+        canonical[("POST", "/api/events/{id}/ack")].path_inject
+        == {"id": "event_id"}
+    )
+    assert (
+        canonical[("GET", "/api/events/outbox")].function_name
+        == "defaultspack:adaptive_event_outbox"
+    )
+    assert (
+        canonical[("POST", "/api/continuations/resume")].function_id
+        == "adaptive_continuation_resume"
+    )
 
 
 def test_inactive_template_function_routes_are_not_registered(tmp_path):
