@@ -756,6 +756,8 @@ export type MobilePairingStatus = {
   expires_at?: number;
   approved_device_id?: string;
   device_token?: string;
+  approval_token?: string;
+  approval_scopes?: string[];
 };
 
 export type CredentialTransferPayload = {
@@ -3123,7 +3125,7 @@ export const api = {
   },
 
   approveMobilePairing(pairingId: string) {
-    return request<{ ok: boolean; device_token?: string; device?: MobileDevice }>(
+    return request<{ ok: boolean; device_token?: string; approval_token?: string; approval_scopes?: string[]; device?: MobileDevice }>(
       `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
       { method: "POST", body: JSON.stringify({}) },
     );

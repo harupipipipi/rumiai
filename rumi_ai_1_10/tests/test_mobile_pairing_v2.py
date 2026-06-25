@@ -41,25 +41,35 @@ def test_pairing_v2_claim_approve_flow():
 
     # Issue device token
     ds = DeviceStore(tmp)
-    device, token = ds.issue_token(
+    device, token, approval_token = ds.issue_tokens(
         approve["device_id"],
         label=approve["device_label"],
         public_key=approve["device_public_key"],
-        scopes=approve["scopes"],
+        scopes=[*approve["scopes"], "tools.approve"],
         pairing_id=session.pairing_id,
     )
     assert token.startswith("dtk_")
+    assert approval_token.startswith("dtk_")
     assert device.confirmation_code  # visual code like "🟢・58"
+    assert "tools.approve" not in device.scopes
+    assert device.approval_scopes == ["tools.approve"]
 
     # Verify token
     verified = ds.verify_token(token)
     assert verified is not None
     assert verified.device_id == "iphone-1"
+    assert "tools.approve" not in verified.scopes
+
+    verified_approval = ds.verify_token(approval_token)
+    assert verified_approval is not None
+    assert verified_approval.device_id == "iphone-1"
+    assert verified_approval.scopes == ["tools.approve"]
 
     # Revoke
     revoked = ds.revoke_device("iphone-1")
     assert revoked.status == "revoked"
     assert ds.verify_token(token) is None
+    assert ds.verify_token(approval_token) is None
 
 
 def test_pairing_v2_reject():
@@ -113,13 +123,30 @@ def test_device_token_is_scoped():
 
     tmp = tempfile.mkdtemp()
     ds = DeviceStore(tmp)
-    device, token = ds.issue_token(
+    device, token, approval_token = ds.issue_tokens(
         "d1",
-        scopes=["chat.read", "tools.observe"],
+        scopes=["chat.read", "tools.observe", "tools.approve"],
     )
     assert "chat.read" in device.scopes
     assert "chat.write" not in device.scopes
+    assert "tools.approve" not in device.scopes
+    assert device.approval_scopes == ["tools.approve"]
     assert "credentials.request" not in device.scopes
+    assert ds.verify_token(token).scopes == ["chat.read", "tools.observe"]
+    assert ds.verify_token(approval_token).scopes == ["tools.approve"]
+
+
+def test_legacy_device_record_does_not_keep_approval_scope_on_normal_token():
+    from domain.p2p.device_store import DeviceRecord
+
+    record = DeviceRecord.from_dict({
+        "device_id": "legacy-mobile",
+        "token_hash": "hash",
+        "scopes": ["chat.read", "tools.approve"],
+    })
+
+    assert record.scopes == ["chat.read"]
+    assert record.approval_scopes == []
 
 
 def test_pairing_claim_requires_matching_code():
@@ -186,7 +213,67 @@ def test_mobile_pairing_status_requires_code_and_device_for_token():
     }, None)
     assert with_code["status"] == "ok"
     assert with_code["data"]["device_token"].startswith("dtk_")
+    assert with_code["data"]["approval_token"] == ""
+    assert with_code["data"]["approval_scopes"] == []
     assert with_code["data"]["scopes"] == ["chat.read", "chat.write"]
+
+
+def test_mobile_pairing_status_splits_normal_and_approval_tokens():
+    from domain.p2p.device_store import DeviceStore
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(
+        capabilities=["chat.read", "chat.write", "tools.observe", "tools.approve"],
+    )
+
+    claim = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "device_label": "iPhone",
+        "requested_capabilities": [
+            "chat.read",
+            "chat.write",
+            "tools.observe",
+            "tools.approve",
+        ],
+    }, None)
+    assert claim["status"] == "ok"
+
+    approved = run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+    assert approved["status"] == "ok"
+
+    status = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+    }, None)
+
+    assert status["status"] == "ok"
+    data = status["data"]
+    assert data["device_token"].startswith("dtk_")
+    assert data["approval_token"].startswith("dtk_")
+    assert data["device_token"] != data["approval_token"]
+    assert "tools.approve" not in data["scopes"]
+    assert data["approval_scopes"] == ["tools.approve"]
+
+    store = DeviceStore(tmp)
+    normal = store.verify_token(data["device_token"])
+    approver = store.verify_token(data["approval_token"])
+    assert normal is not None
+    assert "tools.approve" not in normal.scopes
+    assert approver is not None
+    assert approver.scopes == ["tools.approve"]
 
 
 def test_mobile_pairing_status_returns_pc_label(monkeypatch):

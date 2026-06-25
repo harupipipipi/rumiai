@@ -29,8 +29,10 @@ class _FakeSecureStorage implements SecureKeyValueStorage {
 const _validDevice = PairedDevice(
   deviceId: 'mobile-1',
   deviceToken: 'dtk-test',
+  approvalToken: 'dtk-approve',
   label: 'iPhone',
   scopes: ['chat.read', 'chat.write'],
+  approvalScopes: ['tools.approve'],
   pcBaseUrl: 'http://192.168.11.25:8765',
   pcLabel: 'Mac',
   pairingId: 'pair-1',
@@ -104,5 +106,33 @@ void main() {
 
     expect(await store.loadPairedDevice(), isNull);
     expect(await store.loadPairedDevices(), isEmpty);
+  });
+
+  test('paired device keeps normal and approval tokens separate', () {
+    expect(_validDevice.toPcConnection().token, 'dtk-test');
+    expect(_validDevice.toPcConnection().approvalToken, 'dtk-approve');
+    expect(_validDevice.canApprovePcTools, isTrue);
+
+    final json = _validDevice.toJson();
+    final reloaded = PairedDevice.fromJson(json);
+    expect(reloaded.deviceToken, 'dtk-test');
+    expect(reloaded.approvalToken, 'dtk-approve');
+    expect(reloaded.scopes, ['chat.read', 'chat.write']);
+    expect(reloaded.approvalScopes, ['tools.approve']);
+    expect(reloaded.canApprovePcTools, isTrue);
+  });
+
+  test('tools.approve in normal scopes does not enable approvals', () {
+    const device = PairedDevice(
+      deviceId: 'mobile-3',
+      deviceToken: 'dtk-test',
+      label: 'iPhone',
+      scopes: ['chat.read', 'tools.approve'],
+      pcBaseUrl: 'http://192.168.11.25:8765',
+      pcLabel: 'Mac',
+      pairingId: 'pair-3',
+    );
+
+    expect(device.canApprovePcTools, isFalse);
   });
 }

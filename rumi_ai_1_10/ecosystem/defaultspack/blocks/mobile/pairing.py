@@ -81,7 +81,7 @@ def approve(input_data, context=None):
 
     # Issue scoped device token
     device_store = DeviceStore(s.store_path)
-    device, token = device_store.issue_token(
+    device, token, approval_token = device_store.issue_tokens(
         result["device_id"],
         label=result.get("device_label") or "",
         public_key=result.get("device_public_key") or "",
@@ -92,6 +92,8 @@ def approve(input_data, context=None):
         "pairing": result["pairing"],
         "device": device.as_dict(),
         "device_token": token,  # plaintext — returned only once
+        "approval_token": approval_token,
+        "approval_scopes": list(device.approval_scopes),
     })
 
 
@@ -143,7 +145,7 @@ def status(input_data, context=None):
             ds = DeviceStore(s.store_path)
             device = ds.get_device(session.claimed_device_id)
             if device and device.active and device.pairing_id == pairing_id:
-                device, token = ds.issue_token(
+                device, token, approval_token = ds.issue_tokens(
                     session.claimed_device_id,
                     label=session.claimed_device_label,
                     public_key=session.claimed_device_public_key,
@@ -151,8 +153,10 @@ def status(input_data, context=None):
                     pairing_id=pairing_id,
                 )
                 result["device_token"] = token
+                result["approval_token"] = approval_token
                 result["device"] = device.as_dict()
                 result["scopes"] = list(device.scopes)
+                result["approval_scopes"] = list(device.approval_scopes)
                 result["confirmation_code"] = device.confirmation_code
                 result["pc_base_url"] = _detect_base_url(input_data, context)
                 result["pc_label"] = _pc_label()
