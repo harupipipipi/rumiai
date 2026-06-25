@@ -74,10 +74,13 @@ class PairingSession:
     claimed_device_id: str = ""
     claimed_device_label: str = ""
     claimed_device_public_key: str = ""
+    claimed_device_encryption_public_key: str = ""
     claimed_capabilities: list[str] = field(default_factory=list)
     claimed_at: int = 0
     token_pickup_secret_hash: str = ""
     token_pickup_consumed_at: int = 0
+    token_delivery_envelope: dict[str, Any] = field(default_factory=dict)
+    token_delivery_created_at: int = 0
     token_pickup_secret: str = field(default="", repr=False, compare=False)
 
     @classmethod
@@ -99,10 +102,15 @@ class PairingSession:
             claimed_device_id=str(value.get("claimed_device_id") or ""),
             claimed_device_label=str(value.get("claimed_device_label") or ""),
             claimed_device_public_key=str(value.get("claimed_device_public_key") or ""),
+            claimed_device_encryption_public_key=str(value.get("claimed_device_encryption_public_key") or ""),
             claimed_capabilities=_string_list(value.get("claimed_capabilities")),
             claimed_at=int(value.get("claimed_at") or 0),
             token_pickup_secret_hash=str(value.get("token_pickup_secret_hash") or ""),
             token_pickup_consumed_at=int(value.get("token_pickup_consumed_at") or 0),
+            token_delivery_envelope=dict(value.get("token_delivery_envelope") or {})
+            if isinstance(value.get("token_delivery_envelope"), dict)
+            else {},
+            token_delivery_created_at=int(value.get("token_delivery_created_at") or 0),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -127,11 +135,16 @@ class PairingSession:
             "requested_scopes": list(self.claimed_capabilities),
             "claimed_at": int(self.claimed_at),
             "token_pickup_consumed_at": int(self.token_pickup_consumed_at),
+            "token_delivery_ready": bool(self.token_delivery_envelope),
+            "token_delivery_created_at": int(self.token_delivery_created_at),
         }
 
     def to_storage_dict(self) -> dict[str, Any]:
         data = self.as_dict()
+        data["claimed_device_public_key"] = self.claimed_device_public_key
+        data["claimed_device_encryption_public_key"] = self.claimed_device_encryption_public_key
         data["token_pickup_secret_hash"] = self.token_pickup_secret_hash
+        data["token_delivery_envelope"] = dict(self.token_delivery_envelope)
         return data
 
     def expired(self, now: int | None = None) -> bool:
@@ -252,6 +265,7 @@ class PairingManager:
         device_id: str,
         device_label: str = "",
         device_public_key: str = "",
+        device_encryption_public_key: str = "",
         requested_capabilities: list[str] | None = None,
         now_ms: int | None = None,
     ) -> dict[str, Any]:
@@ -276,6 +290,7 @@ class PairingManager:
         session.claimed_device_id = str(device_id or "").strip()
         session.claimed_device_label = str(device_label or "").strip()
         session.claimed_device_public_key = str(device_public_key or "").strip()
+        session.claimed_device_encryption_public_key = str(device_encryption_public_key or "").strip()
         session.claimed_capabilities = _string_list(requested_capabilities) or session.capabilities
         session.claimed_at = now
         session.status = PAIRING_CLAIMED
@@ -325,10 +340,93 @@ class PairingManager:
             "device_id": session.claimed_device_id,
             "device_label": session.claimed_device_label,
             "device_public_key": session.claimed_device_public_key,
+            "device_encryption_public_key": session.claimed_device_encryption_public_key,
             "scopes": resolved_scopes,
         }
 
+    def store_token_delivery(
+        self,
+        pairing_id: str,
+        *,
+        envelope: dict[str, Any],
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        sessions = self._sessions()
+        session = sessions.get(str(pairing_id or "").strip())
+        if session is None:
+            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+        if session.status != PAIRING_APPROVED:
+            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
+        if not isinstance(envelope, dict) or not envelope:
+            return {"ok": False, "reason": "token delivery envelope is required", "code": "INVALID_INPUT"}
+        session.token_delivery_envelope = dict(envelope)
+        session.token_delivery_created_at = int(now_ms if now_ms is not None else _now_ms())
+        session.token_pickup_consumed_at = 0
+        self._replace(session)
+        return {"ok": True, "pairing": session.as_dict()}
+
+    def peek_token_delivery(
+        self,
+        pairing_id: str,
+        *,
+        pickup_secret: str,
+        device_id: str,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
+        if not checked.get("ok"):
+            return checked
+        session = checked["session"]
+        return {
+            "ok": True,
+            "pairing": session.as_dict(),
+            "device_id": session.claimed_device_id,
+            "device_label": session.claimed_device_label,
+            "device_public_key": session.claimed_device_public_key,
+            "device_encryption_public_key": session.claimed_device_encryption_public_key,
+            "scopes": list(session.capabilities),
+            "token_delivery_envelope": dict(session.token_delivery_envelope),
+        }
+
+    def ack_token_delivery(
+        self,
+        pairing_id: str,
+        *,
+        pickup_secret: str,
+        device_id: str,
+        delivery_id: str = "",
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
+        if not checked.get("ok"):
+            return checked
+        session = checked["session"]
+        expected_delivery_id = str(session.token_delivery_envelope.get("delivery_id") or "")
+        if str(delivery_id or "").strip() and not hmac.compare_digest(str(delivery_id).strip(), expected_delivery_id):
+            return {"ok": False, "reason": "delivery_id does not match", "code": "DELIVERY_ID_MISMATCH"}
+        session.token_pickup_consumed_at = int(now_ms if now_ms is not None else _now_ms())
+        self._replace(session)
+        return {
+            "ok": True,
+            "pairing": session.as_dict(),
+        }
+
     def consume_token_pickup(
+        self,
+        pairing_id: str,
+        *,
+        pickup_secret: str,
+        device_id: str,
+        now_ms: int | None = None,
+    ) -> dict[str, Any]:
+        return self.ack_token_delivery(
+            pairing_id,
+            pickup_secret=pickup_secret,
+            device_id=device_id,
+            now_ms=now_ms,
+        )
+
+    def _validate_token_pickup(
         self,
         pairing_id: str,
         *,
@@ -350,22 +448,15 @@ class PairingManager:
             return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
         if session.token_pickup_consumed_at:
             return {"ok": False, "reason": "token pickup was already used", "code": "TOKEN_PICKUP_CONSUMED"}
+        if not session.token_delivery_envelope:
+            return {"ok": False, "reason": "token delivery is not ready", "code": "TOKEN_DELIVERY_NOT_READY"}
         if not str(device_id or "").strip() or not hmac_compare_code(device_id, session.claimed_device_id):
             return {"ok": False, "reason": "device_id does not match", "code": "DEVICE_MISMATCH"}
         expected_hash = str(session.token_pickup_secret_hash or "")
         provided_hash = _hash_pickup_secret(str(pickup_secret or "").strip())
         if not expected_hash or not hmac.compare_digest(expected_hash, provided_hash):
             return {"ok": False, "reason": "pickup secret does not match", "code": "PICKUP_SECRET_MISMATCH"}
-        session.token_pickup_consumed_at = now
-        self._replace(session)
-        return {
-            "ok": True,
-            "pairing": session.as_dict(),
-            "device_id": session.claimed_device_id,
-            "device_label": session.claimed_device_label,
-            "device_public_key": session.claimed_device_public_key,
-            "scopes": list(session.capabilities),
-        }
+        return {"ok": True, "session": session}
 
     def list_pairings(self) -> list[dict[str, Any]]:
         self.cleanup_expired()

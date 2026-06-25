@@ -11,6 +11,8 @@ class DeviceIdentity {
     required this.deviceId,
     required this.deviceLabel,
     required this.publicKey,
+    this.encryptionPublicKey = '',
+    this.encryptionPrivateKey = '',
     this.privateKey = '',
     this.keyType = 'ed25519',
   });
@@ -18,6 +20,8 @@ class DeviceIdentity {
   final String deviceId;
   final String deviceLabel;
   final String publicKey;
+  final String encryptionPublicKey;
+  final String encryptionPrivateKey;
   final String privateKey;
   final String keyType;
 
@@ -25,11 +29,16 @@ class DeviceIdentity {
       keyType == 'ed25519' &&
       publicKey.trim().startsWith('ed25519:') &&
       privateKey.trim().isNotEmpty;
+  bool get canDecryptTokenDelivery =>
+      encryptionPublicKey.trim().startsWith('x25519:') &&
+      encryptionPrivateKey.trim().isNotEmpty;
 
   Map<String, dynamic> toJson() => {
         'deviceId': deviceId,
         'deviceLabel': deviceLabel,
         'publicKey': publicKey,
+        'encryptionPublicKey': encryptionPublicKey,
+        'encryptionPrivateKey': encryptionPrivateKey,
         'privateKey': privateKey,
         'keyType': keyType,
       };
@@ -39,8 +48,25 @@ class DeviceIdentity {
       deviceId: json['deviceId'] as String? ?? '',
       deviceLabel: json['deviceLabel'] as String? ?? '',
       publicKey: json['publicKey'] as String? ?? '',
+      encryptionPublicKey: json['encryptionPublicKey'] as String? ?? '',
+      encryptionPrivateKey: json['encryptionPrivateKey'] as String? ?? '',
       privateKey: json['privateKey'] as String? ?? '',
       keyType: json['keyType'] as String? ?? 'ed25519',
+    );
+  }
+
+  DeviceIdentity copyWith({
+    String? encryptionPublicKey,
+    String? encryptionPrivateKey,
+  }) {
+    return DeviceIdentity(
+      deviceId: deviceId,
+      deviceLabel: deviceLabel,
+      publicKey: publicKey,
+      encryptionPublicKey: encryptionPublicKey ?? this.encryptionPublicKey,
+      encryptionPrivateKey: encryptionPrivateKey ?? this.encryptionPrivateKey,
+      privateKey: privateKey,
+      keyType: keyType,
     );
   }
 }
@@ -123,6 +149,16 @@ class PairedDevice {
       pairingId: json['pairingId'] as String? ?? '',
     );
   }
+}
+
+class _EncryptionKeyPair {
+  const _EncryptionKeyPair({
+    required this.publicKey,
+    required this.privateKey,
+  });
+
+  final String publicKey;
+  final String privateKey;
 }
 
 String friendlyPcLabel(String? label, String baseUrl) {
@@ -289,6 +325,8 @@ class MobileDeviceStore {
   static const _pairedKey = 'rumi.paired_device.v1';
   static const _pairedListKey = 'rumi.paired_devices.v1';
   static const _legacyPcKey = 'rumi.pc_connection.v1';
+  static const _legacyRemoteBaseUrlKey = 'rumi_remote.base_url';
+  static const _legacyRemoteTokenKey = 'rumi_remote.token';
 
   final SecureKeyValueStorage _storage;
   final _uuid = const Uuid();
@@ -301,7 +339,7 @@ class MobileDeviceStore {
           jsonDecode(raw) as Map<String, dynamic>,
         );
         if (identity.deviceId.trim().isNotEmpty && identity.canSignApproval) {
-          return identity;
+          return _ensureEncryptionKey(identity);
         }
       }
     } catch (_) {
@@ -335,16 +373,105 @@ class MobileDeviceStore {
   }
 
   Future<DeviceIdentity> _createIdentity() async {
-    final keyPair = await Ed25519().newKeyPair();
-    final keyPairData = await keyPair.extract();
-    final publicKey = await keyPair.extractPublicKey();
+    final signingKeyPair = await Ed25519().newKeyPair();
+    final signingKeyPairData = await signingKeyPair.extract();
+    final signingPublicKey = await signingKeyPair.extractPublicKey();
+    final encryption = await _createEncryptionKeyPair();
     return DeviceIdentity(
       deviceId: 'mobile-${_uuid.v4().substring(0, 12)}',
       deviceLabel: 'Rumi Mobile',
-      publicKey: 'ed25519:${_encodeBase64Url(publicKey.bytes)}',
-      privateKey: _encodeBase64Url(keyPairData.bytes),
+      publicKey: 'ed25519:${_encodeBase64Url(signingPublicKey.bytes)}',
+      encryptionPublicKey: encryption.publicKey,
+      encryptionPrivateKey: encryption.privateKey,
+      privateKey: _encodeBase64Url(signingKeyPairData.bytes),
       keyType: 'ed25519',
     );
+  }
+
+  Future<DeviceIdentity> _ensureEncryptionKey(DeviceIdentity identity) async {
+    if (identity.canDecryptTokenDelivery) return identity;
+    final encryption = await _createEncryptionKeyPair();
+    final upgraded = identity.copyWith(
+      encryptionPublicKey: encryption.publicKey,
+      encryptionPrivateKey: encryption.privateKey,
+    );
+    try {
+      await _storage.write(_identityKey, jsonEncode(upgraded.toJson()));
+    } catch (_) {
+      // ignore secure storage failures
+    }
+    return upgraded;
+  }
+
+  Future<_EncryptionKeyPair> _createEncryptionKeyPair() async {
+    final keyPair = await X25519().newKeyPair();
+    final keyPairData = await keyPair.extract();
+    final publicKey = await keyPair.extractPublicKey();
+    return _EncryptionKeyPair(
+      publicKey: 'x25519:${_encodeBase64Url(publicKey.bytes)}',
+      privateKey: _encodeBase64Url(keyPairData.bytes),
+    );
+  }
+
+  Future<Map<String, dynamic>> decryptTokenDeliveryEnvelope(
+    Map<String, dynamic> envelope, {
+    required String pairingId,
+    required String deviceId,
+  }) async {
+    final identity = await loadOrCreateIdentity();
+    if (!identity.canDecryptTokenDelivery) {
+      throw StateError('token delivery decryption key is not available');
+    }
+    final version = envelope['version'] as int? ?? 0;
+    final alg = envelope['alg'] as String? ?? '';
+    if (version != 1 || alg != 'X25519-HKDF-SHA256-AES-256-GCM') {
+      throw FormatException('unsupported token delivery envelope');
+    }
+    final deliveryId = envelope['delivery_id'] as String? ?? '';
+    final remotePublicKey = SimplePublicKey(
+      _decodePrefixedPublicKey(
+        envelope['ephemeral_public_key'] as String? ?? '',
+        'x25519:',
+      ),
+      type: KeyPairType.x25519,
+    );
+    final localPublicKey = SimplePublicKey(
+      _decodePrefixedPublicKey(identity.encryptionPublicKey, 'x25519:'),
+      type: KeyPairType.x25519,
+    );
+    final localKeyPair = SimpleKeyPairData(
+      _decodeBase64Url(identity.encryptionPrivateKey),
+      publicKey: localPublicKey,
+      type: KeyPairType.x25519,
+    );
+    final sharedSecret = await X25519().sharedSecretKey(
+      keyPair: localKeyPair,
+      remotePublicKey: remotePublicKey,
+    );
+    final secretKey = await Hkdf(
+      hmac: Hmac.sha256(),
+      outputLength: 32,
+    ).deriveKey(
+      secretKey: sharedSecret,
+      nonce: utf8.encode('rumi-mobile-token-delivery-v1'),
+      info: utf8.encode('$pairingId:$deviceId:$deliveryId'),
+    );
+    final box = SecretBox(
+      _decodeBase64Url(envelope['ciphertext'] as String? ?? ''),
+      nonce: _decodeBase64Url(envelope['nonce'] as String? ?? ''),
+      mac: Mac(_decodeBase64Url(envelope['tag'] as String? ?? '')),
+    );
+    final aad = _decodeBase64Url(envelope['aad'] as String? ?? '');
+    final clear = await AesGcm.with256bits().decrypt(
+      box,
+      secretKey: secretKey,
+      aad: aad,
+    );
+    final decoded = jsonDecode(utf8.decode(clear));
+    if (decoded is! Map) {
+      throw FormatException('invalid token delivery payload');
+    }
+    return Map<String, dynamic>.from(decoded);
   }
 
   Future<PairedDevice?> loadPairedDevice() async {
@@ -405,10 +532,12 @@ class MobileDeviceStore {
   Future<PairedDevice?> _migrateLegacyPcConnection() async {
     try {
       final raw = await _storage.read(_legacyPcKey);
-      if (raw == null || raw.trim().isEmpty) return null;
-      final pc = PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      final pc = raw == null || raw.trim().isEmpty
+          ? await _loadLegacyRemoteConnection()
+          : PcConnection.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      if (pc == null) return null;
       if (!pc.isConfigured) {
-        await _storage.delete(_legacyPcKey);
+        await _deleteLegacyConnectionKeys();
         return null;
       }
       final identity = await loadOrCreateIdentity();
@@ -432,11 +561,25 @@ class MobileDeviceStore {
       }
       await _storage.write(_pairedKey, jsonEncode(device.toJson()));
       await _storage.write(_pairedListKey, jsonEncode([device.toJson()]));
-      await _storage.delete(_legacyPcKey);
+      await _deleteLegacyConnectionKeys();
       return device;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<PcConnection?> _loadLegacyRemoteConnection() async {
+    final baseUrl =
+        (await _storage.read(_legacyRemoteBaseUrlKey))?.trim() ?? '';
+    final token = (await _storage.read(_legacyRemoteTokenKey))?.trim() ?? '';
+    if (baseUrl.isEmpty && token.isEmpty) return null;
+    return PcConnection(baseUrl: baseUrl, token: token);
+  }
+
+  Future<void> _deleteLegacyConnectionKeys() async {
+    await _storage.delete(_legacyPcKey);
+    await _storage.delete(_legacyRemoteBaseUrlKey);
+    await _storage.delete(_legacyRemoteTokenKey);
   }
 
   Future<void> savePairedDevices(List<PairedDevice> devices) async {
@@ -473,7 +616,7 @@ class MobileDeviceStore {
     try {
       await _storage.delete(_pairedKey);
       await _storage.delete(_pairedListKey);
-      await _storage.delete(_legacyPcKey);
+      await _deleteLegacyConnectionKeys();
     } catch (_) {
       // ignore
     }
@@ -493,6 +636,12 @@ Uint8List _decodeBase64Url(String value) {
 Uint8List _decodePublicKey(String value) {
   final text = value.trim();
   final raw = text.startsWith('ed25519:') ? text.substring(8) : text;
+  return _decodeBase64Url(raw);
+}
+
+Uint8List _decodePrefixedPublicKey(String value, String prefix) {
+  final text = value.trim();
+  final raw = text.startsWith(prefix) ? text.substring(prefix.length) : text;
   return _decodeBase64Url(raw);
 }
 

@@ -83,6 +83,14 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
         feature="pairing",
     ),
     MobileRouteContract(
+        "POST",
+        "/api/mobile/v1/pairings/{id}/token/ack",
+        block_module="blocks.mobile.pairing",
+        path_inject={"id": "pairing_id"},
+        defaults={"action": "ack_token_delivery"},
+        feature="pairing",
+    ),
+    MobileRouteContract(
         "GET",
         "/api/mobile/v1/devices",
         block_module="blocks.mobile.pairing",

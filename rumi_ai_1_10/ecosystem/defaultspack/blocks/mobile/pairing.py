@@ -20,6 +20,7 @@ from blocks._common import error, ok
 from blocks.p2p._helpers import settings_from
 from domain.p2p.device_store import DeviceStore
 from domain.p2p.pairing import PairingManager
+from domain.p2p.token_delivery import encrypt_token_delivery
 
 
 def _merged(input_data: dict) -> dict:
@@ -87,6 +88,14 @@ def claim(input_data, context=None):
     device_id = str(args.get("device_id") or "").strip()
     if not device_id:
         return error("device_id is required", "INVALID_INPUT")
+    encryption_public_key = str(
+        args.get("device_encryption_public_key")
+        or args.get("encryption_public_key")
+        or args.get("token_delivery_public_key")
+        or ""
+    ).strip()
+    if not encryption_public_key:
+        return error("device_encryption_public_key is required", "ENCRYPTION_KEY_REQUIRED")
     s = _settings(input_data, context)
     manager = PairingManager(s.store_path)
     result = manager.claim_pairing(
@@ -95,6 +104,7 @@ def claim(input_data, context=None):
         device_id=device_id,
         device_label=str(args.get("device_label") or args.get("label") or ""),
         device_public_key=str(args.get("device_public_key") or args.get("public_key") or ""),
+        device_encryption_public_key=encryption_public_key,
         requested_capabilities=args.get("requested_capabilities") if isinstance(args.get("requested_capabilities"), list) else None,
     )
     if not result.get("ok"):
@@ -117,6 +127,44 @@ def approve(input_data, context=None):
         return error(str(result.get("reason") or "approve failed"), str(result.get("code") or "APPROVE_FAILED"))
 
     profile_id = _profile_id(input_data, context)
+    issued_device_id = ""
+    ds = DeviceStore(s.store_path)
+    try:
+        device, token, approval_token = ds.issue_tokens(
+            result["device_id"],
+            label=result.get("device_label") or "",
+            public_key=result.get("device_public_key") or "",
+            scopes=result.get("scopes"),
+            pairing_id=pairing_id,
+            profile_id=profile_id,
+        )
+        issued_device_id = device.device_id
+        delivery_payload = {
+            "device_token": token,
+            "approval_token": approval_token,
+            "client_access_token": token,
+            "approver_access_token": approval_token,
+            "device": device.as_dict(),
+            "scopes": list(device.scopes),
+            "approval_scopes": list(device.approval_scopes),
+            "profile_id": profile_id,
+            "confirmation_code": device.confirmation_code,
+            "pc_label": _pc_label(),
+        }
+        envelope = encrypt_token_delivery(
+            delivery_payload,
+            result.get("device_encryption_public_key") or "",
+            pairing_id=pairing_id,
+            device_id=result["device_id"],
+        )
+        stored = manager.store_token_delivery(pairing_id, envelope=envelope)
+        if not stored.get("ok"):
+            raise RuntimeError(str(stored.get("reason") or "token delivery failed"))
+    except Exception as exc:
+        if issued_device_id:
+            ds.revoke_device(issued_device_id)
+        return error(f"encrypted token delivery failed: {exc}", "TOKEN_DELIVERY_FAILED")
+
     key_registration = _register_authority_device_key(
         profile_id=profile_id,
         device_id=result["device_id"],
@@ -131,7 +179,8 @@ def approve(input_data, context=None):
         },
         "profile_id": profile_id,
         "device_key": key_registration,
-        "token_delivery": "mobile_pickup_once",
+        "token_delivery": "mobile_encrypted_pickup",
+        "token_delivery_ready": True,
     })
 
 
@@ -176,46 +225,43 @@ def status(input_data, context=None):
     ).strip()
     requested_device_id = str(args.get("device_id") or "").strip()
     if session.status == "approved" and session.claimed_device_id and requested_secret and requested_device_id:
-        pickup = manager.consume_token_pickup(
+        pickup = manager.peek_token_delivery(
             pairing_id,
             pickup_secret=requested_secret,
             device_id=requested_device_id,
         )
         if pickup.get("ok"):
-            try:
-                ds = DeviceStore(s.store_path)
-                profile_id = _profile_id(input_data, context)
-                device, token, approval_token = ds.issue_tokens(
-                    pickup["device_id"],
-                    label=pickup.get("device_label") or "",
-                    public_key=pickup.get("device_public_key") or "",
-                    scopes=pickup.get("scopes"),
-                    pairing_id=pairing_id,
-                    profile_id=profile_id,
-                )
-                key_registration = _register_authority_device_key(
-                    profile_id=profile_id,
-                    device_id=pickup["device_id"],
-                    public_key=pickup.get("device_public_key") or "",
-                )
-                pickup_pairing = _public_pairing(pickup["pairing"])
-                result["pairing"] = pickup_pairing
-                result["token_pickup_consumed_at"] = pickup_pairing.get("token_pickup_consumed_at")
-                result["device_token"] = token
-                result["approval_token"] = approval_token
-                result["client_access_token"] = token
-                result["approver_access_token"] = approval_token
-                result["device"] = device.as_dict()
-                result["scopes"] = list(device.scopes)
-                result["approval_scopes"] = list(device.approval_scopes)
-                result["profile_id"] = profile_id
-                result["device_key"] = key_registration
-                result["confirmation_code"] = device.confirmation_code
-                result["pc_base_url"] = _detect_base_url(input_data, context)
-                result["pc_label"] = _pc_label()
-            except Exception:
-                pass
+            pickup_pairing = _public_pairing(pickup["pairing"])
+            result["pairing"] = pickup_pairing
+            result["token_pickup_consumed_at"] = pickup_pairing.get("token_pickup_consumed_at")
+            result["token_delivery"] = "mobile_encrypted_pickup"
+            result["token_delivery_envelope"] = pickup.get("token_delivery_envelope") or {}
+            result["pc_base_url"] = _detect_base_url(input_data, context)
+            result["pc_label"] = _pc_label()
     return ok(result)
+
+
+def ack_token_delivery(input_data, context=None):
+    args = _merged(input_data)
+    pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
+    if not pairing_id:
+        return error("pairing_id is required", "INVALID_INPUT")
+    s = _settings(input_data, context)
+    manager = PairingManager(s.store_path)
+    result = manager.ack_token_delivery(
+        pairing_id,
+        pickup_secret=str(
+            args.get("pickup_secret")
+            or args.get("pickupSecret")
+            or args.get("token_pickup_secret")
+            or ""
+        ).strip(),
+        device_id=str(args.get("device_id") or "").strip(),
+        delivery_id=str(args.get("delivery_id") or args.get("deliveryId") or "").strip(),
+    )
+    if not result.get("ok"):
+        return error(str(result.get("reason") or "ack failed"), str(result.get("code") or "ACK_FAILED"))
+    return ok({"pairing": _public_pairing(result["pairing"])})
 
 
 def _detect_base_url(input_data, context) -> str:
@@ -291,6 +337,7 @@ def run(input_data, context=None):
         "approve": approve,
         "reject": reject,
         "status": status,
+        "ack_token_delivery": ack_token_delivery,
         "list_devices": list_devices,
         "delete_device": delete_device,
         "patch_device": patch_device,

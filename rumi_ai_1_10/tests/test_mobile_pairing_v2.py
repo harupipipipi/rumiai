@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import json
 import sys
 import tempfile
 from pathlib import Path
@@ -15,6 +17,53 @@ AUTHORITY_APPROVER_SCOPES = [
     "authority.request.list",
     "authority.request.read",
 ]
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+
+def _unb64url(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * ((4 - len(value) % 4) % 4))
+
+
+def _x25519_keypair():
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import x25519
+
+    private = x25519.X25519PrivateKey.generate()
+    public = private.public_key().public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    )
+    return private, "x25519:" + _b64url(public)
+
+
+def _decrypt_delivery_envelope(private_key, envelope: dict, *, pairing_id: str, device_id: str) -> dict:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import x25519
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    epk = str(envelope["ephemeral_public_key"])
+    if epk.startswith("x25519:"):
+        epk = epk[len("x25519:") :]
+    remote = x25519.X25519PublicKey.from_public_bytes(_unb64url(epk))
+    shared = private_key.exchange(remote)
+    delivery_id = str(envelope["delivery_id"])
+    key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=b"rumi-mobile-token-delivery-v1",
+        info=f"{pairing_id}:{device_id}:{delivery_id}".encode("utf-8"),
+    ).derive(shared)
+    encrypted = _unb64url(envelope["ciphertext"]) + _unb64url(envelope["tag"])
+    clear = AESGCM(key).decrypt(
+        _unb64url(envelope["nonce"]),
+        encrypted,
+        _unb64url(envelope["aad"]),
+    )
+    return json.loads(clear.decode("utf-8"))
 
 
 def test_pairing_v2_claim_approve_flow():
@@ -182,6 +231,7 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     session = PairingManager(tmp).start_pairing(
         capabilities=["chat.read", "chat.write", "tools.observe"],
     )
+    private_key, public_key = _x25519_keypair()
 
     claim = run({
         "action": "claim",
@@ -191,6 +241,7 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
         "device_id": "mobile-1",
         "device_label": "iPhone",
         "public_key": "pk-mobile",
+        "encryption_public_key": public_key,
         "requested_capabilities": ["chat.read", "chat.write"],
     }, None)
     assert claim["status"] == "ok"
@@ -240,10 +291,19 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
         "device_id": "mobile-1",
     }, None)
     assert with_secret["status"] == "ok"
-    assert with_secret["data"]["device_token"].startswith("dtk_")
-    assert with_secret["data"]["approval_token"] == ""
-    assert with_secret["data"]["approval_scopes"] == []
-    assert with_secret["data"]["scopes"] == ["chat.read", "chat.write"]
+    assert "device_token" not in with_secret["data"]
+    assert "approval_token" not in with_secret["data"]
+    envelope = with_secret["data"]["token_delivery_envelope"]
+    delivery = _decrypt_delivery_envelope(
+        private_key,
+        envelope,
+        pairing_id=session.pairing_id,
+        device_id="mobile-1",
+    )
+    assert delivery["device_token"].startswith("dtk_")
+    assert delivery["approval_token"] == ""
+    assert delivery["approval_scopes"] == []
+    assert delivery["scopes"] == ["chat.read", "chat.write"]
     assert "code" not in with_secret["data"]
     assert "code" not in with_secret["data"]["pairing"]
     first_device = DeviceStore(tmp).get_device("mobile-1")
@@ -259,11 +319,31 @@ def test_mobile_pairing_status_requires_pickup_secret_and_device_for_token():
     }, None)
     assert replay["status"] == "ok"
     assert "device_token" not in replay["data"]
+    assert replay["data"]["token_delivery_envelope"] == envelope
     assert "code" not in replay["data"]
     assert "code" not in replay["data"]["pairing"]
     replay_device = DeviceStore(tmp).get_device("mobile-1")
     assert replay_device is not None
     assert replay_device.token_hash == first_token_hash
+
+    ack = run({
+        "action": "ack_token_delivery",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": session.token_pickup_secret,
+        "device_id": "mobile-1",
+        "delivery_id": envelope["delivery_id"],
+    }, None)
+    assert ack["status"] == "ok"
+    after_ack = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "pickup_secret": session.token_pickup_secret,
+        "device_id": "mobile-1",
+    }, None)
+    assert after_ack["status"] == "ok"
+    assert "token_delivery_envelope" not in after_ack["data"]
 
 
 def test_pairing_start_returns_mobile_pickup_secret():
@@ -287,18 +367,23 @@ def test_mobile_pairing_status_rejects_wrong_pickup_secret_without_rotating():
 
     tmp = tempfile.mkdtemp()
     session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    _private_key, public_key = _x25519_keypair()
     assert run({
         "action": "claim",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
         "code": session.code,
         "device_id": "mobile-1",
+        "encryption_public_key": public_key,
     }, None)["status"] == "ok"
     assert run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
     }, None)["status"] == "ok"
+    issued = DeviceStore(tmp).get_device("mobile-1")
+    assert issued is not None
+    issued_hash = issued.token_hash
 
     wrong = run({
         "action": "status",
@@ -309,7 +394,8 @@ def test_mobile_pairing_status_rejects_wrong_pickup_secret_without_rotating():
     }, None)
     assert wrong["status"] == "ok"
     assert "device_token" not in wrong["data"]
-    assert DeviceStore(tmp).get_device("mobile-1") is None
+    assert "token_delivery_envelope" not in wrong["data"]
+    assert DeviceStore(tmp).get_device("mobile-1").token_hash == issued_hash
 
 
 def test_mobile_pairing_status_splits_normal_and_approval_tokens():
@@ -321,6 +407,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     session = PairingManager(tmp).start_pairing(
         capabilities=["chat.read", "chat.write", "tools.observe", *AUTHORITY_APPROVER_SCOPES],
     )
+    private_key, public_key = _x25519_keypair()
 
     claim = run({
         "action": "claim",
@@ -329,6 +416,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
         "code": session.code,
         "device_id": "mobile-1",
         "device_label": "iPhone",
+        "encryption_public_key": public_key,
         "requested_capabilities": [
             "chat.read",
             "chat.write",
@@ -361,17 +449,25 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
 
     assert status["status"] == "ok"
     data = status["data"]
-    assert data["device_token"].startswith("dtk_")
-    assert data["approval_token"].startswith("dtk_")
-    assert data["client_access_token"] == data["device_token"]
-    assert data["approver_access_token"] == data["approval_token"]
-    assert data["device_token"] != data["approval_token"]
-    assert "tools.approve" not in data["scopes"]
-    assert data["approval_scopes"] == AUTHORITY_APPROVER_SCOPES
+    assert "device_token" not in data
+    assert "approval_token" not in data
+    delivery = _decrypt_delivery_envelope(
+        private_key,
+        data["token_delivery_envelope"],
+        pairing_id=session.pairing_id,
+        device_id="mobile-1",
+    )
+    assert delivery["device_token"].startswith("dtk_")
+    assert delivery["approval_token"].startswith("dtk_")
+    assert delivery["client_access_token"] == delivery["device_token"]
+    assert delivery["approver_access_token"] == delivery["approval_token"]
+    assert delivery["device_token"] != delivery["approval_token"]
+    assert "tools.approve" not in delivery["scopes"]
+    assert delivery["approval_scopes"] == AUTHORITY_APPROVER_SCOPES
 
     store = DeviceStore(tmp)
-    normal = store.verify_token(data["device_token"])
-    approver = store.verify_token(data["approval_token"])
+    normal = store.verify_token(delivery["device_token"])
+    approver = store.verify_token(delivery["approval_token"])
     assert normal is not None
     assert "tools.approve" not in normal.scopes
     assert approver is not None
@@ -385,6 +481,7 @@ def test_mobile_pairing_status_returns_pc_label(monkeypatch):
     tmp = tempfile.mkdtemp()
     monkeypatch.setenv("RUMI_PC_LABEL", "Haru MacBook")
     session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    _private_key, public_key = _x25519_keypair()
 
     claim = run({
         "action": "claim",
@@ -393,6 +490,7 @@ def test_mobile_pairing_status_returns_pc_label(monkeypatch):
         "code": session.code,
         "device_id": "mobile-1",
         "device_label": "iPhone",
+        "encryption_public_key": public_key,
     }, None)
     assert claim["status"] == "ok"
 

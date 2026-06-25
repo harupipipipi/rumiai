@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:cryptography/cryptography.dart';
 
 import 'package:rumi_remote_app/src/data/pc/device_store.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
@@ -52,6 +54,71 @@ const _missingTokenDevice = PairedDevice(
   pcLabel: 'Mac',
   pairingId: 'pair-2',
 );
+
+String _encodeBase64Url(List<int> bytes) =>
+    base64Url.encode(bytes).replaceAll('=', '');
+
+Uint8List _decodeBase64Url(String value) {
+  final text = value.trim();
+  return base64Url.decode(
+    text.padRight(text.length + ((4 - text.length % 4) % 4), '='),
+  );
+}
+
+Uint8List _decodeX25519PublicKey(String value) {
+  final text = value.trim();
+  final raw = text.startsWith('x25519:') ? text.substring(7) : text;
+  return _decodeBase64Url(raw);
+}
+
+Future<Map<String, dynamic>> _encryptTokenDeliveryForIdentity(
+  DeviceIdentity identity,
+  Map<String, dynamic> payload, {
+  required String pairingId,
+  required String deviceId,
+}) async {
+  const deliveryId = 'tdv-test';
+  final ephemeral = await X25519().newKeyPair();
+  final ephemeralData = await ephemeral.extract();
+  final ephemeralPublic = await ephemeral.extractPublicKey();
+  final sharedSecret = await X25519().sharedSecretKey(
+    keyPair: SimpleKeyPairData(
+      ephemeralData.bytes,
+      publicKey: ephemeralPublic,
+      type: KeyPairType.x25519,
+    ),
+    remotePublicKey: SimplePublicKey(
+      _decodeX25519PublicKey(identity.encryptionPublicKey),
+      type: KeyPairType.x25519,
+    ),
+  );
+  final secretKey = await Hkdf(
+    hmac: Hmac.sha256(),
+    outputLength: 32,
+  ).deriveKey(
+    secretKey: sharedSecret,
+    nonce: utf8.encode('rumi-mobile-token-delivery-v1'),
+    info: utf8.encode('$pairingId:$deviceId:$deliveryId'),
+  );
+  final aad = utf8.encode(
+    'rumi-mobile-token-delivery:v1:$pairingId:$deviceId:$deliveryId',
+  );
+  final box = await AesGcm.with256bits().encrypt(
+    utf8.encode(jsonEncode(payload)),
+    secretKey: secretKey,
+    aad: aad,
+  );
+  return {
+    'version': 1,
+    'delivery_id': deliveryId,
+    'alg': 'X25519-HKDF-SHA256-AES-256-GCM',
+    'ephemeral_public_key': 'x25519:${_encodeBase64Url(ephemeralPublic.bytes)}',
+    'nonce': _encodeBase64Url(box.nonce),
+    'ciphertext': _encodeBase64Url(box.cipherText),
+    'tag': _encodeBase64Url(box.mac.bytes),
+    'aad': _encodeBase64Url(aad),
+  };
+}
 
 void main() {
   test('preferredPairingBaseUrl prefers reachable LAN addresses', () {
@@ -158,6 +225,22 @@ void main() {
     expect(await store.loadPairedDevices(), isEmpty);
   });
 
+  test('migrates old rumi_remote connection keys into paired devices',
+      () async {
+    final storage = _FakeSecureStorage();
+    final store = MobileDeviceStore(storage: storage);
+
+    await storage.write('rumi_remote.base_url', 'http://192.168.11.30:8765');
+    await storage.write('rumi_remote.token', 'dtk-old-remote');
+
+    final migrated = await store.loadPairedDevice();
+    expect(migrated, isNotNull);
+    expect(migrated!.pcBaseUrl, 'http://192.168.11.30:8765');
+    expect(migrated.deviceToken, 'dtk-old-remote');
+    expect(storage._values.containsKey('rumi_remote.base_url'), isFalse);
+    expect(storage._values.containsKey('rumi_remote.token'), isFalse);
+  });
+
   test('paired device keeps normal and approval tokens separate', () {
     expect(_validDevice.toPcConnection().token, 'dtk-test');
     expect(_validDevice.toPcConnection().approvalToken, 'dtk-approve');
@@ -202,7 +285,35 @@ void main() {
     );
 
     expect(identity.publicKey, startsWith('ed25519:'));
+    expect(identity.encryptionPublicKey, startsWith('x25519:'));
     expect(identity.privateKey, isNotEmpty);
+    expect(identity.encryptionPrivateKey, isNotEmpty);
+    expect(identity.canDecryptTokenDelivery, isTrue);
     expect(signature, isNotEmpty);
+  });
+
+  test('decrypts encrypted token delivery envelope', () async {
+    final store = MobileDeviceStore(storage: _FakeSecureStorage());
+    final identity = await store.loadOrCreateIdentity();
+    final envelope = await _encryptTokenDeliveryForIdentity(
+      identity,
+      {
+        'device_token': 'dtk-client',
+        'approval_token': 'dtk-approver',
+        'scopes': ['chat.read'],
+      },
+      pairingId: 'pair-1',
+      deviceId: identity.deviceId,
+    );
+
+    final payload = await store.decryptTokenDeliveryEnvelope(
+      envelope,
+      pairingId: 'pair-1',
+      deviceId: identity.deviceId,
+    );
+
+    expect(payload['device_token'], 'dtk-client');
+    expect(payload['approval_token'], 'dtk-approver');
+    expect(payload['scopes'], ['chat.read']);
   });
 }

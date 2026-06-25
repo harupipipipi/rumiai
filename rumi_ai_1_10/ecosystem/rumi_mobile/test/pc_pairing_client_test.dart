@@ -22,6 +22,7 @@ const _identity = DeviceIdentity(
   deviceId: 'mobile-abc123',
   deviceLabel: 'Rumi Mobile',
   publicKey: 'pk-test',
+  encryptionPublicKey: 'x25519:test-public',
 );
 
 void main() {
@@ -90,6 +91,23 @@ void main() {
       expect(resp.isAccepted, isTrue);
       expect(resp.hasDeviceToken, isFalse);
       expect(resp.isReady, isFalse);
+    });
+
+    test('accepted status is ready with encrypted token delivery envelope', () {
+      final resp = PairingStatusResponse.fromJson({
+        'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+        'token_delivery_envelope': {
+          'version': 1,
+          'delivery_id': 'tdv-test',
+          'alg': 'X25519-HKDF-SHA256-AES-256-GCM',
+        },
+      });
+
+      expect(resp.isAccepted, isTrue);
+      expect(resp.hasDeviceToken, isFalse);
+      expect(resp.hasTokenDeliveryEnvelope, isTrue);
+      expect(resp.deliveryId, 'tdv-test');
+      expect(resp.isReady, isTrue);
     });
 
     test('parses top-level pc label and token from status response', () {
@@ -162,6 +180,7 @@ void main() {
       final body = jsonDecode(requestBody!) as Map<String, dynamic>;
       expect(body['code'], 'abc123');
       expect(body['device_id'], 'mobile-abc123');
+      expect(body['device_encryption_public_key'], 'x25519:test-public');
       expect(body['requested_capabilities'], ['chat.read', 'chat.write']);
     });
 
@@ -199,6 +218,33 @@ void main() {
         expect(resp.deviceToken, 'dt-123');
       },
     );
+
+    test('ackTokenDelivery posts to token ack route', () async {
+      String? requestedPath;
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        requestedPath = request.url.path;
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _ok({
+          'pairing': {'pairing_id': 'p1', 'status': 'approved'},
+        });
+      });
+
+      final pairingClient = PcPairingClient(client: client);
+      await pairingClient.ackTokenDelivery(
+        _pc,
+        pairingId: 'p1',
+        pickupSecret: 'pup_123',
+        deviceId: 'mobile-abc123',
+        deliveryId: 'tdv-test',
+      );
+      pairingClient.close();
+
+      expect(requestedPath, '/api/mobile/v1/pairings/p1/token/ack');
+      expect(body?['pickup_secret'], 'pup_123');
+      expect(body?['device_id'], 'mobile-abc123');
+      expect(body?['delivery_id'], 'tdv-test');
+    });
 
     test('throws PcPairingException on non-ok response', () async {
       final client = MockClient((request) async {

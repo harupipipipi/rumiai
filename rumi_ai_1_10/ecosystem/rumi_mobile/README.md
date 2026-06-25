@@ -2,7 +2,7 @@
 
 Rumi Mobile is the Flutter client for Rumi. It ships a ChatGPT-style chat UI
 that runs **on-device** against any OpenAI-compatible endpoint, plus QR-based
-import for API/model config and PC connection.
+PC pairing.
 
 The app lives under the defaultspack ecosystem folder so it sits next to the
 canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
@@ -18,12 +18,8 @@ canonical control panel at `rumi_ai_1_10/ecosystem/defaultspack/`.
 - QR import:
   - **スマホをペアリング**: scan a `rumi_mobile_pair_v1` QR to claim a PC
     pairing session and pick up scoped split mobile tokens after PC approval.
-  - **API/モデル取り込み**: scan a `rumi_api` QR to fill API URL/key/model.
-  - **PC接続 (Legacy)**: scan a `rumi_pc` QR to fill the Kernel API URL and
-    bearer token for compatibility testing.
 - PC pairing from the defaultspack control panel: open **Settings → アプリ** on
-  the Mac to start **スマホをペアリング** or display the legacy PC接続QR,
-  Cloudflare Pages QR, and API/モデル import QR.
+  the Mac to start **スマホをペアリング** or display a Cloudflare Pages URL QR.
 
 ## PC chat controls
 
@@ -66,15 +62,10 @@ The PC side (defaultspack webapp **Settings → アプリ**) emits JSON QR codes
   "expiresAt": 1781830000000
 }
 
-// PC接続QR (kind=rumi_pc)
-{ "kind": "rumi_pc", "baseUrl": "http://192.168.1.10:8765", "token": "<redacted bearer token>" }
-
-// API/モデルインポートQR (kind=rumi_api)
-{ "kind": "rumi_api", "baseUrl": "https://api.example.test/v1", "apiKey": "<redacted provider key>", "model": "model-id", "label": "main" }
 ```
 
-The mobile parser also accepts `api_key` as an alias for `apiKey`, and falls
-back to `QrUrl` for plain `http(s)://` links (e.g. Cloudflare Pages URLs).
+The mobile parser falls back to `QrUrl` for plain `http(s)://` links (e.g.
+Cloudflare Pages URLs).
 
 ## PC pairing developer/tester checklist
 
@@ -113,8 +104,9 @@ normal pairing tests.
   `/api/authority/*` request list/read/challenge/approve/deny routes.
 - Pairing status is observable by the PC, but token pickup requires the QR-only
   pickup secret and the claimed `device_id`. A status response without both
-  values must not include `device_token`, and pickup is consumed after the first
-  successful token delivery.
+  values must not include token material. Token delivery is an encrypted
+  X25519/AES-GCM envelope, and pickup is consumed only after mobile decrypts,
+  stores, and acknowledges the delivery.
 - Credential transfer is fail-closed. PC-created transfers must name a paired
   device and include encrypted `ciphertext` plus `nonce`; plaintext keys,
   `api_key` fallback fields, and `plaintext`/`base64-wrapper` algorithms are
@@ -134,9 +126,9 @@ normal pairing tests.
 - iOS declares `NSLocalNetworkUsageDescription` and `NSAllowsLocalNetworking`
   for private-network HTTP. This supports LAN origins such as
   `http://192.168.x.x:8765`; use HTTPS or a reverse proxy for non-LAN exposure.
-- Android declares internet/network/camera permissions and a network security
-  config that permits cleartext HTTP for LAN testing. Keep cleartext pairing on
-  trusted private networks only.
+- Android declares internet/network/camera permissions. Debug/profile builds
+  permit cleartext HTTP for LAN testing; release builds use the platform HTTPS
+  default.
 - For off-LAN smoke tests, expose the local Kernel API with Cloudflare Tunnel:
 
   ```bash

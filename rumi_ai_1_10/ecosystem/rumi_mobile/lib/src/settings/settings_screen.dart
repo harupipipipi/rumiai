@@ -294,7 +294,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           pickupSecret: payload.pickupSecret,
           deviceId: _deviceIdentity!.deviceId,
         );
-        if (statusResp.isAccepted && !statusResp.hasDeviceToken) {
+        if (statusResp.isAccepted &&
+            !statusResp.hasDeviceToken &&
+            !statusResp.hasTokenDeliveryEnvelope) {
           if (!mounted) return;
           setState(() {
             _pairingInProgress = false;
@@ -304,17 +306,53 @@ class _SettingsScreenState extends State<SettingsScreen> {
           return;
         }
         if (statusResp.isReady) {
-          final token = statusResp.deviceToken!.trim();
-          final approvalToken = statusResp.approvalToken?.trim() ?? '';
+          final deliveryPayload = statusResp.hasTokenDeliveryEnvelope
+              ? await widget.deviceStore.decryptTokenDeliveryEnvelope(
+                  statusResp.tokenDeliveryEnvelope!,
+                  pairingId: pairingId,
+                  deviceId: _deviceIdentity!.deviceId,
+                )
+              : <String, dynamic>{};
+          final token = (deliveryPayload['client_access_token'] as String? ??
+                  deliveryPayload['device_token'] as String? ??
+                  statusResp.deviceToken ??
+                  '')
+              .trim();
+          final approvalToken =
+              (deliveryPayload['approver_access_token'] as String? ??
+                      deliveryPayload['approval_token'] as String? ??
+                      statusResp.approvalToken ??
+                      '')
+                  .trim();
+          if (token.isEmpty) {
+            if (!mounted) return;
+            setState(() {
+              _pairingInProgress = false;
+              _pairingError = '端末トークンの復号に失敗しました';
+            });
+            _toast('ペアリングエラー: 端末トークンを復号できませんでした');
+            return;
+          }
+          final scopes = _stringList(
+            deliveryPayload['scopes'],
+            fallback: statusResp.scopes,
+          );
+          final approvalScopes = _stringList(
+            deliveryPayload['approval_scopes'],
+            fallback: statusResp.approvalScopes,
+          );
           final device = PairedDevice(
             deviceId: _deviceIdentity!.deviceId,
             deviceToken: token,
             approvalToken: approvalToken,
             label: _deviceIdentity!.deviceLabel,
-            scopes: statusResp.scopes,
-            approvalScopes: statusResp.approvalScopes,
+            scopes: scopes,
+            approvalScopes: approvalScopes,
             pcBaseUrl: pc.baseUrl,
-            pcLabel: friendlyPcLabel(statusResp.pcLabel, pc.baseUrl),
+            pcLabel: friendlyPcLabel(
+              deliveryPayload['pc_label'] as String? ?? statusResp.pcLabel,
+              pc.baseUrl,
+            ),
             pairingId: pairingId,
           );
           await widget.deviceStore.savePairedDevice(device);
@@ -324,6 +362,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             approvalToken: approvalToken,
           );
           await widget.configStore.savePc(newPc);
+          if (statusResp.hasTokenDeliveryEnvelope) {
+            try {
+              await client.ackTokenDelivery(
+                pc,
+                pairingId: pairingId,
+                pickupSecret: payload.pickupSecret,
+                deviceId: _deviceIdentity!.deviceId,
+                deliveryId: statusResp.deliveryId,
+              );
+            } catch (_) {
+              // The encrypted payload is already saved locally; ack can retry on
+              // a later status poll without rotating the server-side token.
+            }
+          }
           final pairedDevices = await widget.deviceStore.loadPairedDevices();
           if (!mounted) return;
           setState(() {
@@ -1560,6 +1612,14 @@ class _PcModelPickerState extends State<_PcModelPicker> {
     if (tokens >= 1000) return '${(tokens / 1000).toStringAsFixed(0)}K ctx';
     return '$tokens ctx';
   }
+}
+
+List<String> _stringList(Object? value, {List<String> fallback = const []}) {
+  if (value is! List) return fallback;
+  return value
+      .map((e) => e.toString())
+      .where((e) => e.trim().isNotEmpty)
+      .toList();
 }
 
 class _MiniTag extends StatelessWidget {

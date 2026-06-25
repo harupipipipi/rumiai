@@ -35,6 +35,7 @@ class PairingStatusResponse {
     this.scopes = const [],
     this.approvalScopes = const [],
     this.pcLabel,
+    this.tokenDeliveryEnvelope,
   });
 
   final String pairingId;
@@ -44,45 +45,49 @@ class PairingStatusResponse {
   final List<String> scopes;
   final List<String> approvalScopes;
   final String? pcLabel;
+  final Map<String, dynamic>? tokenDeliveryEnvelope;
 
   bool get isAccepted => status == 'approved' || status == 'accepted';
   bool get hasDeviceToken => deviceToken?.trim().isNotEmpty ?? false;
   bool get hasApprovalToken => approvalToken?.trim().isNotEmpty ?? false;
-  bool get isReady => isAccepted && hasDeviceToken;
+  bool get hasTokenDeliveryEnvelope =>
+      tokenDeliveryEnvelope?.isNotEmpty ?? false;
+  bool get isReady =>
+      isAccepted && (hasDeviceToken || hasTokenDeliveryEnvelope);
+  String get deliveryId =>
+      tokenDeliveryEnvelope?['delivery_id'] as String? ?? '';
 
   factory PairingStatusResponse.fromJson(Map<String, dynamic> json) {
     final pairing = json['pairing'] as Map<String, dynamic>? ?? json;
     final device = json['device'] as Map<String, dynamic>?;
     final server = json['server'] as Map<String, dynamic>?;
-    final rawScopes =
-        (json['scopes'] as List?) ??
+    final rawScopes = (json['scopes'] as List?) ??
         (device?['scopes'] as List?) ??
         (pairing['scopes'] as List?) ??
         (pairing['capabilities'] as List?) ??
         const [];
-    final rawApprovalScopes =
-        (json['approval_scopes'] as List?) ??
+    final rawApprovalScopes = (json['approval_scopes'] as List?) ??
         (device?['approval_scopes'] as List?) ??
         const [];
     return PairingStatusResponse(
       pairingId: pairing['pairing_id'] as String? ?? '',
       status: pairing['status'] as String? ?? '',
-      deviceToken:
-          json['client_access_token'] as String? ??
+      deviceToken: json['client_access_token'] as String? ??
           json['device_token'] as String? ??
           pairing['client_access_token'] as String? ??
           pairing['device_token'] as String?,
-      approvalToken:
-          json['approver_access_token'] as String? ??
+      approvalToken: json['approver_access_token'] as String? ??
           json['approval_token'] as String? ??
           pairing['approver_access_token'] as String? ??
           pairing['approval_token'] as String?,
       scopes: rawScopes.map((e) => e.toString()).toList(),
       approvalScopes: rawApprovalScopes.map((e) => e.toString()).toList(),
-      pcLabel:
-          json['pc_label'] as String? ??
+      pcLabel: json['pc_label'] as String? ??
           pairing['pc_label'] as String? ??
           server?['label'] as String?,
+      tokenDeliveryEnvelope: _mapOrNull(
+        json['token_delivery_envelope'] ?? json['tokenDeliveryEnvelope'],
+      ),
     );
   }
 }
@@ -99,10 +104,10 @@ class PcPairingClient {
   }
 
   Map<String, String> _headers(String token) => {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json',
-    if (token.trim().isNotEmpty) 'Authorization': 'Bearer $token',
-  };
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        if (token.trim().isNotEmpty) 'Authorization': 'Bearer $token',
+      };
 
   bool _hasBaseUrl(PcConnection pc) => pc.baseUrl.trim().isNotEmpty;
 
@@ -132,6 +137,7 @@ class PcPairingClient {
       'device_id': device.deviceId,
       'device_label': device.deviceLabel,
       'public_key': device.publicKey,
+      'device_encryption_public_key': device.encryptionPublicKey,
       'requested_capabilities': requestedCapabilities,
     });
     final resp = await _http
@@ -159,16 +165,16 @@ class PcPairingClient {
     if (_closed) {
       throw const PcPairingException('クライアントは閉じられました。');
     }
-    final uri = _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status')
-        .replace(
-          queryParameters: {
-            if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
-            if (pickupSecret != null && pickupSecret.trim().isNotEmpty)
-              'pickup_secret': pickupSecret.trim(),
-            if (deviceId != null && deviceId.trim().isNotEmpty)
-              'device_id': deviceId.trim(),
-          },
-        );
+    final uri =
+        _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/status').replace(
+      queryParameters: {
+        if (code != null && code.trim().isNotEmpty) 'code': code.trim(),
+        if (pickupSecret != null && pickupSecret.trim().isNotEmpty)
+          'pickup_secret': pickupSecret.trim(),
+        if (deviceId != null && deviceId.trim().isNotEmpty)
+          'device_id': deviceId.trim(),
+      },
+    );
     final resp = await _http
         .get(uri, headers: _headers(pc.token))
         .timeout(const Duration(seconds: 15));
@@ -179,6 +185,41 @@ class PcPairingClient {
       );
     }
     return PairingStatusResponse.fromJson(_decodeData(resp.body));
+  }
+
+  Future<void> ackTokenDelivery(
+    PcConnection pc, {
+    required String pairingId,
+    required String pickupSecret,
+    required String deviceId,
+    required String deliveryId,
+  }) async {
+    if (!_hasBaseUrl(pc)) {
+      throw const PcPairingException('PC接続が設定されていません。');
+    }
+    if (_closed) {
+      throw const PcPairingException('クライアントは閉じられました。');
+    }
+    final uri =
+        _uri(pc.baseUrl, '/api/mobile/v1/pairings/$pairingId/token/ack');
+    final resp = await _http
+        .post(
+          uri,
+          headers: _headers(pc.token),
+          body: jsonEncode({
+            'pickup_secret': pickupSecret,
+            'device_id': deviceId,
+            'delivery_id': deliveryId,
+          }),
+        )
+        .timeout(const Duration(seconds: 15));
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw PcPairingException(
+        'トークン受領確認に失敗しました (HTTP ${resp.statusCode})',
+        statusCode: resp.statusCode,
+      );
+    }
+    _decodeData(resp.body);
   }
 
   Map<String, dynamic> _decodeData(String body) {
@@ -200,4 +241,9 @@ class PcPairingClient {
     if (path.isEmpty || path == '/') return '';
     return path.endsWith('/') ? path.substring(0, path.length - 1) : path;
   }
+}
+
+Map<String, dynamic>? _mapOrNull(Object? value) {
+  if (value is Map) return Map<String, dynamic>.from(value);
+  return null;
 }

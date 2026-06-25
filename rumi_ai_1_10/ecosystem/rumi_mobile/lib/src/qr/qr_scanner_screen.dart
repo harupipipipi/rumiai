@@ -44,10 +44,10 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
   }
 
   String get _title => switch (widget.purpose) {
-    QrScanPurpose.apiImport => 'API/モデルをQRで取り込む',
-    QrScanPurpose.pcConnect => 'PCにQRで接続',
-    QrScanPurpose.general => 'QRスキャン',
-  };
+        QrScanPurpose.apiImport => 'API/モデルをQRで取り込む',
+        QrScanPurpose.pcConnect => 'PCにQRで接続',
+        QrScanPurpose.general => 'QRスキャン',
+      };
 
   bool _matchesPurpose(QrPayload payload) {
     switch (widget.purpose) {
@@ -191,7 +191,7 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
           maxLines: 4,
           decoration: const InputDecoration(
             labelText: 'QR内容 (JSON または URL)',
-            hintText: '{"kind":"rumi_pc","baseUrl":"...","token":"..."}',
+            hintText: '{"kind":"rumi_mobile_pair_v1","pairingId":"..."}',
             border: OutlineInputBorder(),
           ),
         ),
@@ -229,20 +229,6 @@ class _QrScannerScreenState extends State<QrScannerScreen> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                ActionChip(
-                  label: const Text('PC接続 (rumi_pc)'),
-                  onPressed: () {
-                    _controller.text =
-                        '{"kind":"rumi_pc","baseUrl":"http://192.168.1.10:8765","token":"test-token"}';
-                  },
-                ),
-                ActionChip(
-                  label: const Text('API (rumi_api)'),
-                  onPressed: () {
-                    _controller.text =
-                        '{"kind":"rumi_api","baseUrl":"https://api.openai.com/v1","apiKey":"sk-test","model":"gpt-4o-mini"}';
-                  },
-                ),
                 ActionChip(
                   label: const Text('ペアリングv2'),
                   onPressed: () {

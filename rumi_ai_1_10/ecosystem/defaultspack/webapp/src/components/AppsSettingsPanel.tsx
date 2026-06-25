@@ -8,7 +8,6 @@ import {
   Apple,
   AppWindow,
   QrCode,
-  RefreshCw,
   Loader2,
   Link2,
   Trash2,
@@ -18,26 +17,12 @@ import {
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
 import type { MobileDevice, P2PPairing } from "../features/mobile/resources/mobileApiResources";
-import { buildMobilePairingBaseUrls, isLoopbackHost } from "../lib/mobilePairingUrls";
+import { buildMobilePairingBaseUrls } from "../lib/mobilePairingUrls";
 import { MobilePairingApproval } from "./MobilePairingApproval";
 
 type AppsSettingsPanelProps = {
   kernelBaseUrl?: string;
   cloudflarePagesUrl?: string;
-};
-
-type PcConnectionPayload = {
-  kind: "rumi_pc";
-  baseUrl: string;
-  token: string;
-};
-
-type ApiImportPayload = {
-  kind: "rumi_api";
-  baseUrl: string;
-  apiKey: string;
-  model?: string;
-  label?: string;
 };
 
 type MobilePairQrPayload = {
@@ -170,15 +155,6 @@ function ComingSoonBadge() {
       Coming soon
     </span>
   );
-}
-
-function lanHost() {
-  if (typeof window === "undefined") return "";
-  const host = window.location.hostname;
-  if (isLoopbackHost(host)) {
-    return "";
-  }
-  return host;
 }
 
 function windowOrigin() {
@@ -524,60 +500,15 @@ function DeviceManagementSection() {
   );
 }
 
-function LegacyQrSection({
-  kernelBaseUrl,
-  cloudflarePagesUrl,
-}: {
-  kernelBaseUrl?: string;
-  cloudflarePagesUrl?: string;
-}) {
-  const defaultPcBase = useMemo(() => {
-    const host = lanHost();
-    const detected = buildMobilePairingBaseUrls([kernelBaseUrl, windowOrigin()])[0] ?? "";
-    return detected
-      ? detected
-      : kernelBaseUrl && kernelBaseUrl.trim().length > 0
-      ? kernelBaseUrl.trim()
-      : host
-        ? `http://${host}:8765`
-        : "http://127.0.0.1:8765";
-  }, [kernelBaseUrl]);
-
-  const [pcBaseUrl, setPcBaseUrl] = useState(defaultPcBase);
-  const [pcToken, setPcToken] = useState("");
+function PagesQrSection({ cloudflarePagesUrl }: { cloudflarePagesUrl?: string }) {
   const [pagesUrl, setPagesUrl] = useState(cloudflarePagesUrl ?? "");
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    setPcBaseUrl(defaultPcBase);
-  }, [defaultPcBase]);
-
-  const pcPayload: PcConnectionPayload = useMemo(
-    () => ({ kind: "rumi_pc", baseUrl: pcBaseUrl.trim(), token: pcToken.trim() }),
-    [pcBaseUrl, pcToken],
-  );
-  const pcQrValue = useMemo(() => JSON.stringify(pcPayload), [pcPayload]);
+    setPagesUrl(cloudflarePagesUrl ?? "");
+  }, [cloudflarePagesUrl]);
 
   const pagesQr = useQrDataUrl(pagesUrl.trim());
-  const pcQr = useQrDataUrl(pcQrValue);
-
-  const apiImportPayload: ApiImportPayload = useMemo(
-    () => ({ kind: "rumi_api", baseUrl: pcBaseUrl.trim(), apiKey: pcToken.trim() }),
-    [pcBaseUrl, pcToken],
-  );
-  const apiImportText = useMemo(() => JSON.stringify(apiImportPayload), [apiImportPayload]);
-  const apiQr = useQrDataUrl(apiImportText);
-
-  const isLoopbackUrl = useMemo(() => {
-    const host = (() => {
-      try {
-        return new URL(pcBaseUrl.trim()).hostname;
-      } catch {
-        return "";
-      }
-    })();
-    return isLoopbackHost(host);
-  }, [pcBaseUrl]);
 
   return (
     <details
@@ -587,90 +518,31 @@ function LegacyQrSection({
     >
       <summary className="flex cursor-pointer items-center gap-2 p-4 text-sm text-zinc-400 hover:text-zinc-200">
         <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
-        上級者向け: 直接HMACキーで接続
+        Cloudflare Pages URL
       </summary>
       {open && (
-        <div className="space-y-4 px-4 pb-4">
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-              <div className="flex items-center gap-2">
-                <Smartphone size={15} className="text-zinc-400" />
-                <h4 className="text-sm font-medium text-zinc-100">PC接続QR (Legacy)</h4>
-              </div>
-              <p className="text-xs leading-5 text-zinc-500">
-                スマホアプリでこのQRをスキャンすると、PCのKernel APIへ接続します。トークンは
-                <code className="mx-1 rounded bg-zinc-900 px-1 py-0.5 text-[10px] text-zinc-300">rumi_ai_1_10/user_data/hmac_keys.json</code>
-                のアクティブキーを貼り付けてください。
-              </p>
-              <CopyField label="Kernel API URL" value={pcBaseUrl} onChange={setPcBaseUrl} mono />
-              <CopyField label="Bearer token" value={pcToken} onChange={setPcToken} placeholder="HMACKeyManager().get_active_key()" mono />
-              <button
-                type="button"
-                onClick={() => setPcBaseUrl(defaultPcBase)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 px-2.5 py-1.5 text-[11px] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-              >
-                <RefreshCw size={12} /> URLを再検出
-              </button>
-              {isLoopbackUrl && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-200">
-                  現在のURLはこのPC自身（localhost / 127.0.0.1）を指しています。スマホからは到達できません。PCのLAN IP（例: 192.168.x.x）を入力してください。
-                </div>
-              )}
-              <QrCard
-                title="PC接続QR"
-                description="スマホの「PCに接続」からスキャン。"
-                dataUrl={pcQr.dataUrl}
-                error={pcQr.error}
-                emptyHint="URLとトークンを入力するとQRが表示されます。"
-              />
-            </div>
-
-            <div className="space-y-3 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-              <div className="flex items-center gap-2">
-                <AppWindow size={15} className="text-zinc-400" />
-                <h4 className="text-sm font-medium text-zinc-100">Cloudflare Pages QR</h4>
-              </div>
-              <p className="text-xs leading-5 text-zinc-500">
-                スマホアプリのランディング/接続ガイドをCloudflare Pagesで公開したURLを入力するとQRを発行します。スマホでスキャンして開けます。
-              </p>
-              <CopyField
-                label="Cloudflare Pages URL"
-                value={pagesUrl}
-                onChange={setPagesUrl}
-                placeholder="https://rumi-mobile.pages.dev"
-                mono
-              />
-              <QrCard
-                title="Cloudflare Pages QR"
-                description="スマホカメラ/アプリでスキャンして開く。"
-                dataUrl={pagesQr.dataUrl}
-                error={pagesQr.error}
-                emptyHint="Pages URLを入力するとQRが表示されます。"
-              />
-            </div>
+        <div className="space-y-3 px-4 pb-4">
+          <div className="flex items-center gap-2">
+            <AppWindow size={15} className="text-zinc-400" />
+            <h4 className="text-sm font-medium text-zinc-100">Cloudflare Pages QR</h4>
           </div>
-
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-            <div className="flex items-center gap-2">
-              <QrCode size={15} className="text-zinc-400" />
-              <h4 className="text-sm font-medium text-zinc-100">API/モデル インポート用ペイロード</h4>
-            </div>
-            <p className="mt-1 text-xs leading-5 text-zinc-500">
-              上のPC接続情報をAPI/モデルインポート形式で出力します。スマホアプリの「APIをQRで取り込む」でこのQRをスキャンすると、APIキーとエンドポイントを取り込めます。
-            </p>
-            <div className="mt-3">
-              <QrCard
-                title="API/モデル インポートQR"
-                description="kind=rumi_api。baseUrlとapiKeyを取り込みます。"
-                dataUrl={apiQr.dataUrl}
-                error={apiQr.error}
-                emptyHint="URLとキーを入力するとQRが表示されます。"
-              />
-            </div>
-            <pre className="mt-3 overflow-x-auto rounded-lg border border-zinc-800 bg-black/40 p-3 text-[11px] leading-5 text-zinc-400">
-{apiImportText}
-            </pre>
-          </div>
+          <p className="text-xs leading-5 text-zinc-500">
+            スマホアプリのランディング/接続ガイドをCloudflare Pagesで公開したURLを入力するとQRを発行します。スマホでスキャンして開けます。
+          </p>
+          <CopyField
+            label="Cloudflare Pages URL"
+            value={pagesUrl}
+            onChange={setPagesUrl}
+            placeholder="https://rumi-mobile.pages.dev"
+            mono
+          />
+          <QrCard
+            title="Cloudflare Pages QR"
+            description="スマホカメラ/アプリでスキャンして開く。"
+            dataUrl={pagesQr.dataUrl}
+            error={pagesQr.error}
+            emptyHint="Pages URLを入力するとQRが表示されます。"
+          />
         </div>
       )}
     </details>
@@ -721,7 +593,7 @@ export function AppsSettingsPanel({ kernelBaseUrl, cloudflarePagesUrl }: AppsSet
 
       <DeviceManagementSection />
 
-      <LegacyQrSection kernelBaseUrl={kernelBaseUrl} cloudflarePagesUrl={cloudflarePagesUrl} />
+      <PagesQrSection cloudflarePagesUrl={cloudflarePagesUrl} />
     </section>
   );
 }

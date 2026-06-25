@@ -81,10 +81,10 @@ metadata, and `expiresAt`.
   list of PC commands. Command execution goes through
   `POST /api/mobile/v1/commands/execute`, which is a scoped mobile facade over
   the PC slash command registry and requires the route's mobile device scope.
-- LAN HTTP is for trusted private networks. Mobile pairing base URLs must not
-  advertise loopback hosts; Android permits cleartext LAN HTTP through network
-  security config, and iOS uses local-network/ATS local networking entries.
-  Internet exposure should use HTTPS or an explicit reverse proxy design.
+- LAN HTTP is for trusted private-network development only. Mobile pairing base
+  URLs must not advertise loopback hosts; Android release builds keep cleartext
+  disabled, while debug/profile builds may permit it for LAN testing. Internet
+  exposure should use HTTPS or an explicit reverse proxy design.
 
 ## Non-Goals
 
