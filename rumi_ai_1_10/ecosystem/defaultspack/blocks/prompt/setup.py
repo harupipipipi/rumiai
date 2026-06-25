@@ -18,7 +18,7 @@ def run(context):
     interface_registry = context["interface_registry"]
     source_component = context.get("_source_component", "defaultspack:prompt:prompt")
 
-    def _lazy(module_path, func_name="run", defaults=None):
+    def _lazy(module_path, func_name="run", defaults=None, *, sensitive=False, pre_auth=False):
         """Return a lazy handler that imports the module on first call."""
         route_defaults = dict(defaults or {})
 
@@ -29,6 +29,11 @@ def run(context):
             payload = dict(request_data or {})
             payload.update(route_defaults)
             return fn(payload, context)
+        try:
+            setattr(handler, "__rumi_route_sensitive__", bool(sensitive))
+            setattr(handler, "__rumi_route_pre_auth__", bool(pre_auth))
+        except Exception:
+            pass
         return handler
 
     from transport.registry import prompt_http_route_specs
@@ -37,13 +42,21 @@ def run(context):
         module_path = spec.legacy_block_module or spec.block_module or spec.fallback_block_module
         if not module_path:
             continue
+        handler = _lazy(
+            module_path,
+            defaults=spec.defaults,
+            sensitive=spec.sensitive,
+            pre_auth=spec.pre_auth,
+        )
         interface_registry.register(
             "io.http.route",
             {
                 "method": spec.method,
                 "pattern": spec.pattern,
-                "handler": _lazy(module_path, defaults=spec.defaults),
+                "handler": handler,
                 "path_inject": dict(spec.path_inject),
+                "sensitive": bool(spec.sensitive),
+                "pre_auth": bool(spec.pre_auth),
             },
             meta={"_source_component": source_component},
         )

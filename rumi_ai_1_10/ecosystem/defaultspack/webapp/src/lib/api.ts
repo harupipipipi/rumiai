@@ -106,6 +106,7 @@ export type PromptStudioPrompt = {
   description?: string;
   body?: string;
   content?: string;
+  body_hash?: string;
   variables?: Record<string, unknown>[];
   metadata?: Record<string, unknown>;
   source_type?: string;
@@ -2305,6 +2306,8 @@ export const api = {
     variables?: Record<string, unknown>[];
     metadata?: Record<string, unknown>;
     create_override?: boolean;
+    expected_body_hash?: string;
+    expected_exists?: boolean;
     reason?: string;
   }) {
     return request<Record<string, unknown>>("/api/prompts/editor/save", {
@@ -2313,7 +2316,7 @@ export const api = {
     });
   },
 
-  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; reason?: string }) {
+  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; expected_body_hash?: string; expected_exists?: boolean; reason?: string }) {
     return request<Record<string, unknown>>("/api/prompts/override", {
       method: "POST",
       body: JSON.stringify({ action: "override", ...payload }),

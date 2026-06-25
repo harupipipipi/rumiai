@@ -121,12 +121,19 @@ class PromptManager:
 
     def _save_prompt(self, prompt: dict) -> None:
         """プロンプトを JSON ファイルに保存する。"""
-        prompts_dir = _get_prompts_dir()
-        name = prompt.get("name", "unnamed")
-        fname = _safe_filename(name) + ".json"
-        fpath = os.path.join(prompts_dir, fname)
-        with open(fpath, "w", encoding="utf-8") as f:
-            json.dump(prompt, f, ensure_ascii=False, indent=2)
+        fpath = self.prompt_path_for_name(str(prompt.get("name") or "unnamed"))
+        tmp_path = fpath.with_suffix(fpath.suffix + f".tmp.{os.getpid()}.{uuid.uuid4().hex}")
+        tmp_path.write_text(
+            json.dumps(prompt, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        tmp_path.replace(fpath)
+
+    def prompt_path_for_name(self, name: str) -> Path:
+        """Return the durable JSON path for a user-owned prompt name."""
+        prompts_dir = Path(_get_prompts_dir())
+        prompts_dir.mkdir(parents=True, exist_ok=True)
+        return prompts_dir / (_safe_filename(name) + ".json")
 
     def _delete_prompt_file(self, name: str) -> None:
         """プロンプトの JSON ファイルを削除する。"""

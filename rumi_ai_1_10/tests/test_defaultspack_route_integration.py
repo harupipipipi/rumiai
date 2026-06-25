@@ -115,9 +115,16 @@ def test_template_function_routes_join_canonical_transport_registry():
     prompt_save_route = template_routes[("POST", "/api/prompts/editor/save")]
     assert prompt_save_route.function_name == "defaultspack:prompt_editor_save"
     assert prompt_save_route.defaults == {"action": "save"}
+    assert prompt_save_route.sensitive is True
     prompt_versions_route = canonical[("GET", "/api/prompts/{name}/versions")]
     assert prompt_versions_route.function_name == "defaultspack:prompt_versions"
     assert prompt_versions_route.path_inject == {"name": "name"}
+    assert prompt_versions_route.sensitive is True
+    assert all(
+        spec.sensitive is True
+        for spec in canonical.values()
+        if str(spec.pattern).startswith("/api/prompts")
+    )
 
 
 def test_inactive_template_function_routes_are_not_registered(tmp_path):

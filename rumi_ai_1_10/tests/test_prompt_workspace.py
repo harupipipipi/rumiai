@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -16,18 +17,23 @@ from core_runtime.ai_input_trace_store import AiInputTraceStore  # noqa: E402
 from domain.ai_client.tokenizer import count_text_tokens  # noqa: E402
 from domain.function_runtime.dispatcher import run_defaultspack_function  # noqa: E402
 from domain.prompt.effective import resolve_effective_prompt  # noqa: E402
-from domain.prompt.editor import load_prompt_studio, rollback_prompt, save_prompt, test_prompt_input as run_prompt_studio_test  # noqa: E402
+from domain.prompt.editor import PromptWriteConflict, load_prompt_studio, prompt_versions, rollback_prompt, save_prompt, test_prompt_input as run_prompt_studio_test  # noqa: E402
 from domain.prompt.usage import (  # noqa: E402
     active_prompt_summary,
     append_runtime_prompt_segment,
     compact_active_prompt_summary_response,
     compact_prompt_usage_for_metadata,
+    get_prompt_trace,
     prompt_usage_from_trace,
     toggle_prompt_edge,
 )
 from blocks.prompt.active import run as run_prompt_active_block  # noqa: E402
 from blocks.prompt.test import run as run_prompt_studio_test_block  # noqa: E402
 from transport.registry import _FALLBACK_HTTP_ROUTE_SPECS, prompt_http_route_specs  # noqa: E402
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class _EmptyToolRegistry:
@@ -701,6 +707,8 @@ def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Pa
             "profile_id": "prompt-profile",
             "prompt_id": "locked.system",
             "body": "Profile-owned override text",
+            "expected_exists": False,
+            "expected_body_hash": _sha256("Pack prompt body"),
             "reason": "test_override",
         }
     )
@@ -743,6 +751,25 @@ def test_body_only_user_prompt_save_preserves_description_and_variables(monkeypa
     assert fake_manager.updated["variables"] == [{"name": "topic", "type": "string", "required": True}]
 
 
+def test_stale_user_prompt_save_is_rejected_before_update(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    fake_manager = _EditablePromptManager()
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: fake_manager)
+
+    with pytest.raises(PromptWriteConflict):
+        save_prompt(
+            {
+                "profile_id": "prompt-profile",
+                "prompt_id": "editable.system",
+                "body": "Stale write",
+                "expected_body_hash": _sha256("body from an older tab"),
+            }
+        )
+
+    assert fake_manager.updated is None
+    assert fake_manager.prompt["body"] == "Original body"
+
+
 def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Path) -> None:
     _setup_profile(monkeypatch, tmp_path)
     monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: _FakePromptManager())
@@ -765,6 +792,44 @@ def test_first_override_rollback_removes_override_file(monkeypatch, tmp_path: Pa
 
     assert result["removed_override"] is True
     assert not override_path.exists()
+    versions = prompt_versions({"profile_id": "prompt-profile", "prompt_id": "locked.system"})["versions"]
+    assert any(item["reason"] == f"rollback:{saved['version']['version_id']}" for item in versions)
+    rollback_version = next(item for item in versions if item["reason"] == f"rollback:{saved['version']['version_id']}")
+    assert rollback_version["metadata"]["removed_override"] is True
+
+
+def test_user_prompt_rollback_records_audit_version(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    fake_manager = _EditablePromptManager()
+    monkeypatch.setattr("domain.prompt.editor.get_manager", lambda: fake_manager)
+    monkeypatch.setattr(
+        "domain.prompt.editor._version_dir",
+        lambda profile_id, prompt_id, scope: tmp_path / "versions" / prompt_id / scope,
+    )
+
+    saved = save_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "editable.system",
+            "body": "Updated body",
+            "expected_body_hash": _sha256("Original body"),
+            "reason": "manual_save",
+        }
+    )
+    result = rollback_prompt(
+        {
+            "profile_id": "prompt-profile",
+            "prompt_id": "editable.system",
+            "version_id": saved["version"]["version_id"],
+            "expected_body_hash": _sha256("Updated body"),
+        }
+    )
+
+    assert result["action"] == "rolled_back"
+    assert fake_manager.prompt["body"] == "Original body"
+    versions = prompt_versions({"profile_id": "prompt-profile", "prompt_id": "editable.system"})["versions"]
+    assert any(item["reason"] == "manual_save" for item in versions)
+    assert any(item["reason"] == f"rollback:{saved['version']['version_id']}" for item in versions)
 
 
 def test_prompt_studio_uses_profile_snapshot_as_editor_and_test_body(monkeypatch, tmp_path: Path) -> None:
@@ -859,19 +924,85 @@ def test_prompt_trace_detail_can_lazy_load_full_text() -> None:
     assert "text" not in compact["segments"][0]
 
 
+def test_prompt_trace_api_redacts_raw_trace_and_text_by_default(monkeypatch, tmp_path: Path) -> None:
+    _setup_profile(monkeypatch, tmp_path)
+    trace = {
+        "trace_id": "ait_trace_redaction",
+        "profile_id": "prompt-profile",
+        "conversation_id": "chat-1",
+        "run_id": "run-1",
+        "effective_input": {
+            "system_segments": [
+                {
+                    "id": "prompt:editable.system",
+                    "text": "Sensitive system prompt body",
+                    "metadata": {"prompt_id": "editable.system"},
+                }
+            ],
+            "developer_segments": [],
+            "context_segments": [
+                {"id": "context:user", "text": "Conversation-derived private text"}
+            ],
+            "tool_schemas": [],
+            "policy": {"segments": []},
+            "disabled_segments": [],
+        },
+        "runtime_prompt_segments": [
+            {
+                "id": "skill:test",
+                "source_type": "skill",
+                "text": "Runtime skill prompt body",
+                "tokens": 4,
+            }
+        ],
+        "provider_payload_summary": {"Authorization": "Bearer secret-token"},
+        "graph": {},
+        "token_estimate": {"total": 3},
+    }
+    AiInputTraceStore().save_trace("prompt-profile", trace)
+
+    redacted = get_prompt_trace({"profile_id": "prompt-profile", "trace_id": "ait_trace_redaction"})
+    payload_text = json.dumps(redacted, ensure_ascii=False)
+
+    assert redacted is not None
+    assert redacted["redaction"]["raw_trace_returned"] is False
+    assert redacted["trace"]["effective_input_redacted"] is True
+    assert redacted["trace"]["provider_payload_summary"]["Authorization"] == "[REDACTED]"
+    assert "effective_input" not in redacted["trace"]
+    assert "Sensitive system prompt body" not in payload_text
+    assert "Conversation-derived private text" not in payload_text
+    assert "Runtime skill prompt body" not in payload_text
+
+    explicit = get_prompt_trace(
+        {"profile_id": "prompt-profile", "trace_id": "ait_trace_redaction", "include_text": True}
+    )
+    assert explicit is not None
+    assert explicit["prompt_usage"]["segments"][0]["text"] == "Sensitive system prompt body"
+
+
 def test_prompt_route_specs_have_no_control_stub_and_match_fallback_registry() -> None:
+    prompt_specs = prompt_http_route_specs()
     canonical = {
         (spec.method, spec.pattern, spec.legacy_block_module or spec.block_module or spec.fallback_block_module)
-        for spec in prompt_http_route_specs()
+        for spec in prompt_specs
     }
+    canonical_sensitive = {(spec.method, spec.pattern): spec.sensitive for spec in prompt_specs}
     fallback = {
         (spec.method, spec.pattern, spec.legacy_block_module or spec.block_module or spec.fallback_block_module)
+        for spec in _FALLBACK_HTTP_ROUTE_SPECS
+        if str(spec.pattern).startswith("/api/prompts")
+    }
+    fallback_sensitive = {
+        (spec.method, spec.pattern): spec.sensitive
         for spec in _FALLBACK_HTTP_ROUTE_SPECS
         if str(spec.pattern).startswith("/api/prompts")
     }
 
     assert canonical
     assert canonical == fallback
+    assert canonical_sensitive
+    assert all(canonical_sensitive.values())
+    assert fallback_sensitive == canonical_sensitive
     assert all("/control" not in pattern for _, pattern, _ in canonical)
     assert ("POST", "/api/prompts/editor", "blocks.prompt.control") not in canonical
     assert ("GET", "/api/prompts/editor", "blocks.prompt.editor_load") in canonical

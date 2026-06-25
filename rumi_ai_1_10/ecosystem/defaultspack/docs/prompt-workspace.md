@@ -13,8 +13,10 @@ estimates, segment previews, and source/status metadata. It does not duplicate
 full prompt text or tool schemas into every chat message.
 
 The chat disclosure reads the message metadata first. If text is missing and the
-metadata has a `trace_id`, it loads the full detail from
-`GET /api/prompts/traces/{trace_id}?include_text=true`.
+metadata has a `trace_id`, it loads detail from
+`GET /api/prompts/traces/{trace_id}`. Trace detail is redacted by default:
+raw `effective_input` is not returned, and full prompt/conversation-derived
+segment text appears only when the caller explicitly passes `include_text=true`.
 
 ## Functions
 
@@ -42,6 +44,10 @@ Mutating functions require prompt-specific caller capabilities. They do not
 grant tool, terminal, browser, provider, or filesystem authority.
 
 ## HTTP Routes
+
+All `/api/prompts/*` routes are marked sensitive. Local HTTP access therefore
+goes through the same bearer-token guard as other sensitive defaultspack routes,
+and browser-origin mutations require `X-Rumi-CSRF`.
 
 - `GET /api/prompts/active`
 - `GET /api/prompts/traces`
@@ -86,6 +92,13 @@ profiles/<profile_id>/prompts/<prompt_id>.system.md
 
 Each save records a version entry. Rollback restores the selected version's
 previous body and records a new rollback version.
+
+Prompt Studio sends the loaded `body_hash` as `expected_body_hash` for editable
+prompts. First-time overrides assert that the override file is still missing.
+The backend serializes writes with a per-prompt lock, checks the expected state,
+uses collision-resistant version IDs, and writes both version records and prompt
+files by atomic replacement. Stale saves fail with `PROMPT_WRITE_CONFLICT`
+instead of overwriting newer prompt text.
 
 ## Studio Test Bench
 

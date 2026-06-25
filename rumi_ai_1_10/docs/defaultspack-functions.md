@@ -86,6 +86,9 @@ Prompt Workspace management is available through:
 
 See [prompt_workspace.md](prompt_workspace.md) for chat trace inspection,
 override priority, `disabled_edges`, and the passive prompt safety boundary.
+Prompt trace detail is redacted unless `include_text=true` is explicit, and
+Prompt Studio saves use `expected_body_hash` with atomic versioned writes to
+reject stale concurrent edits.
 
 ## Flow Example
 

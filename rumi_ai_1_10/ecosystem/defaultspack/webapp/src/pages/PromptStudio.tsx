@@ -840,10 +840,16 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     if (!promptId) return;
     if (!canWriteDraft && !forceOverride) return;
     if (forceOverride && !canOverridePrompt && !canEditDirectly) return;
-    setBusy(forceOverride || selectedPrompt?.read_only ? "override" : "save");
-    const request = forceOverride || selectedPrompt?.read_only
-      ? api.createPromptOverride({ profile_id: profileId || undefined, prompt_id: promptId, body: draft, reason: "studio_override" })
-      : api.savePrompt({ profile_id: profileId || undefined, prompt_id: promptId, body: draft, reason: "studio_save" });
+    const willWriteOverride = forceOverride || Boolean(selectedPrompt?.read_only);
+    setBusy(willWriteOverride ? "override" : "save");
+    const editingProfileOverride = isOverride(selectedPrompt);
+    const expectedBodyHash = (!willWriteOverride || editingProfileOverride) && typeof selectedPrompt?.body_hash === "string" && selectedPrompt.body_hash.trim()
+      ? selectedPrompt.body_hash
+      : undefined;
+    const expectedExists = willWriteOverride && !editingProfileOverride ? false : undefined;
+    const request = willWriteOverride
+      ? api.createPromptOverride({ profile_id: profileId || undefined, prompt_id: promptId, body: draft, expected_body_hash: expectedBodyHash, expected_exists: expectedExists, reason: "studio_override" })
+      : api.savePrompt({ profile_id: profileId || undefined, prompt_id: promptId, body: draft, expected_body_hash: expectedBodyHash, reason: "studio_save" });
     void request
       .then(() => {
         setNotice(forceOverride || selectedPrompt?.read_only ? msg("promptStudio.noticeOverrideSaved") : msg("promptStudio.noticePromptSaved"));

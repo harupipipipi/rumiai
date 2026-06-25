@@ -10,6 +10,7 @@ from core_runtime.ai_input_trace_store import AiInputTraceStore
 from core_runtime.profile_paths import active_profile_id
 from core_runtime.profile_runtime_selection import apply_profile_graph_selection
 from core_runtime.profile_workspace import ProfileWorkspaceManager, validate_profile_id
+from core_runtime.runtime_audit_helpers import redact_sensitive
 
 
 def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -24,7 +25,7 @@ def active_prompt_summary(input_data: dict[str, Any] | None = None) -> dict[str,
         request_context.setdefault("model_profile_id", model_profile_id)
     if model:
         request_context.setdefault("model", model)
-    include_text = bool(data.get("include_text", False))
+    include_text = _truthy(data.get("include_text"), default=False)
     response = build_ai_input_graph_response(
         profile,
         include_text=include_text or bool(model_profile_id or model),
@@ -84,8 +85,15 @@ def get_prompt_trace(input_data: dict[str, Any] | None = None) -> dict[str, Any]
         return None
     return {
         "profile_id": profile_id,
-        "trace": trace,
-        "prompt_usage": prompt_usage_from_trace(trace, include_text=bool(data.get("include_text", True))),
+        "trace": _redacted_trace_detail(trace),
+        "prompt_usage": prompt_usage_from_trace(
+            trace,
+            include_text=_truthy(data.get("include_text"), default=False),
+        ),
+        "redaction": {
+            "default_redacted": not _truthy(data.get("include_text"), default=False),
+            "raw_trace_returned": False,
+        },
     }
 
 
@@ -118,7 +126,7 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
     patched_profile = _profile_with_edge_state(profile, edge_id=edge_id, enabled=enabled)
     response = build_ai_input_graph_response(
         patched_profile,
-        include_text=bool(data.get("include_text", False)) or bool(model_profile_id or model),
+        include_text=_truthy(data.get("include_text"), default=False) or bool(model_profile_id or model),
         request_context=request_context,
     )
     response = apply_tokenizer_to_ai_input_response(
@@ -138,7 +146,7 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
         conversation_id=str(data.get("conversation_id") or ""),
         run_id=str(data.get("run_id") or "toggle"),
         trace_id="preview_toggle" if preview else "active",
-        include_text=bool(data.get("include_text", False)),
+        include_text=_truthy(data.get("include_text"), default=False),
     )
     return {
         "profile_id": profile_id,
@@ -147,6 +155,44 @@ def toggle_prompt_edge(input_data: dict[str, Any] | None = None, *, preview: boo
         "preview": preview,
         "ai_input": _compact_toggle_ai_input(response.get("ai_input", {})),
         "summary": compact_prompt_usage_for_metadata(prompt_summary),
+    }
+
+
+def _truthy(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off", ""}:
+        return False
+    return default
+
+
+def _redacted_trace_detail(trace: dict[str, Any]) -> dict[str, Any]:
+    token_estimate = trace.get("token_estimate") if isinstance(trace.get("token_estimate"), dict) else {}
+    provider_summary = (
+        trace.get("provider_payload_summary")
+        if isinstance(trace.get("provider_payload_summary"), dict)
+        else {}
+    )
+    return {
+        "trace_id": trace.get("trace_id"),
+        "created_at": trace.get("created_at"),
+        "conversation_id": trace.get("conversation_id"),
+        "run_id": trace.get("run_id"),
+        "profile_id": trace.get("profile_id"),
+        "token_estimate": redact_sensitive(token_estimate),
+        "provider_payload_summary": redact_sensitive(provider_summary),
+        "gate_decisions": redact_sensitive(trace.get("gate_decisions") if isinstance(trace.get("gate_decisions"), list) else []),
+        "diagnostics": redact_sensitive(trace.get("diagnostics") if isinstance(trace.get("diagnostics"), list) else []),
+        "blocked": redact_sensitive(trace.get("blocked") if isinstance(trace.get("blocked"), list) else []),
+        "blocked_count": len(trace.get("blocked")) if isinstance(trace.get("blocked"), list) else 0,
+        "effective_input_redacted": True,
     }
 
 
@@ -167,6 +213,8 @@ def prompt_usage_from_trace(trace: dict[str, Any], *, include_text: bool = True)
     )
     for segment in trace.get("runtime_prompt_segments", []) if isinstance(trace.get("runtime_prompt_segments"), list) else []:
         if isinstance(segment, dict):
+            if not include_text:
+                segment = {key: value for key, value in segment.items() if key not in {"text", "schema"}}
             usage = append_runtime_prompt_segment(usage, segment)
     return usage
 

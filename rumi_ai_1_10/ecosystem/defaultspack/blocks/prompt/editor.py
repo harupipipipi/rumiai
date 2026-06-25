@@ -8,6 +8,7 @@ from domain.prompt.editor import (
     diff_prompt,
     lint_prompt_text,
     load_prompt_studio,
+    PromptWriteConflict,
     prompt_versions,
     rollback_prompt,
     save_prompt,
@@ -39,6 +40,8 @@ def run(input_data: dict, context: dict) -> dict:
         if action in {"test", "test_input", "studio_test"}:
             return ok(test_prompt_input(data))
         return error(f"Unknown prompt editor action: {action}", "INVALID_INPUT")
+    except PromptWriteConflict as exc:
+        return error(str(exc), "PROMPT_WRITE_CONFLICT")
     except ValueError as exc:
         return error(str(exc), "INVALID_INPUT")
     except Exception as exc:

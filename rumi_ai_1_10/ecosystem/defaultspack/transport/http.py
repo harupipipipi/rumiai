@@ -140,6 +140,8 @@ class DefaultsHttpServer:
                             entry.get("fallback_block_module") or ""
                         ).strip()
                         path_inject = entry.get("path_inject", {})
+                        route_sensitive = bool(entry.get("sensitive"))
+                        route_pre_auth = bool(entry.get("pre_auth"))
                         method_key = str(method or "").upper()
                         pattern_key = str(pattern or "")
                         mapped_flow = _CHAT_TURN_HTTP_FALLBACKS.get((method_key, pattern_key))
@@ -169,10 +171,34 @@ class DefaultsHttpServer:
                                 )
 
                             _flow_handler._defaultspack_flow_route_handler = True
+                            try:
+                                setattr(_flow_handler, "__rumi_route_sensitive__", route_sensitive)
+                                setattr(_flow_handler, "__rumi_route_pre_auth__", route_pre_auth)
+                            except Exception:
+                                pass
                             route_entries.append(
                                 (method, pattern, _flow_handler, path_inject, index)
                             )
                         elif method and pattern and callable(handler):
+                            try:
+                                setattr(
+                                    handler,
+                                    "__rumi_route_sensitive__",
+                                    bool(
+                                        route_sensitive
+                                        or getattr(handler, "__rumi_route_sensitive__", False)
+                                    ),
+                                )
+                                setattr(
+                                    handler,
+                                    "__rumi_route_pre_auth__",
+                                    bool(
+                                        route_pre_auth
+                                        or getattr(handler, "__rumi_route_pre_auth__", False)
+                                    ),
+                                )
+                            except Exception:
+                                pass
                             route_entries.append((method, pattern, handler, path_inject, index))
                     for method, pattern, handler, path_inject, index in sorted(
                         route_entries,
