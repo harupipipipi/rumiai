@@ -93,8 +93,12 @@ export function MobilePairingApproval({
     setError("");
     try {
       const result = await mobileApiResources.approvePairing(pairingId);
-      if (result.device_token) {
-        console.log("[pairing] device token received (not displayed)", { pairingId });
+      if (result.device_token || result.approval_token) {
+        console.log("[pairing] split device tokens received (not displayed)", {
+          pairingId,
+          hasDeviceToken: Boolean(result.device_token),
+          hasApprovalToken: Boolean(result.approval_token),
+        });
       }
       onApproved?.(pairingId, result.device_token);
     } catch (err) {

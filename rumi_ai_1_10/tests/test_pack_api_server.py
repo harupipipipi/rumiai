@@ -287,12 +287,17 @@ class TestCheckAuth:
             "default_store_path",
             lambda: tmp_path,
         )
-        _device, token = DeviceStore(tmp_path).issue_token(
+        _device, token, approval_token = DeviceStore(tmp_path).issue_tokens(
             "mobile-1",
-            scopes=["chat.read"],
+            scopes=["chat.read", "tools.approve"],
         )
         handler = _make_handler(
             headers=_make_headers(Authorization=f"Bearer {token}"),
+            _hmac_key_manager=None,
+            internal_token="",
+        )
+        approval_handler = _make_handler(
+            headers=_make_headers(Authorization=f"Bearer {approval_token}"),
             _hmac_key_manager=None,
             internal_token="",
         )
@@ -300,6 +305,9 @@ class TestCheckAuth:
         assert handler._check_auth("GET", "/api/mobile/v1/conversations") is True
         assert handler._authenticated_device_id == "mobile-1"
         assert handler._check_auth("POST", "/api/mobile/v1/conversations/c1/stream") is False
+        assert handler._check_auth("POST", "/api/mobile/v1/approvals/a1/approve") is False
+        assert approval_handler._check_auth("POST", "/api/mobile/v1/approvals/a1/approve") is True
+        assert approval_handler._authenticated_device_id == "mobile-1"
         assert handler._check_auth("GET", "/api/packs") is False
 
     def test_panel_session_auth_success_for_get(self) -> None:

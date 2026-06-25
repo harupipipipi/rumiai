@@ -72,18 +72,29 @@ class ApiConfig {
 }
 
 class PcConnection {
-  const PcConnection({required this.baseUrl, required this.token});
+  const PcConnection({
+    required this.baseUrl,
+    required this.token,
+    this.approvalToken = '',
+  });
 
   final String baseUrl;
   final String token;
+  final String approvalToken;
 
   bool get isConfigured => baseUrl.trim().isNotEmpty && token.trim().isNotEmpty;
+  bool get canApprove => approvalToken.trim().isNotEmpty;
 
-  Map<String, dynamic> toJson() => {'baseUrl': baseUrl, 'token': token};
+  Map<String, dynamic> toJson() => {
+        'baseUrl': baseUrl,
+        'token': token,
+        'approvalToken': approvalToken,
+      };
 
   factory PcConnection.fromJson(Map<String, dynamic> json) => PcConnection(
         baseUrl: json['baseUrl'] as String? ?? '',
         token: json['token'] as String? ?? '',
+        approvalToken: json['approvalToken'] as String? ?? '',
       );
 }
 
@@ -121,9 +132,8 @@ class PlatformSecureStorage implements SecureKeyValueStorage {
 }
 
 class ApiConfigStore {
-  ApiConfigStore({
-    SecureKeyValueStorage? storage,
-  }) : _storage = storage ?? PlatformSecureStorage();
+  ApiConfigStore({SecureKeyValueStorage? storage})
+      : _storage = storage ?? PlatformSecureStorage();
 
   static const _apiKey = 'rumi.api_config.v1';
   static const _pcKey = 'rumi.pc_connection.v1';

@@ -290,17 +290,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
         if (statusResp.isReady) {
           final token = statusResp.deviceToken!.trim();
+          final approvalToken = statusResp.approvalToken?.trim() ?? '';
           final device = PairedDevice(
             deviceId: _deviceIdentity!.deviceId,
             deviceToken: token,
+            approvalToken: approvalToken,
             label: _deviceIdentity!.deviceLabel,
             scopes: statusResp.scopes,
+            approvalScopes: statusResp.approvalScopes,
             pcBaseUrl: pc.baseUrl,
             pcLabel: friendlyPcLabel(statusResp.pcLabel, pc.baseUrl),
             pairingId: pairingId,
           );
           await widget.deviceStore.savePairedDevice(device);
-          final newPc = PcConnection(baseUrl: pc.baseUrl, token: token);
+          final newPc = PcConnection(
+            baseUrl: pc.baseUrl,
+            token: token,
+            approvalToken: approvalToken,
+          );
           await widget.configStore.savePc(newPc);
           if (!mounted) return;
           setState(() {
