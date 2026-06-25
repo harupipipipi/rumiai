@@ -916,6 +916,42 @@ test("testPromptStudio posts draft input and selected tools", async () => {
   });
 });
 
+test("rollbackPrompt posts conflict precondition body hash", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        prompt_id: "default_chat",
+        rolled_back: true,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.rollbackPrompt({
+      profile_id: "default-profile",
+      prompt_id: "default_chat",
+      version_id: "version-2",
+      expected_body_hash: "3d6eb9f8b9f1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/prompts/default_chat/rollback");
+  assert.deepEqual(requestBody, {
+    profile_id: "default-profile",
+    prompt_id: "default_chat",
+    version_id: "version-2",
+    expected_body_hash: "3d6eb9f8b9f1",
+  });
+});
+
 test("searchConversations serializes spotlight search filters", async () => {
   let requestUrl = "";
   let requestBody: any = null;

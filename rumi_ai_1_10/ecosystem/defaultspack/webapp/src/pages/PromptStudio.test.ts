@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { resolvePromptStudioSelection } from "./PromptStudio";
+import { buildPromptRollbackPayload, resolvePromptStudioSelection } from "./PromptStudio";
 import type { PromptStudioData } from "../lib/api";
 
 function studioData(): PromptStudioData {
@@ -67,4 +67,25 @@ test("Prompt Studio selection falls back to API selected_prompt without a reques
   const selected = resolvePromptStudioSelection(studioData(), "");
 
   assert.equal(selected?.prompt_id, "api_toolsmith");
+});
+
+test("Prompt Studio rollback payload carries the loaded body hash", () => {
+  const payload = buildPromptRollbackPayload(
+    {
+      id: "default_chat",
+      name: "default_chat",
+      prompt_id: "default_chat",
+      body: "current prompt body",
+      body_hash: "3d6eb9f8b9f1",
+    },
+    "version-2",
+    "default-profile",
+  );
+
+  assert.deepEqual(payload, {
+    profile_id: "default-profile",
+    prompt_id: "default_chat",
+    version_id: "version-2",
+    expected_body_hash: "3d6eb9f8b9f1",
+  });
 });

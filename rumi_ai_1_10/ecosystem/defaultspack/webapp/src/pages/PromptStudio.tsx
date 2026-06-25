@@ -561,6 +561,22 @@ export function resolvePromptStudioSelection(result: PromptStudioData, promptId?
   return requestedPrompt ?? detailPrompt ?? result.prompts[0] ?? null;
 }
 
+export function buildPromptRollbackPayload(
+  prompt: PromptStudioPrompt | null | undefined,
+  versionId: string,
+  profileId?: string,
+) {
+  const expectedBodyHash = typeof prompt?.body_hash === "string" && prompt.body_hash.trim()
+    ? prompt.body_hash
+    : undefined;
+  return {
+    profile_id: profileId || undefined,
+    prompt_id: promptKey(prompt),
+    version_id: versionId,
+    expected_body_hash: expectedBodyHash,
+  };
+}
+
 function updateStudioUrl(profileId: string, conversationId: string, promptId: string, modelProfileId = "") {
   const url = new URL(window.location.href);
   url.pathname = "/prompts";
@@ -863,7 +879,7 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
     const promptId = promptKey(selectedPrompt);
     if (!promptId || !versionId) return;
     setBusy(`rollback:${versionId}`);
-    void api.rollbackPrompt({ profile_id: profileId || undefined, prompt_id: promptId, version_id: versionId })
+    void api.rollbackPrompt(buildPromptRollbackPayload(selectedPrompt, versionId, profileId || undefined))
       .then(() => {
         setNotice(msg("promptStudio.noticeRolledBack"));
         loadStudio(promptId);

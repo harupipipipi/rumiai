@@ -2358,7 +2358,7 @@ export const api = {
     });
   },
 
-  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string }) {
+  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string; expected_body_hash?: string; expected_exists?: boolean }) {
     return request<Record<string, unknown>>(`/api/prompts/${encodeURIComponent(payload.prompt_id)}/rollback`, {
       method: "POST",
       body: JSON.stringify(payload),
