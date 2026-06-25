@@ -452,8 +452,9 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     """
     flow_specs = flow_http_route_specs()
     fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
+    adaptive_specs = list(_ADAPTIVE_HTTP_ROUTE_SPECS)
     template_specs = template_http_route_specs()
-    base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs])
+    base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs, adaptive_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
     component_specs = [
         spec for spec in _component_route_specs() if (spec.method, spec.pattern) not in existing
@@ -1957,6 +1958,110 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ui/select-directory", block_module="blocks.ui.select_directory"),
 ]
 
+
+def _adaptive_http_route(method: str, pattern: str, function_id: str, **kwargs: Any) -> HttpRouteSpec:
+    return HttpRouteSpec(
+        method,
+        pattern,
+        function_id=function_id,
+        function_name=f"defaultspack:{function_id}",
+        **kwargs,
+    )
+
+
+_ADAPTIVE_HTTP_ROUTE_SPECS = [
+    _adaptive_http_route("GET", "/api/onboarding/status", "adaptive_onboarding_status"),
+    _adaptive_http_route("GET", "/api/onboarding/schema", "adaptive_onboarding_schema"),
+    _adaptive_http_route("POST", "/api/onboarding/answers/normalize", "adaptive_onboarding_normalize"),
+    _adaptive_http_route("POST", "/api/onboarding/compile", "adaptive_onboarding_compile"),
+    _adaptive_http_route("POST", "/api/onboarding/simulate", "adaptive_onboarding_simulate"),
+    _adaptive_http_route("POST", "/api/onboarding/apply", "adaptive_onboarding_apply"),
+    _adaptive_http_route("POST", "/api/onboarding/undo", "adaptive_onboarding_undo"),
+    _adaptive_http_route("GET", "/api/onboarding/history", "adaptive_onboarding_history"),
+    _adaptive_http_route("POST", "/api/onboarding/rediagnose", "adaptive_onboarding_rediagnose"),
+    _adaptive_http_route("GET", "/api/operating-profiles", "adaptive_operating_profiles_list"),
+    _adaptive_http_route(
+        "GET",
+        "/api/operating-profiles/{id}",
+        "adaptive_operating_profiles_get",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/operating-profiles", "adaptive_operating_profiles_create"),
+    _adaptive_http_route(
+        "PUT",
+        "/api/operating-profiles/{id}",
+        "adaptive_operating_profiles_update",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/operating-profiles/{id}/preview",
+        "adaptive_operating_profiles_preview",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/operating-profiles/{id}/activate",
+        "adaptive_operating_profiles_activate",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("GET", "/api/packs/onboarding-recommendations", "adaptive_pack_recommendations_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/packs/onboarding-recommendations/preview",
+        "adaptive_pack_recommendations_preview",
+    ),
+    _adaptive_http_route("GET", "/api/activity-center", "adaptive_activity_snapshot"),
+    _adaptive_http_route("POST", "/api/activity-center/freeze", "adaptive_freeze_set"),
+    _adaptive_http_route("POST", "/api/context/file-read", "adaptive_context_file_read"),
+    _adaptive_http_route("POST", "/api/context/code-search", "adaptive_context_code_search"),
+    _adaptive_http_route("GET", "/api/context/repository-map", "adaptive_context_repository_map"),
+    _adaptive_http_route("POST", "/api/context/evidence", "adaptive_context_evidence"),
+    _adaptive_http_route("POST", "/api/prepared-actions/prepare", "adaptive_prepared_action_prepare"),
+    _adaptive_http_route(
+        "POST",
+        "/api/prepared-actions/{id}/commit",
+        "adaptive_prepared_action_commit",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/prepared-actions/{id}/revoke",
+        "adaptive_prepared_action_revoke",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/events", "adaptive_event_append"),
+    _adaptive_http_route("GET", "/api/events", "adaptive_event_list"),
+    _adaptive_http_route("POST", "/api/events/replay", "adaptive_event_replay"),
+    _adaptive_http_route("GET", "/api/skills/candidates", "adaptive_skill_candidates_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/skills/candidates/{id}/promote",
+        "adaptive_skill_candidate_promote",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/skills/candidates/{id}/rollback",
+        "adaptive_skill_candidate_rollback",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("GET", "/api/memory/conflicts", "adaptive_memory_conflicts_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/memory/conflicts/{id}/resolve",
+        "adaptive_memory_conflict_resolve",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/orchestration/leases/acquire", "adaptive_lease_acquire"),
+    _adaptive_http_route(
+        "POST",
+        "/api/orchestration/leases/{id}/release",
+        "adaptive_lease_release",
+        path_inject={"id": "id"},
+    ),
+]
+
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
@@ -1973,6 +2078,8 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/finger-recording", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/console", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/host-permissions", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/adaptive", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/operating-profile", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 

@@ -114,6 +114,24 @@ def test_template_function_routes_join_canonical_transport_registry():
     assert external_template_route.sensitive is True
 
 
+def test_adaptive_function_routes_join_canonical_transport_registry():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    onboarding = canonical[("GET", "/api/onboarding/status")]
+    assert onboarding.function_id == "adaptive_onboarding_status"
+    assert onboarding.function_name == "defaultspack:adaptive_onboarding_status"
+    assert (
+        canonical[("POST", "/api/prepared-actions/{id}/commit")].path_inject
+        == {"id": "id"}
+    )
+    assert (
+        canonical[("POST", "/api/orchestration/leases/{id}/release")].function_name
+        == "defaultspack:adaptive_lease_release"
+    )
+
+
 def test_inactive_template_function_routes_are_not_registered(tmp_path):
     import domain.function_runtime.template_specs as template_specs
     from ecosystem.defaultspack.transport.registry import template_http_route_specs
@@ -179,6 +197,8 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/finger-recording", "_handle_static") in routes
     assert ("GET", "/console", "_handle_static") in routes
     assert ("GET", "/host-permissions", "_handle_static") in routes
+    assert ("GET", "/adaptive", "_handle_static") in routes
+    assert ("GET", "/operating-profile", "_handle_static") in routes
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
@@ -343,6 +363,32 @@ def test_pack_api_uses_direct_defaultspack_fallback_without_registered_routes(mo
     assert module_name == "blocks.chat.create_conversation"
     assert input_data["model"] == "google/gemma-4-31b-it"
     assert context["owner_pack"] == "defaultspack"
+
+
+def test_pack_api_dispatches_adaptive_defaultspack_route_without_kernel(tmp_path, monkeypatch):
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+
+    handler = object.__new__(PackAPIHandler)
+    handler.path = "/api/onboarding/status"
+    handler.headers = {"Origin": "http://127.0.0.1:8766"}
+    captured = []
+    handler._send_defaultspack_http_result = captured.append
+
+    previous_kernel = PackAPIHandler.kernel
+    monkeypatch.setattr(PackAPIHandler, "kernel", None)
+    try:
+        assert handler._dispatch_defaultspack_http_route(
+            "GET",
+            "/api/onboarding/status",
+        )
+    finally:
+        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
+
+    assert captured
+    assert captured[0]["status"] == "ok"
+    assert captured[0]["data"]["profile_id"] == "default"
 
 
 def test_chat_send_route_handler_invokes_flow_route_before_block_fallback():

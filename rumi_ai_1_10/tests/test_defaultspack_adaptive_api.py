@@ -41,6 +41,28 @@ def test_adaptive_dispatch_compile_apply_and_activity(tmp_path, monkeypatch: pyt
     assert blocked["code"] == "ADAPTIVE_FROZEN"
 
 
+def test_adaptive_generated_functions_register_into_shared_registry() -> None:
+    from core_runtime.function_registry import FunctionRegistry
+    from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
+
+    registry = FunctionRegistry()
+
+    class Container:
+        def get_or_none(self, name: str):
+            if name == "function_registry":
+                return registry
+            return None
+
+    registered = ensure_defaultspack_functions_registered(Container())
+    entry = registry.get("defaultspack:adaptive_onboarding_status")
+
+    assert registered > 0
+    assert entry is not None
+    assert entry.entrypoint == "template_runner.py:run"
+    assert entry.function_dir.name == "function_runtime"
+    assert entry.manifest["extensions"]["defaultspack"]["block_module"] == "blocks.adaptive"
+
+
 def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     workspace = tmp_path / "repo"
