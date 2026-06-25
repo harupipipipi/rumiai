@@ -434,7 +434,8 @@ test("new conversation composer input is not locked to one visual line", () => {
   );
 
   assert.match(html, /rumi-composer-input-new-overlay/);
-  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[22px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[24px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*max-h-\[150px\]/);
   assert.doesNotMatch(html, /rumi-composer-input-new[^"]*\sh-\[22px\]/);
   assert.match(html, /style="[^"]*flex:0 1 9ch;min-width:5.5rem;max-width:12rem/);
 });
@@ -713,5 +714,6 @@ test("coding workspace picker renders selected workspace and trust affordance", 
   );
 
   assert.match(html, /Main Repo/);
-  assert.match(html, /Trust workspace/);
+  assert.match(html, /rumi-workspace-picker-action is-trust/);
+  assert.match(html, /aria-label="Main Repo を信頼"/);
 });

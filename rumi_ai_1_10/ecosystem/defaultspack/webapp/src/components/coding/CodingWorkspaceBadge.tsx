@@ -11,16 +11,16 @@ export function CodingWorkspaceBadge({
 }) {
   if (!workspace) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[11px] text-zinc-500">
+      <span className="rumi-coding-workspace-badge inline-flex items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[11px] text-zinc-500">
         <FolderCheck size={11} />
-        no workspace
+        workspace なし
       </span>
     );
   }
 
   return (
     <span
-      className="inline-flex min-w-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[11px] text-zinc-300"
+      className={`rumi-coding-workspace-badge inline-flex min-w-0 items-center gap-1 rounded-md border border-zinc-800 bg-zinc-900/50 px-2 py-0.5 text-[11px] text-zinc-300 ${compact ? "is-compact" : ""}`}
       title={workspace.root_path}
     >
       {workspace.trusted ? <ShieldCheck size={11} className="text-emerald-300" /> : <ShieldQuestion size={11} className="text-amber-300" />}
