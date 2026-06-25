@@ -23,7 +23,7 @@ Requirements are selected with human-readable tags rather than UUIDs. Tags are f
 
 ## Marketplace Preview
 
-The Tools workspace exposes a stable preview route labelled `Marketplace`, `Coming soon`, and `探す`. The search button remains disabled until remote discovery, result review, and install handoff are implemented.
+The Tools workspace exposes a stable preview route labelled `Marketplace`, `Coming soon`, and `探す`. Pressing `探す` opens the preview panel only; remote discovery, result review, and install handoff are not implemented yet.
 
 ## Required Secrets
 
