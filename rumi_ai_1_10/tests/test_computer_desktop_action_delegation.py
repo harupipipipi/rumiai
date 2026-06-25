@@ -8,6 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.models import ActionResult
+from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
     BrowserComputerController,
 )
@@ -349,6 +350,84 @@ def test_implicit_background_rejects_experimental_and_uses_foreground(controller
     assert focused["value"] is True
     assert outcome["executed"] is True
     assert outcome["driver"] == "foreground_input"
+    svc.background_action.assert_called_once()
+
+
+def test_windows_implicit_background_rejects_postmessage_and_uses_foreground_key(controller, monkeypatch):
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    svc = MagicMock()
+
+    def background_action(action, target, payload, *, verified_only=False):
+        if verified_only:
+            return asdict(ActionResult(action="key", driver="none", executed=False, confidence="failed"))
+        return asdict(
+            ActionResult(
+                action="key",
+                driver="windows_postmessage",
+                executed=True,
+                confidence="best_effort",
+                can_parallel_user_work=True,
+                requires_foreground=False,
+                uses_physical_input=False,
+            )
+        )
+
+    svc.background_action.side_effect = background_action
+    svc.key.return_value = asdict(ActionResult(action="key", driver="none", executed=False))
+    svc.doctor.return_value = {"platform": "win32", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
+    controller._computer_seat = svc
+    focused = {"value": False}
+    foreground = {"value": False}
+    monkeypatch.setattr(controller, "_focus_action_target", lambda payload: focused.update(value=True) or True)
+    monkeypatch.setattr(controller, "_foreground_action_focus_error", lambda action, payload: None)
+    monkeypatch.setattr(controller, "_windows_desktop_action", lambda action, payload: foreground.update(value=True))
+
+    outcome = controller.run(
+        "computer.key",
+        {"key_combo": "return", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert focused["value"] is True
+    assert foreground["value"] is True
+    assert outcome["executed"] is True
+    assert outcome["driver"] == "foreground_input"
+    assert outcome.get("background") is not True
+
+
+def test_windows_explicit_background_allows_postmessage_key(controller, monkeypatch):
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Windows")
+    svc = MagicMock()
+    svc.background_action.return_value = asdict(
+        ActionResult(
+            action="key",
+            driver="windows_postmessage",
+            executed=True,
+            confidence="best_effort",
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+        )
+    )
+    svc.key.side_effect = AssertionError("explicit background must not use foreground key")
+    svc.doctor.return_value = {"platform": "win32", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
+    controller._computer_seat = svc
+    monkeypatch.setattr(controller, "_focus_action_target", lambda payload: (_ for _ in ()).throw(AssertionError("must not focus")))
+
+    outcome = controller.run(
+        "computer.key",
+        {
+            "window": {"x": 0, "y": 0, "width": 800, "height": 600, "pid": 4321, "hwnd": 9876},
+            "key_combo": "return",
+            "background": True,
+            "include_screenshot": False,
+        },
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["background"] is True
+    assert outcome["driver"] == "windows_postmessage"
     svc.background_action.assert_called_once()
 
 
