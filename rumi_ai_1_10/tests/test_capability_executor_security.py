@@ -344,6 +344,7 @@ class TestCommandFunctionHostExecutionGuard:
         """RUMI_ALLOW_HOST_EXECUTION 未設定 → host_execution_disabled"""
         monkeypatch.delenv("RUMI_ALLOW_HOST_EXECUTION", raising=False)
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
         entry = _MockFunctionEntry(command=["echo", "hello"], host_execution=True, is_builtin=True)
         resp = executor._execute_command_function(
             principal_id="test_principal",
@@ -363,6 +364,7 @@ class TestCommandFunctionPathTraversal:
         """command[0] が function_dir の外を指す絶対パス → security_violation"""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
@@ -388,6 +390,7 @@ class TestCommandFunctionPathTraversal:
     def test_command_requires_absolute_executable_path(self, monkeypatch):
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
         entry = _MockFunctionEntry(command=["bash", "-lc", "echo hi"], host_execution=True, is_builtin=True)
 
         resp = executor._execute_command_function(
@@ -406,6 +409,7 @@ class TestCommandFunctionPathTraversal:
         """sys.executable + -c cannot bypass the function_dir boundary."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()
@@ -431,6 +435,7 @@ class TestCommandFunctionPathTraversal:
         """sys.executable + a script outside function_dir is rejected."""
         monkeypatch.setenv("RUMI_ALLOW_HOST_EXECUTION", "true")
         executor = _make_test_executor()
+        executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
         func_dir = tmp_path / "func"
         func_dir.mkdir()

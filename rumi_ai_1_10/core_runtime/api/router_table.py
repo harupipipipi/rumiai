@@ -290,19 +290,38 @@ class APIRouteTableMixin:
                             call_args[target_key] = path_params[source_key]
                 else:
                     call_args.update(path_params)
+                route_context = {
+                    "pack_id": entry["pack_id"],
+                    "method": method_upper,
+                    "path": path,
+                    "_api_route": True,
+                }
+                execution_principal = entry["pack_id"]
+                if principal is not None:
+                    principal_payload = principal.to_dict()
+                    route_context["_authenticated_principal"] = principal_payload
+                    to_subject = getattr(principal, "to_internal_subject", None)
+                    route_context["_authority_subject"] = (
+                        to_subject(
+                            owner_pack_id=str(
+                                entry.get("owner_pack_id") or entry.get("pack_id") or ""
+                            ),
+                            provider_id=str(entry.get("provider_id") or ""),
+                            frontend_id=str(entry.get("frontend_id") or ""),
+                        )
+                        if callable(to_subject)
+                        else principal_payload
+                    )
+                    if not principal.core_role:
+                        execution_principal = principal.principal_id
                 response = get_capability_executor().execute(
-                    entry["pack_id"],
+                    execution_principal,
                     {
                         "type": "function.call",
                         "qualified_name": f"{entry['pack_id']}:{entry['function_id']}",
                         "args": call_args,
                         "request_id": f"api-route:{method_upper}:{path}",
-                        "context": {
-                            "pack_id": entry["pack_id"],
-                            "method": method_upper,
-                            "path": path,
-                            "_api_route": True,
-                        },
+                        "context": route_context,
                     },
                 )
                 if not getattr(response, "success", False):

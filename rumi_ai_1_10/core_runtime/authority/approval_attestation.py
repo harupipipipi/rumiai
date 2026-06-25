@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .approval_challenge_store import ApprovalChallengeStore
+from .approval_challenge_store import DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS
 from .device_key_registry import DeviceKeyRegistry
 from .models import AuthorityRequest
 from .request_store import AuthorityRequestStore
@@ -64,6 +65,7 @@ def verify_mobile_approval_attestation(
         "resource_hash": resource_hash,
         "decision": str(decision or "").strip().lower(),
         "scope": str(scope or "").strip().lower(),
+        "approval_expires_in_seconds": str(DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS),
     }
     actual = {
         "request_id": challenge.request_id,
@@ -74,6 +76,7 @@ def verify_mobile_approval_attestation(
         "resource_hash": challenge.resource_hash,
         "decision": challenge.decision,
         "scope": challenge.scope,
+        "approval_expires_in_seconds": str(challenge.approval_expires_in_seconds),
     }
     for key, expected_value in expected.items():
         if not expected_value or str(actual.get(key) or "") != expected_value:
@@ -105,6 +108,7 @@ def verify_mobile_approval_attestation(
             "token_id": actor_token_id,
             "device_id": actor_device_id,
             "payload_hash": payload_hash,
+            "approval_expires_in_seconds": challenge.approval_expires_in_seconds,
         },
     )
 

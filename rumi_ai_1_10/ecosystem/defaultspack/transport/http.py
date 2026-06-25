@@ -334,6 +334,7 @@ class DefaultsHttpServer:
             return handler(request_data, path_params or {})
         context = self._build_context()
         context["_facade"] = self.facade
+        _apply_authenticated_principal_context(context, request_data)
         _apply_ambient_browser_qa_context(context, request_data)
         _apply_defaultspack_local_ui_context(context, request_data)
         return handler(request_data, context)
@@ -343,6 +344,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
         # Standalone live-server scripts start transport with no kernel facade.
@@ -365,7 +367,7 @@ class DefaultsHttpServer:
                     qualified_name,
                     payload,
                     context,
-                    principal_id="defaultspack",
+                    principal_id=_function_principal_from_context(context, "defaultspack"),
                     timeout_seconds=timeout_seconds,
                 )
                 result = self._retry_after_dev_auto_approve(
@@ -414,6 +416,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         context["flow_id"] = flow_id
         context["_defaultspack_http_route_adapter"] = True
         try:
@@ -454,6 +457,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         context["flow_id"] = "transport_function_route"
         context["_defaultspack_http_route_adapter"] = True
         _apply_ambient_browser_qa_context(context, payload)
@@ -476,7 +480,7 @@ class DefaultsHttpServer:
                 function_name,
                 payload,
                 context,
-                principal_id="defaultspack",
+                principal_id=_function_principal_from_context(context, "defaultspack"),
                 timeout_seconds=timeout_seconds,
             )
             result = self._retry_after_dev_auto_approve(
@@ -538,7 +542,7 @@ class DefaultsHttpServer:
             qualified_name,
             payload,
             context,
-            principal_id=pack_id,
+            principal_id=_function_principal_from_context(context, pack_id),
             timeout_seconds=timeout_seconds,
         )
 
@@ -1521,6 +1525,39 @@ def _apply_defaultspack_local_ui_context(context, payload):
     context["_tool_server_approved"] = True
     context["source"] = "defaultspack_local_ui"
     context["approval_id"] = "defaultspack_local_ui"
+
+
+def _apply_authenticated_principal_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    principal = payload.get("_authenticated_principal")
+    if not isinstance(principal, dict):
+        return
+    principal_payload = dict(principal)
+    context["_authenticated_principal"] = principal_payload
+    subject = payload.get("_authority_subject")
+    context["_authority_subject"] = dict(subject) if isinstance(subject, dict) else dict(principal_payload)
+    principal_id = str(principal_payload.get("principal_id") or "").strip()
+    profile_id = str(principal_payload.get("profile_id") or "").strip()
+    if profile_id:
+        context["profile_id"] = profile_id
+    if principal_id:
+        context["authority_principal_id"] = principal_id
+        if not bool(principal_payload.get("core_role")):
+            context["principal_id"] = principal_id
+
+
+def _function_principal_from_context(context, default="defaultspack"):
+    if isinstance(context, dict):
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict) and not bool(principal.get("core_role")):
+            candidate = str(principal.get("principal_id") or "").strip()
+            if candidate:
+                return candidate
+        candidate = str(context.get("principal_id") or "").strip()
+        if candidate:
+            return candidate
+    return default
 
 
 class _RequestHandler(http.server.BaseHTTPRequestHandler):

@@ -269,7 +269,7 @@ class TestCheckAuth:
             secret_key="scoped-token-test-secret",
         )
         reset_scoped_access_token_manager_for_tests(manager)
-        issued = manager.issue_token(
+        issued = manager._issue_token_unchecked(
             profile_id="work",
             surface_id="mobile",
             device_id="phone-1",
@@ -447,6 +447,46 @@ class TestCheckAuth:
         response, status = packs_handler._send_response.call_args.args
         assert response.success is False
         assert status == 403
+
+    def test_mobile_approver_challenge_handler_passes_scoped_principal(self, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.api.security import authority_handlers
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile-approver",
+            device_id="phone-1",
+            role="mobile_approver",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        captured = {}
+
+        class FakeAuthorityService:
+            def create_approval_challenge(self, request_id, **kwargs):
+                captured["request_id"] = request_id
+                captured.update(kwargs)
+                return {"success": True, "request_id": request_id}
+
+        monkeypatch.setattr(
+            authority_handlers,
+            "_authority_service",
+            lambda: FakeAuthorityService(),
+        )
+        handler = _make_handler(_authenticated_principal=principal)
+
+        result = handler._authority_challenge(
+            "req-1",
+            {"decision": "approve", "scope": "once", "expires_in_seconds": 120},
+        )
+
+        assert result["success"] is True
+        assert captured["request_id"] == "req-1"
+        assert captured["actor_principal"] is principal
+        assert captured["decision"] == "approve"
+        assert captured["scope"] == "once"
 
     def test_mobile_approver_requires_grant_for_authority_request_routes(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal
@@ -671,6 +711,7 @@ class TestCheckAuth:
             body={
                 "_headers": {"Authorization": "Bearer forged"},
                 "_authenticated_principal": {"profile_id": "evil"},
+                "_authority_subject": {"profile_id": "evil"},
                 "_method": "GET",
                 "_actual_method": "GET",
                 "_path": "/forged",
@@ -683,11 +724,61 @@ class TestCheckAuth:
         assert request_data["status"] == "body"
         assert request_data["_headers"] == {"X-Test": "kept"}
         assert request_data["_authenticated_principal"]["profile_id"] == "work"
+        assert request_data["_authority_subject"]["profile_id"] == "work"
+        assert request_data["_authority_subject"]["principal_id"] == "profile:work__surface:mobile__device:phone-1"
         assert request_data["_method"] == "POST"
         assert request_data["_actual_method"] == "POST"
         assert request_data["_path"] == "/api/test"
         assert request_data["_query_params"] == {"status": "query"}
         assert "_raw_body" not in request_data
+
+    def test_api_route_pack_function_preserves_authenticated_profile_subject(self, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_executor as capability_executor_module
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        captured = {}
+
+        class FakeExecutor:
+            def execute(self, principal_id, request):
+                captured["principal_id"] = principal_id
+                captured["request"] = request
+                return SimpleNamespace(success=True, output={"ok": True})
+
+        monkeypatch.setattr(
+            capability_executor_module,
+            "get_capability_executor",
+            lambda: FakeExecutor(),
+        )
+        handler = _make_handler()
+
+        result = handler._execute_api_route_pack_function(
+            "defaultspack",
+            "test_function",
+            {"value": 1},
+            {
+                "method": "POST",
+                "path": "/api/test",
+                "_authenticated_principal": principal.to_dict(),
+                "_authority_subject": principal.to_internal_subject(owner_pack_id="defaultspack"),
+            },
+        )
+
+        assert result == {"ok": True}
+        assert captured["principal_id"] == "profile:work__surface:mobile__device:phone-1"
+        context = captured["request"]["context"]
+        assert context["_authenticated_principal"]["profile_id"] == "work"
+        assert context["_authority_subject"]["profile_id"] == "work"
+        assert context["_api_route"] is True
 
     def test_auth_issue_access_token_rejects_non_mobile_roles(self, tmp_path) -> None:
         from core_runtime.access_tokens import (

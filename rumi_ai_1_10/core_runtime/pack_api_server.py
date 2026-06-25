@@ -617,6 +617,15 @@ class PackAPIHandler(
         )
         route_context = dict(context or {})
         route_context["_api_route"] = True
+        principal_payload = route_context.get("_authenticated_principal")
+        execution_principal = pack_id
+        if isinstance(principal_payload, dict):
+            if not bool(principal_payload.get("core_role")):
+                execution_principal = str(principal_payload.get("principal_id") or "").strip() or pack_id
+            subject_payload = route_context.get("_authority_subject")
+            route_context["_authority_subject"] = (
+                dict(subject_payload) if isinstance(subject_payload, dict) else dict(principal_payload)
+            )
         request_id = "api-route:{}:{}".format(
             route_context.get("method", ""),
             route_context.get("path", ""),
@@ -628,7 +637,7 @@ class PackAPIHandler(
             "request_id": request_id,
             "context": route_context,
         }
-        response = get_capability_executor().execute(pack_id, request)
+        response = get_capability_executor().execute(execution_principal, request)
         if response.success:
             return response.output
 
@@ -815,8 +824,15 @@ class PackAPIHandler(
         request_data["_headers"] = sanitized_forwarded_headers(self.headers)
         if principal is not None:
             request_data["_authenticated_principal"] = principal.to_dict()
+            to_subject = getattr(principal, "to_internal_subject", None)
+            request_data["_authority_subject"] = (
+                to_subject(owner_pack_id="defaultspack")
+                if callable(to_subject)
+                else principal.to_dict()
+            )
         else:
             request_data.pop("_authenticated_principal", None)
+            request_data.pop("_authority_subject", None)
         request_data["_method"] = method.upper()
         request_data["_actual_method"] = method.upper()
         return request_data
@@ -834,6 +850,11 @@ class PackAPIHandler(
                 principal.to_dict()
                 if (principal := getattr(self, "_authenticated_principal", None)) is not None
                 else None
+            ),
+            "_authority_subject": (
+                principal.to_internal_subject(owner_pack_id="defaultspack")
+                if principal is not None and hasattr(principal, "to_internal_subject")
+                else (principal.to_dict() if principal is not None else None)
             ),
         }
 

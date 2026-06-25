@@ -23,6 +23,7 @@ RESERVED_REQUEST_CONTEXT_KEYS = frozenset(
     {
         "_headers",
         "_authenticated_principal",
+        "_authority_subject",
         "_method",
         "_actual_method",
         "_path",

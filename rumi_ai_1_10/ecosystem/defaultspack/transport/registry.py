@@ -1613,14 +1613,19 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST",
         "/api/authority/requests/{request_id}/approve",
         handler_name="_handle_authority_approve",
+        permission_id="authority.request.approve",
     ),
     HttpRouteSpec(
         "POST",
         "/api/authority/requests/{request_id}/challenge",
         handler_name="_handle_authority_challenge",
+        permission_id="authority.request.approve",
     ),
     HttpRouteSpec(
-        "POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"
+        "POST",
+        "/api/authority/requests/{request_id}/deny",
+        handler_name="_handle_authority_deny",
+        permission_id="authority.request.deny",
     ),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),
     HttpRouteSpec(

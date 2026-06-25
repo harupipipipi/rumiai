@@ -23,6 +23,7 @@ class BubblewrapSandboxSpec:
     uid: int | None = None
     gid: int | None = None
     seccomp_profile: Path | None = None
+    seccomp_fd: int | None = None
 
     def __post_init__(self) -> None:
         if not self.sandbox_id or "/" in self.sandbox_id or "\x00" in self.sandbox_id:

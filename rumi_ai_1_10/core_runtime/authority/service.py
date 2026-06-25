@@ -15,7 +15,10 @@ from .config_lattice import (
     validate_authority_config,
 )
 from .approval_attestation import verify_mobile_approval_attestation
-from .approval_challenge_store import ApprovalChallengeStore
+from .approval_challenge_store import (
+    ApprovalChallengeStore,
+    DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
+)
 from .device_key_registry import DeviceKeyRegistry
 from .models import AUTHORITY_PERMISSION_IDS, AuthorityDecision, AuthorityRequest
 from .principal import build_principal_id, parse_principal_parts, principal_scope_candidates
@@ -135,6 +138,7 @@ class AuthorityService:
             decision=decision,
             scope="once",
             expires_in_seconds=expires_in_seconds,
+            approval_expires_in_seconds=DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
         )
         self._request_store.audit(
             "authority_approval_challenge_issued",
@@ -344,14 +348,27 @@ class AuthorityService:
         scope = str(scope or "once").strip().lower()
         if scope not in AUTHORITY_APPROVAL_SCOPES:
             return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
-        if self._actor_mobile_approver(actor_principal) and scope != "once":
+        mobile_approver = self._actor_mobile_approver(actor_principal)
+        if mobile_approver and scope != "once":
             return {
                 "success": False,
                 "error": "Mobile approver tokens may only issue one-shot approvals",
                 "status_code": 403,
             }
+        if mobile_approver and related_permissions:
+            return {
+                "success": False,
+                "error": "Mobile approver approvals may not bundle related permissions",
+                "status_code": 403,
+            }
+        if mobile_approver and expires_in_seconds is not None:
+            return {
+                "success": False,
+                "error": "Mobile approver approval TTL is fixed by the signed challenge",
+                "status_code": 403,
+            }
         mobile_attestation_audit: dict[str, Any] = {}
-        if self._actor_mobile_approver(actor_principal):
+        if mobile_approver:
             if not self._mobile_actor_has_route_grant(actor_principal, "authority.request.approve"):
                 return {"success": False, "error": "Mobile approver grant is not valid", "status_code": 403}
             attestation_result = verify_mobile_approval_attestation(
@@ -402,7 +419,7 @@ class AuthorityService:
                     "error": "Typed confirmation is required for this host operation",
                     "status_code": 400,
                 }
-        if self._actor_mobile_approver(actor_principal):
+        if mobile_approver:
             operator_audit = dict(mobile_attestation_audit)
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
@@ -413,7 +430,11 @@ class AuthorityService:
                 )
                 return {"success": False, "error": operator_error, "status_code": 403}
             operator_audit = ui_operator_audit_record(operator_payload)
-        expires = int(expires_in_seconds or 86400)
+        expires = int(
+            mobile_attestation_audit.get("approval_expires_in_seconds")
+            if mobile_approver
+            else (expires_in_seconds or 86400)
+        )
         if scope == "once":
             token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
             self._request_store.set_request_status(request.request_id, "approved")

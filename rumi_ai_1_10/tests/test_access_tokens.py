@@ -29,7 +29,52 @@ def _issue(manager: ScopedAccessTokenManager, **overrides):
         "audiences": ["control-panel"],
     }
     payload.update(overrides)
-    return manager.issue_token(**payload)
+    return manager._issue_token_unchecked(**payload)
+
+
+def test_issue_token_enforces_role_surface_and_audience_policy(tmp_path):
+    manager = _manager(tmp_path)
+
+    issued = manager.issue_token(
+        profile_id="profile-main",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=["kernel_api"],
+    )
+
+    assert issued.metadata.role == "mobile_client"
+    assert issued.metadata.surface_id == "mobile"
+    assert issued.metadata.audiences == ("kernel_api",)
+    for payload in (
+        {
+            "profile_id": "profile-main",
+            "surface_id": "desktop",
+            "device_id": "device-1",
+            "role": "owner",
+            "audiences": ["control-panel"],
+        },
+        {
+            "profile_id": "profile-main",
+            "surface_id": "desktop",
+            "device_id": "phone-1",
+            "role": "mobile_client",
+            "audiences": ["kernel_api"],
+        },
+        {
+            "profile_id": "profile-main",
+            "surface_id": "mobile",
+            "device_id": "phone-1",
+            "role": "mobile_client",
+            "audiences": ["browser_companion"],
+        },
+    ):
+        try:
+            manager.issue_token(**payload)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("policy-invalid access token was issued")
 
 
 def test_issue_token_returns_plaintext_once_and_list_omits_it(tmp_path):

@@ -136,6 +136,54 @@ def test_mobile_approver_signed_challenge_issues_one_shot(tmp_path, monkeypatch)
     assert approval["token"]
 
 
+def test_mobile_signed_challenge_cannot_be_expanded_after_signing(tmp_path, monkeypatch):
+    service, grants = _service(tmp_path, monkeypatch)
+    _grant_mobile_approver(grants)
+    private_key = _keypair(service)
+    request_id = _pending_request(service)
+    actor = _mobile_actor()
+
+    challenge = service.create_approval_challenge(
+        request_id,
+        decision="approve",
+        scope="once",
+        actor_principal=actor,
+    )
+    assert challenge["success"] is True
+    assert challenge["challenge"]["approval_expires_in_seconds"] == 300
+    attestation = _attestation(private_key, challenge)
+
+    widened = service.approve_request(
+        request_id,
+        scope="once",
+        actor_principal=actor,
+        related_permissions=["api_key.use", "network.egress"],
+        attestation=attestation,
+    )
+    inflated_ttl = service.approve_request(
+        request_id,
+        scope="once",
+        actor_principal=actor,
+        expires_in_seconds=315360000,
+        attestation=attestation,
+    )
+    approval = service.approve_request(
+        request_id,
+        scope="once",
+        actor_principal=actor,
+        attestation=attestation,
+    )
+
+    assert widened["success"] is False
+    assert widened["status_code"] == 403
+    assert "related permissions" in widened["error"]
+    assert inflated_ttl["success"] is False
+    assert inflated_ttl["status_code"] == 403
+    assert "TTL is fixed" in inflated_ttl["error"]
+    assert approval["success"] is True
+    assert approval.get("related_approvals") == []
+
+
 def test_mobile_challenge_rejects_unregistered_device(tmp_path, monkeypatch):
     service, grants = _service(tmp_path, monkeypatch)
     _grant_mobile_approver(grants)

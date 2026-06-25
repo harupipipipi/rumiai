@@ -20,6 +20,7 @@ from .models import AuthorityRequest
 
 
 DEFAULT_CHALLENGE_TTL_SECONDS = 120
+DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS = 300
 
 
 def _now_utc() -> datetime:
@@ -50,6 +51,13 @@ def _safe_id(value: str) -> str:
     return hashlib.sha256(str(value or "").encode("utf-8")).hexdigest()
 
 
+def _int_or_default(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return int(default)
+
+
 @dataclass(frozen=True)
 class ApprovalChallenge:
     challenge_id: str
@@ -61,6 +69,7 @@ class ApprovalChallenge:
     resource_hash: str
     decision: str
     scope: str
+    approval_expires_in_seconds: int
     nonce: str
     issued_at: str
     expires_at: str
@@ -79,6 +88,7 @@ class ApprovalChallenge:
             "resource_hash": self.resource_hash,
             "decision": self.decision,
             "scope": self.scope,
+            "approval_expires_in_seconds": int(self.approval_expires_in_seconds),
             "nonce": self.nonce,
             "issued_at": self.issued_at,
             "expires_at": self.expires_at,
@@ -104,6 +114,11 @@ class ApprovalChallenge:
             resource_hash=str(data.get("resource_hash") or ""),
             decision=str(data.get("decision") or ""),
             scope=str(data.get("scope") or ""),
+            approval_expires_in_seconds=_int_or_default(
+                data.get("approval_expires_in_seconds")
+                or DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
+                DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
+            ),
             nonce=str(data.get("nonce") or ""),
             issued_at=str(data.get("issued_at") or ""),
             expires_at=str(data.get("expires_at") or ""),
@@ -151,9 +166,11 @@ class ApprovalChallengeStore:
         decision: str,
         scope: str,
         expires_in_seconds: int | None = DEFAULT_CHALLENGE_TTL_SECONDS,
+        approval_expires_in_seconds: int = DEFAULT_MOBILE_APPROVAL_TOKEN_TTL_SECONDS,
     ) -> ApprovalChallenge:
         now = _now_utc()
         ttl = max(15, min(int(expires_in_seconds or DEFAULT_CHALLENGE_TTL_SECONDS), 300))
+        approval_ttl = int(approval_expires_in_seconds)
         payload = {
             "challenge_id": "ach_" + secrets.token_urlsafe(16),
             "request_id": request.request_id,
@@ -164,6 +181,7 @@ class ApprovalChallengeStore:
             "resource_hash": resource_hash,
             "decision": str(decision or "").strip().lower(),
             "scope": str(scope or "").strip().lower(),
+            "approval_expires_in_seconds": approval_ttl,
             "nonce": secrets.token_urlsafe(24),
             "issued_at": _now_ts(now),
             "expires_at": _now_ts(now + timedelta(seconds=ttl)),

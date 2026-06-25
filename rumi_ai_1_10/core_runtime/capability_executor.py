@@ -2044,6 +2044,7 @@ class CapabilityExecutor:
         start_time: float,
         request_context: dict[str, Any] | None,
         calling_convention: str,
+        timeout_seconds: float | None = None,
     ) -> CapabilityResponse | None:
         if not self._entry_requires_managed_sandbox(entry, principal_id, request_context):
             return None
@@ -2071,6 +2072,9 @@ class CapabilityExecutor:
                 reason="Managed sandbox supervisor cannot execute capabilities",
             )
         try:
+            function_dir = getattr(entry, "function_dir", None)
+            main_py_path = getattr(entry, "main_py_path", None)
+            entrypoint = str(getattr(entry, "entrypoint", "") or "main.py:run")
             result = execute(
                 {
                     "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
@@ -2081,6 +2085,11 @@ class CapabilityExecutor:
                     "function_id": str(getattr(entry, "function_id", "") or ""),
                     "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
                     "calling_convention": str(calling_convention or ""),
+                    "function_dir": str(function_dir) if function_dir is not None else "",
+                    "main_py_path": str(main_py_path) if main_py_path is not None else "",
+                    "entrypoint": entrypoint,
+                    "timeout_seconds": float(timeout_seconds or self._get_function_timeout(entry)),
+                    "runner_path": str(FUNCTION_RUNNER_PATH),
                     "args": dict(args or {}),
                     "context": dict(request_context or {}) if isinstance(request_context, dict) else {},
                 }
@@ -2119,24 +2128,23 @@ class CapabilityExecutor:
     ) -> bool:
         del principal_id
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
-        if bool(getattr(entry, "is_builtin", False)):
-            return False
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        if self._is_core_builtin_trust_bypass_entry(entry):
+        if self._is_bundled_core_pack_entry(entry):
             return False
         if self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint):
-            return False
-        context = request_context if isinstance(request_context, dict) else {}
-        boundary = str(context.get("execution_boundary") or context.get("boundary") or "").strip()
-        if boundary == ExecutionBoundary.HOST_BROKER.value:
             return False
         return True
 
     def _handler_def_requires_managed_sandbox(self, handler_def, principal_id: str) -> bool:
         del principal_id
-        if bool(getattr(handler_def, "is_builtin", False)):
-            return False
         pack_id = str(getattr(handler_def, "pack_id", "") or "").strip()
+        entry = types.SimpleNamespace(
+            pack_id=pack_id,
+            function_dir=getattr(handler_def, "handler_dir", None),
+            main_py_path=getattr(handler_def, "handler_py_path", None),
+        )
+        if self._is_bundled_core_pack_entry(entry):
+            return False
         if pack_id and self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
             return False
         return True
@@ -2581,7 +2589,8 @@ class CapabilityExecutor:
         return self._response_from_completed_process(proc, start_time, failure_prefix)
 
     def _get_function_timeout(self, entry):
-        grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
+        manifest = getattr(entry, "manifest", None)
+        grant_config = manifest.get("grant_config", {}) if isinstance(manifest, dict) else {}
         t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
         try:
             t = float(t)

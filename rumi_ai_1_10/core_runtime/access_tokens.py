@@ -336,6 +336,33 @@ class AuthenticatedPrincipal:
             "principal_id": self.principal_id,
         }
 
+    def to_internal_subject(
+        self,
+        *,
+        owner_pack_id: str = "",
+        provider_id: str = "",
+        frontend_id: str = "",
+    ) -> dict[str, Any]:
+        """Server-sealed authority subject for nested runtime calls."""
+        return {
+            "auth_mode": self.auth_mode,
+            "token_id": self.token_id,
+            "profile_id": self.profile_id,
+            "surface_id": self.surface_id,
+            "device_id": self.device_id,
+            "role": self.role,
+            "audiences": list(self.audiences),
+            "core_role": self.core_role,
+            "principal_id": self.principal_id,
+            "facet_principal_ids": list(
+                self.facet_principal_ids(
+                    owner_pack_id=owner_pack_id,
+                    provider_id=provider_id,
+                    frontend_id=frontend_id,
+                )
+            ),
+        }
+
     def whoami_dict(self) -> dict[str, Any]:
         principal = self.to_dict()
         return {
@@ -397,6 +424,34 @@ class ScopedAccessTokenManager:
         surface_id: str,
         device_id: str,
         role: str = "user",
+        audiences: Sequence[str] | str | None = None,
+        expires_in_seconds: int | None = DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+        expires_at: datetime | str | None = None,
+        now: datetime | None = None,
+    ) -> IssuedAccessToken:
+        policy = access_token_issue_policy(
+            role=role,
+            surface_id=surface_id,
+            audiences=audiences,
+        )
+        return self._issue_token_unchecked(
+            profile_id=profile_id,
+            surface_id=str(policy["surface_id"]),
+            device_id=device_id,
+            role=str(policy["role"]),
+            audiences=policy["audiences"],
+            expires_in_seconds=expires_in_seconds,
+            expires_at=expires_at,
+            now=now,
+        )
+
+    def _issue_token_unchecked(
+        self,
+        *,
+        profile_id: str,
+        surface_id: str,
+        device_id: str,
+        role: str,
         audiences: Sequence[str] | str | None = None,
         expires_in_seconds: int | None = DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
         expires_at: datetime | str | None = None,
