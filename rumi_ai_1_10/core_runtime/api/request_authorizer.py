@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Any
 
 from .auth_principal import AuthenticatedPrincipal
 from ..authority.config_lattice import meet_authority_configs
 from ..authority.service import AuthorityService
-from ..capability_grant_manager import get_capability_grant_manager
 
 
 @dataclass(frozen=True)
@@ -21,6 +21,22 @@ class RouteAuthorization:
 
 
 _AUTHORITY_REQUEST_RE = re.compile(r"^/api/authority/requests/([^/]+)(?:/(challenge|approve|deny))?$")
+
+
+def _get_capability_grant_manager():
+    """Resolve the current grant manager without holding stale test stubs."""
+    for module_name in (
+        "core_runtime.capability_grant_manager",
+        "rumi_ai_1_10.core_runtime.capability_grant_manager",
+    ):
+        module = sys.modules.get(module_name)
+        getter = getattr(module, "get_capability_grant_manager", None)
+        if callable(getter):
+            return getter()
+
+    from .. import capability_grant_manager
+
+    return capability_grant_manager.get_capability_grant_manager()
 
 
 def route_permission(method: str, path: str, route_entry: dict[str, Any] | None = None) -> str:
@@ -124,7 +140,7 @@ def authorize_route(
             return RouteAuthorization(False, 403, "Approver role required", permission_id)
 
     resource = route_resource(method, path, route_entry)
-    manager = get_capability_grant_manager()
+    manager = _get_capability_grant_manager()
     checks = []
     for facet_principal in principal.facet_principal_ids(
         owner_pack_id=str(resource.get("owner_pack_id") or resource.get("pack_id") or ""),

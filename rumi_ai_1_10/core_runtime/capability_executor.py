@@ -2647,27 +2647,23 @@ class CapabilityExecutor:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
             logger.warning("Docker not available for user function %s:%s.", pack_id, function_id)
-            fallback_requires_sandbox = (
-                self._approval_manager is None or self._permission_manager is None
+            sandbox_resp = self._managed_sandbox_response_if_required(
+                entry=entry,
+                principal_id=principal_id,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                request_context=request_context,
+                calling_convention=(
+                    "python_docker"
+                    if force_docker
+                    else str(getattr(entry, "calling_convention", None) or runtime)
+                ),
+                timeout_seconds=timeout_seconds,
+                grant_config=grant_config,
             )
-            if fallback_requires_sandbox:
-                sandbox_resp = self._managed_sandbox_response_if_required(
-                    entry=entry,
-                    principal_id=principal_id,
-                    args=args,
-                    request_id=request_id,
-                    start_time=start_time,
-                    request_context=request_context,
-                    calling_convention=(
-                        "python_docker"
-                        if force_docker
-                        else str(getattr(entry, "calling_convention", None) or runtime)
-                    ),
-                    timeout_seconds=timeout_seconds,
-                    grant_config=grant_config,
-                )
-                if sandbox_resp is not None:
-                    return sandbox_resp
+            if sandbox_resp is not None:
+                return sandbox_resp
             if force_docker:
                 return CapabilityResponse(success=False, error="Docker is not available for python_docker function execution.", error_type="docker_unavailable", latency_ms=(time.time() - start_time) * 1000)
             security_mode = os.environ.get("RUMI_SECURITY_MODE", "").strip().lower()
