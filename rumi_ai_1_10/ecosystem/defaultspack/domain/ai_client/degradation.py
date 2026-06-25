@@ -185,7 +185,7 @@ def _degrade_modalities(
                 continue
             elif block_type == "pdf" and not caps.get("supports_pdf"):
                 bridges.append(BridgeAction(action="extract_pdf_text_and_page_images", reason="Provider does not support native PDF."))
-            elif block_type == "audio" and not caps.get("supports_audio"):
+            elif block_type in {"audio", "input_audio"} and not caps.get("supports_audio"):
                 bridges.append(BridgeAction(action="transcription_bridge_required", reason="Provider does not support audio."))
             elif block_type == "file" and not caps.get("supports_file_upload"):
                 if block.text or block.data.get("text"):

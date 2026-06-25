@@ -1,7 +1,9 @@
-import sys, os
+import sys
+import os
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from blocks._common import ok, error, not_implemented, timestamp, gen_id
+from blocks._common import ok, error, timestamp  # noqa: E402
 
 import json
 import socket
@@ -44,6 +46,7 @@ _ID_INJECT_MAP = {
 
 def _match_route(method, path):
     import re
+
     for route_method, pattern, module_name in _ROUTE_MAP:
         if route_method != method:
             continue
@@ -80,9 +83,7 @@ class DefaultsUdsTransport:
                 continue
             except OSError:
                 break
-            threading.Thread(
-                target=self._handle_client, args=(conn,), daemon=True
-            ).start()
+            threading.Thread(target=self._handle_client, args=(conn,), daemon=True).start()
 
     def stop(self):
         self._running = False

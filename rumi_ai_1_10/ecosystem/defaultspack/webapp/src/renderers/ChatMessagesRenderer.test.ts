@@ -1,8 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
+
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
 
 function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
   return {
@@ -12,6 +22,12 @@ function message(overrides: Partial<ChatUiMessage>): ChatUiMessage {
     rawText: "",
     ...overrides,
   };
+}
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
 }
 
 test("message copy text includes visible text and code blocks", () => {
@@ -25,6 +41,30 @@ test("message copy text includes visible text and code blocks", () => {
 
 test("message copy text falls back to raw text", () => {
   assert.equal(messageCopyText(message({ rawText: "fallback text" })), "fallback text");
+});
+
+test("assistant authority retry boilerplate is stripped while preserving the answer", () => {
+  const leakedText = "The model/API authority is now approved. Retrying the request to DeepSeek V4 Flash via OpenCode Go with the provided credentials and network context.\n\n---\n\nHello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
+  const answer = "Hello! 😊 How can I help you today? I’m DeepSeek V4 Flash, ready to assist you...";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(leakedText), answer);
+  assert.equal(messageCopyText(message({ rawText: leakedText })), answer);
+  assert.equal(messageCopyText(message({ content: [{ type: "markdown", text: leakedText }] })), answer);
+});
+
+test("assistant authority thank-you boilerplate is stripped while preserving the answer", () => {
+  const leakedText = "Thank you for granting the model authority request. I can now use the approved provider...\n\n---\n\nHere is the implementation detail you asked for.";
+  const answer = "Here is the implementation detail you asked for.";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(leakedText), answer);
+  assert.equal(messageCopyText(message({ content: [{ type: "text", text: leakedText }] })), answer);
+});
+
+test("ordinary assistant messages are not sanitized as authority boilerplate", () => {
+  const normalText = "Thank you for granting the docs review enough context.\n\n---\n\nHere is the summary.";
+
+  assert.equal(sanitizeAssistantAuthorityBoilerplate(normalText), normalText);
+  assert.equal(messageCopyText(message({ rawText: normalText })), normalText);
 });
 
 test("formatMessageTimestamp shows the conversation day and time", () => {
@@ -119,6 +159,9 @@ test("empty response warning only appears for finalized agent messages without a
 });
 
 test("authority approval followup is hidden while waiting response remains passive", () => {
+  assert.equal(AUTHORITY_FOLLOWUP_TEXT, "Internal authority resume.");
+  assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);
+
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -133,8 +176,8 @@ test("authority approval followup is hidden while waiting response remains passi
   const followup = message({
     id: "authority-followup",
     role: "user",
-    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
-    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    rawText: AUTHORITY_FOLLOWUP_TEXT,
+    content: [{ type: "text", text: AUTHORITY_FOLLOWUP_TEXT }],
     metadata: {
       authorityFollowup: {
         request_id: "approval-1",
@@ -154,6 +197,8 @@ test("authority approval followup is hidden while waiting response remains passi
 });
 
 test("authority waiting message is not replaced by the settled assistant continuation", () => {
+  assertNoRiskyAuthorityFollowupPhrases(AUTHORITY_FOLLOWUP_TEXT);
+
   const waiting = message({
     id: "authority-waiting",
     rawText: "モデル/API の使用許可が必要です。承認後に続行します。",
@@ -168,8 +213,8 @@ test("authority waiting message is not replaced by the settled assistant continu
   const followup = message({
     id: "authority-followup",
     role: "user",
-    rawText: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。",
-    content: [{ type: "text", text: "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。" }],
+    rawText: AUTHORITY_FOLLOWUP_TEXT,
+    content: [{ type: "text", text: AUTHORITY_FOLLOWUP_TEXT }],
     metadata: {
       authorityFollowup: {
         request_id: "approval-1",
@@ -190,6 +235,43 @@ test("authority waiting message is not replaced by the settled assistant continu
   });
 
   assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-waiting", "authority-continuation"]);
+});
+
+test("prompt usage disclosure can be hidden from chat messages", () => {
+  const promptMessage = message({
+    id: "assistant-with-prompts",
+    rawText: "done",
+    content: [{ type: "text", text: "done" }],
+    metadata: {
+      promptUsage: {
+        active_count: 1,
+        token_estimate: { total: 12 },
+        segments: [{ id: "prompt:default_chat", label: "default_chat", status: "active", tokens: 12 }],
+      },
+    },
+  });
+  const baseProps = {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [promptMessage],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  };
+
+  const visible = renderToStaticMarkup(createElement(ChatMessagesRenderer, baseProps));
+  const hidden = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    ...baseProps,
+    showPromptUsageInMessages: false,
+  }));
+
+  assert.match(visible, /Prompt used/);
+  assert.doesNotMatch(hidden, /Prompt used/);
 });
 
 test("long terminal-style output is detected for compact display", () => {

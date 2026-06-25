@@ -1,0 +1,33 @@
+version: 1
+owner: rumi_host_capabilities_pack
+defaultspack:
+  may:
+    - render_authority_ui
+    - route_host_intent_to_viewer_broker
+    - show_host_permission_status
+  must_not:
+    - execute_os_host_operations
+    - persist_raw_microphone_audio
+    - persist_raw_camera_frames
+    - persist_screen_images
+host_intent:
+  required_fields:
+    - type
+    - operation
+    - args
+    - caller.pack_id
+    - caller.function_id
+  approval_token_binding:
+    - operation
+    - args_hash
+    - caller_pack_id
+    - caller_function_id
+    - stream_enabled
+critical:
+  operations:
+    - host.process.exec_guarded
+  scope: once
+  typed_confirmation_required: true
+audit:
+  store_media_payloads: false
+  store_event_only: true

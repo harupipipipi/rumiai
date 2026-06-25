@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "id": "rumi.model_selector.default",
+  "kind": "composite",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.model_selector",
+      "rumi.settings.models"
+    ],
+    "requires": [],
+    "permissions": [
+      "model.invoke"
+    ]
+  },
+  "metadata": {
+    "title": "Default Model Selector",
+    "template_kind": "fullstack_template",
+    "local_first": true,
+    "description": "Declarative metadata for selecting and routing chat models."
+  },
+  "pieces": [
+    {
+      "id": "model_selector_settings_section",
+      "kind": "settings_section",
+      "order": 20,
+      "section_id": "models",
+      "label": "Models",
+      "description": "Model selection and routing metadata from RumiTemplate.",
+      "fields": []
+    },
+    {
+      "id": "model_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 21,
+      "section_id": "models",
+      "field_id": "preferred_model",
+      "type": "model_select",
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Default Model",
+      "default": "stub/default",
+      "data_source": "selectable_model_profiles",
+      "help": "新しい会話と composer が最初に使う既定モデルです。"
+    },
+    {
+      "id": "model_group",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 22,
+      "section_id": "models",
+      "field_id": "preferred_model_group",
+      "type": "select",
+      "label": "Model Group",
+      "default": "default",
+      "options": [
+        {"value": "default", "label": "標準"},
+        {"value": "fast", "label": "高速"},
+        {"value": "deep", "label": "深く考える"},
+        {"value": "vision", "label": "画像対応"},
+        {"value": "cheap", "label": "節約"},
+        {"value": "local", "label": "ローカル"},
+        {"value": "custom", "label": "カスタム"}
+      ],
+      "help": "個別モデルではなく、目的別グループ内で自動ルーティングします。"
+    },
+    {
+      "id": "auto_route_within_group",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 23,
+      "section_id": "models",
+      "type": "toggle",
+      "label": "Auto Route In Group",
+      "default": true,
+      "help": "画像、tool、thinking、速度の条件に合わせてグループ内の実モデルを選びます。"
+    },
+    {
+      "id": "non_vision_image_policy",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 24,
+      "section_id": "models",
+      "field_id": "on_switch_to_non_vision_with_images",
+      "type": "select",
+      "label": "Non-vision Image Switch",
+      "default": "auto_bridge",
+      "options": [
+        {"value": "auto_bridge", "label": "Auto Bridge"},
+        {"value": "ask", "label": "Ask"},
+        {"value": "block", "label": "Block"},
+        {"value": "ignore", "label": "Ignore"}
+      ],
+      "help": "画像あり会話で画像非対応モデルへ切り替える時の挙動です。"
+    },
+    {
+      "id": "utility_models",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 25,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Utility Models",
+      "default": "{}",
+      "help": "tool_selector / vision_ocr / prompt_compactor などの雑用モデル割り当て。空なら自動選択します。",
+      "advanced": true
+    },
+    {
+      "id": "api_routes",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 27,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Structured API Routes",
+      "default": "[]",
+      "help": "高度設定: JSON配列/オブジェクトで model と apis を定義します。旧 Model API Priority も読み取り互換です。",
+      "advanced": true
+    },
+    {
+      "id": "api_bound_profiles",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 28,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "API-bound Profiles",
+      "default": "[]",
+      "help": "高度設定: このAPI keyだけで使えるモデル profile をJSONで追加します。",
+      "advanced": true
+    },
+    {
+      "id": "composite_models",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 29,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Composite Models",
+      "default": "[]",
+      "help": "高度設定: fallback_chain / ensemble の合体モデルをJSONで定義します。",
+      "advanced": true
+    },
+    {
+      "id": "model_notes",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 30,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Model Notes",
+      "default": "{}",
+      "help": "高度設定: モデルごとの特徴を自分の言葉で書き、検索とルーティングの判断材料にします。",
+      "advanced": true
+    },
+    {
+      "id": "thinking_level",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 31,
+      "section_id": "models",
+      "type": "select",
+      "label": "Thinking Level",
+      "default": "medium",
+      "options": [
+        {"value": "none", "label": "Off"},
+        {"value": "low", "label": "Low"},
+        {"value": "medium", "label": "Medium"},
+        {"value": "high", "label": "High"},
+        {"value": "xhigh", "label": "Extra High"}
+      ],
+      "help": "Rumi は none/low/medium/high/xhigh を送り、各 provider が対応する API パラメータへ変換します。"
+    },
+    {
+      "id": "deepthink",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 32,
+      "section_id": "models",
+      "field_id": "deepthink_enabled",
+      "type": "toggle",
+      "label": "DeepThink",
+      "default": false,
+      "help": "thinker型のDeepThink loopを有効にします。タスクには数時間かかる可能性があります。"
+    },
+    {
+      "id": "favorite_profiles",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 33,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Composer Model Pins",
+      "default": "stub/default",
+      "help": "高度設定: composer に優先表示する profile_id。通常は Preferred Model だけで十分です。",
+      "advanced": true
+    },
+    {
+      "id": "thinking_level_by_profile",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 34,
+      "section_id": "models",
+      "type": "textarea",
+      "label": "Per-profile Thinking Map",
+      "default": "{\"stub/default\":\"medium\"}",
+      "help": "高度設定: profile_id ごとの上書き。通常は Thinking Level を使います。",
+      "advanced": true
+    },
+    {
+      "id": "provider_select",
+      "kind": "settings_field",
+      "slot": "models",
+      "order": 35,
+      "section_id": "models",
+      "type": "provider_select",
+      "renderer": "provider_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Provider",
+      "default": "stub",
+      "data_source": "ai_providers",
+      "help": "Filter model choices by provider."
+    },
+    {
+      "id": "model_selector_field_renderer",
+      "kind": "field_renderer",
+      "order": 36,
+      "renderer": "model_select",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "field_types": [
+        "model_select",
+        "provider_select",
+        "api_key_setup"
+      ]
+    },
+    {
+      "id": "model_profile_data_source",
+      "kind": "function",
+      "order": 37,
+      "role": "data_source",
+      "data_source": "selectable_model_profiles",
+      "function_id": "ai_models",
+      "handler_ref": "blocks.ai.models:run",
+      "route_path": "/api/ai/models",
+      "method": "GET",
+      "returns": "model profile options"
+    },
+    {
+      "id": "select_model_action",
+      "kind": "function",
+      "order": 38,
+      "role": "action",
+      "action_id": "ai_set_preferred_model",
+      "function_id": "ai_set_preferred_model",
+      "handler_ref": "domain.frontend.command_registry:ai_set_preferred_model",
+      "requires_approval": false
+    },
+    {
+      "id": "model_runtime_settings_service",
+      "kind": "backend_service",
+      "order": 39,
+      "service_id": "model_runtime_settings",
+      "entrypoint": "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService",
+      "lifecycle": "local"
+    },
+    {
+      "id": "model_invoke_permission",
+      "kind": "permission",
+      "order": 41,
+      "permission_id": "model.invoke",
+      "override": {
+        "mode": "replace",
+        "target_projected_id": "rumi.backend.model_routing.default:model_route_permission"
+      },
+      "scope": "ai_client",
+      "reason": "Selecting a model can lead to local model invocation later."
+    },
+    {
+      "id": "model_selector_test_contract",
+      "kind": "test_contract",
+      "order": 42,
+      "contract_id": "defaultspack.template.model_selector.catalog",
+      "route_metadata": {
+        "method": "GET",
+        "path": "/api/ai/models",
+        "block_module": "blocks.ai.models",
+        "diagnostic": "Template function route_path is projected to transport when it is not already covered by a builtin route."
+      },
+      "assertions": [
+        {"type": "template_projectable", "template_id": "rumi.model_selector.default"},
+        {"type": "catalog_contains", "bucket": "templates", "match": {"id": "rumi.model_selector.default"}},
+        {"type": "setting_field_exists", "section_id": "models", "field_id": "preferred_model", "field_type": "model_select"},
+        {"type": "catalog_contains", "bucket": "field_renderers", "match": {"renderer": "model_select"}},
+        {"type": "route_resolves", "method": "GET", "path": "/api/ai/models"},
+        {"type": "function_registered", "function_id": "ai_models"}
+      ]
+    }
+  ]
+}

@@ -15,18 +15,16 @@ import sys
 import os
 import json
 import argparse
-import time
 
 # Ensure pack root is importable
 _pack_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 if _pack_root not in sys.path:
     sys.path.insert(0, _pack_root)
 
-from blocks._common import ok, error, timestamp, gen_id
-from bridge.block_adapter import invoke_block
-from transport.registry import flow_http_output_is_compatible
-from transport.cli_formatter import (
-    format_markdown,
+from blocks._common import error, timestamp  # noqa: E402
+from bridge.block_adapter import invoke_block  # noqa: E402
+from transport.registry import flow_http_output_is_compatible  # noqa: E402
+from transport.cli_formatter import (  # noqa: E402
     format_json,
     stream_print,
     stream_print_line,
@@ -35,11 +33,9 @@ from transport.cli_formatter import (
     print_assistant_label,
     print_system_message,
     print_error_message,
-    print_success_message,
     print_welcome,
-    c, BOLD, DIM, RED, YELLOW, CYAN, GREEN,
 )
-from transport.cli_commands import execute_command
+from transport.cli_commands import execute_command  # noqa: E402
 
 
 # ── Configuration ────────────────────────────────────────────
@@ -126,6 +122,7 @@ def _cli_chunk_from_sse_event(event):
 
 # ── Backend Adapters ─────────────────────────────────────────
 
+
 class DirectBackend:
     """Call blocks directly via Python import (no HTTP server needed)."""
 
@@ -207,10 +204,15 @@ class DirectBackend:
                 message = err.get("message") if isinstance(err, dict) else str(err)
                 yield {"type": "error", "message": message or "Request failed"}
                 return
-            text = extract_text_from_response(result.get("data") if isinstance(result, dict) else result)
+            text = extract_text_from_response(
+                result.get("data") if isinstance(result, dict) else result
+            )
             if text:
                 yield {"type": "content_delta", "delta": {"text": text}}
-            yield {"type": "stream_end", "message": result.get("data") if isinstance(result, dict) else None}
+            yield {
+                "type": "stream_end",
+                "message": result.get("data") if isinstance(result, dict) else None,
+            }
             return
         for event in events:
             chunk = _cli_chunk_from_sse_event(event)
@@ -237,6 +239,7 @@ class HttpBackend:
     def _request(self, method, path, data=None):
         import urllib.request
         import urllib.error
+
         url = self.base_url + path
         body = None
         if data is not None:
@@ -287,10 +290,12 @@ class HttpBackend:
     def send_message_stream(self, conversation_id, message_content, model):
         """HTTP mode does not support true streaming — falls back to send_message
         and yields the full response as a single chunk."""
-        result = self.send_message({
-            "conversation_id": conversation_id,
-            "message": {"role": "user", "content": message_content},
-        })
+        result = self.send_message(
+            {
+                "conversation_id": conversation_id,
+                "message": {"role": "user", "content": message_content},
+            }
+        )
         if result and result.get("status") == "ok":
             text = extract_text_from_response(result.get("data"))
             if text:
@@ -317,6 +322,7 @@ class HttpBackend:
 
 
 # ── CLI Session ──────────────────────────────────────────────
+
 
 class CLISession:
     """Maintains state for an interactive CLI session."""
@@ -347,7 +353,9 @@ class CLISession:
             cid = conv.get("id", conv.get("conversation_id", ""))
             if cid:
                 self.conversation_id = cid
-                print_system_message("Auto-created conversation " + cid[:8] + " (model: " + model + ")")
+                print_system_message(
+                    "Auto-created conversation " + cid[:8] + " (model: " + model + ")"
+                )
                 return True
         print_error_message("Failed to create conversation.")
         return False
@@ -361,10 +369,13 @@ class CLISession:
 
         if self.json_mode:
             # JSON mode: send via non-streaming call and dump raw response
-            result = self.backend_call("send_message", {
-                "conversation_id": self.conversation_id,
-                "message": {"role": "user", "content": user_input},
-            })
+            result = self.backend_call(
+                "send_message",
+                {
+                    "conversation_id": self.conversation_id,
+                    "message": {"role": "user", "content": user_input},
+                },
+            )
             print(format_json(result))
             return
 
@@ -374,9 +385,7 @@ class CLISession:
         full_text_parts = []
         error_occurred = False
 
-        for chunk in self.backend.send_message_stream(
-            self.conversation_id, user_input, model
-        ):
+        for chunk in self.backend.send_message_stream(self.conversation_id, user_input, model):
             chunk_type = chunk.get("type", "")
             if chunk_type == "content_delta":
                 delta_text = chunk.get("delta", {}).get("text", "")
@@ -399,6 +408,7 @@ class CLISession:
 
 
 # ── Interactive mode ─────────────────────────────────────────
+
 
 def _run_interactive(session):
     """Run the interactive REPL loop."""
@@ -439,12 +449,14 @@ def _run_interactive(session):
 
 # ── One-shot mode ────────────────────────────────────────────
 
+
 def _run_oneshot(session, message):
     """Send a single message and print the response."""
     session.send_and_display(message)
 
 
 # ── Pipe mode ────────────────────────────────────────────────
+
 
 def _run_pipe(session):
     """Read all of stdin and send as a single message."""
@@ -460,6 +472,7 @@ def _run_pipe(session):
 
 # ── Interface registry entry point ───────────────────────────
 
+
 def start_cli_server(facade):
     """Callable registered as io.cli.server.
 
@@ -473,6 +486,7 @@ def start_cli_server(facade):
 
 # ── Main ─────────────────────────────────────────────────────
 
+
 def main():
     """CLI entry point — parses args and dispatches to the appropriate mode."""
     parser = argparse.ArgumentParser(
@@ -480,7 +494,8 @@ def main():
         description="rumi defaults — CLI transport",
     )
     parser.add_argument(
-        "-m", "--message",
+        "-m",
+        "--message",
         help="Send a single message (one-shot mode)",
     )
     parser.add_argument(
@@ -508,7 +523,8 @@ def main():
         help="Output raw JSON responses",
     )
     parser.add_argument(
-        "--conversation", "-c",
+        "--conversation",
+        "-c",
         default=None,
         help="Resume an existing conversation by ID (or prefix)",
     )

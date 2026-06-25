@@ -68,6 +68,39 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - 配布版 / bundle 起動では `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
 - そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、配布版 viewer からその実体を開けます
 
+## defaultspack を開発中に起動するときの注意
+
+viewer 経由で検証するときは、まず `rumi_viewer` を起動し、viewer の Home から `Open Defaultspack` / `Launch Defaultspack` を押してください。
+`pack-shell run defaultspack` を先に直接実行すると、pack-shell が別の kernel を `8765` に起動することがあります。その kernel は viewer が生成した `RUMI_PANEL_BOOTSTRAP_SECRET` を知らないため、あとから viewer を開いたときに bootstrap 401、黒画面、または「Rumi Viewer と Rumi AI/defaultspack が複数起動している」状態に見えます。
+
+defaultspack の独立 UI は `8766` を使います。viewer 本体は `8765` の kernel を管理し、defaultspack は viewer から必要になったタイミングで別ウィンドウとして開かれるのが通常の流れです。
+
+`Open Defaultspack` が `desktop_app.execute not granted` または `Pack not allowed for desktop app execution: defaultspack` で失敗するときは、pack 承認とは別に desktop app 起動用 capability grant が不足しています。開発環境でだけ、次のように署名付き grant を確認・修復できます。
+
+```bash
+cd rumi_ai_1_10
+python3 - <<'PY'
+from core_runtime.capability_grant_manager import CapabilityGrantManager
+
+mgr = CapabilityGrantManager()
+mgr.grant_permission(
+    "defaultspack",
+    "desktop_app.execute",
+    {
+        "mode": "development",
+        "source": "local_dev_launch",
+        "setup_pack_id": "defaultspack",
+        "allowed_packs": ["defaultspack"],
+        "max_token_lifetime": 3600,
+    },
+)
+check = mgr.check("defaultspack", "desktop_app.execute")
+print({"allowed": check.allowed, "reason": check.reason, "config": check.config})
+PY
+```
+
+この操作は `user_data/permissions/capabilities/defaultspack.json` を `CapabilityGrantManager` 経由で更新し、HMAC 署名も再計算します。手で JSON だけを書き換えると tamper 扱いになるため避けてください。
+
 ## よくある詰まり方
 
 ### `Kernel directory not found`
@@ -81,6 +114,44 @@ bootstrap secret がずれているか、古い kernel がポート `8765` を�
 ```bash
 lsof -nP -iTCP:8765 -sTCP:LISTEN
 ```
+
+viewer で検証する場合、`8765` を掴んでいる古い `python -m rumi_ai`、`python -m app`、または `pack-shell run defaultspack` は終了してから `cd rumi_viewer && cargo tauri dev` を実行してください。
+
+```bash
+pgrep -fl 'rumi-viewer|python.*-m app|python.*rumi_ai|pack-shell run defaultspack|defaultspack.desktop_app'
+```
+
+`8766` に古い defaultspack が残っていると、新しい viewer から開く defaultspack と競合します。viewer から再起動して確認するときは、`8766` も空いている状態にします。
+
+```bash
+lsof -nP -iTCP:8766 -sTCP:LISTEN
+```
+
+ブラウザから Authority approval を QA するときは、通常の local Bearer token ではなく、明示的なブラウザQAトークンを使います。viewer から defaultspack を開く前に同じ環境で token を渡してください。
+
+```bash
+cd rumi_viewer
+RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa cargo tauri dev
+```
+
+`pack-shell run defaultspack` を直接起動してブラウザQAする場合は、viewer が生成した署名secretも同じプロセスへ渡してください。tokenだけだと承認ページは開けても、承認操作に必要な `ui_operator` を署名できません。
+
+```bash
+export RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa
+export RUMI_PANEL_BOOTSTRAP_SECRET="$(tr -d '\n' < "$HOME/Library/Application Support/dev.rumiai.app/.rumi_panel_bootstrap_secret")"
+```
+
+ブラウザで開く URL には `browser_approval_token` を付けます。
+
+```text
+http://127.0.0.1:8766/approval?request_id=auth_xxx&browser_approval_token=ambient-browser-qa
+```
+
+`失敗: local auth token required` が出る場合は、まず `8766` を掴んでいる古い defaultspack がないかを確認してください。古い server はこの QA token を知らないため、正しい URL でも承認できません。
+
+### `Open Defaultspack` が 403 で失敗する
+
+`defaultspack` の pack approval が済んでいても、desktop window として起動するには `desktop_app.execute` capability grant が別途必要です。`CapabilityGrantManager.check("defaultspack", "desktop_app.execute")` が `allowed: true` で、config の `allowed_packs` に `defaultspack` が含まれていることを確認してください。
 
 ### Home などを押すと真っ暗になる
 

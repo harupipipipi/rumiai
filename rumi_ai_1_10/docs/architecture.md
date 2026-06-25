@@ -46,6 +46,13 @@
 
 Pack 作者に悪意がある可能性を常に想定します。Pack 実行は原則 Docker `--network=none` で隔離されます。外部通信やホスト特権は capability（Trust + Grant）で仲介し、明示的な許可がない限り動作しません。
 
+defaultspack の RumiTemplate はこの境界を越えません。template は
+composition metadata を catalog に投影する仕組みであり、trust assignment、
+approval、secret、sandbox、audit、provider execution は kernel/runtime 側に
+残ります。詳細は
+[`../ecosystem/defaultspack/docs/templates.md`](../ecosystem/defaultspack/docs/templates.md)
+を参照してください。
+
 ### Fail-Soft
 
 一部が壊れても OS 全体は停止しません。失敗したコンポーネントは無効化され、Diagnostics と Audit に記録して継続します。

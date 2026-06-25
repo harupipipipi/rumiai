@@ -1,8 +1,13 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
+import { defaultspackUrlWithLocalAuthToken } from "./defaultspackLocalAuth";
 
 const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
+const DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY = "rumi-defaultspack-local-auth";
+const DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY = "rumi_local_auth";
+let defaultspackLocalAuthMemoryToken = "";
+let defaultspackLocalAuthBootstrapped = false;
 
 export type ChatContentBlock = {
   type?: string;
@@ -27,6 +32,184 @@ export type ChatMessage = {
   events?: ChatActivityEvent[] | null;
   tool_logs?: ToolLogEntry[] | null;
   model?: string | null;
+};
+
+export type TokenizerInfo = {
+  available?: boolean;
+  fallback?: boolean;
+  status?: string;
+  source?: string;
+  warning?: string;
+  warning_code?: string;
+  tokenizer_id?: string;
+  tokenizer_profile_id?: string;
+  tokenizer_provider_id?: string;
+  tokenizer_model?: string;
+  provider_id?: string;
+  model_profile_id?: string;
+  model?: string;
+};
+
+export type PromptUsageSegment = {
+  id: string;
+  edge_id?: string;
+  prompt_id?: string;
+  label?: string;
+  kind?: string;
+  port?: string;
+  status?: "active" | "disabled" | "gated" | "budget-dropped" | string;
+  enabled?: boolean;
+  source?: string;
+  source_type?: string;
+  source_chain?: Record<string, unknown>[];
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  reason?: string;
+  allow_disable?: boolean;
+  editable?: boolean;
+  readonly_reason?: string;
+  preview?: string;
+  text?: string;
+  explanation?: string;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptUsageSummary = {
+  trace_id?: string;
+  profile_id?: string;
+  conversation_id?: string;
+  run_id?: string;
+  active_count?: number;
+  disabled_count?: number;
+  token_estimate?: {
+    total?: number;
+    by_port?: Record<string, number>;
+    by_node?: Record<string, number>;
+    tokenizer?: TokenizerInfo;
+  };
+  segments?: PromptUsageSegment[];
+  active_segments?: PromptUsageSegment[];
+  disabled_segments?: PromptUsageSegment[];
+  source_counts?: Record<string, number>;
+};
+
+export type PromptStudioPrompt = {
+  id: string;
+  name: string;
+  prompt_id?: string;
+  description?: string;
+  body?: string;
+  content?: string;
+  body_hash?: string;
+  variables?: Record<string, unknown>[];
+  metadata?: Record<string, unknown>;
+  source_type?: string;
+  source?: string;
+  effective_source?: string;
+  effective_source_type?: string;
+  read_only?: boolean;
+  editable?: boolean;
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  preview?: string;
+  activation_state?: string;
+  active_edge_id?: string;
+  active_reason?: string;
+  allow_disable?: boolean;
+  override_allowed?: boolean;
+  source_chain?: Record<string, unknown>[];
+  validation?: Record<string, unknown>;
+  lint?: Record<string, unknown>;
+  versions?: PromptVersionRecord[];
+  safety?: Record<string, unknown>;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+};
+
+export type PromptVersionRecord = {
+  version_id: string;
+  profile_id?: string;
+  prompt_id?: string;
+  scope?: string;
+  created_at?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptStudioData = {
+  profile_id: string;
+  model_profile_id?: string;
+  model?: string;
+  tokenizer?: TokenizerInfo;
+  profile_workspace?: Record<string, string>;
+  prompts: PromptStudioPrompt[];
+  selected_prompt?: PromptStudioPrompt | null;
+  active_summary?: PromptUsageSummary;
+};
+
+export type PromptStudioTestResult = {
+  profile_id: string;
+  prompt_id?: string;
+  conversation_id?: string;
+  input?: {
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+  };
+  model_profile_id?: string;
+  model?: string;
+  summary?: PromptUsageSummary;
+  segments?: PromptUsageSegment[];
+  matched_skills?: Record<string, unknown>[];
+  skill_instructions?: string;
+  selected_tool_records?: Record<string, unknown>[];
+  selected_tool_segments?: PromptUsageSegment[];
+  candidate_tool_segments?: PromptUsageSegment[];
+  tool_candidates?: {
+    combined?: Record<string, unknown>[];
+    from_prompt?: Record<string, unknown>[];
+    from_input?: Record<string, unknown>[];
+  };
+  prompt_tool_analysis?: Record<string, unknown>;
+  template_tool_policy_resolution?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  verdicts?: Record<string, string>[];
+};
+
+export type PromptTraceSummary = {
+  trace_id?: string;
+  created_at?: number;
+  conversation_id?: string;
+  run_id?: string;
+  profile_id?: string;
+  token_estimate?: PromptUsageSummary["token_estimate"];
+  provider_payload_summary?: Record<string, unknown>;
+  blocked_count?: number;
+};
+
+export type PromptTraceDetail = {
+  profile_id: string;
+  trace: Record<string, unknown>;
+  prompt_usage: PromptUsageSummary;
+};
+
+export type PromptToggleResponse = {
+  profile_id: string;
+  edge_id: string;
+  enabled: boolean;
+  preview?: boolean;
+  ai_input?: Record<string, unknown>;
+  summary: PromptUsageSummary;
 };
 
 export type ChatAttachment = {
@@ -191,6 +374,11 @@ export type AuthorityUiOperator = {
   signature: string;
 };
 
+export type AuthorityApprovalContext = {
+  request_id: string;
+  ui_operator: AuthorityUiOperator;
+};
+
 export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
@@ -209,7 +397,16 @@ export type AuthorityRequestDisplayMetadata = {
   endpoint_path?: string | null;
   credential_label?: string | null;
   access_summary?: string | null;
+  host_execution_summary?: {
+    executable?: string;
+    argument_count?: number;
+    cwd?: string;
+    target_paths?: string[];
+    target_urls?: string[];
+  } | null;
   risk_level?: string;
+  typed_confirmation_required?: boolean;
+  confirmation_phrase?: string | null;
   audit_text?: string;
 };
 
@@ -734,6 +931,8 @@ export type ConversationListOptions = {
   company_id?: string;
   workspace_id?: string;
   conversation_kind?: string;
+  group_id?: string;
+  include_messages?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -847,6 +1046,9 @@ export type ModelProfile = {
   recommended_roles?: string[];
   allowed_roles?: string[];
   availability?: Record<string, unknown>;
+  tokenizer?: Record<string, unknown>;
+  tokenizer_profile_id?: string;
+  tokenizer_model_profile_id?: string;
   metadata?: Record<string, unknown>;
   defaults?: Record<string, unknown>;
   pricing?: Record<string, unknown>;
@@ -1140,7 +1342,8 @@ export type ComposerCommandExecution =
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
-  | { type: "chat_action"; action: string };
+  | { type: "chat_action"; action: string }
+  | { type: "pack_block"; qualified_name: string };
 
 export type ComposerCommandItem = {
   id: string;
@@ -1156,6 +1359,9 @@ export type ComposerCommandItem = {
   active?: boolean;
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
+  source?: string;
+  template_id?: string;
+  piece_id?: string;
 };
 
 export type ComposerCommandExecuteResult = {
@@ -1168,6 +1374,89 @@ export type ComposerCommandExecuteResult = {
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;
+};
+
+export type TemplateComposerInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  help?: string;
+  accepted_modalities?: string[];
+  feature_flags?: Record<string, boolean | string | number | null | undefined>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  component?: string;
+  renderer?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateContextPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateToolPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  toggleable?: boolean;
+  default_enabled_tools?: string[];
+  default_disabled_tools?: string[];
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateAiInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  composer_input?: string;
+  composer_input_id?: string;
+  context_policy?: string;
+  context_policy_id?: string;
+  tool_policy?: string;
+  tool_policy_id?: string;
+  widgets?: string[];
+  params?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateCatalogMetadataItem = {
+  id?: string;
+  label?: string;
+  description?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type ShellRegion = {
@@ -1264,6 +1553,20 @@ export type UICatalog = {
     }>;
   };
   skills?: SkillCatalogItem[];
+  commands?: ComposerCommandItem[];
+  composer_inputs?: TemplateComposerInput[];
+  ai_inputs?: TemplateAiInput[];
+  tool_policies?: TemplateToolPolicy[];
+  context_policies?: TemplateContextPolicy[];
+  composer_widgets?: TemplateCatalogMetadataItem[];
+  external_io_templates?: TemplateCatalogMetadataItem[];
+  templates?: TemplateCatalogMetadataItem[];
+  actions?: TemplateCatalogMetadataItem[];
+  data_sources?: TemplateCatalogMetadataItem[];
+  api_routes?: TemplateCatalogMetadataItem[];
+  permissions?: TemplateCatalogMetadataItem[];
+  shell_regions?: ShellRegion[];
+  shell_renderers?: ShellRenderer[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1276,6 +1579,71 @@ export type UICatalog = {
     source: string;
   }>;
 };
+
+function normalizedCommandIdentity(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function commandIdentityKeys(command: ComposerCommandItem): string[] {
+  const keys = [
+    normalizedCommandIdentity(command.id),
+    normalizedCommandIdentity(command.name),
+  ].filter(Boolean);
+  return [...new Set(keys)];
+}
+
+export function mergeComposerCommands(
+  backendCommands: ComposerCommandItem[] = [],
+  catalogCommands: ComposerCommandItem[] = [],
+): ComposerCommandItem[] {
+  const merged: ComposerCommandItem[] = [];
+  const indexByKey = new Map<string, number>();
+
+  const upsert = (command: ComposerCommandItem, source: "backend" | "catalog") => {
+    const keys = commandIdentityKeys(command);
+    const existingIndex = keys.map((key) => indexByKey.get(key)).find((index) => index !== undefined);
+    if (existingIndex !== undefined) {
+      if (source === "catalog") {
+        return;
+      }
+      return;
+    }
+    merged.push(command);
+    const nextIndex = merged.length - 1;
+    keys.forEach((key) => indexByKey.set(key, nextIndex));
+  };
+
+  backendCommands.forEach((command) => upsert(command, "backend"));
+  catalogCommands.forEach((command) => upsert(command, "catalog"));
+  return merged;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function composerCommandResultMessage(result: ComposerCommandExecuteResult): string | null {
+  const directMessage = nonEmptyString(result.message);
+  if (directMessage) return directMessage;
+
+  const resultPayload = objectRecord(result.result);
+  if (!resultPayload) return null;
+
+  const payloadMessage = nonEmptyString(resultPayload.message);
+  const path = nonEmptyString(resultPayload.path)
+    || nonEmptyString(resultPayload.file_path)
+    || nonEmptyString(resultPayload.artifact_path);
+  if (payloadMessage && path) return `${payloadMessage}\n${path}`;
+  if (payloadMessage) return payloadMessage;
+  if (path) return `Command wrote ${path}`;
+  return null;
+}
 
 type ApiOk<T> = {
   status: "ok";
@@ -1305,6 +1673,7 @@ type SendMessageOptions = {
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
   tool_policy?: Record<string, unknown>;
   tool_selection?: ToolSelectionRequest;
   attachments?: ChatAttachment[];
@@ -1504,16 +1873,66 @@ function getDefaultspackCsrfToken(): string {
   return token;
 }
 
+function consumeDefaultspackLocalAuthFromLocation(): string {
+  if (typeof window === "undefined") return "";
+  const storage = sessionStorageOrNull();
+  try {
+    const rawHash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    if (!rawHash) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    const params = new URLSearchParams(rawHash);
+    const token = params.get(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY)?.trim() ?? "";
+    if (!token) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    defaultspackLocalAuthMemoryToken = token;
+    storage?.setItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY, token);
+    params.delete(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY);
+    const nextHash = params.toString();
+    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+    window.history.replaceState(window.history.state, document.title, nextUrl);
+    return token;
+  } catch {
+    return storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() ?? "";
+  }
+}
+
+export function bootstrapDefaultspackLocalAuth(): string {
+  const stored = sessionStorageOrNull()?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+  if (defaultspackLocalAuthBootstrapped) {
+    if (defaultspackLocalAuthMemoryToken || stored) return defaultspackLocalAuthMemoryToken || stored;
+  }
+  defaultspackLocalAuthBootstrapped = true;
+  const consumed = consumeDefaultspackLocalAuthFromLocation();
+  if (consumed) {
+    defaultspackLocalAuthMemoryToken = consumed;
+    return consumed;
+  }
+  defaultspackLocalAuthMemoryToken = stored;
+  return defaultspackLocalAuthMemoryToken;
+}
+
+function getDefaultspackLocalAuthToken(): string {
+  return bootstrapDefaultspackLocalAuth();
+}
+
+bootstrapDefaultspackLocalAuth();
+
 export function defaultspackApiHeaders(method: string, headers?: HeadersInit): Headers {
   const nextHeaders = new Headers(headers);
   if (!nextHeaders.has("Content-Type")) {
     nextHeaders.set("Content-Type", "application/json");
+  }
+  if (!nextHeaders.has("Authorization")) {
+    const token = getDefaultspackLocalAuthToken();
+    if (token) nextHeaders.set("Authorization", `Bearer ${token}`);
   }
   const csrfHeader = nextHeaders.get("X-Rumi-CSRF");
   if (isUnsafeHttpMethod(method) && (!csrfHeader || !csrfHeader.trim())) {
     nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
   }
   return nextHeaders;
+}
+
+export function defaultspackUrlWithLocalAuth(pathOrUrl: string): string {
+  return defaultspackUrlWithLocalAuthToken(pathOrUrl, getDefaultspackLocalAuthToken());
 }
 
 export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
@@ -1531,7 +1950,25 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
   return `${text.slice(0, limit).trim()}...`;
 }
 
-function defaultspackApiStatusHint(status: number): string {
+function defaultspackApiCodeHint(code: string | undefined): string | null {
+  if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
+    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
+    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
+  }
+  if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
+    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+  }
+  return null;
+}
+
+function defaultspackApiStatusHint(status: number, code?: string): string {
+  const codeHint = defaultspackApiCodeHint(code);
+  if (codeHint) return codeHint;
   if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
   if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
   if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
@@ -1552,7 +1989,7 @@ export function explainDefaultspackApiError(
   const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
   return [
     `${label}${code}`,
-    defaultspackApiStatusHint(status),
+    defaultspackApiStatusHint(status, error?.code),
     detail ? `詳細: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -1651,6 +2088,7 @@ function messageRequestBody(
     },
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
+      ...(options?.params ?? {}),
       thinking_level: options?.thinking_level ?? undefined,
       deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
@@ -1811,6 +2249,119 @@ export const api = {
   deleteConversation(id: string) {
     return request<{ deleted: boolean }>(`/api/chat/conversations/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  getPromptActive(params?: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) {
+    return request<{
+      profile_id: string;
+      conversation_id?: string;
+      summary: PromptUsageSummary;
+      segments?: PromptUsageSegment[];
+      active_segments?: PromptUsageSegment[];
+      disabled_segments?: PromptUsageSegment[];
+      token_estimate?: PromptUsageSummary["token_estimate"];
+    }>(withQuery("/api/prompts/active", params));
+  },
+
+  listPromptTraces(params?: { profile_id?: string; conversation_id?: string; limit?: number }) {
+    return request<{ profile_id: string; traces: PromptTraceSummary[]; count: number }>(
+      withQuery("/api/prompts/traces", params),
+    );
+  },
+
+  getPromptTrace(traceId: string, params?: { profile_id?: string; include_text?: boolean }) {
+    return request<PromptTraceDetail>(
+      withQuery(`/api/prompts/traces/${encodeURIComponent(traceId)}`, params),
+    );
+  },
+
+  getPromptStudio(params?: { profile_id?: string; prompt_id?: string; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptStudioData>(withQuery("/api/prompts/editor", params));
+  },
+
+  testPromptStudio(payload: {
+    profile_id?: string;
+    prompt_id?: string;
+    conversation_id?: string;
+    draft?: string;
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+    request_context?: Record<string, unknown>;
+    template_policy?: Record<string, unknown>;
+  }) {
+    return request<PromptStudioTestResult>("/api/prompts/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  savePrompt(payload: {
+    profile_id?: string;
+    prompt_id: string;
+    body: string;
+    description?: string;
+    variables?: Record<string, unknown>[];
+    metadata?: Record<string, unknown>;
+    create_override?: boolean;
+    expected_body_hash?: string;
+    expected_exists?: boolean;
+    reason?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/prompts/editor/save", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", ...payload }),
+    });
+  },
+
+  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; expected_body_hash?: string; expected_exists?: boolean; reason?: string }) {
+    return request<Record<string, unknown>>("/api/prompts/override", {
+      method: "POST",
+      body: JSON.stringify({ action: "override", ...payload }),
+    });
+  },
+
+  togglePromptEdge(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  previewPromptToggle(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/preview-toggle", {
+      method: "POST",
+      body: JSON.stringify({ preview: true, ...payload }),
+    });
+  },
+
+  diffPrompt(payload: { profile_id?: string; prompt_id: string; base?: string; draft?: string }) {
+    return request<{ profile_id: string; prompt_id: string; diff: string; changed: boolean }>("/api/prompts/diff", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  lintPrompt(payload: { prompt?: string; text?: string; body?: string; token_budget?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/lint", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  compactPrompt(payload: { prompt?: string; text?: string; body?: string; target_chars?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/compact", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string; expected_body_hash?: string; expected_exists?: boolean }) {
+    return request<Record<string, unknown>>(`/api/prompts/${encodeURIComponent(payload.prompt_id)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -2894,6 +3445,21 @@ export const api = {
       `/api/authority/requests/${encodeURIComponent(requestId)}`,
       { cache: "no-store" },
     );
+  },
+
+  browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
+    return request<AuthorityApprovalContext>(withQuery("/api/authority/browser-ui-operator", {
+      browser_approval_token: browserApprovalToken,
+    }), {
+      method: "POST",
+      headers: {
+        "X-Rumi-Approval-Browser-Token": browserApprovalToken,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        browser_approval_token: browserApprovalToken,
+      }),
+    });
   },
 
   approveAuthorityApproval(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,21 @@ class ViewerBrokerClient:
 
     def permissions(self) -> dict[str, Any]:
         return self._request("GET", "/api/host/permissions")
+
+    def execute_intent(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/api/host/intent/execute", dict(payload or {}))
+
+    def start_stream(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._request("POST", "/api/host/stream/start", dict(payload or {}))
+
+    def stop_stream(self, stream_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        request_payload = dict(payload or {})
+        request_payload["stream_id"] = _string(stream_id)
+        return self._request("POST", "/api/host/stream/stop", request_payload)
+
+    def stream_events(self, stream_id: str) -> dict[str, Any]:
+        encoded_stream_id = urllib.parse.quote(_string(stream_id), safe="")
+        return self._request("GET", f"/api/host/stream/events/{encoded_stream_id}")
 
     def run_computer(
         self,

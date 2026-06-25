@@ -1,0 +1,40 @@
+{
+  "function_id": "ambient_permission_check",
+  "description": "Record observed OS microphone and camera permission state without granting Rumi permissions.",
+  "tags": ["ambient", "permission"],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.permission_check",
+    "defaultspack.ambient.permission_check",
+    "defaults.ambient.permission.check",
+    "defaultspack.ambient.permission.check",
+    "defaults.ambient.permissions.check",
+    "defaultspack.ambient.permissions.check"
+  ],
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "permission_id": {"type": "string"},
+      "os_status": {"type": "string"},
+      "statuses": {
+        "type": "object",
+        "additionalProperties": {"type": "string"}
+      }
+    },
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.permissions",
+      "default_args": {"action": "check_os"}
+    }
+  }
+}

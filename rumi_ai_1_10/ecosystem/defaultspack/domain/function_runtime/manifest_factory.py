@@ -14,11 +14,13 @@ class FunctionSpec:
     tags: tuple[str, ...]
     risk: str = "low"
     block_module: str | None = None
+    handler_ref: str | None = None
     default_args: dict[str, Any] = field(default_factory=dict)
     aliases: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
+    permission_id: str | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -79,7 +81,13 @@ def _spec(
 
 
 def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
-    return {
+    defaultspack_extension = {
+        "block_module": spec.block_module,
+        "default_args": spec.default_args,
+    }
+    if spec.handler_ref:
+        defaultspack_extension["handler_ref"] = spec.handler_ref
+    manifest = {
         "function_id": spec.function_id,
         "description": spec.description,
         "tags": list(spec.tags),
@@ -93,12 +101,12 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
         "input_schema": dict(spec.input_schema or OBJECT_SCHEMA),
         "output_schema": dict(ENVELOPE_SCHEMA),
         "extensions": {
-            "defaultspack": {
-                "block_module": spec.block_module,
-                "default_args": spec.default_args,
-            }
+            "defaultspack": defaultspack_extension
         },
     }
+    if spec.permission_id:
+        manifest["permission_id"] = spec.permission_id
+    return manifest
 
 
 AI_FUNCTIONS: tuple[FunctionSpec, ...] = (
@@ -340,6 +348,73 @@ RECORDING_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "ambient_status",
+        "Read ambient trigger monitor, permission, OS permission, and privacy status.",
+        ("ambient", "permission"),
+        block="blocks.ambient.status",
+    ),
+    _spec(
+        "ambient_monitor_start",
+        "Enable the ambient microphone and camera trigger monitor.",
+        ("ambient", "monitor"),
+        risk="high",
+        block="blocks.ambient.monitor",
+        default_args={"action": "start"},
+        requires=("host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"),
+    ),
+    _spec(
+        "ambient_monitor_stop",
+        "Pause the ambient trigger monitor.",
+        ("ambient", "monitor"),
+        block="blocks.ambient.monitor",
+        default_args={"action": "stop"},
+    ),
+    _spec(
+        "ambient_configure",
+        "Configure ambient trigger chat routing and new-chat defaults.",
+        ("ambient", "settings"),
+        block="blocks.ambient.config",
+        aliases=("defaults.ambient.configure", "defaultspack.ambient.configure"),
+    ),
+    _spec(
+        "ambient_event_submit",
+        "Submit a sanitized ambient trigger event to the ambient trigger router.",
+        ("ambient", "input"),
+        risk="high",
+        block="blocks.ambient.event_submit",
+        aliases=("defaults.ambient.events.submit", "defaultspack.ambient.events.submit"),
+        requires=("ambient.trigger.dispatch",),
+    ),
+    _spec(
+        "ambient_permission_grant",
+        "Grant a Rumi-side ambient permission and optionally record OS permission state.",
+        ("ambient", "permission"),
+        risk="high",
+        block="blocks.ambient.permissions",
+        default_args={"action": "grant"},
+    ),
+    _spec(
+        "ambient_permission_revoke",
+        "Revoke a Rumi-side ambient permission without changing OS permission state.",
+        ("ambient", "permission"),
+        risk="medium",
+        block="blocks.ambient.permissions",
+        default_args={"action": "revoke"},
+    ),
+    _spec(
+        "ambient_permission_check",
+        "Record observed OS microphone and camera permission state without granting Rumi permissions.",
+        ("ambient", "permission"),
+        block="blocks.ambient.permissions",
+        default_args={"action": "check_os"},
+        aliases=("defaults.ambient.permissions.check", "defaultspack.ambient.permissions.check"),
+        requires=(),
+    ),
+)
+
+
 AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
     _spec(function_id, description, ("agent",), risk=risk, block=block)
     for function_id, description, risk, block in (
@@ -435,8 +510,21 @@ REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+_PROMPT_WORKSPACE_DEFAULT_ARGS: dict[str, dict[str, Any]] = {
+    "prompt_editor_save": {"action": "save"},
+    "prompt_create_override": {"action": "override"},
+}
+
+
 DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
-    _spec(function_id, description, tags, risk=risk, block=block)
+    _spec(
+        function_id,
+        description,
+        tags,
+        risk=risk,
+        block=block,
+        default_args=_PROMPT_WORKSPACE_DEFAULT_ARGS.get(function_id),
+    )
     for function_id, description, tags, risk, block in (
         ("prompt_render", "Render a prompt.", ("prompt",), "low", "blocks.prompt.render"),
         ("prompt_list", "List prompts.", ("prompt",), "low", "blocks.prompt.list"),
@@ -448,6 +536,18 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("prompt_convert", "Convert a prompt.", ("prompt",), "low", "blocks.prompt.convert"),
         ("prompt_validate_template", "Validate a prompt template.", ("prompt",), "low", None),
         ("prompt_resolve_for_conversation", "Resolve prompt context for a conversation.", ("prompt",), "low", None),
+        ("prompt_active", "Summarize active prompt segments for a profile or chat.", ("prompt",), "low", "blocks.prompt.active"),
+        ("prompt_trace_list", "List saved prompt usage traces.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
+        ("prompt_trace_get", "Get a saved prompt usage trace.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
+        ("prompt_toggle", "Enable or disable a prompt edge through AI Input Graph disabled_edges.", ("prompt",), "medium", "blocks.prompt.toggle"),
+        ("prompt_preview_toggle", "Preview enabling or disabling a prompt edge without saving.", ("prompt",), "low", "blocks.prompt.preview_toggle"),
+        ("prompt_editor_load", "Load Prompt Studio data for prompts, source chains, and versions.", ("prompt", "editor"), "low", "blocks.prompt.editor_load"),
+        ("prompt_editor_save", "Save an editable prompt or create a profile override for a read-only prompt.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
+        ("prompt_create_override", "Create a profile prompt override.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
+        ("prompt_test", "Run a local Prompt Studio test for prompt, skill, and tool-schema activation.", ("prompt", "editor"), "low", "blocks.prompt.test"),
+        ("prompt_diff", "Diff prompt base, effective, and draft text.", ("prompt", "editor"), "low", "blocks.prompt.diff"),
+        ("prompt_versions", "List prompt versions recorded by Prompt Studio.", ("prompt", "editor"), "low", "blocks.prompt.versions"),
+        ("prompt_rollback", "Roll back a prompt to a recorded Prompt Studio version.", ("prompt", "editor"), "medium", "blocks.prompt.rollback"),
         ("memory_store", "Store memory.", ("memory",), "medium", "blocks.memory.store"),
         ("memory_recall", "Recall memory.", ("memory",), "low", "blocks.memory.recall"),
         ("memory_project_context", "Get project memory context.", ("memory",), "low", "blocks.memory.project_context"),
@@ -595,6 +695,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS
+    + AMBIENT_FUNCTIONS
     + DATA_FUNCTIONS
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS

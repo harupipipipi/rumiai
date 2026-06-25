@@ -44,7 +44,15 @@ pub struct AllowedNavigationPorts(pub Arc<Mutex<Vec<u16>>>);
 const PRIMARY_WINDOW_LABELS: [&str; 2] = ["panel", "main"];
 const DEFAULTSPACK_RESERVED_PORT: u16 = 8766;
 const AUTHORITY_APPROVAL_WINDOW_LABEL: &str = "authority-approval";
-const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumi Approval";
+const AUTHORITY_APPROVAL_WINDOW_TITLE: &str = "Rumiの許可";
+const AMBIENT_TRIGGER_WINDOW_LABEL: &str = "ambient-trigger";
+const AMBIENT_TRIGGER_WINDOW_TITLE: &str = "合図待ち";
+const FINGER_RECORDING_WINDOW_LABEL: &str = "finger-recording";
+const FINGER_RECORDING_WINDOW_TITLE: &str = "指で録音";
+const DEFAULTS_CONSOLE_WINDOW_LABEL: &str = "defaults-console";
+const DEFAULTS_CONSOLE_WINDOW_TITLE: &str = "詳細ログ";
+const HOST_PERMISSIONS_WINDOW_LABEL: &str = "host-permissions";
+const HOST_PERMISSIONS_WINDOW_TITLE: &str = "Rumi Host Permissions";
 const AUTHORITY_UI_OPERATOR_TTL_SECONDS: u64 = 180;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -147,6 +155,16 @@ fn open_external_url(url: String) -> Result<(), String> {
     open::that_detached(url).map_err(|error| format!("failed to open external url: {error}"))
 }
 
+#[tauri::command]
+fn close_current_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    if should_send_to_background_on_close(window.label()) {
+        return Err("primary windows are sent to the background instead of closed".into());
+    }
+    window
+        .close()
+        .map_err(|error| format!("failed to close current window: {error}"))
+}
+
 fn valid_authority_request_id(request_id: &str) -> bool {
     let trimmed = request_id.trim();
     !trimmed.is_empty()
@@ -167,6 +185,43 @@ fn authority_approval_url(request_id: &str) -> Result<Url, String> {
     .map_err(|error| format!("failed to build approval window URL: {error}"))
 }
 
+fn ambient_trigger_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/ambient"
+    ))
+    .map_err(|error| format!("failed to build ambient trigger window URL: {error}"))
+}
+
+fn finger_recording_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/finger-recording"
+    ))
+    .map_err(|error| format!("failed to build finger recording window URL: {error}"))
+}
+
+fn defaults_console_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/console"
+    ))
+    .map_err(|error| format!("failed to build defaults console window URL: {error}"))
+}
+
+fn host_permissions_url() -> Result<Url, String> {
+    Url::parse(&format!(
+        "http://127.0.0.1:{DEFAULTSPACK_RESERVED_PORT}/host-permissions"
+    ))
+    .map_err(|error| format!("failed to build host permissions window URL: {error}"))
+}
+
+fn authenticated_defaultspack_window_url(
+    config: &AppConfig,
+    url: Result<Url, String>,
+) -> Result<Url, String> {
+    let url = url?;
+    dock_registration::add_defaultspack_local_auth(config, url)
+        .map_err(|error| format!("failed to authenticate Defaultspack window URL: {error:#}"))
+}
+
 fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     window
         .unminimize()
@@ -182,9 +237,14 @@ fn focus_authority_approval_window(window: &tauri::WebviewWindow) -> Result<(), 
         .map_err(|error| format!("failed to focus approval window: {error}"))
 }
 
-fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> Result<(), String> {
+fn open_authority_approval_window_for_app(
+    app: &AppHandle,
+    config: &AppConfig,
+    request_id: &str,
+) -> Result<(), String> {
     let request_id = request_id.trim().to_string();
-    let approval_url = authority_approval_url(&request_id)?;
+    let approval_url =
+        authenticated_defaultspack_window_url(config, authority_approval_url(&request_id))?;
     if let Some(window) = app.get_webview_window(AUTHORITY_APPROVAL_WINDOW_LABEL) {
         window
             .navigate(approval_url)
@@ -198,7 +258,7 @@ fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> 
         tauri::WebviewUrl::External(approval_url),
     )
     .title(AUTHORITY_APPROVAL_WINDOW_TITLE)
-    .inner_size(620.0, 720.0)
+    .inner_size(520.0, 620.0)
     .min_inner_size(480.0, 560.0)
     .resizable(true)
     .focused(true)
@@ -210,8 +270,203 @@ fn open_authority_approval_window_for_app(app: &AppHandle, request_id: &str) -> 
 }
 
 #[tauri::command]
-async fn open_authority_approval_window(app: AppHandle, request_id: String) -> Result<(), String> {
-    open_authority_approval_window_for_app(&app, &request_id)
+async fn open_authority_approval_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+    request_id: String,
+) -> Result<(), String> {
+    open_authority_approval_window_for_app(&app, config.inner(), &request_id)
+}
+
+fn focus_ambient_trigger_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize ambient trigger window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show ambient trigger window: {error}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| format!("failed to float ambient trigger window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus ambient trigger window: {error}"))
+}
+
+fn open_ambient_trigger_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let ambient_url = authenticated_defaultspack_window_url(config, ambient_trigger_url())?;
+    if let Some(window) = app.get_webview_window(AMBIENT_TRIGGER_WINDOW_LABEL) {
+        window
+            .navigate(ambient_url)
+            .map_err(|error| format!("failed to navigate ambient trigger window: {error}"))?;
+        return focus_ambient_trigger_window(&window);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        AMBIENT_TRIGGER_WINDOW_LABEL,
+        tauri::WebviewUrl::External(ambient_url),
+    )
+    .title(AMBIENT_TRIGGER_WINDOW_TITLE)
+    .inner_size(360.0, 240.0)
+    .min_inner_size(320.0, 180.0)
+    .resizable(true)
+    .focused(true)
+    .visible(true)
+    .always_on_top(true)
+    .build()
+    .map_err(|error| format!("failed to open ambient trigger window: {error}"))?;
+    focus_ambient_trigger_window(&window)
+}
+
+#[tauri::command]
+async fn open_ambient_trigger_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_ambient_trigger_window_for_app(&app, config.inner())
+}
+
+fn focus_floating_window(window: &tauri::WebviewWindow, label: &str) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize {label} window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show {label} window: {error}"))?;
+    window
+        .set_always_on_top(true)
+        .map_err(|error| format!("failed to float {label} window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus {label} window: {error}"))
+}
+
+fn open_small_defaultspack_window_for_app(
+    app: &AppHandle,
+    label: &'static str,
+    title: &str,
+    url: Url,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(label) {
+        window
+            .navigate(url)
+            .map_err(|error| format!("failed to navigate {label} window: {error}"))?;
+        return focus_floating_window(&window, label);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(app, label, tauri::WebviewUrl::External(url))
+        .title(title)
+        .inner_size(width, height)
+        .min_inner_size(360.0, 420.0)
+        .resizable(true)
+        .focused(true)
+        .visible(true)
+        .always_on_top(true)
+        .build()
+        .map_err(|error| format!("failed to open {label} window: {error}"))?;
+    focus_floating_window(&window, label)
+}
+
+fn open_finger_recording_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    open_small_defaultspack_window_for_app(
+        app,
+        FINGER_RECORDING_WINDOW_LABEL,
+        FINGER_RECORDING_WINDOW_TITLE,
+        authenticated_defaultspack_window_url(config, finger_recording_url())?,
+        380.0,
+        460.0,
+    )
+}
+
+#[tauri::command]
+async fn open_finger_recording_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_finger_recording_window_for_app(&app, config.inner())
+}
+
+#[tauri::command]
+async fn open_defaultspack_main_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+    path: Option<String>,
+) -> Result<(), String> {
+    dock_registration::open_defaultspack_desktop_window_path_impl(
+        &app,
+        config.inner(),
+        path.as_deref().unwrap_or("/chat"),
+    )
+    .map(|_| ())
+    .map_err(|error| format!("{error:#}"))
+}
+
+fn open_defaults_console_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    open_small_defaultspack_window_for_app(
+        app,
+        DEFAULTS_CONSOLE_WINDOW_LABEL,
+        DEFAULTS_CONSOLE_WINDOW_TITLE,
+        authenticated_defaultspack_window_url(config, defaults_console_url())?,
+        760.0,
+        520.0,
+    )
+}
+
+#[tauri::command]
+async fn open_defaults_console_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_defaults_console_window_for_app(&app, config.inner())
+}
+
+fn focus_host_permissions_window(window: &tauri::WebviewWindow) -> Result<(), String> {
+    window
+        .unminimize()
+        .map_err(|error| format!("failed to unminimize host permissions window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show host permissions window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus host permissions window: {error}"))
+}
+
+fn open_host_permissions_window_for_app(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let host_permissions_url =
+        authenticated_defaultspack_window_url(config, host_permissions_url())?;
+    if let Some(window) = app.get_webview_window(HOST_PERMISSIONS_WINDOW_LABEL) {
+        window
+            .navigate(host_permissions_url)
+            .map_err(|error| format!("failed to navigate host permissions window: {error}"))?;
+        return focus_host_permissions_window(&window);
+    }
+
+    let window = tauri::WebviewWindowBuilder::new(
+        app,
+        HOST_PERMISSIONS_WINDOW_LABEL,
+        tauri::WebviewUrl::External(host_permissions_url),
+    )
+    .title(HOST_PERMISSIONS_WINDOW_TITLE)
+    .inner_size(900.0, 680.0)
+    .min_inner_size(620.0, 480.0)
+    .resizable(true)
+    .focused(true)
+    .visible(true)
+    .build()
+    .map_err(|error| format!("failed to open host permissions window: {error}"))?;
+    focus_host_permissions_window(&window)
+}
+
+#[tauri::command]
+async fn open_host_permissions_window(
+    app: AppHandle,
+    config: tauri::State<'_, AppConfig>,
+) -> Result<(), String> {
+    open_host_permissions_window_for_app(&app, config.inner())
 }
 
 #[cfg(debug_assertions)]
@@ -327,9 +582,14 @@ fn maybe_spawn_authority_approval_smoke_window(app: AppHandle) {
 
         thread::sleep(Duration::from_secs(2));
         let app_for_open = app.clone();
+        let config_for_open = app.state::<AppConfig>().inner().clone();
         let request_id_for_open = request_id.clone();
         if let Err(error) = app.run_on_main_thread(move || {
-            match open_authority_approval_window_for_app(&app_for_open, &request_id_for_open) {
+            match open_authority_approval_window_for_app(
+                &app_for_open,
+                &config_for_open,
+                &request_id_for_open,
+            ) {
                 Ok(()) => info!(
                     "authority smoke approval window opened on main thread for request {request_id_for_open}"
                 ),
@@ -1254,6 +1514,11 @@ pub fn run() {
     let allowed_navigation_ports_for_setup = Arc::clone(&allowed_navigation_ports);
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = show_primary_window(app) {
+                error!("Failed to focus existing Rumi window after duplicate launch: {error}");
+            }
+        }))
         .plugin(
             tauri::plugin::Builder::<tauri::Wry, ()>::new("nav-guard")
                 .on_navigation(move |_webview, url| {
@@ -1429,12 +1694,20 @@ pub fn run() {
             restart_kernel,
             reauthorize_panel_session,
             open_external_url,
+            close_current_window,
             open_authority_approval_window,
+            open_ambient_trigger_window,
+            open_finger_recording_window,
+            open_defaultspack_main_window,
+            open_defaults_console_window,
+            open_host_permissions_window,
             authority_approval_context,
             send_to_background,
             show_app_window,
             get_background_control_status,
             desktop_system_info::get_desktop_system_info,
+            desktop_system_info::get_host_permission_status,
+            desktop_system_info::open_host_permission_settings,
             dock_registration::register_defaultspack_dock,
             dock_registration::launch_defaultspack_desktop
         ])
@@ -1504,6 +1777,27 @@ mod tests {
             url.as_str(),
             "http://127.0.0.1:8766/approval?request_id=auth_123"
         );
+    }
+
+    #[test]
+    fn ambient_trigger_url_targets_defaultspack_window_route() {
+        let url = ambient_trigger_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/ambient");
+    }
+
+    #[test]
+    fn finger_recording_url_targets_dedicated_defaultspack_window_route() {
+        let url = finger_recording_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/finger-recording");
+    }
+
+    #[test]
+    fn defaults_console_url_targets_defaultspack_console_surface() {
+        let url = defaults_console_url().unwrap();
+
+        assert_eq!(url.as_str(), "http://127.0.0.1:8766/console");
     }
 
     #[test]

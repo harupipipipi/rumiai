@@ -1,6 +1,6 @@
 # Known Debt
 
-Last updated: 2026-06-06
+Last updated: 2026-06-22
 
 ## P0
 
@@ -18,3 +18,5 @@ Last updated: 2026-06-06
 - continue clarifying unit execution isolation modes, especially container/sandbox boundaries
 - keep update/apply flows moving toward explicit capability ownership
 - trim residual transport/runtime compatibility shims once replacement paths are stable
+- continue splitting `AmbientTriggerPanel.tsx` state/effects into smaller ambient hooks after the hand-tracker, routing, storage, and bridge seams are stable
+- keep the PR #347 macOS ambient smoke checklist as a manual release gate until it has automated coverage: first mic/camera grant, denial and re-grant, window close/reopen, camera disconnect, finger recording dispatch, and approval gesture audit-failure stop

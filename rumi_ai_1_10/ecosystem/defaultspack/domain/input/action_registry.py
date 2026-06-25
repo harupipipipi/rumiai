@@ -39,6 +39,10 @@ def _default_specs() -> list[InputActionSpec]:
 
     return [
         InputActionSpec("chat.message", handle_chat_message),
+        InputActionSpec("dispatch_input", handle_chat_message),
+        InputActionSpec("submit_input", handle_chat_message),
+        InputActionSpec("defaults.console.input", handle_chat_message),
+        InputActionSpec("defaultspack.console.input", handle_chat_message),
         InputActionSpec("run.instruction", handle_run_instruction),
         InputActionSpec("run.interrupt", handle_run_interrupt),
         InputActionSpec("agent.delegate", handle_agent_delegate),

@@ -52,6 +52,29 @@ def test_fallback_http_chat_send_uses_long_running_timeout():
     assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
 
 
+def test_fallback_http_ambient_event_uses_long_running_timeout():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={"status": "ok", "data": {"event_id": "ambient-1"}},
+    ) as mocked:
+        result = server._invoke_function_route(
+            "defaultspack:ambient_event_submit",
+            {"trigger": "pinch", "mode": "dispatch_audio"},
+            {},
+            {},
+            fallback_block_module="blocks.ambient.event_submit",
+        )
+
+    assert result == {"status": "ok", "data": {"event_id": "ambient-1"}}
+    mocked.assert_called_once()
+    assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
+
+
 def test_fallback_http_explicit_timeout_overrides_default():
     from transport.http import DefaultsHttpServer
 
