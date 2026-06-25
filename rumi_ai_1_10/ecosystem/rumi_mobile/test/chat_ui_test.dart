@@ -79,7 +79,7 @@ void main() {
     expect(find.byType(ActionChip), findsNWidgets(4));
     expect(find.byType(ComposerBar), findsOneWidget);
     expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
-    expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.settings_outlined), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

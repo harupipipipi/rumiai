@@ -67,11 +67,6 @@ class ChatDrawer extends StatelessWidget {
               ],
             ),
           ),
-          _SpaceSelector(
-            spaces: spaces,
-            activeSpaceId: activeSpaceId,
-            onSelect: onSelectSpace,
-          ),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: FilledButton.icon(
@@ -87,11 +82,35 @@ class ChatDrawer extends StatelessWidget {
             ),
           ),
           Expanded(child: _buildConversationList(activeSpace, theme)),
-          const Divider(),
-          ListTile(
-            leading: const Icon(Icons.settings_outlined),
-            title: const Text('設定'),
-            onTap: onOpenSettings,
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Text(
+                    '接続先',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                _SpaceSelector(
+                  spaces: spaces,
+                  activeSpaceId: activeSpaceId,
+                  onSelect: onSelectSpace,
+                ),
+                ListTile(
+                  leading: const Icon(Icons.settings_outlined),
+                  title: const Text('設定'),
+                  onTap: onOpenSettings,
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -271,22 +290,26 @@ class _SpaceSelector extends StatelessWidget {
                         color: isOffline
                             ? Colors.grey
                             : isActive
-                            ? theme.colorScheme.primary
-                            : theme.colorScheme.onSurfaceVariant,
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.onSurfaceVariant,
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        space.label,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: isActive
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                          color: isOffline
-                              ? Colors.grey
-                              : isActive
-                              ? theme.colorScheme.primary
-                              : theme.colorScheme.onSurface,
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 132),
+                        child: Text(
+                          space.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight:
+                                isActive ? FontWeight.w600 : FontWeight.w400,
+                            color: isOffline
+                                ? Colors.grey
+                                : isActive
+                                    ? theme.colorScheme.primary
+                                    : theme.colorScheme.onSurface,
+                          ),
                         ),
                       ),
                     ],
@@ -303,8 +326,8 @@ class _SpaceSelector extends StatelessWidget {
                           color: isOffline
                               ? Colors.grey
                               : space.isLocal
-                              ? Colors.green
-                              : theme.colorScheme.primary,
+                                  ? Colors.green
+                                  : theme.colorScheme.primary,
                         ),
                       ),
                       const SizedBox(width: 5),

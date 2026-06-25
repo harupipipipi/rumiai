@@ -10,11 +10,9 @@ import '../data/pc/pc_catalog.dart';
 import '../data/pc/pc_catalog_client.dart';
 import '../data/pc/pc_chat_backend.dart';
 import '../domain/chat_event.dart';
-import '../domain/connection_state.dart';
 import '../domain/conversation_backend.dart';
 import '../domain/conversation_locator.dart';
 import '../domain/space.dart';
-import '../features/chat/connection_chip.dart';
 import '../platform/platform_services.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
@@ -48,7 +46,6 @@ class _ChatScreenState extends State<ChatScreen> {
   late final ConversationRouter _router;
   PcConversationBackend? _pcBackend;
   PairedDevice? _pairedDevice;
-  DeviceConnectionView _connectionView = DeviceConnectionView.unpaired;
   bool _busy = false;
   bool _streaming = false;
   late Future<void> _initFuture;
@@ -254,21 +251,11 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       _router.setPc(_pcBackend!);
       _pairedDevice = paired;
-      _connectionView = DeviceConnectionView(
-        pairingState: PairingState.paired,
-        pcConnectionState: PcConnectionState.online,
-        canReadPcConversations: paired.canReadPcConversations,
-        canWritePcConversations: paired.canWritePcConversations,
-        canObservePcTools: paired.canObservePcTools,
-        canApprovePcTools: paired.canApprovePcTools,
-        canRequestCredentialCopy: paired.canRequestCredentialCopy,
-      );
     } else {
       _pcBackend?.close();
       _pcBackend = null;
       _router.setPc(null);
       _pairedDevice = null;
-      _connectionView = DeviceConnectionView.unpaired;
     }
   }
 
@@ -466,7 +453,7 @@ class _ChatScreenState extends State<ChatScreen> {
           onDevicePaired: (device) async {
             await _loadPcConnection();
             _activeSpaceId =
-                device == null ? Space.local.id : 'pc:${device.deviceId}';
+                device == null ? Space.local.id : 'pc:${device.connectionId}';
             await _loadSpaces();
             if (mounted) setState(() {});
           },
@@ -991,6 +978,56 @@ class _ChatScreenState extends State<ChatScreen> {
       );
       return;
     }
+    final providers = (await widget.configStore.loadProviderConfigs())
+        .where((provider) => provider.isConfigured)
+        .toList();
+    if (!mounted) return;
+    if (providers.isNotEmpty) {
+      final selected = await showModalBottomSheet<Object>(
+        context: context,
+        showDragHandle: true,
+        useSafeArea: true,
+        builder: (context) {
+          return ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+            children: [
+              Text('このスマホのモデル', style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              for (final provider in providers)
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    provider.providerId == 'anthropic'
+                        ? Icons.auto_awesome_outlined
+                        : Icons.cloud_outlined,
+                  ),
+                  title: Text(provider.effectiveLabel),
+                  subtitle: Text('${provider.displayName} · ${provider.model}'),
+                  trailing: provider.providerId == _apiConfig?.providerId &&
+                          provider.model == _activeModelId()
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () => Navigator.pop(context, provider),
+                ),
+              const Divider(),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('モデル名を直接入力'),
+                onTap: () => Navigator.pop(context, 'custom'),
+              ),
+            ],
+          );
+        },
+      );
+      if (selected is MobileProviderConfig) {
+        await _setLocalProvider(selected);
+        return;
+      }
+      if (selected != 'custom') return;
+      if (!mounted) return;
+    }
     final controller = TextEditingController(text: _activeModelId());
     final selected = await showDialog<String>(
       context: context,
@@ -1029,6 +1066,18 @@ class _ChatScreenState extends State<ChatScreen> {
     if (!mounted) return;
     setState(() => _apiConfig = next);
     _showSnack('このスマホのモデルを ${next.model} にしました');
+  }
+
+  Future<void> _setLocalProvider(MobileProviderConfig provider) async {
+    final current = _apiConfig ?? await widget.configStore.loadApi();
+    final next = provider.toApiConfig(
+      systemPrompt: current.systemPrompt,
+      temperature: current.temperature,
+    );
+    await widget.configStore.saveApi(next);
+    if (!mounted) return;
+    setState(() => _apiConfig = next);
+    _showSnack('${provider.effectiveLabel} にしました');
   }
 
   Future<void> _setPcModel(String profileId) async {
@@ -1533,6 +1582,8 @@ class _ChatScreenState extends State<ChatScreen> {
       if (modelId.isEmpty) return 'PC既定モデル';
       return _pcCatalog?.labelForProfile(modelId) ?? modelId;
     }
+    final label = _apiConfig?.label.trim() ?? '';
+    if (label.isNotEmpty && label != modelId) return '$label · $modelId';
     return modelId;
   }
 
@@ -1540,6 +1591,74 @@ class _ChatScreenState extends State<ChatScreen> {
     final modelId = _activeModelId();
     if (!_activeSpaceIsPc || modelId.isEmpty) return null;
     return _pcCatalog?.profileById(modelId);
+  }
+
+  IconData _spaceIcon(Space? space) {
+    if (space == null || space.isLocal) return Icons.phone_android;
+    return space.isOffline
+        ? Icons.desktop_access_disabled
+        : Icons.desktop_windows;
+  }
+
+  Widget _buildSpaceSwitcherSubtitle(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final space = _activeSpace();
+    final child = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(_spaceIcon(space), size: 13, color: scheme.onSurfaceVariant),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            '${_activeSpaceLabel()} · ${_activeModelLabel()}',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w400,
+              color: scheme.onSurfaceVariant,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (_spaces.length > 1) ...[
+          const SizedBox(width: 2),
+          Icon(Icons.expand_more, size: 14, color: scheme.onSurfaceVariant),
+        ],
+      ],
+    );
+    if (_spaces.length <= 1) return child;
+    return PopupMenuButton<String>(
+      tooltip: '接続先を切り替え',
+      initialValue: _activeSpaceId,
+      padding: EdgeInsets.zero,
+      onSelected: (spaceId) {
+        unawaited(_selectSpace(spaceId));
+      },
+      itemBuilder: (context) => [
+        for (final space in _spaces)
+          CheckedPopupMenuItem<String>(
+            value: space.id,
+            checked: space.id == _activeSpaceId,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_spaceIcon(space), size: 18),
+                const SizedBox(width: 8),
+                Text(space.label),
+                if (space.isOffline) ...[
+                  const SizedBox(width: 8),
+                  Text(
+                    'オフライン',
+                    style: TextStyle(fontSize: 12, color: scheme.error),
+                  ),
+                ],
+              ],
+            ),
+          ),
+      ],
+      child: child,
+    );
   }
 
   @override
@@ -1602,63 +1721,14 @@ class _ChatScreenState extends State<ChatScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(
-                  '${_activeSpaceLabel()} · ${_activeModelLabel()}',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w400,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                _buildSpaceSwitcherSubtitle(context),
               ],
             ),
             actions: [
-              if (_spaces.length > 1)
-                PopupMenuButton<String>(
-                  tooltip: 'スマホ/PCを切り替え',
-                  icon: const Icon(Icons.devices_outlined),
-                  initialValue: _activeSpaceId,
-                  onSelected: (spaceId) {
-                    unawaited(_selectSpace(spaceId));
-                  },
-                  itemBuilder: (context) => [
-                    for (final space in _spaces)
-                      CheckedPopupMenuItem<String>(
-                        value: space.id,
-                        checked: space.id == _activeSpaceId,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              space.isLocal
-                                  ? Icons.phone_android
-                                  : Icons.desktop_windows,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(space.label),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ConnectionChip(
-                connectionView: _connectionView,
-                pairedDevice: _pairedDevice,
-                onTap: _openSettings,
-              ),
-              const SizedBox(width: 4),
               IconButton(
                 tooltip: '新規チャット',
                 icon: const Icon(Icons.add_comment_outlined),
                 onPressed: _newChat,
-              ),
-              IconButton(
-                tooltip: '設定',
-                icon: const Icon(Icons.settings_outlined),
-                onPressed: _openSettings,
               ),
             ],
           ),

@@ -63,6 +63,7 @@ class PairedDevice {
   bool get isConfigured =>
       deviceToken.trim().isNotEmpty && pcBaseUrl.trim().isNotEmpty;
   String get displayPcLabel => friendlyPcLabel(pcLabel, pcBaseUrl);
+  String get connectionId => pairedDeviceConnectionId(this);
 
   PcConnection toPcConnection() => PcConnection(
         baseUrl: pcBaseUrl,
@@ -109,6 +110,29 @@ String friendlyPcLabel(String? label, String baseUrl) {
       .replaceFirst(RegExp(r'\.local$', caseSensitive: false), '')
       .replaceFirst(RegExp(r'\.lan$', caseSensitive: false), '');
   return withoutLocal.isEmpty ? 'PC' : withoutLocal;
+}
+
+String pairedDeviceConnectionId(PairedDevice device) {
+  for (final candidate in [
+    device.pairingId,
+    _hostFromBaseUrl(device.pcBaseUrl),
+    device.pcBaseUrl,
+    device.deviceId,
+  ]) {
+    final normalized = _safeConnectionId(candidate);
+    if (normalized.isNotEmpty) return normalized;
+  }
+  return 'pc';
+}
+
+String _safeConnectionId(String value) {
+  final safe = value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9._-]+'), '-')
+      .replaceAll(RegExp(r'-+'), '-')
+      .replaceAll(RegExp(r'^-|-$'), '');
+  return safe;
 }
 
 String preferredPairingBaseUrl(List<String> baseUrls) {
@@ -292,17 +316,17 @@ class MobileDeviceStore {
   Future<void> addPairedDevice(PairedDevice device) async {
     if (!device.isConfigured) return;
     final devices = await loadPairedDevices();
-    devices.removeWhere((d) => d.deviceId == device.deviceId);
+    devices.removeWhere((d) => d.connectionId == device.connectionId);
     devices.add(device);
     await savePairedDevices(devices);
   }
 
-  Future<void> removePairedDevice(String deviceId) async {
+  Future<void> removePairedDevice(String connectionId) async {
     final devices = await loadPairedDevices();
-    devices.removeWhere((d) => d.deviceId == deviceId);
+    devices.removeWhere((d) => d.connectionId == connectionId);
     await savePairedDevices(devices);
     final single = await loadPairedDevice();
-    if (single != null && single.deviceId == deviceId) {
+    if (single != null && single.connectionId == connectionId) {
       await _storage.delete(_pairedKey);
     }
   }

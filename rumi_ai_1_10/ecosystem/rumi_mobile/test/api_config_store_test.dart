@@ -45,4 +45,35 @@ void main() {
     final settings = await store.loadNotificationSettings();
     expect(settings.pcTaskFinishedEnabled, isFalse);
   });
+
+  test('provider configs persist and replace by provider id', () async {
+    final store = ApiConfigStore(storage: _FakeSecureStorage());
+
+    await store.upsertProviderConfig(
+      const MobileProviderConfig(
+        providerId: 'openrouter',
+        displayName: 'OpenRouter',
+        label: 'Router',
+        apiKey: 'sk-one',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model: 'openai/gpt-4o-mini',
+      ),
+    );
+    await store.upsertProviderConfig(
+      const MobileProviderConfig(
+        providerId: 'openrouter',
+        displayName: 'OpenRouter',
+        label: 'Router 2',
+        apiKey: 'sk-two',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        model: 'openai/gpt-4o-mini',
+      ),
+    );
+
+    final configs = await store.loadProviderConfigs();
+    expect(configs, hasLength(1));
+    expect(configs.single.providerId, 'openrouter');
+    expect(configs.single.label, 'Router 2');
+    expect(configs.single.apiKey, 'sk-two');
+  });
 }
