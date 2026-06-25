@@ -72,7 +72,10 @@ def test_pairing_v2_claim_approve_flow():
 
     tmp = tempfile.mkdtemp()
     pm = PairingManager(tmp)
-    session = pm.start_pairing(ttl_seconds=300)
+    session = pm.start_pairing(
+        ttl_seconds=300,
+        capabilities=["chat.read", "chat.write", "tools.observe"],
+    )
     assert session.status == "pending"
 
     # Claim
@@ -238,6 +241,46 @@ def test_pairing_claim_requires_matching_code():
     assert result["code"] == "PAIRING_CODE_MISMATCH"
 
 
+def test_pairing_claim_rejects_scopes_outside_pc_grant():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    pm = PairingManager(tmp)
+    session = pm.start_pairing(capabilities=["chat.read", "chat.write"])
+
+    result = pm.claim_pairing(
+        session.pairing_id,
+        code=session.code,
+        device_id="d1",
+        requested_capabilities=["chat.read", "authority.request.approve"],
+    )
+
+    assert not result["ok"]
+    assert result["code"] == "SCOPE_NOT_ALLOWED"
+    assert result["denied_scopes"] == ["authority.request.approve"]
+
+
+def test_pairing_approve_rejects_scopes_outside_claimed_grant():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    pm = PairingManager(tmp)
+    session = pm.start_pairing(capabilities=["chat.read", "chat.write"])
+    claim = pm.claim_pairing(
+        session.pairing_id,
+        code=session.code,
+        device_id="d1",
+        requested_capabilities=["chat.read"],
+    )
+    assert claim["ok"]
+
+    result = pm.approve_pairing_v2(session.pairing_id, scopes=["chat.read", "chat.write"])
+
+    assert not result["ok"]
+    assert result["code"] == "SCOPE_NOT_ALLOWED"
+    assert result["denied_scopes"] == ["chat.write"]
+
+
 def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     from domain.p2p.device_store import DeviceStore
     from domain.p2p.pairing import PairingManager
@@ -286,6 +329,13 @@ def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     assert "device_token" not in without_code["data"]
     assert "code" not in without_code["data"]
     assert "code" not in without_code["data"]["pairing"]
+    public_keys = {"pairing_id", "status", "expires_at", "pairing", "pc_label"}
+    assert set(without_code["data"]) <= public_keys
+    assert set(without_code["data"]["pairing"]) == {"pairing_id", "status", "expires_at"}
+    assert "claimed_device_id" not in without_code["data"]
+    assert "claimed_device_label" not in without_code["data"]
+    assert "requested_scopes" not in without_code["data"]
+    assert "token_delivery_ready" not in without_code["data"]
 
     with_code = run({
         "action": "status",
@@ -309,6 +359,7 @@ def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     assert status_with_secret["status"] == "ok"
     assert "token_delivery_envelope" not in status_with_secret["data"]
     assert "code" not in status_with_secret["data"]
+    assert set(status_with_secret["data"]) <= public_keys
 
     with_secret = run({
         "action": "pickup_token_delivery",
@@ -476,6 +527,39 @@ def test_mobile_pairing_approve_rolls_back_when_delivery_store_fails(monkeypatch
     restored = PairingManager(tmp).get_pairing(session.pairing_id)
     assert restored is not None
     assert restored.status == "claimed"
+
+
+def test_pairing_concurrent_approve_is_compare_and_set():
+    import threading
+
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    assert PairingManager(tmp).claim_pairing(
+        session.pairing_id,
+        code=session.code,
+        device_id="mobile-1",
+        requested_capabilities=["chat.read"],
+    )["ok"]
+
+    results: list[dict] = []
+    barrier = threading.Barrier(2)
+
+    def approve_once() -> None:
+        manager = PairingManager(tmp)
+        barrier.wait(timeout=5)
+        results.append(manager.approve_pairing_v2(session.pairing_id))
+
+    threads = [threading.Thread(target=approve_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+
+    assert len(results) == 2
+    assert sum(1 for result in results if result.get("ok")) == 1
+    assert sorted(result.get("code", "") for result in results if not result.get("ok")) == ["PAIRING_NOT_CLAIMED"]
 
 
 def test_mobile_pairing_status_splits_normal_and_approval_tokens():

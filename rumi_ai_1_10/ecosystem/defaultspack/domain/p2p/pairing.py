@@ -3,12 +3,14 @@ from __future__ import annotations
 import json
 import hashlib
 import hmac
+import os
 import secrets
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from .peer_store import PeerRecord, PeerStore, generate_shared_secret
 from .settings import P2PSettings, default_store_path
@@ -21,6 +23,9 @@ PAIRING_APPROVED = "approved"
 PAIRING_REJECTED = "rejected"
 PAIRING_EXPIRED = "expired"
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+_DEFAULT_MOBILE_SCOPES = ["chat.read", "chat.write", "tools.observe"]
+_LOCK_TIMEOUT_SECONDS = 5.0
+_LOCK_STALE_SECONDS = 30.0
 
 
 def _now_ms() -> int:
@@ -53,6 +58,11 @@ def _hash_pickup_secret(value: str) -> str:
 
 def _new_pickup_secret() -> str:
     return "pup_" + secrets.token_urlsafe(32)
+
+
+def _scope_not_allowed(requested: list[str], allowed: list[str]) -> list[str]:
+    allowed_set = set(allowed)
+    return sorted(scope for scope in requested if scope not in allowed_set)
 
 
 @dataclass
@@ -186,9 +196,12 @@ class PairingManager:
             capabilities=_string_list(capabilities) or ["message"],
             allowed_company_ids=_string_list(allowed_company_ids),
         )
-        sessions = self._sessions()
-        sessions[session.pairing_id] = session
-        self._save_sessions(sessions)
+        with self._file_lock():
+            self._data = self._load()
+            session.code = self._new_unique_code()
+            sessions = self._sessions()
+            sessions[session.pairing_id] = session
+            self._save_sessions(sessions)
         return session
 
     def accept_pairing(
@@ -203,59 +216,63 @@ class PairingManager:
         allowed_company_ids: list[str] | None = None,
         now_ms: int | None = None,
     ) -> dict[str, Any]:
-        session = self._find_by_code(code)
-        if session is None:
-            return {"ok": False, "reason": "pairing code not found", "code": "PAIRING_NOT_FOUND"}
-        now = int(now_ms if now_ms is not None else _now_ms())
-        if session.status != PAIRING_PENDING:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
-        if session.expired(now):
-            session.status = PAIRING_EXPIRED
-            session.reason = "expired"
-            self._replace(session)
-            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+        with self._file_lock():
+            self._data = self._load()
+            session = self._find_by_code(code)
+            if session is None:
+                return {"ok": False, "reason": "pairing code not found", "code": "PAIRING_NOT_FOUND"}
+            now = int(now_ms if now_ms is not None else _now_ms())
+            if session.status != PAIRING_PENDING:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
+            if session.expired(now):
+                session.status = PAIRING_EXPIRED
+                session.reason = "expired"
+                self._replace(session)
+                return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
 
-        resolved_peer_id = str(peer_id or session.peer_id or "").strip()
-        if not resolved_peer_id:
-            return {"ok": False, "reason": "peer_id is required", "code": "INVALID_INPUT"}
-        secret = str(hmac_secret or "").strip() or generate_shared_secret()
-        resolved_capabilities = _string_list(capabilities) or session.capabilities or ["message"]
-        resolved_allowed_companies = _string_list(allowed_company_ids) or session.allowed_company_ids
-        peer = self.peer_store.approve_peer(
-            resolved_peer_id,
-            fingerprint=str(peer_fingerprint or session.peer_fingerprint or "").strip(),
-            hmac_secret=secret,
-            capabilities=resolved_capabilities,
-            allowed_company_ids=resolved_allowed_companies,
-            label=str(peer_label or session.peer_label or "").strip(),
-            metadata={"pairing_id": session.pairing_id},
-        )
-        session.status = PAIRING_ACCEPTED
-        session.accepted_at = now
-        session.peer_id = peer.peer_id
-        session.peer_fingerprint = peer.fingerprint
-        session.peer_label = peer.label
-        session.capabilities = list(peer.capabilities)
-        session.allowed_company_ids = list(peer.allowed_company_ids)
-        self._replace(session)
-        return {
-            "ok": True,
-            "pairing": session.as_dict(),
-            "peer": peer.as_dict(),
-            "hmac_secret": secret,
-        }
+            resolved_peer_id = str(peer_id or session.peer_id or "").strip()
+            if not resolved_peer_id:
+                return {"ok": False, "reason": "peer_id is required", "code": "INVALID_INPUT"}
+            secret = str(hmac_secret or "").strip() or generate_shared_secret()
+            resolved_capabilities = _string_list(capabilities) or session.capabilities or ["message"]
+            resolved_allowed_companies = _string_list(allowed_company_ids) or session.allowed_company_ids
+            peer = self.peer_store.approve_peer(
+                resolved_peer_id,
+                fingerprint=str(peer_fingerprint or session.peer_fingerprint or "").strip(),
+                hmac_secret=secret,
+                capabilities=resolved_capabilities,
+                allowed_company_ids=resolved_allowed_companies,
+                label=str(peer_label or session.peer_label or "").strip(),
+                metadata={"pairing_id": session.pairing_id},
+            )
+            session.status = PAIRING_ACCEPTED
+            session.accepted_at = now
+            session.peer_id = peer.peer_id
+            session.peer_fingerprint = peer.fingerprint
+            session.peer_label = peer.label
+            session.capabilities = list(peer.capabilities)
+            session.allowed_company_ids = list(peer.allowed_company_ids)
+            self._replace(session)
+            return {
+                "ok": True,
+                "pairing": session.as_dict(),
+                "peer": peer.as_dict(),
+                "hmac_secret": secret,
+            }
 
     def reject_pairing(self, code: str, *, reason: str = "", now_ms: int | None = None) -> dict[str, Any]:
-        session = self._find_by_code(code)
-        if session is None:
-            return {"ok": False, "reason": "pairing code not found", "code": "PAIRING_NOT_FOUND"}
-        if session.status not in {PAIRING_PENDING, PAIRING_CLAIMED}:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
-        session.status = PAIRING_REJECTED
-        session.rejected_at = int(now_ms if now_ms is not None else _now_ms())
-        session.reason = str(reason or "rejected")
-        self._replace(session)
-        return {"ok": True, "pairing": session.as_dict()}
+        with self._file_lock():
+            self._data = self._load()
+            session = self._find_by_code(code)
+            if session is None:
+                return {"ok": False, "reason": "pairing code not found", "code": "PAIRING_NOT_FOUND"}
+            if session.status not in {PAIRING_PENDING, PAIRING_CLAIMED}:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
+            session.status = PAIRING_REJECTED
+            session.rejected_at = int(now_ms if now_ms is not None else _now_ms())
+            session.reason = str(reason or "rejected")
+            self._replace(session)
+            return {"ok": True, "pairing": session.as_dict()}
 
     def claim_pairing(
         self,
@@ -273,31 +290,44 @@ class PairingManager:
 
         The PC operator must still approve before a device token is issued.
         """
-        sessions = self._sessions()
-        session = sessions.get(str(pairing_id or "").strip())
-        if session is None:
-            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
-        now = int(now_ms if now_ms is not None else _now_ms())
-        if session.status != PAIRING_PENDING:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
-        if not str(code or "").strip() or not hmac_compare_code(code, session.code):
-            return {"ok": False, "reason": "pairing code does not match", "code": "PAIRING_CODE_MISMATCH"}
-        if session.expired(now):
-            session.status = PAIRING_EXPIRED
-            session.reason = "expired"
+        with self._file_lock():
+            self._data = self._load()
+            sessions = self._sessions()
+            session = sessions.get(str(pairing_id or "").strip())
+            if session is None:
+                return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+            now = int(now_ms if now_ms is not None else _now_ms())
+            if session.status != PAIRING_PENDING:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_PENDING"}
+            if not str(code or "").strip() or not hmac_compare_code(code, session.code):
+                return {"ok": False, "reason": "pairing code does not match", "code": "PAIRING_CODE_MISMATCH"}
+            if session.expired(now):
+                session.status = PAIRING_EXPIRED
+                session.reason = "expired"
+                self._replace(session)
+                return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+            requested = _string_list(requested_capabilities)
+            allowed = list(session.capabilities or _DEFAULT_MOBILE_SCOPES)
+            denied = _scope_not_allowed(requested, allowed)
+            if denied:
+                return {
+                    "ok": False,
+                    "reason": "requested capabilities exceed pairing grant",
+                    "code": "SCOPE_NOT_ALLOWED",
+                    "denied_scopes": denied,
+                }
+            session.claimed_device_id = str(device_id or "").strip()
+            session.claimed_device_label = str(device_label or "").strip()
+            session.claimed_device_public_key = str(device_public_key or "").strip()
+            session.claimed_device_encryption_public_key = str(device_encryption_public_key or "").strip()
+            session.claimed_capabilities = requested or allowed
+            session.claimed_at = now
+            session.status = PAIRING_CLAIMED
             self._replace(session)
-            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
-        session.claimed_device_id = str(device_id or "").strip()
-        session.claimed_device_label = str(device_label or "").strip()
-        session.claimed_device_public_key = str(device_public_key or "").strip()
-        session.claimed_device_encryption_public_key = str(device_encryption_public_key or "").strip()
-        session.claimed_capabilities = _string_list(requested_capabilities) or session.capabilities
-        session.claimed_at = now
-        session.status = PAIRING_CLAIMED
-        self._replace(session)
-        return {"ok": True, "pairing": session.as_dict()}
+            return {"ok": True, "pairing": session.as_dict()}
 
     def get_pairing(self, pairing_id: str) -> PairingSession | None:
+        self._data = self._load()
         return self._sessions().get(str(pairing_id or "").strip())
 
     def approve_pairing_v2(
@@ -313,36 +343,48 @@ class PairingManager:
         PairingManager should not depend on crypto. This method just flips
         the session status and returns claim info for token issuance.
         """
-        sessions = self._sessions()
-        session = sessions.get(str(pairing_id or "").strip())
-        if session is None:
-            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
-        now = int(now_ms if now_ms is not None else _now_ms())
-        if session.status != PAIRING_CLAIMED:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_CLAIMED"}
-        if not session.claimed_device_id:
-            return {"ok": False, "reason": "pairing has not been claimed", "code": "NOT_CLAIMED"}
-        if session.expired(now):
-            session.status = PAIRING_EXPIRED
-            session.reason = "expired"
+        with self._file_lock():
+            self._data = self._load()
+            sessions = self._sessions()
+            session = sessions.get(str(pairing_id or "").strip())
+            if session is None:
+                return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+            now = int(now_ms if now_ms is not None else _now_ms())
+            if session.status != PAIRING_CLAIMED:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_CLAIMED"}
+            if not session.claimed_device_id:
+                return {"ok": False, "reason": "pairing has not been claimed", "code": "NOT_CLAIMED"}
+            if session.expired(now):
+                session.status = PAIRING_EXPIRED
+                session.reason = "expired"
+                self._replace(session)
+                return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+            allowed = list(session.claimed_capabilities or session.capabilities or _DEFAULT_MOBILE_SCOPES)
+            requested = _string_list(scopes)
+            denied = _scope_not_allowed(requested, allowed)
+            if denied:
+                return {
+                    "ok": False,
+                    "reason": "approved scopes exceed claimed pairing grant",
+                    "code": "SCOPE_NOT_ALLOWED",
+                    "denied_scopes": denied,
+                }
+            resolved_scopes = requested or allowed
+            session.status = PAIRING_APPROVED
+            session.accepted_at = now
+            session.peer_id = session.claimed_device_id
+            session.peer_label = session.claimed_device_label
+            session.capabilities = resolved_scopes
             self._replace(session)
-            return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
-        resolved_scopes = _string_list(scopes) or session.claimed_capabilities or ["chat.read", "chat.write", "tools.observe"]
-        session.status = PAIRING_APPROVED
-        session.accepted_at = now
-        session.peer_id = session.claimed_device_id
-        session.peer_label = session.claimed_device_label
-        session.capabilities = resolved_scopes
-        self._replace(session)
-        return {
-            "ok": True,
-            "pairing": session.as_dict(),
-            "device_id": session.claimed_device_id,
-            "device_label": session.claimed_device_label,
-            "device_public_key": session.claimed_device_public_key,
-            "device_encryption_public_key": session.claimed_device_encryption_public_key,
-            "scopes": resolved_scopes,
-        }
+            return {
+                "ok": True,
+                "pairing": session.as_dict(),
+                "device_id": session.claimed_device_id,
+                "device_label": session.claimed_device_label,
+                "device_public_key": session.claimed_device_public_key,
+                "device_encryption_public_key": session.claimed_device_encryption_public_key,
+                "scopes": resolved_scopes,
+            }
 
     def store_token_delivery(
         self,
@@ -351,19 +393,21 @@ class PairingManager:
         envelope: dict[str, Any],
         now_ms: int | None = None,
     ) -> dict[str, Any]:
-        sessions = self._sessions()
-        session = sessions.get(str(pairing_id or "").strip())
-        if session is None:
-            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
-        if session.status != PAIRING_APPROVED:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
-        if not isinstance(envelope, dict) or not envelope:
-            return {"ok": False, "reason": "token delivery envelope is required", "code": "INVALID_INPUT"}
-        session.token_delivery_envelope = dict(envelope)
-        session.token_delivery_created_at = int(now_ms if now_ms is not None else _now_ms())
-        session.token_pickup_consumed_at = 0
-        self._replace(session)
-        return {"ok": True, "pairing": session.as_dict()}
+        with self._file_lock():
+            self._data = self._load()
+            sessions = self._sessions()
+            session = sessions.get(str(pairing_id or "").strip())
+            if session is None:
+                return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+            if session.status != PAIRING_APPROVED:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
+            if not isinstance(envelope, dict) or not envelope:
+                return {"ok": False, "reason": "token delivery envelope is required", "code": "INVALID_INPUT"}
+            session.token_delivery_envelope = dict(envelope)
+            session.token_delivery_created_at = int(now_ms if now_ms is not None else _now_ms())
+            session.token_pickup_consumed_at = 0
+            self._replace(session)
+            return {"ok": True, "pairing": session.as_dict()}
 
     def rollback_approved_pairing(
         self,
@@ -371,23 +415,25 @@ class PairingManager:
         *,
         reason: str = "",
     ) -> dict[str, Any]:
-        sessions = self._sessions()
-        session = sessions.get(str(pairing_id or "").strip())
-        if session is None:
-            return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
-        if session.status != PAIRING_APPROVED:
-            return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
-        session.status = PAIRING_CLAIMED
-        session.accepted_at = 0
-        session.peer_id = ""
-        session.peer_label = ""
-        session.capabilities = list(session.claimed_capabilities or session.capabilities)
-        session.reason = str(reason or "approval rolled back")
-        session.token_delivery_envelope = {}
-        session.token_delivery_created_at = 0
-        session.token_pickup_consumed_at = 0
-        self._replace(session)
-        return {"ok": True, "pairing": session.as_dict()}
+        with self._file_lock():
+            self._data = self._load()
+            sessions = self._sessions()
+            session = sessions.get(str(pairing_id or "").strip())
+            if session is None:
+                return {"ok": False, "reason": "pairing not found", "code": "PAIRING_NOT_FOUND"}
+            if session.status != PAIRING_APPROVED:
+                return {"ok": False, "reason": f"pairing is {session.status}", "code": "PAIRING_NOT_APPROVED"}
+            session.status = PAIRING_CLAIMED
+            session.accepted_at = 0
+            session.peer_id = ""
+            session.peer_label = ""
+            session.capabilities = list(session.claimed_capabilities or session.capabilities)
+            session.reason = str(reason or "approval rolled back")
+            session.token_delivery_envelope = {}
+            session.token_delivery_created_at = 0
+            session.token_pickup_consumed_at = 0
+            self._replace(session)
+            return {"ok": True, "pairing": session.as_dict()}
 
     def peek_token_delivery(
         self,
@@ -397,20 +443,22 @@ class PairingManager:
         device_id: str,
         now_ms: int | None = None,
     ) -> dict[str, Any]:
-        checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
-        if not checked.get("ok"):
-            return checked
-        session = checked["session"]
-        return {
-            "ok": True,
-            "pairing": session.as_dict(),
-            "device_id": session.claimed_device_id,
-            "device_label": session.claimed_device_label,
-            "device_public_key": session.claimed_device_public_key,
-            "device_encryption_public_key": session.claimed_device_encryption_public_key,
-            "scopes": list(session.capabilities),
-            "token_delivery_envelope": dict(session.token_delivery_envelope),
-        }
+        with self._file_lock():
+            self._data = self._load()
+            checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
+            if not checked.get("ok"):
+                return checked
+            session = checked["session"]
+            return {
+                "ok": True,
+                "pairing": session.as_dict(),
+                "device_id": session.claimed_device_id,
+                "device_label": session.claimed_device_label,
+                "device_public_key": session.claimed_device_public_key,
+                "device_encryption_public_key": session.claimed_device_encryption_public_key,
+                "scopes": list(session.capabilities),
+                "token_delivery_envelope": dict(session.token_delivery_envelope),
+            }
 
     def ack_token_delivery(
         self,
@@ -421,19 +469,21 @@ class PairingManager:
         delivery_id: str = "",
         now_ms: int | None = None,
     ) -> dict[str, Any]:
-        checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
-        if not checked.get("ok"):
-            return checked
-        session = checked["session"]
-        expected_delivery_id = str(session.token_delivery_envelope.get("delivery_id") or "")
-        if str(delivery_id or "").strip() and not hmac.compare_digest(str(delivery_id).strip(), expected_delivery_id):
-            return {"ok": False, "reason": "delivery_id does not match", "code": "DELIVERY_ID_MISMATCH"}
-        session.token_pickup_consumed_at = int(now_ms if now_ms is not None else _now_ms())
-        self._replace(session)
-        return {
-            "ok": True,
-            "pairing": session.as_dict(),
-        }
+        with self._file_lock():
+            self._data = self._load()
+            checked = self._validate_token_pickup(pairing_id, pickup_secret=pickup_secret, device_id=device_id, now_ms=now_ms)
+            if not checked.get("ok"):
+                return checked
+            session = checked["session"]
+            expected_delivery_id = str(session.token_delivery_envelope.get("delivery_id") or "")
+            if str(delivery_id or "").strip() and not hmac.compare_digest(str(delivery_id).strip(), expected_delivery_id):
+                return {"ok": False, "reason": "delivery_id does not match", "code": "DELIVERY_ID_MISMATCH"}
+            session.token_pickup_consumed_at = int(now_ms if now_ms is not None else _now_ms())
+            self._replace(session)
+            return {
+                "ok": True,
+                "pairing": session.as_dict(),
+            }
 
     def consume_token_pickup(
         self,
@@ -484,19 +534,22 @@ class PairingManager:
 
     def list_pairings(self) -> list[dict[str, Any]]:
         self.cleanup_expired()
+        self._data = self._load()
         return [session.as_dict() for session in self._sessions().values()]
 
     def cleanup_expired(self, *, now_ms: int | None = None) -> None:
         now = int(now_ms if now_ms is not None else _now_ms())
-        sessions = self._sessions()
-        changed = False
-        for session in sessions.values():
-            if session.status in {PAIRING_PENDING, PAIRING_CLAIMED} and session.expired(now):
-                session.status = PAIRING_EXPIRED
-                session.reason = "expired"
-                changed = True
-        if changed:
-            self._save_sessions(sessions)
+        with self._file_lock():
+            self._data = self._load()
+            sessions = self._sessions()
+            changed = False
+            for session in sessions.values():
+                if session.status in {PAIRING_PENDING, PAIRING_CLAIMED} and session.expired(now):
+                    session.status = PAIRING_EXPIRED
+                    session.reason = "expired"
+                    changed = True
+            if changed:
+                self._save_sessions(sessions)
 
     def _find_by_code(self, code: str) -> PairingSession | None:
         target = str(code or "").strip().upper()
@@ -547,6 +600,37 @@ class PairingManager:
         self._data["schema_version"] = 1
         self._data["updated_at"] = _now_ms()
         self._data["pairings"] = {session_id: session.to_storage_dict() for session_id, session in sessions.items()}
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
         tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         tmp.replace(self.path)
+
+    @contextmanager
+    def _file_lock(self) -> Iterator[None]:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
+        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
+        fd: int | None = None
+        while fd is None:
+            try:
+                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+                os.write(fd, f"{os.getpid()}\n".encode("ascii"))
+            except FileExistsError:
+                try:
+                    age = time.time() - lock_path.stat().st_mtime
+                    if age > _LOCK_STALE_SECONDS:
+                        lock_path.unlink(missing_ok=True)
+                        continue
+                except OSError:
+                    pass
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"timed out acquiring pairing store lock: {lock_path}")
+                time.sleep(0.025)
+        try:
+            yield
+        finally:
+            if fd is not None:
+                os.close(fd)
+            try:
+                lock_path.unlink()
+            except FileNotFoundError:
+                pass

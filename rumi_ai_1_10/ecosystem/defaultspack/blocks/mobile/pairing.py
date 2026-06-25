@@ -75,9 +75,12 @@ def _register_authority_device_key(*, profile_id: str, device_id: str, public_ke
 
 
 def _public_pairing(pairing: dict) -> dict:
-    public = dict(pairing or {})
-    public.pop("code", None)
-    return public
+    source = pairing if isinstance(pairing, dict) else {}
+    return {
+        "pairing_id": str(source.get("pairing_id") or ""),
+        "status": str(source.get("status") or ""),
+        "expires_at": int(source.get("expires_at") or 0),
+    }
 
 
 def claim(input_data, context=None):

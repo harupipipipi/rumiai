@@ -276,7 +276,12 @@ class PlatformSecureStorage implements SecureKeyValueStorage {
 
 class LegacyFlutterSecureStorage implements SecureKeyValueStorage {
   LegacyFlutterSecureStorage({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ??
+            const FlutterSecureStorage(
+              aOptions: AndroidOptions(
+                encryptedSharedPreferences: true,
+              ),
+            );
 
   final FlutterSecureStorage _storage;
 

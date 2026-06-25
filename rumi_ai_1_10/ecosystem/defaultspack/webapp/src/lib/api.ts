@@ -955,18 +955,6 @@ export type MobilePairingStatus = {
   token_pickup_consumed_at?: number;
 };
 
-export type CredentialTransferPayload = {
-  device_id: string;
-  provider_id: string;
-  api_id?: string;
-  base_url?: string;
-  default_model?: string;
-  name?: string;
-  ciphertext?: string;
-  nonce?: string;
-  algorithm?: string;
-};
-
 export type ConversationListOptions = {
   tag?: string;
   tags?: string[];
@@ -3713,10 +3701,4 @@ export const api = {
     );
   },
 
-  createCredentialTransfer(payload: CredentialTransferPayload) {
-    return request<{ transfer_id?: string; status?: string; transfer?: Record<string, unknown> }>(
-      "/api/mobile/v1/credential-transfers",
-      { method: "POST", body: JSON.stringify(payload) },
-    );
-  },
 };

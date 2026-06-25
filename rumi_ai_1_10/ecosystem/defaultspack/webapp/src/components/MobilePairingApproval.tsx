@@ -117,10 +117,10 @@ export function MobilePairingApproval({
     }
   };
 
-  const isClaimed = Boolean(status?.claimed_device_id);
+  const isClaimed = status?.status === "claimed" || Boolean(status?.claimed_device_id);
   const isFinished = status?.status === "approved" || status?.status === "rejected" || status?.status === "expired";
   const confirmationCode = status?.confirmation_code ?? "";
-  const deviceLabel = status?.claimed_device_label ?? "不明なデバイス";
+  const deviceLabel = status?.claimed_device_label ?? "Rumi Mobile";
   const requestedScopes = status?.requested_scopes ?? [];
 
   if (!isClaimed || isFinished) return null;

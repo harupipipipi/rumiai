@@ -1,5 +1,5 @@
 import { api } from "../../../lib/api";
-import type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, CredentialTransferPayload, P2PPairing } from "../../../lib/api";
+import type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, P2PPairing } from "../../../lib/api";
 
 export const mobileApiResources = {
   startPairing(payload?: {
@@ -33,9 +33,6 @@ export const mobileApiResources = {
     return api.revokeMobileDevice(deviceId);
   },
 
-  createCredentialTransfer(payload: CredentialTransferPayload) {
-    return api.createCredentialTransfer(payload);
-  },
 };
 
-export type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, CredentialTransferPayload, P2PPairing };
+export type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, P2PPairing };
