@@ -59,6 +59,30 @@ class MockDriver(ComputerDriver):
         return True
 
 
+class BackgroundTypeDriver(MockDriver):
+    def __init__(self, name_: str = "background", *, physical: bool = False):
+        super().__init__(name_, succeed=True)
+        self._physical = physical
+        self.called = False
+
+    def capabilities(self) -> ComputerCapabilities:
+        return ComputerCapabilities(
+            can_background_type=not self._physical,
+            can_parallel_user_work=not self._physical,
+            can_foreground_action=self._physical,
+        )
+
+    def type_text(self, target, text=""):
+        self.called = True
+        return ActionResult(
+            action="type_text",
+            driver=self._name,
+            executed=True,
+            can_parallel_user_work=not self._physical,
+            uses_physical_input=self._physical,
+        )
+
+
 def _make_service(drivers):
     reg = DriverRegistry()
     for d in drivers:
@@ -95,6 +119,35 @@ def test_type_text_success():
     svc = _make_service([MockDriver("mock1")])
     result = svc.type_text({"app": "Test"}, text="hello")
     assert result["executed"] is True
+
+
+def test_background_action_skips_foreground_only_driver():
+    foreground = BackgroundTypeDriver("mac_swift_host", physical=True)
+    background = BackgroundTypeDriver("mac_cgevent_pid", physical=False)
+    svc = _make_service([foreground, background])
+
+    result = svc.background_action("type_text", {"app": "Test"}, {"text": "hello"})
+
+    assert result["executed"] is True
+    assert result["driver"] == "mac_cgevent_pid"
+    assert foreground.called is False
+    assert background.called is True
+
+
+def test_mac_accessibility_skips_ax_set_value_for_vivaldi():
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.drivers.mac_accessibility import (
+        MacAccessibilityDriver,
+    )
+
+    driver = MacAccessibilityDriver()
+    result = driver.type_text(
+        ComputerTarget(app="Vivaldi", pid=1234, bundle_id="com.vivaldi.Vivaldi"),
+        text="hello",
+    )
+
+    assert result.executed is False
+    assert result.uses_physical_input is False
+    assert "Skipping AXSetValue" in result.notes[0]
 
 
 def test_audit_logger_called():

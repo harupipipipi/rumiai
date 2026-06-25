@@ -35,6 +35,9 @@ class MacCGEventPidDriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=False,
+            can_background_click=True,
+            can_background_type=True,
+            can_background_key=True,
             can_pid_event=True,
             can_foreground_action=False,
             can_parallel_user_work=True,
@@ -94,6 +97,7 @@ class MacCGEventPidDriver(ComputerDriver):
                 executed=success,
                 confidence="experimental",
                 can_parallel_user_work=True,
+                uses_physical_input=False,
                 notes=["⚠️ EXPERIMENTAL: CGEventPostToPid click"],
             )
         except Exception as e:
@@ -134,6 +138,7 @@ class MacCGEventPidDriver(ComputerDriver):
                 executed=success,
                 confidence="experimental",
                 can_parallel_user_work=True,
+                uses_physical_input=False,
                 notes=["⚠️ EXPERIMENTAL: CGEventPostToPid type"],
             )
         except Exception as e:
@@ -174,6 +179,7 @@ class MacCGEventPidDriver(ComputerDriver):
                 executed=success,
                 confidence="experimental",
                 can_parallel_user_work=True,
+                uses_physical_input=False,
                 notes=["⚠️ EXPERIMENTAL: CGEventPostToPid key"],
             )
         except Exception as e:

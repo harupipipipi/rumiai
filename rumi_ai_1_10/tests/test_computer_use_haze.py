@@ -176,7 +176,9 @@ def test_edge_haze_reuses_process_for_same_sequence_until_sequence_ends(tmp_path
     assert "terminate_pid:2468" not in events
     assert popen_envs[0]["RUMI_EDGE_HAZE_SEQUENCE_ID"] == "run_123"
     lease = json.loads(Path(popen_envs[0]["RUMI_EDGE_HAZE_LEASE_PATH"]).read_text(encoding="utf-8"))
-    assert 0 < lease["deadline_epoch"] - time.time() <= 6
+    assert 60 < lease["deadline_epoch"] - time.time() <= 121
+    assert lease["status_text"] == "考え中"
+    assert lease["active"] is False
 
     second.end_sequence("other_run")
     assert "terminate_pid:2468" not in events
@@ -235,7 +237,127 @@ def test_edge_haze_standalone_active_lease_has_floor(tmp_path, monkeypatch):
     lease = json.loads(manager._lease_path.read_text(encoding="utf-8"))
     remaining = lease["deadline_epoch"] - time.time()
     assert lease["sequence_id"] == "standalone"
+    assert lease["status_text"] == "操作中"
+    assert lease["active"] is True
     assert 25 <= remaining <= 31
+
+
+def test_edge_haze_virtual_pointer_updates_lease(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac import edge_haze
+    from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import (
+        ComputerUseEdgeHazeManager,
+        EdgeHazeSettings,
+    )
+
+    source = tmp_path / "EdgeHaze.swift"
+    source.write_text("print(\"haze\")\n", encoding="utf-8")
+    binary = tmp_path / "helpers" / "edge_haze"
+
+    class FakeProcess:
+        pid = 8642
+
+        def poll(self):
+            return None
+
+        def terminate(self):
+            pass
+
+        def wait(self, timeout=None):
+            pass
+
+        def kill(self):
+            pass
+
+    def fake_run(args, capture_output=False, timeout=None, check=False):
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_text("binary", encoding="utf-8")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(edge_haze.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(edge_haze.shutil, "which", lambda name: "/usr/bin/swiftc" if name == "swiftc" else None)
+    monkeypatch.setattr(edge_haze.subprocess, "run", fake_run)
+    monkeypatch.setattr(edge_haze.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(ComputerUseEdgeHazeManager, "_pid_alive", staticmethod(lambda pid: pid == 8642))
+    monkeypatch.setenv("RUMI_COMPUTER_USE_HAZE", "1")
+
+    manager = ComputerUseEdgeHazeManager(
+        pack_root=tmp_path,
+        source_path=source,
+        binary_path=binary,
+        settings=EdgeHazeSettings(enabled=True, linger_seconds=1),
+    )
+
+    result = manager.update_virtual_pointer(
+        {"x": 42.4, "y": 80.6, "origin": "top_left", "phase": "move"},
+        action="computer.move",
+        payload={
+            "computer_use_haze_sequence_id": "cursor_run",
+            "edge_haze_target_window": {
+                "app": "Vivaldi",
+                "pid": 1234,
+                "window_id": 5678,
+                "title": "Google",
+                "x": 10,
+                "y": 20,
+                "width": 800,
+                "height": 600,
+            },
+        },
+    )
+
+    lease = json.loads(manager._lease_path.read_text(encoding="utf-8"))
+    assert result["started"] is True
+    assert result["sequence_id"] == "cursor_run"
+    assert lease["virtual_pointer"]["x"] == 42
+    assert lease["virtual_pointer"]["y"] == 81
+    assert lease["virtual_pointer"]["visible"] is True
+    assert lease["target_window"] == {
+        "app": "Vivaldi",
+        "height": 600,
+        "pid": 1234,
+        "width": 800,
+        "window_id": 5678,
+        "window_title": "Google",
+        "x": 10,
+        "y": 20,
+    }
+
+
+def test_browser_computer_haze_payload_includes_target_window(tmp_path, monkeypatch):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "app": "Vivaldi",
+                "title": "Google - Vivaldi",
+                "x": 0,
+                "y": 37,
+                "width": 1470,
+                "height": 919,
+                "window_id": 7112,
+                "pid": 23721,
+                "frame_window_ids": [7112, 7113],
+            }
+        ],
+    )
+
+    payload = controller._edge_haze_payload("computer.key", {"app": "Vivaldi", "key_combo": "return"})
+
+    assert payload["edge_haze_target_window"] == {
+        "app": "Vivaldi",
+        "frame_window_ids": [7112, 7113],
+        "height": 919,
+        "pid": 23721,
+        "width": 1470,
+        "window_id": 7112,
+        "window_title": "Google - Vivaldi",
+        "x": 0,
+        "y": 37,
+    }
 
 
 def test_browser_computer_injects_haze_sequence_from_context_without_overwriting_payload():
@@ -306,6 +428,13 @@ def test_edge_haze_swift_helper_watches_lease():
     text = source.read_text(encoding="utf-8")
     assert "RUMI_EDGE_HAZE_LEASE_PATH" in text
     assert "deadline_epoch" in text
+    assert "status_text" in text
+    assert "virtual_pointer" in text
+    assert "target_window" in text
+    assert "targetWindowDrawRect" in text
+    assert "frontmostApplication" in text
+    assert "drawVirtualPointer" in text
+    assert "考え中" in text
     assert "app.terminate(nil)" in text
 
 
@@ -325,7 +454,7 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(BrowserComputerController, "_edge_haze", fake_haze)
-    monkeypatch.setattr(BrowserComputerController, "_try_computer_seat_action", lambda self, action, payload: None)
+    monkeypatch.setattr(BrowserComputerController, "_try_computer_seat_action", lambda self, action, payload, **kwargs: None)
     monkeypatch.setattr(BrowserComputerController, "_darwin_type", lambda self, payload: None)
 
     result = BrowserComputerController(artifact_root=tmp_path).run(
@@ -341,7 +470,14 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
         "action": "computer.type",
         "sequence_id": "seq-test",
     }
-    assert events == ["enter:computer.type", "exit:computer.type", "enter:computer.type", "exit:computer.type"]
+    assert events == [
+        "enter:computer.type",
+        "exit:computer.type",
+        "enter:computer.type",
+        "exit:computer.type",
+        "enter:computer.type",
+        "exit:computer.type",
+    ]
 
 
 def test_browser_computer_wraps_foreground_open_url_with_haze(tmp_path, monkeypatch):

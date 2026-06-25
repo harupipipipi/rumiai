@@ -83,6 +83,156 @@ def test_seat_executed_fallback_does_not_rerun_legacy(controller, monkeypatch):
     assert outcome["is_fallback"] is True
 
 
+def test_type_tries_background_safe_seat_before_focus(controller, monkeypatch):
+    svc = MagicMock()
+    svc.background_action.return_value = asdict(
+        ActionResult(
+            action="type_text",
+            driver="mac_cgevent_pid",
+            executed=True,
+            can_parallel_user_work=True,
+            uses_physical_input=False,
+        )
+    )
+    svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
+    controller._computer_seat = svc
+    monkeypatch.setattr(
+        controller,
+        "_focus_action_target",
+        lambda payload: (_ for _ in ()).throw(AssertionError("background type should not focus")),
+    )
+
+    outcome = controller.run(
+        "computer.type",
+        {"app": "Vivaldi", "text": "hello", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["background"] is True
+    assert outcome["driver"] == "mac_cgevent_pid"
+    svc.background_action.assert_called_once()
+
+
+def test_explicit_background_key_uses_background_safe_seat(controller, monkeypatch):
+    svc = MagicMock()
+    svc.background_action.return_value = asdict(
+        ActionResult(
+            action="key",
+            driver="mac_cgevent_pid",
+            executed=True,
+            can_parallel_user_work=True,
+            uses_physical_input=False,
+        )
+    )
+    svc.key.side_effect = AssertionError("background key must not use foreground key path")
+    svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
+    controller._computer_seat = svc
+    monkeypatch.setattr(controller, "_focus_action_target", lambda payload: False)
+
+    outcome = controller.run(
+        "computer.key",
+        {"app": "Vivaldi", "key_combo": "return", "background": True, "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["background"] is True
+    assert outcome["driver"] == "mac_cgevent_pid"
+    svc.background_action.assert_called_once()
+
+
+def test_computer_seat_target_preserves_pid_from_matching_window(controller, monkeypatch):
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "app": "Vivaldi",
+                "title": "Google - Vivaldi",
+                "x": 0,
+                "y": 37,
+                "width": 1470,
+                "height": 919,
+                "window_id": 7112,
+                "pid": 23721,
+            }
+        ],
+    )
+
+    target = controller._computer_seat_target({"app": "Vivaldi"})
+
+    assert target["app"] == "Vivaldi"
+    assert target["pid"] == 23721
+    assert target["window_id"] == 7112
+
+
+def test_computer_seat_target_fills_pid_from_running_app(controller, monkeypatch):
+    monkeypatch.setattr(
+        controller,
+        "_list_windows",
+        lambda: [
+            {
+                "app": "Vivaldi",
+                "title": "Google - Vivaldi",
+                "x": 0,
+                "y": 37,
+                "width": 1470,
+                "height": 919,
+                "window_id": 7112,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        controller,
+        "_running_apps",
+        lambda: [
+            {"name": "Vivaldi Helper", "app": "Vivaldi Helper", "pid": 46606},
+            {"name": "Vivaldi", "app": "Vivaldi", "pid": 23721},
+        ],
+    )
+
+    target = controller._computer_seat_target({"app": "Vivaldi"})
+
+    assert target["pid"] == 23721
+
+
+def test_virtual_cursor_publishes_user_separate_overlay(controller, monkeypatch):
+    overlay = {"started": True, "sequence_id": "seq"}
+    monkeypatch.setattr(controller, "_publish_virtual_pointer", lambda pointer, *, action, payload: overlay)
+
+    outcome = controller.run(
+        "computer.move",
+        {"x": 12, "y": 34, "coordinate_space": "screen", "include_screenshot": False},
+        yolo_mode=True,
+    )
+
+    assert outcome["executed"] is True
+    assert outcome["virtual_cursor"] is True
+    assert outcome["ai_cursor"]["x"] == 12
+    assert outcome["ai_cursor"]["y"] == 34
+    assert outcome["virtual_pointer_overlay"] == overlay
+
+
+def test_background_safe_result_rejects_physical_mac_driver():
+    assert BrowserComputerController._seat_result_is_background_safe(
+        {
+            "driver": "mac_swift_host",
+            "executed": True,
+            "can_parallel_user_work": False,
+            "uses_physical_input": True,
+        }
+    ) is False
+    assert BrowserComputerController._seat_result_is_background_safe(
+        {
+            "driver": "mac_accessibility",
+            "executed": True,
+            "can_parallel_user_work": True,
+            "uses_physical_input": False,
+        }
+    ) is True
+
+
 def test_seat_exception_falls_through(controller):
     """If _try_computer_seat_action raises, legacy code runs."""
     svc = MagicMock()

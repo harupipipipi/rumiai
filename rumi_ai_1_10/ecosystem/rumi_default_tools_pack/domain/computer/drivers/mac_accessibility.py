@@ -14,6 +14,18 @@ from ..models import ActionResult, ComputerCapabilities, ComputerTarget, Observe
 from .base import ComputerDriver
 
 
+_AX_SET_VALUE_UNSAFE_APP_MARKERS = (
+    "arc",
+    "brave",
+    "chrome",
+    "chromium",
+    "edge",
+    "msedge",
+    "opera",
+    "vivaldi",
+)
+
+
 class MacAccessibilityDriver(ComputerDriver):
     """Driver using macOS Accessibility API (AX) for semantic interaction.
 
@@ -34,6 +46,8 @@ class MacAccessibilityDriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=True,
+            can_background_click=True,
+            can_background_type=True,
             can_pid_event=False,
             can_foreground_action=False,
             can_parallel_user_work=True,
@@ -147,6 +161,18 @@ class MacAccessibilityDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
+        if self._target_avoids_ax_set_value(target):
+            return ActionResult(
+                action="type_text",
+                driver=self.name,
+                executed=False,
+                can_parallel_user_work=True,
+                uses_physical_input=False,
+                notes=[
+                    "Skipping AXSetValue for Chromium-family apps because it can crash Vivaldi/Chromium; falling back to CGEventPostToPid.",
+                ],
+            )
+
         from ..mac.ax import ax_set_value
 
         try:
@@ -292,3 +318,12 @@ class MacAccessibilityDriver(ComputerDriver):
         from ..mac.ax import ax_is_trusted
 
         return ax_is_trusted()
+
+    @staticmethod
+    def _target_avoids_ax_set_value(target: ComputerTarget) -> bool:
+        values = (
+            target.app,
+            target.bundle_id,
+        )
+        haystack = " ".join(str(value or "").lower() for value in values)
+        return any(marker in haystack for marker in _AX_SET_VALUE_UNSAFE_APP_MARKERS)

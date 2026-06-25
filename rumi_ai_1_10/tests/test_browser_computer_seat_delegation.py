@@ -9,6 +9,12 @@ from dataclasses import asdict
 
 import pytest
 
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+for path in (ROOT, DEFAULTSPACK_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.models import (
     ActionResult,
     ObserveResult,

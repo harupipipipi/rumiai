@@ -133,6 +133,16 @@ class ComputerSeatService:
         payload = {"x": x, "y": y, "button": button}
         return self._fallback_chain("click", target, payload)
 
+    def background_action(
+        self,
+        action: str,
+        target: ComputerTarget | dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run an action only through non-physical background-capable drivers."""
+        target = self._normalize_target(target)
+        return self._fallback_chain(action, target, payload, background_only=True)
+
     def type_text(
         self,
         target: ComputerTarget | dict[str, Any],
@@ -295,6 +305,8 @@ class ComputerSeatService:
         action: str,
         target: ComputerTarget,
         payload: dict[str, Any],
+        *,
+        background_only: bool = False,
     ) -> dict[str, Any]:
         """Try each driver in the chain until one succeeds.
 
@@ -312,6 +324,8 @@ class ComputerSeatService:
         is_fallback = False
 
         for driver in chain:
+            if background_only and not self._driver_supports_background_action(driver, action):
+                continue
             try:
                 method = getattr(driver, action, None)
                 if method is None:
@@ -321,6 +335,10 @@ class ComputerSeatService:
                 result: ActionResult = self._dispatch(method, target, payload)
 
                 if result.executed:
+                    if background_only and result.uses_physical_input:
+                        errors.append(f"{driver.name}: physical input is not background-safe")
+                        is_fallback = True
+                        continue
                     result.is_fallback = is_fallback
                     self._audit.record(
                         action=action,
@@ -357,6 +375,26 @@ class ComputerSeatService:
             result=asdict(failure),
         )
         return asdict(failure)
+
+    @staticmethod
+    def _driver_supports_background_action(driver: Any, action: str) -> bool:
+        try:
+            caps = driver.capabilities()
+        except Exception:
+            return False
+        if not bool(getattr(caps, "can_parallel_user_work", False)):
+            return False
+        if action == "click":
+            return bool(getattr(caps, "can_background_click", False))
+        if action == "type_text":
+            return bool(getattr(caps, "can_background_type", False))
+        if action == "key":
+            return bool(getattr(caps, "can_background_key", False))
+        if action == "scroll":
+            return bool(getattr(caps, "can_background_scroll", False))
+        if action == "semantic_action":
+            return bool(getattr(caps, "can_semantic_action", False))
+        return False
 
     def _dispatch(
         self,
