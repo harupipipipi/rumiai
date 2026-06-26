@@ -8,6 +8,9 @@
 !/rumi_viewer/
 !/pack-shell/
 !/rumi_mobile/
+!/scripts/
+!/scripts/support/
+!/scripts/support/collect_managed_runtime_bundle.py
 !/tests/
 
 # 整理退避用ディレクトリは Git 管理しない

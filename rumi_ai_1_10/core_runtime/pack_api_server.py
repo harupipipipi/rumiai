@@ -38,6 +38,11 @@ from .validation import (
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
+from .api.safe_headers import (
+    RESERVED_REQUEST_CONTEXT_KEYS,
+    sanitized_forwarded_headers,
+    strip_reserved_request_context,
+)
 from .api.route_errors import (
     APIRouteFunctionError,
     api_route_function_error_status,
@@ -235,6 +240,7 @@ class PackAPIHandler(
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _request_auth_mode: Optional[str] = None
+    _authenticated_principal: Optional[Any] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
@@ -791,18 +797,30 @@ class PackAPIHandler(
         body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         parsed_url = urlparse(self.path)
-        request_data: dict[str, Any] = {
+        query_params: dict[str, Any] = {
             key: values[-1]
             for key, values in parse_qs(parsed_url.query, keep_blank_values=True).items()
-            if values
+            if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
         }
-        request_data["_headers"] = {
-            str(key): str(value) for key, value in self.headers.items()
-        }
+        request_data: dict[str, Any] = dict(query_params)
         if body:
-            request_data.update(body)
+            request_data.update(strip_reserved_request_context(body))
         for url_param, data_key in (path_inject or {}).items():
+            if str(data_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                continue
             request_data[data_key] = (path_params or {}).get(url_param, "")
+        principal = getattr(self, "_authenticated_principal", None)
+        request_data["_path"] = parsed_url.path
+        request_data["_query_params"] = dict(query_params)
+        request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+        if principal is not None:
+            request_data["_authenticated_principal"] = principal.to_dict()
+            to_subject = getattr(principal, "to_internal_subject", None)
+            request_data["_authority_subject"] = (
+                to_subject(owner_pack_id="defaultspack")
+                if callable(to_subject)
+                else principal.to_dict()
+            )
         request_data["_method"] = method.upper()
         request_data["_actual_method"] = method.upper()
         return request_data
@@ -961,16 +979,33 @@ class PackAPIHandler(
             return False
         token = auth_header[7:]  # len("Bearer ") == 7
 
+        try:
+            from .access_tokens import AuthenticatedPrincipal, get_scoped_access_token_manager
+
+            principal = get_scoped_access_token_manager().verify_token(token, audience="kernel_api")
+        except Exception:
+            principal = None
+            AuthenticatedPrincipal = None  # type: ignore[assignment]
+        if principal is not None:
+            self._authenticated_principal = principal
+            return True
+
         # 1. HMACKeyManager 経由で検証（ローテーション対応）
         if self._hmac_key_manager is not None:
-            return self._hmac_key_manager.verify_token(token)
+            verified = self._hmac_key_manager.verify_token(token)
+            if verified and AuthenticatedPrincipal is not None:
+                self._authenticated_principal = AuthenticatedPrincipal.legacy_root()
+            return verified
 
         # 2. フォールバック: 従来の internal_token での検証（後方互換）
         if not self.internal_token:
             logger.error("API token not configured - rejecting request")
             return False
 
-        return hmac.compare_digest(token, self.internal_token)
+        verified = hmac.compare_digest(token, self.internal_token)
+        if verified and AuthenticatedPrincipal is not None:
+            self._authenticated_principal = AuthenticatedPrincipal.legacy_root()
+        return verified
 
     def _parse_cookie_header(self) -> dict[str, str]:
         raw_cookie = self.headers.get("Cookie", "")
@@ -1025,6 +1060,12 @@ class PackAPIHandler(
                 return False
 
         self._panel_session = session
+        try:
+            from .access_tokens import AuthenticatedPrincipal
+
+            self._authenticated_principal = AuthenticatedPrincipal.panel_session(session)
+        except Exception:
+            self._authenticated_principal = None
         self._panel_session_cookie = self._build_set_cookie(
             "rumi_panel_session",
             session_id,
@@ -1531,6 +1572,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(path):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
 
@@ -1655,6 +1697,7 @@ class PackAPIHandler(
         if not self._check_rate_limit(_pre_auth_path_post):
             return
         self._request_auth_mode = None
+        self._authenticated_principal = None
         self._panel_session = None
         self._panel_session_cookie = None
         result: Any = None

@@ -33,7 +33,7 @@ import logging
 import types
 from urllib.parse import urlsplit, urlunsplit
 from .flow_context_security import sanitize_user_flow_context
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -83,6 +83,11 @@ sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _imported_compute_file_sha256)
 from .pack_function_policy import permission_id_for_entry
 from .rate_limit_store import PersistentRateLimitStore
+from .execution_boundary import (
+    ExecutionBoundary,
+    SANDBOX_RUNTIME_UNAVAILABLE,
+    profile_runtime_name,
+)
 
 from typing import Any, Dict, List, Optional
 
@@ -250,6 +255,7 @@ class _HandlerDefAdapter:
     handler_dir: Path
     handler_py_path: Path
     is_builtin: bool = False
+    pack_id: str = ""
 
 
 
@@ -936,38 +942,6 @@ class CapabilityExecutor:
                     return True
         return False
 
-    def _entry_path_looks_like_ecosystem_pack(self, entry, pack_id: str) -> bool:
-        entry_paths = [
-            getattr(entry, "function_dir", None),
-            getattr(entry, "main_py_path", None),
-        ]
-        ecosystem_root = None
-        if _ECOSYSTEM_DIR:
-            try:
-                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
-            except (OSError, TypeError):
-                ecosystem_root = Path(_ECOSYSTEM_DIR)
-        for raw_path in entry_paths:
-            if raw_path is None:
-                continue
-            try:
-                candidate = Path(raw_path).resolve()
-            except (OSError, TypeError):
-                continue
-            if ecosystem_root is not None:
-                try:
-                    relative = candidate.relative_to(ecosystem_root)
-                except ValueError:
-                    pass
-                else:
-                    if relative.parts and relative.parts[0] == pack_id:
-                        return True
-            parts = candidate.parts
-            for index, part in enumerate(parts[:-1]):
-                if part == "ecosystem" and parts[index + 1] == pack_id:
-                    return True
-        return False
-
     def _is_core_builtin_trust_bypass_entry(self, entry) -> bool:
         """Preserve legacy core handler compatibility without trusting ecosystem metadata."""
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
@@ -979,7 +953,7 @@ class CapabilityExecutor:
             return False
         if pack_id in self._core_function_handlers:
             return True
-        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+        return False
 
     def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
         """Return True/False for an existing path hint, or None when no path evidence exists."""
@@ -1386,7 +1360,7 @@ class CapabilityExecutor:
             resp = self._dispatch_by_permission_id(
                 entry=entry, principal_id=principal_id, effective_permission_id=effective_permission_id,
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
-                request_id=request_id, start_time=start_time)
+                request_id=request_id, start_time=start_time, request_context=request_context)
 
         resp = self._response_after_host_intent_handling(
             resp,
@@ -1432,7 +1406,8 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
@@ -1458,6 +1433,7 @@ class CapabilityExecutor:
                 grant_config=grant_config,
                 request_context=request_context,
                 force_docker=True,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "binary":
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
@@ -1493,7 +1469,8 @@ class CapabilityExecutor:
     # ------------------------------------------------------------------
 
     def _dispatch_by_permission_id(self, entry, principal_id, effective_permission_id,
-                                     grant_config, args, timeout_seconds, request_id, start_time):
+                                     grant_config, args, timeout_seconds, request_id, start_time,
+                                     request_context=None):
         """calling_convention が None/未知の場合のフォールバック。"""
         if effective_permission_id == FLOW_RUN_PERMISSION_ID:
             return self._execute_flow_run(principal_id=principal_id, permission_id=effective_permission_id,
@@ -1510,11 +1487,13 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
-                                                     request_id=request_id, start_time=start_time)
+                                                     request_id=request_id, start_time=start_time,
+                                                     request_context=request_context)
 
     # ------------------------------------------------------------------
     # function.call dispatch
@@ -1960,6 +1939,222 @@ class CapabilityExecutor:
         required = {str(item or "").strip() for item in caller_requires or []}
         return bool(required) and required <= {"user.approved.high_risk"}
 
+    def _sandbox_execution_context(
+        self,
+        request_context: dict[str, Any] | None,
+        *,
+        principal_id: str,
+        entry,
+        request_id: str,
+        grant_config: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        context.update(
+            {
+                "principal_id": principal_id,
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "request_id": request_id,
+                "ts": self._now_ts(),
+                "grant_config": dict(grant_config or {}),
+            }
+        )
+        return context
+
+    def _managed_sandbox_response_if_required(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        args: dict[str, Any] | None,
+        request_id: str,
+        start_time: float,
+        request_context: dict[str, Any] | None,
+        calling_convention: str,
+        timeout_seconds: float | None = None,
+        grant_config: dict[str, Any] | None = None,
+    ) -> CapabilityResponse | None:
+        if not self._entry_requires_managed_sandbox(entry, principal_id, request_context):
+            return None
+        if self._development_host_boundary_allowed(principal_id, request_context):
+            return None
+
+        supervisor = self._managed_sandbox_supervisor()
+        if supervisor is None:
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason="Managed sandbox runtime is not registered",
+            )
+        execute = getattr(supervisor, "execute_capability", None)
+        if not callable(execute):
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason="Managed sandbox supervisor cannot execute capabilities",
+            )
+        try:
+            function_dir = getattr(entry, "function_dir", None)
+            main_py_path = getattr(entry, "main_py_path", None)
+            entrypoint = str(getattr(entry, "entrypoint", "") or "main.py:run")
+            sandbox_context = self._sandbox_execution_context(
+                request_context,
+                principal_id=principal_id,
+                entry=entry,
+                request_id=request_id,
+                grant_config=grant_config,
+            )
+            result = execute(
+                {
+                    "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                    "profile_runtime": profile_runtime_name(self._principal_profile_id(principal_id, request_context)),
+                    "principal_id": principal_id,
+                    "request_id": request_id,
+                    "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                    "function_id": str(getattr(entry, "function_id", "") or ""),
+                    "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                    "calling_convention": str(calling_convention or ""),
+                    "function_dir": str(function_dir) if function_dir is not None else "",
+                    "main_py_path": str(main_py_path) if main_py_path is not None else "",
+                    "entrypoint": entrypoint,
+                    "timeout_seconds": float(timeout_seconds or self._get_function_timeout(entry)),
+                    "runner_path": str(FUNCTION_RUNNER_PATH),
+                    "args": dict(args or {}),
+                    "context": sandbox_context,
+                }
+            )
+        except Exception as exc:
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason=f"Managed sandbox execution failed: {exc}",
+            )
+        if isinstance(result, CapabilityResponse):
+            return result
+        if isinstance(result, dict):
+            success = bool(result.get("success", result.get("ok", False)))
+            return CapabilityResponse(
+                success=success,
+                output=result.get("output", result),
+                error=None if success else str(result.get("error") or "Managed sandbox execution failed"),
+                error_type=None if success else str(result.get("error_type") or "managed_sandbox_error"),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        return CapabilityResponse(success=True, output=result, latency_ms=(time.time() - start_time) * 1000)
+
+    def _entry_requires_managed_sandbox(
+        self,
+        entry,
+        principal_id: str,
+        request_context: dict[str, Any] | None = None,
+    ) -> bool:
+        del principal_id, request_context
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        if self._is_bundled_core_pack_entry(entry):
+            return False
+        if self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint):
+            return False
+        return True
+
+    def _handler_def_requires_managed_sandbox(self, handler_def, principal_id: str) -> bool:
+        del principal_id
+        pack_id = str(getattr(handler_def, "pack_id", "") or "").strip()
+        if bool(getattr(handler_def, "is_builtin", False)) and pack_id.startswith(_CORE_PACK_ID_PREFIX):
+            return False
+        if not pack_id and bool(getattr(handler_def, "is_builtin", False)):
+            return False
+        if not pack_id:
+            return False
+        entry = types.SimpleNamespace(
+            pack_id=pack_id,
+            function_dir=getattr(handler_def, "handler_dir", None),
+            main_py_path=getattr(handler_def, "handler_py_path", None),
+        )
+        if self._is_bundled_core_pack_entry(entry):
+            return False
+        if self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
+            return False
+        return True
+
+    @staticmethod
+    def _development_host_boundary_allowed(
+        principal_id: str,
+        request_context: dict[str, Any] | None,
+    ) -> bool:
+        environment = str(os.environ.get("RUMI_ENVIRONMENT", "")).strip().lower()
+        if environment not in {"development", "dev"}:
+            return False
+        if str(os.environ.get("RUMI_ALLOW_DEVELOPMENT_HOST_EXECUTION", "")).strip().lower() not in {"1", "true"}:
+            return False
+        if str(principal_id or "").startswith("profile:"):
+            return False
+        context = request_context if isinstance(request_context, dict) else {}
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict):
+            if str(principal.get("auth_mode") or "").strip() == "scoped_bearer":
+                return False
+            if str(principal.get("surface_id") or "").strip().startswith("mobile"):
+                return False
+        return True
+
+    @staticmethod
+    def _principal_profile_id(principal_id: str, request_context: dict[str, Any] | None) -> str:
+        context = request_context if isinstance(request_context, dict) else {}
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict) and str(principal.get("profile_id") or "").strip():
+            return str(principal.get("profile_id") or "").strip()
+        text = str(principal_id or "").strip()
+        if text.startswith("profile:"):
+            return text.split(":", 1)[1].split("__", 1)[0]
+        return text or "default"
+
+    @staticmethod
+    def _managed_sandbox_supervisor():
+        try:
+            from .di_container import get_container as _get_di_container
+
+            return _get_di_container().get_or_none("managed_sandbox_supervisor")
+        except Exception:
+            return None
+
+    def _managed_sandbox_unavailable_response(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+        calling_convention: str,
+        reason: str,
+    ) -> CapabilityResponse:
+        profile_id = self._principal_profile_id(principal_id, None)
+        return CapabilityResponse(
+            success=False,
+            output={
+                "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                "required": True,
+                "profile_runtime": profile_runtime_name(profile_id),
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                "calling_convention": str(calling_convention or ""),
+                "request_id": request_id,
+            },
+            error=reason,
+            error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
     @staticmethod
     def _is_host_capability_pack(pack_id: str) -> bool:
         return str(pack_id or "").strip() == "rumi_host_capabilities_pack"
@@ -2367,8 +2562,24 @@ class CapabilityExecutor:
         grant_config=None,
         request_context=None,
         force_docker=False,
+        timeout_seconds=None,
     ):
         runtime = getattr(entry, 'runtime', 'python')
+        calling_convention = str(getattr(entry, "calling_convention", "") or "")
+        if force_docker or calling_convention == "python_docker":
+            sandbox_resp = self._managed_sandbox_response_if_required(
+                entry=entry,
+                principal_id=principal_id,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                request_context=request_context,
+                calling_convention="python_docker",
+                timeout_seconds=timeout_seconds,
+                grant_config=grant_config,
+            )
+            if sandbox_resp is not None:
+                return sandbox_resp
         if runtime == "binary":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
@@ -2384,7 +2595,7 @@ class CapabilityExecutor:
                                       error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="User function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         if function_dir is None or not Path(function_dir).is_dir():
@@ -2765,6 +2976,30 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
+        if self._handler_def_requires_managed_sandbox(handler_def, principal_id):
+            entry = types.SimpleNamespace(
+                pack_id=str(getattr(handler_def, "pack_id", "") or ""),
+                function_id=str(getattr(handler_def, "handler_id", "") or ""),
+                qualified_name=str(getattr(handler_def, "handler_id", "") or ""),
+                function_dir=getattr(handler_def, "handler_dir", None),
+                main_py_path=getattr(handler_def, "handler_py_path", None),
+                is_builtin=bool(getattr(handler_def, "is_builtin", False)),
+                calling_convention="subprocess",
+                entrypoint=str(getattr(handler_def, "entrypoint", "") or "main.py:run"),
+            )
+            sandbox_resp = self._managed_sandbox_response_if_required(
+                entry=entry,
+                principal_id=principal_id,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                request_context=request_context,
+                calling_convention="subprocess",
+                timeout_seconds=timeout_seconds,
+                grant_config=grant_config,
+            )
+            if sandbox_resp is not None:
+                return sandbox_resp
         entrypoint = str(handler_def.entrypoint or "main.py:run")
         ep_file, ep_func = (
             entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")

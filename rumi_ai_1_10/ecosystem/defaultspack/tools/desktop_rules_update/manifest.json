@@ -1,0 +1,56 @@
+{
+  "id": "desktop_rules_update",
+  "description": "Update the role, rules, or access policy for a managed desktop seat.",
+  "metadata": {
+    "aliases": ["desktop.rules", "desktop access policy", "desktop role"],
+    "keywords": ["desktop", "rules", "role", "access", "key", "permission"]
+  },
+  "config": {
+    "tool_id": "desktop_rules_update",
+    "name": "Desktop Rules Update",
+    "summary": "Update desktop role, rules, or access policy.",
+    "tool_category": "desktop",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["desktop", "policy", "computer_use"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "shield",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Rules",
+      "composer_description": "Update role, rules, or access policy for a desktop.",
+      "composer_icon": "shield"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "role": { "type": "string" },
+          "rules": {},
+          "access": {
+            "type": "object",
+            "properties": {
+              "mode": { "type": "string", "enum": ["owner_only", "key_required", "request_required"] },
+              "owner_id": { "type": "string" },
+              "access_key": { "type": "string" },
+              "request_required": { "type": "boolean" }
+            }
+          },
+          "access_request_required": { "type": "boolean" }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_rules_update"
+    }
+  }
+}

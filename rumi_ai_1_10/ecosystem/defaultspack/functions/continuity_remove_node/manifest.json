@@ -1,0 +1,48 @@
+{
+  "function_id": "continuity_remove_node",
+  "description": "Remove a paired continuity destination.",
+  "tags": [
+    "continuity",
+    "node"
+  ],
+  "risk": "medium",
+  "requires": [
+    "continuity.remove.node"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.remove_node",
+    "defaultspack.continuity.remove_node",
+    "defaults.continuity.remove.node",
+    "defaultspack.continuity.remove.node",
+    "defaults.continuity.node.remove",
+    "defaultspack.continuity.node.remove"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "node_delete"
+      }
+    }
+  }
+}

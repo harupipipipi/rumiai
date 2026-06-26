@@ -1,0 +1,47 @@
+{
+  "function_id": "continuity_pairing_accept",
+  "description": "Accept an explicit Rumi Node pairing flow.",
+  "tags": [
+    "continuity",
+    "node",
+    "pairing"
+  ],
+  "risk": "medium",
+  "requires": [
+    "continuity.pairing.accept"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.pairing_accept",
+    "defaultspack.continuity.pairing_accept",
+    "defaults.continuity.pairing.accept",
+    "defaultspack.continuity.pairing.accept"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "pairing_accept"
+      }
+    }
+  }
+}

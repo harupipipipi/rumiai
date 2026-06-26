@@ -5,6 +5,7 @@ import logging
 from http import cookies
 from typing import Any
 
+from ..access_tokens import TOKEN_PREFIX, AuthenticatedPrincipal, get_scoped_access_token_manager
 from ..panel_auth import PanelAuthManager
 
 
@@ -13,16 +14,29 @@ logger = logging.getLogger(__name__)
 
 class AuthGateMixin:
     def _check_bearer_auth(self) -> bool:
+        self._authenticated_principal = None
         auth_header = self.headers.get("Authorization", "")
         if not auth_header or not auth_header.startswith("Bearer "):
             return False
         token = auth_header[7:]
+        if token.startswith(TOKEN_PREFIX):
+            principal = get_scoped_access_token_manager().verify_token(token, audience="kernel_api")
+            if principal is None:
+                return False
+            self._authenticated_principal = principal
+            return True
         if self._hmac_key_manager is not None:
-            return self._hmac_key_manager.verify_token(token)
+            verified = bool(self._hmac_key_manager.verify_token(token))
+            if verified:
+                self._authenticated_principal = AuthenticatedPrincipal.legacy_root()
+            return verified
         if not self.internal_token:
             logger.error("API token not configured - rejecting request")
             return False
-        return hmac.compare_digest(token, self.internal_token)
+        verified = hmac.compare_digest(token, self.internal_token)
+        if verified:
+            self._authenticated_principal = AuthenticatedPrincipal.legacy_root()
+        return verified
 
     def _parse_cookie_header(self) -> dict[str, str]:
         raw_cookie = self.headers.get("Cookie", "")
@@ -76,6 +90,7 @@ class AuthGateMixin:
                 return False
 
         self._panel_session = session
+        self._authenticated_principal = AuthenticatedPrincipal.panel_session(session)
         self._panel_session_cookie = self._build_set_cookie(
             "rumi_panel_session",
             session_id,
@@ -91,6 +106,7 @@ class AuthGateMixin:
         return True
 
     def _check_auth(self, method: str, path: str) -> bool:
+        self._authenticated_principal = None
         if self._check_bearer_auth():
             self._request_auth_mode = "bearer"
             return True
@@ -102,6 +118,7 @@ class AuthGateMixin:
 
     def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
         del web_mount
+        self._authenticated_principal = None
         if self._check_bearer_auth():
             self._request_auth_mode = "bearer"
             return True

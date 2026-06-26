@@ -417,6 +417,12 @@ def _register_defaults(container: DIContainer) -> None:
         vr = c.get_or_none("vocab_registry")
         return FunctionRegistry(vocab_registry=vr)
 
+    # --- Managed sandbox boundary ---
+    def _managed_sandbox_supervisor_factory() -> Any:
+        from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+
+        return ManagedSandboxSupervisor()
+
     # --- Register all (each name exactly once) ---
     container.register("audit_logger", _audit_logger_factory)
     container.register("hmac_key_manager", _hmac_key_manager_factory)
@@ -455,6 +461,7 @@ def _register_defaults(container: DIContainer) -> None:
     container.register("viewer_capability_handler", _viewer_capability_handler_factory)
     container.register("desktop_capability_handler", _desktop_capability_handler_factory)
     container.register("function_registry", _function_registry_factory)
+    container.register("managed_sandbox_supervisor", _managed_sandbox_supervisor_factory)
 
 
 def get_authority_service():
