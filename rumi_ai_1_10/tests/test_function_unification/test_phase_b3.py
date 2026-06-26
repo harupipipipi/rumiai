@@ -161,11 +161,13 @@ class TestResolveEntryRegistryUnavailable(unittest.TestCase):
 # _unified_execute tests
 # =====================================================================
 
-class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
-    """test 4: core pack の entry で Trust チェックがバイパスされること"""
+class TestUnifiedExecuteUnverifiedCorePrefixBoundary(unittest.TestCase):
+    """test 4: 未証明 core prefix entry は host subprocess に抜けないこと"""
 
     @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_builtin_trust_bypass(self, mock_audit_module):
+    def test_unified_execute_unverified_core_prefix_fails_closed(self, mock_audit_module):
+        from core_runtime.execution_boundary import SANDBOX_RUNTIME_UNAVAILABLE
+
         mock_audit_module.return_value = MagicMock()
 
         tmp_ctx = tempfile.TemporaryDirectory()
@@ -184,16 +186,17 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
         )
 
         trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(trusted=True)
         grant_manager = MagicMock()
+        grant_manager.check.return_value = _MockGrantResult(allowed=True)
         executor = _make_executor(trust_store=trust_store, grant_manager=grant_manager)
 
-        # Mock subprocess for execution
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc):
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
             with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
                 mock_tmpfile.return_value.__enter__ = MagicMock(
                     return_value=MagicMock(name="/tmp/fake_runner.py")
@@ -205,9 +208,11 @@ class TestUnifiedExecuteBuiltinTrustBypass(unittest.TestCase):
                     start_time=time.time(),
                 )
 
-        # Trust store should NOT be called (builtin bypass)
-        trust_store.is_trusted.assert_not_called()
-        self.assertTrue(resp.success)
+        trust_store.is_trusted.assert_called_once()
+        mock_run.assert_not_called()
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, SANDBOX_RUNTIME_UNAVAILABLE)
+        self.assertEqual(resp.output["execution_boundary"], "managed_sandbox")
 
 
 class TestUnifiedExecuteNonBuiltinTrustCheck(unittest.TestCase):
@@ -250,17 +255,28 @@ class TestUnifiedExecuteGrantCheckWithConfig(unittest.TestCase):
     def test_unified_execute_grant_check_with_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        function_dir = Path(tmp_ctx.name)
+        handler_path = function_dir / "handler.py"
+        handler_path.write_text("def execute(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+
         entry = _MockFunctionEntry(
-            pack_id="core_test",
-            qualified_name="core_test:test_func",
+            pack_id="user_pack",
+            qualified_name="user_pack:test_func",
             vocab_aliases=["test.perm"],
             grant_config={"some": "config"},
+            entrypoint="handler.py:execute",
+            function_dir=str(function_dir),
+            main_py_path=str(handler_path),
         )
 
+        trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(trusted=True)
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")
 
-        executor = _make_executor(grant_manager=grant_manager)
+        executor = _make_executor(trust_store=trust_store, grant_manager=grant_manager)
 
         resp = executor._unified_execute(
             entry, "principal_a",
@@ -280,18 +296,27 @@ class TestUnifiedExecuteGrantCheckRequired(unittest.TestCase):
     def test_unified_execute_grant_check_required_without_manifest_grant_config(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        function_dir = Path(tmp_ctx.name)
+        handler_path = function_dir / "handler.py"
+        handler_path.write_text("def execute(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+
         entry = _MockFunctionEntry(
-            pack_id="core_test",
-            qualified_name="core_test:test_func",
+            pack_id="user_pack",
+            qualified_name="user_pack:test_func",
             vocab_aliases=["test.perm"],
             grant_config=None,
             entrypoint="handler.py:execute",
-            function_dir="/fake/dir",
+            function_dir=str(function_dir),
+            main_py_path=str(handler_path),
         )
 
+        trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(trusted=True)
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(allowed=False, reason="No grant")
-        executor = _make_executor(grant_manager=grant_manager)
+        executor = _make_executor(trust_store=trust_store, grant_manager=grant_manager)
 
         resp = executor._unified_execute(
             entry, "principal_a",
@@ -311,19 +336,30 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
     def test_unified_execute_flow_run_dispatch(self, mock_audit_module):
         mock_audit_module.return_value = MagicMock()
 
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        function_dir = Path(tmp_ctx.name)
+        handler_path = function_dir / "handler.py"
+        handler_path.write_text("def execute(ctx, args): return {'result': 'ok'}\n", encoding="utf-8")
+
         entry = _MockFunctionEntry(
-            pack_id="core_flow",
-            qualified_name="core_flow:run",
+            pack_id="user_flow",
+            qualified_name="user_flow:run",
             grant_config={},
             vocab_aliases=["flow.run"],
+            entrypoint="handler.py:execute",
+            function_dir=str(function_dir),
+            main_py_path=str(handler_path),
         )
 
+        trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(trusted=True)
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(
             allowed=True,
             config={"allowed_flow_ids": ["my_flow"]},
         )
-        executor = _make_executor(grant_manager=grant_manager)
+        executor = _make_executor(trust_store=trust_store, grant_manager=grant_manager)
         executor._kernel = MagicMock()
         executor._kernel.execute_flow_sync.return_value = {"status": "done"}
 
@@ -338,10 +374,12 @@ class TestUnifiedExecuteFlowRunDispatch(unittest.TestCase):
 
 
 class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
-    """test 9: 通常の entry で _execute_handler_subprocess が呼ばれること"""
+    """test 9: 未証明 core prefix entry は managed sandbox へ送られること"""
 
     @patch(f"{_CE_MODULE}.get_audit_logger", new_callable=MagicMock)
-    def test_unified_execute_subprocess_dispatch(self, mock_audit_module):
+    def test_unified_execute_subprocess_unverified_core_prefix_fails_closed(self, mock_audit_module):
+        from core_runtime.execution_boundary import SANDBOX_RUNTIME_UNAVAILABLE
+
         mock_audit_module.return_value = MagicMock()
 
         tmp_ctx = tempfile.TemporaryDirectory()
@@ -359,16 +397,18 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
             main_py_path=str(handler_path),
         )
 
+        trust_store = MagicMock()
+        trust_store.is_trusted.return_value = _MockTrustResult(trusted=True)
         grant_manager = MagicMock()
         grant_manager.check.return_value = _MockGrantResult(allowed=True)
-        executor = _make_executor(grant_manager=grant_manager)
+        executor = _make_executor(trust_store=trust_store, grant_manager=grant_manager)
 
         mock_proc = MagicMock()
         mock_proc.returncode = 0
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc):
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
             with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
                 mock_tmpfile.return_value.__enter__ = MagicMock(
                     return_value=MagicMock(name="/tmp/fake_runner.py")
@@ -380,8 +420,11 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
                     start_time=time.time(),
                 )
 
-        # Should succeed via subprocess path
-        self.assertTrue(resp.success)
+        trust_store.is_trusted.assert_called_once()
+        mock_run.assert_not_called()
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, SANDBOX_RUNTIME_UNAVAILABLE)
+        self.assertEqual(resp.output["execution_boundary"], "managed_sandbox")
 
 
 # =====================================================================

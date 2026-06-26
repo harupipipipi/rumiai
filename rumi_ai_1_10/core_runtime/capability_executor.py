@@ -33,7 +33,7 @@ import logging
 import types
 from urllib.parse import urlsplit, urlunsplit
 from .flow_context_security import sanitize_user_flow_context
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -942,38 +942,6 @@ class CapabilityExecutor:
                     return True
         return False
 
-    def _entry_path_looks_like_ecosystem_pack(self, entry, pack_id: str) -> bool:
-        entry_paths = [
-            getattr(entry, "function_dir", None),
-            getattr(entry, "main_py_path", None),
-        ]
-        ecosystem_root = None
-        if _ECOSYSTEM_DIR:
-            try:
-                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
-            except (OSError, TypeError):
-                ecosystem_root = Path(_ECOSYSTEM_DIR)
-        for raw_path in entry_paths:
-            if raw_path is None:
-                continue
-            try:
-                candidate = Path(raw_path).resolve()
-            except (OSError, TypeError):
-                continue
-            if ecosystem_root is not None:
-                try:
-                    relative = candidate.relative_to(ecosystem_root)
-                except ValueError:
-                    pass
-                else:
-                    if relative.parts and relative.parts[0] == pack_id:
-                        return True
-            parts = candidate.parts
-            for index, part in enumerate(parts[:-1]):
-                if part == "ecosystem" and parts[index + 1] == pack_id:
-                    return True
-        return False
-
     def _is_core_builtin_trust_bypass_entry(self, entry) -> bool:
         """Preserve legacy core handler compatibility without trusting ecosystem metadata."""
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
@@ -985,7 +953,7 @@ class CapabilityExecutor:
             return False
         if pack_id in self._core_function_handlers:
             return True
-        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+        return False
 
     def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
         """Return True/False for an existing path hint, or None when no path evidence exists."""
