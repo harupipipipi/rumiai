@@ -95,8 +95,8 @@
           "long-context-txt",
           "long_context_txt"
         ],
-        "label": "Context TXT",
-        "description": "Materialize the current conversation context as text.",
+        "label": "会話メモ",
+        "description": "現在の会話をテキストにまとめます。",
         "category": "chat",
         "visibility": "default",
         "risk": "medium",

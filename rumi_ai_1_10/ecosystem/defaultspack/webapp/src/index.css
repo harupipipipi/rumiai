@@ -294,16 +294,8 @@ body {
     box-shadow 220ms ease;
 }
 
-.rumi-composer-input-new-overlay {
-  min-height: 22px;
-}
-
 .rumi-composer-model-dock {
   filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.32));
-}
-
-.rumi-composer-dock-rail {
-  transition: gap 180ms ease;
 }
 
 .rumi-composer-dock-control {
@@ -339,12 +331,6 @@ body {
     min-height: 20px;
     padding-inline: 0;
     padding-top: 0;
-    font-size: 14px;
-    line-height: 20px;
-  }
-
-  .rumi-composer-input-new-overlay {
-    min-height: 20px;
     font-size: 14px;
     line-height: 20px;
   }
