@@ -1032,8 +1032,8 @@ class UINode:
             for item in slots_value
         ]
         _reject_duplicate_slot_ids(slots)
-        if slots and mode not in {"component-with-slots", "composition-only"}:
-            raise ValueError("slots require component-with-slots or composition-only implementationMode")
+        if slots and mode != "component-with-slots":
+            raise ValueError("slots require component-with-slots implementationMode")
         if mode == "component-with-slots" and not slots:
             raise ValueError("component-with-slots requires slots")
         ownership_value = value.get("ownership", [])

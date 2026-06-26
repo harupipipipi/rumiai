@@ -259,6 +259,26 @@ def test_component_slots_must_map_to_children() -> None:
     )
 
 
+def test_composition_only_cannot_define_slots() -> None:
+    result = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "frame",
+                "implementationMode": "composition-only",
+                "slots": [{"id": "main", "acceptsNodeId": "main-region"}],
+                "children": [{"id": "main-region"}],
+            }
+        }
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PLAN_NOT_EXECUTABLE"
+    assert any(
+        item["code"] == "INVALID_UI_TREE"
+        for item in result["data"]["partialPlan"]["diagnostics"]
+    )
+
+
 def test_explicit_children_cannot_hide_parent_complexity() -> None:
     result = compile_ui_plan(
         {
@@ -547,6 +567,15 @@ def test_commit_requires_internal_authorization_and_trusted_workspace(tmp_path: 
         {"ui_tree": _valid_inbox_tree(), "run_id": "approved-run"},
         mark_tool_server_approval_context({"conversation_workspace_dir": str(tmp_path)}),
     )
+    executor_yolo = ToolExecutor().execute(
+        "tool_ui_commit_plan",
+        {"ui_tree": _valid_inbox_tree(), "run_id": "executor-yolo"},
+        {
+            "profile_policy": {"yolo_mode": True},
+            "conversation_workspace_dir": str(tmp_path),
+            "principal_id": "defaultspack",
+        },
+    )
 
     assert raw_approved["status"] == "error"
     assert raw_yolo["status"] == "error"
@@ -555,8 +584,31 @@ def test_commit_requires_internal_authorization_and_trusted_workspace(tmp_path: 
     assert outside_root["error"]["code"] == "INVALID_REQUEST"
     assert allowed["status"] == "ok"
     assert allowed["data"]["artifacts"]["relativePath"] == ".rumi/ui/runs/approved-run"
+    assert executor_yolo["is_error"] is False
+    assert executor_yolo["widget"]["type"] == "ui_commit_plan"
     assert (tmp_path / ".rumi" / "ui" / "runs" / "approved-run" / "manifest.json").is_file()
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "executor-yolo" / "manifest.json").is_file()
     assert not Path("/tmp/nope/.rumi/ui/runs/approved-run").exists()
+
+
+def test_service_validates_run_id_and_idempotency_key(tmp_path: Path) -> None:
+    invalid_compile_run = compile_ui_plan(
+        {"ui_tree": {"id": "empty"}, "run_id": "../bad"}
+    )
+    oversized_commit_key = ui_commit_plan(
+        {
+            "ui_tree": _valid_inbox_tree(),
+            "run_id": "valid-run",
+            "idempotency_key": "x" * 10000,
+        },
+        mark_tool_server_approval_context({"conversation_workspace_dir": str(tmp_path)}),
+    )
+
+    assert invalid_compile_run["status"] == "error"
+    assert invalid_compile_run["error"]["code"] == "INVALID_UI_PLAN"
+    assert oversized_commit_key["status"] == "error"
+    assert oversized_commit_key["error"]["code"] == "INVALID_UI_PLAN"
+    assert not (tmp_path / ".rumi" / "ui" / "runs" / "valid-run").exists()
 
 
 def test_artifact_store_is_run_scoped_and_rejects_overwrites(tmp_path: Path) -> None:

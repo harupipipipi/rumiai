@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from .artifact_store import UICompilerArtifactStore
 from .models import UICompilerConfig
 from .planner import RecursiveUIPlanner
+
+RUN_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 
 
 def compile_ui_plan(arguments: dict[str, Any] | None) -> dict[str, Any]:
@@ -27,7 +31,7 @@ def compile_ui_plan(arguments: dict[str, Any] | None) -> dict[str, Any]:
 
     try:
         config = UICompilerConfig.from_dict(data.get("config") or {})
-        run_id = str(data.get("run_id") or data.get("runId") or "").strip() or None
+        run_id = _validate_run_id(data.get("run_id") or data.get("runId"))
         plan = RecursiveUIPlanner(config).plan(root_payload, run_id=run_id)
     except (RecursionError, TypeError, ValueError) as exc:
         return _error(str(exc), "INVALID_UI_PLAN")
@@ -81,7 +85,8 @@ def commit_ui_plan(
 
     try:
         config = UICompilerConfig.from_dict(data.get("config") or {})
-        run_id = str(data.get("run_id") or data.get("runId") or "").strip() or None
+        run_id = _validate_run_id(data.get("run_id") or data.get("runId"))
+        idempotency_key = _validate_idempotency_key(data.get("idempotency_key") or data.get("idempotencyKey"))
         plan = RecursiveUIPlanner(config).plan(root_payload, run_id=run_id)
     except (RecursionError, TypeError, ValueError) as exc:
         return _error(str(exc), "INVALID_UI_PLAN")
@@ -100,7 +105,7 @@ def commit_ui_plan(
         workspace = Path(workspace_root).expanduser().resolve()
         artifacts = UICompilerArtifactStore(workspace / ".rumi" / "ui").save_plan(
             plan,
-            idempotency_key=str(data.get("idempotency_key") or data.get("idempotencyKey") or "") or None,
+            idempotency_key=idempotency_key,
         )
     except (OSError, ValueError) as exc:
         return _error(str(exc), "ARTIFACT_WRITE_FAILED")
@@ -123,6 +128,24 @@ def _root_payload(data: dict[str, Any]) -> Any:
 
 def _unsupported_keys(data: dict[str, Any], allowed: set[str]) -> list[str]:
     return sorted(str(key) for key in data if str(key) not in allowed)
+
+
+def _validate_run_id(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if len(raw) > 80 or not RUN_ID_RE.fullmatch(raw):
+        raise ValueError("invalid run_id")
+    return raw
+
+
+def _validate_idempotency_key(value: Any) -> str | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if not IDEMPOTENCY_KEY_RE.fullmatch(raw):
+        raise ValueError("invalid idempotency_key")
+    return raw
 
 
 def _truthy(value: Any) -> bool:
