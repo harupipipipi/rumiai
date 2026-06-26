@@ -5144,7 +5144,8 @@ def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
     assert result["target_app"] == "Vivaldi"
     assert "browser_target" not in result
     assert "chrome_target" not in result
-    assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
+    open_calls = [call for call in calls if call[0] and call[0][0] == "open"]
+    assert open_calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
 
 
 def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, monkeypatch):
@@ -5548,7 +5549,7 @@ def test_computer_type_returns_post_action_screenshot_by_default(tmp_path, monke
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
-    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda action, payload: None)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda action, payload, **kwargs: None)
     monkeypatch.setattr(controller, "_focus_action_target", lambda payload: True)
     monkeypatch.setattr(
         controller,

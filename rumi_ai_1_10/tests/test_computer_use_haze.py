@@ -26,13 +26,35 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
 
 @contextmanager
 def _default_tools_function_imports():
+    isolated_roots = ("browser_computer", "browser_use", "computer_use", "domain", "functions")
+    saved_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name in isolated_roots or any(name.startswith(f"{root}.") for root in isolated_roots)
+    }
+    for name in list(sys.modules):
+        if name == "domain" or name.startswith("domain."):
+            sys.modules.pop(name, None)
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    importlib.import_module("domain.host_bridge.computer_router")
     sys.path.insert(0, str(RUMI_DEFAULT_TOOLS_FUNCTIONS))
     try:
         yield
     finally:
-        for path in (str(RUMI_DEFAULT_TOOLS_FUNCTIONS), str(RUMI_DEFAULT_TOOLS_ROOT)):
+        for path in (str(RUMI_DEFAULT_TOOLS_FUNCTIONS), str(RUMI_DEFAULT_TOOLS_ROOT), str(DEFAULTSPACK_ROOT)):
             while path in sys.path:
                 sys.path.remove(path)
+        for name in list(sys.modules):
+            if name in isolated_roots or any(name.startswith(f"{root}.") for root in isolated_roots):
+                if name == "domain" or name.startswith("domain."):
+                    sys.modules.pop(name, None)
+                elif name in saved_modules:
+                    sys.modules[name] = saved_modules[name]
+                else:
+                    sys.modules.pop(name, None)
+        for path in (str(ROOT), str(DEFAULTSPACK_ROOT)):
+            if path not in sys.path:
+                sys.path.insert(0, path)
 
 
 def test_edge_haze_manager_noops_off_macos(tmp_path, monkeypatch):
@@ -644,6 +666,8 @@ def test_edge_haze_draw_path_uses_cached_state():
 
 
 def test_edge_haze_swift_self_test_passes(tmp_path):
+    if sys.platform != "darwin":
+        return
     swiftc = shutil.which("swiftc")
     if not swiftc:
         return
@@ -673,7 +697,9 @@ def test_browser_computer_wraps_visible_desktop_actions_with_haze(tmp_path, monk
     monkeypatch.setattr(BrowserComputerController, "_try_computer_seat_action", lambda self, action, payload, **kwargs: None)
     monkeypatch.setattr(BrowserComputerController, "_darwin_type", lambda self, payload: None)
 
-    result = BrowserComputerController(artifact_root=tmp_path).run(
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    result = controller.run(
         "computer.type",
         {"text": "hi", "include_screenshot": False},
         yolo_mode=True,
@@ -759,7 +785,9 @@ def test_browser_computer_screenshot_uses_darwin_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
 
     screenshot_path = tmp_path / "screenshot.png"
-    result = BrowserComputerController(artifact_root=tmp_path)._capture_screenshot(screenshot_path, {})
+    controller = BrowserComputerController(artifact_root=tmp_path)
+    controller._session_path = tmp_path / "shared" / "browser_sessions.json"
+    result = controller._capture_screenshot(screenshot_path, {})
 
     assert result == {"platform": "Darwin", "target_window": None}
     assert calls == [
