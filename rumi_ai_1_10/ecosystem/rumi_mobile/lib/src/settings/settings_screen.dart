@@ -47,6 +47,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   bool _pairingInProgress = false;
   String? _pairingError;
+  String _pairingVerificationCode = '';
 
   final _baseUrl = TextEditingController();
   final _apiKey = TextEditingController();
@@ -225,9 +226,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
 
+    const requestedScopes = [
+      'chat.read',
+      'chat.write',
+      'tools.observe',
+    ];
+    final verificationCode = await claimVerificationCode(
+      pairingId: payload.pairingId,
+      device: identity,
+      requestedCapabilities: requestedScopes,
+    );
+
     setState(() {
       _pairingInProgress = true;
       _pairingError = null;
+      _pairingVerificationCode = verificationCode;
     });
 
     final client = PcPairingClient();
@@ -243,11 +256,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         pairingId: payload.pairingId,
         code: payload.code,
         device: identity,
-        requestedCapabilities: const [
-          'chat.read',
-          'chat.write',
-          'tools.observe',
-        ],
+        requestedCapabilities: requestedScopes,
       );
 
       if (!mounted) return;
@@ -265,6 +274,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _pairingError = e.toString();
         _pairingInProgress = false;
+        _pairingVerificationCode = '';
       });
       _toast('ペアリングエラー: ${e.message}');
     } catch (e) {
@@ -272,6 +282,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       setState(() {
         _pairingError = '$e';
         _pairingInProgress = false;
+        _pairingVerificationCode = '';
       });
       _toast('ペアリングエラー: $e');
     } finally {
@@ -311,6 +322,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           setState(() {
             _pairingInProgress = false;
             _pairingError = 'PCから端末トークンが返りませんでした';
+            _pairingVerificationCode = '';
           });
           _toast('ペアリングエラー: 端末トークンが空です');
           return;
@@ -339,6 +351,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             setState(() {
               _pairingInProgress = false;
               _pairingError = '端末トークンの復号に失敗しました';
+              _pairingVerificationCode = '';
             });
             _toast('ペアリングエラー: 端末トークンを復号できませんでした');
             return;
@@ -394,6 +407,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _pcUrl.text = pc.baseUrl;
             _pcToken.text = token;
             _pairingInProgress = false;
+            _pairingVerificationCode = '';
           });
           widget.onDevicePaired?.call(device);
           _toast('PCとのペアリングが完了しました');
@@ -408,6 +422,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _pairingInProgress = false;
       _pairingError = 'タイムアウト: PC側で承認されませんでした';
+      _pairingVerificationCode = '';
     });
     _toast('ペアリングがタイムアウトしました');
   }
@@ -900,6 +915,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     const CircularProgressIndicator(),
                     const SizedBox(height: 12),
                     const Text('PC側の承認を待っています...'),
+                    if (_pairingVerificationCode.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        '確認コード',
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _pairingVerificationCode,
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                          fontFeatures: const [
+                            FontFeature.tabularFigures(),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'PC側に表示されているコードと一致することを確認してください',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 12, color: Colors.grey),
+                      ),
+                    ],
                     if (_pairingError != null) ...[
                       const SizedBox(height: 8),
                       Text(

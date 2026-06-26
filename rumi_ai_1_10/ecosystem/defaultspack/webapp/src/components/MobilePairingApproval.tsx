@@ -166,6 +166,9 @@ export function MobilePairingApproval({
   const deviceLabel = review?.claim.device_label ?? "Rumi Mobile";
   const devicePreview = review?.claim.device_id_preview ?? "";
   const requestedScopes = review?.claim.requested_scopes ?? [];
+  const hasElevatedScope = requestedScopes.some(
+    (scope) => scope.startsWith("authority.") || scope.startsWith("credentials."),
+  );
   const signingFingerprint = review?.claim.signing_key_fingerprint ?? "";
   const encryptionFingerprint = review?.claim.encryption_key_fingerprint ?? "";
   const canApprove = busy === "" && Boolean(review) && !reviewBusy && !reviewError;
@@ -270,6 +273,7 @@ export function MobilePairingApproval({
                     <div className="mt-2 space-y-1 text-[11px] text-zinc-400">
                       <div>トークンは端末公開鍵で暗号化</div>
                       <div>pickup secretはPOST bodyのみ</div>
+                      {!hasElevatedScope && <div>APIキー転送/ツール承認は含まれません</div>}
                       {encryptionFingerprint && <div className="font-mono">{encryptionFingerprint}</div>}
                       {signingFingerprint && <div className="font-mono">{signingFingerprint}</div>}
                     </div>

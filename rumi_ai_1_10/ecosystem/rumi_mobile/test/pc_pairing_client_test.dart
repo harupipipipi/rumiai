@@ -54,6 +54,16 @@ void main() {
       expect(resp.pairingId, 'p1');
       expect(resp.status, 'pending');
     });
+
+    test('claim verification code matches PC review fingerprint', () async {
+      final code = await claimVerificationCode(
+        pairingId: 'p1',
+        device: _identity,
+        requestedCapabilities: const ['chat.write', 'chat.read', 'chat.read'],
+      );
+
+      expect(code, 'CTL5-FIWE');
+    });
   });
 
   group('PairingStatusResponse', () {

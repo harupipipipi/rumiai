@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:cryptography/cryptography.dart';
 import '../../settings/api_config_store.dart';
 import 'device_store.dart';
 
@@ -273,4 +274,51 @@ class PcPairingClient {
 Map<String, dynamic>? _mapOrNull(Object? value) {
   if (value is Map) return Map<String, dynamic>.from(value);
   return null;
+}
+
+Future<String> claimVerificationCode({
+  required String pairingId,
+  required DeviceIdentity device,
+  required List<String> requestedCapabilities,
+}) async {
+  final payload = <String, Object>{
+    'claimed_capabilities': _normalizedScopes(requestedCapabilities),
+    'claimed_device_encryption_public_key': device.encryptionPublicKey,
+    'claimed_device_id': device.deviceId,
+    'claimed_device_public_key': device.publicKey,
+    'pairing_id': pairingId,
+  };
+  final digest = await Sha256().hash(utf8.encode(jsonEncode(payload)));
+  final code = _base32Prefix(digest.bytes, 8);
+  return '${code.substring(0, 4)}-${code.substring(4)}';
+}
+
+List<String> _normalizedScopes(List<String> scopes) {
+  final values = scopes
+      .map((e) => e.trim())
+      .where((e) => e.isNotEmpty)
+      .toSet()
+      .toList()
+    ..sort();
+  return values;
+}
+
+String _base32Prefix(List<int> bytes, int length) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  final buffer = StringBuffer();
+  var bits = 0;
+  var value = 0;
+  for (final byte in bytes) {
+    value = (value << 8) | (byte & 0xff);
+    bits += 8;
+    while (bits >= 5 && buffer.length < length) {
+      buffer.write(alphabet[(value >> (bits - 5)) & 0x1f]);
+      bits -= 5;
+    }
+    if (buffer.length >= length) break;
+  }
+  if (buffer.length < length && bits > 0) {
+    buffer.write(alphabet[(value << (5 - bits)) & 0x1f]);
+  }
+  return buffer.toString().padRight(length, 'A').substring(0, length);
 }
