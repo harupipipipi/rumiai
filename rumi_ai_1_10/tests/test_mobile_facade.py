@@ -236,6 +236,9 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
     assert required_device_scope("GET", "/api/packs") == ""
     assert required_device_scope("GET", "/api/mobile/v1/approvals") == ""
     assert required_device_scope("POST", "/api/mobile/v1/approvals/auth_1/approve") == ""
+    assert required_device_scope("GET", "/api/mobile/v1/pairings/pair-1/review") == ""
+    assert required_device_scope("POST", "/api/mobile/v1/pairings/pair-1/approve") == ""
+    assert required_device_scope("POST", "/api/mobile/v1/pairings/pair-1/reject") == ""
 
 
 def test_mobile_manifest_does_not_expose_legacy_approval_facade():

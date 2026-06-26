@@ -318,6 +318,12 @@ class TestCheckAuth:
         assert approval_handler._check_auth("POST", "/api/authority/requests/auth_1/approve") is True
         assert approval_handler._check_auth("POST", "/api/authority/requests/auth_1/deny") is True
         assert approval_handler._check_auth("GET", "/api/mobile/v1/conversations") is False
+        assert handler._check_auth("GET", "/api/mobile/v1/pairings/pair-1/review") is False
+        assert handler._check_auth("POST", "/api/mobile/v1/pairings/pair-1/approve") is False
+        assert handler._check_auth("POST", "/api/mobile/v1/pairings/pair-1/reject") is False
+        assert approval_handler._check_auth("GET", "/api/mobile/v1/pairings/pair-1/review") is False
+        assert approval_handler._check_auth("POST", "/api/mobile/v1/pairings/pair-1/approve") is False
+        assert approval_handler._check_auth("POST", "/api/mobile/v1/pairings/pair-1/reject") is False
         assert approval_handler._check_auth("POST", "/api/packs/defaultspack/approve") is False
         assert handler._check_auth("GET", "/api/packs") is False
         assert handler._check_auth("POST", "/api/packs/defaultspack/approve") is False
