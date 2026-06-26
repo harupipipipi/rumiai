@@ -358,12 +358,13 @@ class TestCapabilityChainE2E(unittest.TestCase):
         principal_id = "pack_epsilon"
 
         # Trust は付与しない（built-in はバイパスするため不要）
-        self._create_function(
+        entry, _ = self._create_function(
             "builtin_echo",
             handler_id,
             permission_id,
             pack_id="core_legacy",
         )
+        entry.legacy_handler_builtin = True
         self._setup_grant(principal_id, permission_id)
 
         executor, registry, _, _ = self._build_executor()

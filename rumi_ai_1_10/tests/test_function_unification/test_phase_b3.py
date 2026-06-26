@@ -196,17 +196,18 @@ class TestUnifiedExecuteUnverifiedCorePrefixBoundary(unittest.TestCase):
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
-            with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
-                mock_tmpfile.return_value.__enter__ = MagicMock(
-                    return_value=MagicMock(name="/tmp/fake_runner.py")
-                )
-                mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
-                resp = executor._unified_execute(
-                    entry, "principal_a",
-                    {"permission_id": "test.perm", "args": {}},
-                    start_time=time.time(),
-                )
+        with patch.object(executor, "_managed_sandbox_supervisor", return_value=None):
+            with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
+                with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
+                    mock_tmpfile.return_value.__enter__ = MagicMock(
+                        return_value=MagicMock(name="/tmp/fake_runner.py")
+                    )
+                    mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
+                    resp = executor._unified_execute(
+                        entry, "principal_a",
+                        {"permission_id": "test.perm", "args": {}},
+                        start_time=time.time(),
+                    )
 
         trust_store.is_trusted.assert_called_once()
         mock_run.assert_not_called()
@@ -408,17 +409,18 @@ class TestUnifiedExecuteSubprocessDispatch(unittest.TestCase):
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
-            with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
-                mock_tmpfile.return_value.__enter__ = MagicMock(
-                    return_value=MagicMock(name="/tmp/fake_runner.py")
-                )
-                mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
-                resp = executor._unified_execute(
-                    entry, "principal_a",
-                    {"permission_id": "test.perm", "args": {}},
-                    start_time=time.time(),
-                )
+        with patch.object(executor, "_managed_sandbox_supervisor", return_value=None):
+            with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
+                with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
+                    mock_tmpfile.return_value.__enter__ = MagicMock(
+                        return_value=MagicMock(name="/tmp/fake_runner.py")
+                    )
+                    mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
+                    resp = executor._unified_execute(
+                        entry, "principal_a",
+                        {"permission_id": "test.perm", "args": {}},
+                        start_time=time.time(),
+                    )
 
         trust_store.is_trusted.assert_called_once()
         mock_run.assert_not_called()
