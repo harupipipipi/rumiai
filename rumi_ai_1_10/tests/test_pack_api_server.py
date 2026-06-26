@@ -350,6 +350,43 @@ class TestCheckAuth:
 
         assert handler._authorize_authenticated_route("GET", "/api/packs") is True
 
+    def test_scoped_route_authorization_ignores_stale_import_binding(self, tmp_path, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+        from core_runtime.api import request_authorizer
+
+        stale_grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "stale_capabilities"),
+            secret_key="capability-test-key-" + ("i" * 32),
+        )
+        current_grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "current_capabilities"),
+            secret_key="capability-test-key-" + ("j" * 32),
+        )
+        monkeypatch.setattr(
+            request_authorizer,
+            "get_capability_grant_manager",
+            lambda: stale_grants,
+            raising=False,
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", current_grants)
+        current_grants.grant_permission("profile:work", "pack.read", {})
+        current_grants.grant_permission("profile:work__surface:mobile", "pack.read", {})
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        assert handler._authorize_authenticated_route("GET", "/api/packs") is True
+
     def test_scoped_route_authorization_rejects_client_claimed_profile(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal
         from core_runtime import capability_grant_manager as cgm
