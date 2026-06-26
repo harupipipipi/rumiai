@@ -1,10 +1,29 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
-import { Loader2, ShieldCheck, ShieldX, Smartphone, X } from "lucide-react";
+import {
+  Fingerprint,
+  Loader2,
+  ShieldCheck,
+  ShieldX,
+  Smartphone,
+  Sparkles,
+  X,
+} from "lucide-react";
 
-import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
-import type { MobilePairingReview, MobilePairingStatus } from "../features/mobile/resources/mobileApiResources";
+import type {
+  MobilePairingReview,
+  MobilePairingStatus,
+} from "../features/mobile/resources/mobileApiResources";
+import {
+  LiquidButton,
+  LiquidCard,
+  LiquidPill,
+  ScopeChip,
+  SecurityRow,
+  StatusDots,
+} from "./liquidParts";
 
 type MobilePairingApprovalProps = {
   pairingId: string;
@@ -14,19 +33,30 @@ type MobilePairingApprovalProps = {
   onClose?: () => void;
 };
 
+const EMPTY_SCOPES: string[] = [];
+
 const SCOPE_LABELS: Record<string, string> = {
-  "chat.read": "チャットの読み取り",
-  "chat.write": "チャットの送信",
-  "tools.observe": "ツールの監視",
-  "authority.request.list": "承認一覧の確認",
-  "authority.request.read": "承認内容の確認",
-  "authority.request.approve": "署名付き承認",
-  "authority.request.deny": "署名付き拒否",
-  "credentials.request": "API設定の受け取り",
+  "chat.read": "PCのチャットを読む",
+  "chat.write": "PCへメッセージを送る",
+  "tools.observe": "PCの作業状況を見る",
+  "authority.request.list": "承認一覧を見る",
+  "authority.request.read": "承認内容を見る",
+  "authority.request.approve": "PCの承認を許可",
+  "authority.request.deny": "PCの拒否を許可",
+  "credentials.request": "API設定を受け取る",
 };
 
 function scopeLabel(scope: string): string {
   return SCOPE_LABELS[scope] ?? scope;
+}
+
+function isElevatedScope(scope: string): boolean {
+  return scope.startsWith("authority.") || scope.startsWith("credentials.");
+}
+
+function shortHash(value?: string): string {
+  if (!value) return "";
+  return value.replace(/^sha256:/, "").slice(0, 12);
 }
 
 export function MobilePairingApproval({
@@ -88,7 +118,7 @@ export function MobilePairingApproval({
           onExpired?.(pairingId);
         }
       } catch {
-        // ignore transient poll errors
+        // Keep this quiet; the admin review request below drives the safety UI.
       }
     };
 
@@ -118,14 +148,20 @@ export function MobilePairingApproval({
   }, [pairingId]);
 
   useEffect(() => {
-    if (status?.status !== "claimed") {
+    if (status && status.status !== "claimed") {
       setReview(null);
       setReviewError("");
       return;
     }
     if (review?.pairing.pairing_id === pairingId || reviewBusy || reviewError) return;
     void loadReview();
-  }, [loadReview, pairingId, review?.pairing.pairing_id, reviewBusy, reviewError, status?.status]);
+  }, [loadReview, pairingId, review?.pairing.pairing_id, reviewBusy, reviewError, status]);
+
+  const claim = review?.claim;
+  const requestedScopes = claim?.requested_scopes ?? EMPTY_SCOPES;
+  const elevatedScopes = useMemo(() => requestedScopes.filter(isElevatedScope), [requestedScopes]);
+  const safeScopes = useMemo(() => requestedScopes.filter((scope) => !isElevatedScope(scope)), [requestedScopes]);
+  const canApprove = busy === "" && Boolean(review) && !reviewBusy && !reviewError;
 
   const handleApprove = async () => {
     if (!review) {
@@ -160,167 +196,218 @@ export function MobilePairingApproval({
     }
   };
 
-  const isClaimed = status?.status === "claimed";
-  const isFinished = status?.status === "approved" || status?.status === "rejected" || status?.status === "expired";
-  const confirmationCode = review?.claim.verification_code ?? "";
-  const deviceLabel = review?.claim.device_label ?? "Rumi Mobile";
-  const devicePreview = review?.claim.device_id_preview ?? "";
-  const requestedScopes = review?.claim.requested_scopes ?? [];
-  const hasElevatedScope = requestedScopes.some(
-    (scope) => scope.startsWith("authority.") || scope.startsWith("credentials."),
-  );
-  const signingFingerprint = review?.claim.signing_key_fingerprint ?? "";
-  const encryptionFingerprint = review?.claim.encryption_key_fingerprint ?? "";
-  const canApprove = busy === "" && Boolean(review) && !reviewBusy && !reviewError;
+  const isFinished =
+    status?.status === "approved" ||
+    status?.status === "rejected" ||
+    status?.status === "expired";
 
-  if (!isClaimed || isFinished) return null;
+  if (isFinished) return null;
 
-  return (
+  const approvalCard = (
     <AnimatePresence>
       <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
+        initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
+        animate={{ opacity: 1, backdropFilter: "blur(16px)" }}
         exit={{ opacity: 0 }}
         className="fixed inset-0 rumi-layer-modal flex items-center justify-center bg-black/60 p-4"
       >
         <motion.div
-          initial={{ scale: 0.95, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          exit={{ scale: 0.95, opacity: 0 }}
-          className="relative w-full max-w-md rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl"
+          initial={{ y: 20, scale: 0.94, opacity: 0 }}
+          animate={{ y: 0, scale: 1, opacity: 1 }}
+          exit={{ y: 14, scale: 0.96, opacity: 0 }}
+          transition={{ type: "spring", stiffness: 260, damping: 24 }}
+          className="rumi-liquid-shell w-full max-w-lg p-1"
         >
-          <button
-            type="button"
-            onClick={onClose}
-            className="absolute right-3 top-3 rounded-lg p-1 text-zinc-500 transition-colors hover:text-zinc-200"
-          >
-            <X size={16} />
-          </button>
+          <div className="relative rounded-[30px] p-5 sm:p-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="absolute right-4 top-4 rounded-full border border-white/10 bg-white/5 p-2 text-zinc-400 transition hover:bg-white/10 hover:text-white"
+              aria-label="閉じる"
+            >
+              <X size={16} />
+            </button>
 
-          <div className="p-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900">
-                <Smartphone size={18} className="text-zinc-300" />
+            <div className="pr-10">
+              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-[11px] text-zinc-200">
+                <Sparkles size={12} className="text-cyan-200" />
+                スマホからの接続リクエスト
               </div>
-              <div>
-                <h3 className="text-sm font-medium text-zinc-100">スマホからの接続要求</h3>
-                <p className="text-xs text-zinc-500">新しいデバイスがペアリングを要求しています</p>
-              </div>
+              <h3 className="mt-4 text-2xl font-black tracking-tight text-white">
+                このスマホをつなぎますか？
+              </h3>
+              <p className="mt-2 text-sm leading-6 text-zinc-300">
+                スマホ側に表示されている確認コードと一致することを確かめてから承認してください。
+              </p>
             </div>
 
-            <div className="mt-5 space-y-4">
+            <div className="mt-5 space-y-3">
               {reviewBusy && !review && (
-                <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 text-xs text-zinc-400">
-                  <Loader2 size={14} className="animate-spin" />
-                  接続要求の詳細を確認しています
-                </div>
+                <LiquidCard className="flex items-center gap-3 p-4 text-sm text-zinc-300">
+                  <Loader2 size={17} className="animate-spin text-cyan-200" />
+                  <span>接続要求の詳細を確認しています</span>
+                  <StatusDots />
+                </LiquidCard>
               )}
 
               {reviewError && !review && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-                  <div className="text-xs font-medium text-amber-100">接続要求の詳細を取得できませんでした</div>
-                  <div className="mt-1 text-[11px] leading-5 text-amber-200/80">
-                    安全のため、詳細を確認できるまで承認できません。
-                  </div>
-                  <button
+                <LiquidCard className="p-4">
+                  <div className="text-sm font-bold text-amber-100">詳細を確認できませんでした</div>
+                  <p className="mt-1 text-xs leading-5 text-amber-100/75">
+                    安全のため、端末名・確認コード・権限を確認できるまで承認できません。
+                  </p>
+                  <LiquidButton
+                    quiet
                     type="button"
                     disabled={reviewBusy}
+                    busy={reviewBusy}
                     onClick={() => void loadReview()}
-                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-[11px] text-amber-100 hover:bg-amber-500/10 disabled:opacity-50"
+                    className="mt-3"
                   >
-                    {reviewBusy && <Loader2 size={12} className="animate-spin" />}
-                    再試行
-                  </button>
-                </div>
+                    もう一度確認
+                  </LiquidButton>
+                </LiquidCard>
               )}
 
               {review && (
                 <>
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                    <div className="text-[11px] uppercase text-zinc-500">デバイス</div>
-                    <div className="mt-1 text-sm font-medium text-zinc-100">{deviceLabel}</div>
-                    {devicePreview && <div className="mt-1 font-mono text-[11px] text-zinc-500">{devicePreview}</div>}
-                  </div>
-
-                  {confirmationCode && (
-                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
-                      <div className="text-[11px] uppercase text-emerald-400">確認コード</div>
-                      <div className="mt-1 text-lg font-semibold text-emerald-200">{confirmationCode}</div>
-                      <div className="mt-1 text-[11px] text-emerald-400/70">
-                        スマホに表示されているコードと一致することを確認してください
+                  <LiquidCard className="p-4">
+                    <div className="flex items-center gap-3">
+                      <div className="grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/10 text-cyan-100">
+                        <Smartphone size={22} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                          Device
+                        </div>
+                        <div className="truncate text-base font-extrabold text-white">
+                          {claim?.device_label || "Rumi Mobile"}
+                        </div>
+                        {claim?.device_id_preview && (
+                          <div className="mt-0.5 truncate font-mono text-[11px] text-zinc-500">
+                            {claim.device_id_preview}
+                          </div>
+                        )}
                       </div>
                     </div>
-                  )}
+                  </LiquidCard>
 
-                  {requestedScopes.length > 0 && (
-                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                      <div className="text-[11px] uppercase text-zinc-500">許可する権限</div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {requestedScopes.map((scope) => (
-                          <span
-                            key={scope}
-                            className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300"
-                          >
-                            {scopeLabel(scope)}
-                          </span>
-                        ))}
+                  <LiquidCard className="p-4 text-center">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-cyan-200/80">
+                      合言葉
+                    </div>
+                    <div className="mt-2 flex justify-center">
+                      <div className="rumi-code-badge">{claim?.verification_code || "確認中"}</div>
+                    </div>
+                    <p className="mt-3 text-xs leading-5 text-zinc-400">
+                      スマホに出ているコードと同じなら、この接続要求は同じ端末から来ています。
+                    </p>
+                  </LiquidCard>
+
+                  <LiquidCard className="p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                          Permissions
+                        </div>
+                        <div className="mt-1 text-sm font-bold text-white">このスマホでできること</div>
                       </div>
+                      <LiquidPill tone={elevatedScopes.length > 0 ? "violet" : "mint"}>
+                        {elevatedScopes.length > 0 ? "追加権限あり" : "最小権限"}
+                      </LiquidPill>
                     </div>
-                  )}
 
-                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                    <div className="text-[11px] uppercase text-zinc-500">セキュリティ</div>
-                    <div className="mt-2 space-y-1 text-[11px] text-zinc-400">
-                      <div>トークンは端末公開鍵で暗号化</div>
-                      <div>pickup secretはPOST bodyのみ</div>
-                      {!hasElevatedScope && <div>APIキー転送/ツール承認は含まれません</div>}
-                      {encryptionFingerprint && <div className="font-mono">{encryptionFingerprint}</div>}
-                      {signingFingerprint && <div className="font-mono">{signingFingerprint}</div>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {safeScopes.map((scope) => (
+                        <ScopeChip key={scope} label={scopeLabel(scope)} />
+                      ))}
+                      {elevatedScopes.map((scope) => (
+                        <span
+                          key={scope}
+                          className="inline-flex items-center gap-2 rounded-full border border-amber-300/25 bg-amber-300/10 px-3 py-2 text-xs text-amber-100"
+                        >
+                          {scopeLabel(scope)}
+                        </span>
+                      ))}
                     </div>
-                  </div>
+                  </LiquidCard>
+
+                  <LiquidCard className="p-4">
+                    <div className="text-[11px] uppercase tracking-[0.18em] text-zinc-500">
+                      Safety
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <SecurityRow>端末トークンはスマホの公開鍵で暗号化して受け渡します。</SecurityRow>
+                      <SecurityRow>pickup は POST body だけで使い、URLには載せません。</SecurityRow>
+                      {elevatedScopes.length === 0 && (
+                        <SecurityRow>APIキー転送やPC承認操作は、この接続には含まれていません。</SecurityRow>
+                      )}
+                    </div>
+                    <details className="mt-3 rounded-2xl border border-white/10 bg-black/15 p-3 text-[11px] text-zinc-500">
+                      <summary className="cursor-pointer select-none font-bold text-zinc-400">
+                        fingerprint
+                      </summary>
+                      <div className="mt-2 grid gap-2">
+                        {claim?.encryption_key_fingerprint && (
+                          <div className="flex items-center gap-2 font-mono">
+                            <Fingerprint size={13} />
+                            {claim.encryption_key_fingerprint}
+                          </div>
+                        )}
+                        {claim?.signing_key_fingerprint && (
+                          <div className="flex items-center gap-2 font-mono">
+                            <ShieldCheck size={13} />
+                            {claim.signing_key_fingerprint}
+                          </div>
+                        )}
+                        <div className="font-mono">claim {shortHash(review.claim_hash)}</div>
+                      </div>
+                    </details>
+                  </LiquidCard>
                 </>
               )}
             </div>
 
-            {error && (
-              <div className="mt-3 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-[11px] text-rose-200">
-                {error}
+            {(error || (reviewError && review)) && (
+              <div className="mt-3 rounded-2xl border border-rose-300/25 bg-rose-400/10 px-4 py-3 text-xs text-rose-100">
+                {error || reviewError}
               </div>
             )}
 
-            <div className="mt-6 flex gap-3">
-              <button
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <LiquidButton
+                quiet
+                danger
                 type="button"
                 disabled={busy !== ""}
+                busy={busy === "reject"}
                 onClick={() => void handleReject()}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm transition-colors",
-                  busy === "reject"
-                    ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100",
-                )}
               >
-                {busy === "reject" ? <Loader2 size={14} className="animate-spin" /> : <ShieldX size={14} />}
-                拒否
-              </button>
-              <button
+                <ShieldX size={15} />
+                今回はやめる
+              </LiquidButton>
+              <LiquidButton
                 type="button"
                 disabled={!canApprove}
+                busy={busy === "approve"}
                 onClick={() => void handleApprove()}
-                className={cn(
-                  "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
-                  !canApprove
-                    ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                    : "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500",
-                )}
               >
-                {busy === "approve" ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
-                このスマホを許可
-              </button>
+                <ShieldCheck size={15} />
+                このスマホをつなぐ
+              </LiquidButton>
             </div>
+
+            {!canApprove && !reviewBusy && (
+              <p className="mt-3 text-center text-[11px] text-zinc-500">
+                詳細を確認できるまで承認できません。
+              </p>
+            )}
           </div>
         </motion.div>
       </motion.div>
     </AnimatePresence>
   );
+
+  if (typeof document === "undefined") return approvalCard;
+  return createPortal(approvalCard, document.body);
 }
