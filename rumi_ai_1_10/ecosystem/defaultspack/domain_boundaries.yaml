@@ -263,6 +263,7 @@ domains:
     - domain/runtime_config
     - domain/safety
     - domain/tool_policy
+    - domain/ui_compiler
     path: domain/tool
   tool_policy:
     may_import:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,8 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool.ui_compiler_tools import ui_commit_plan  # noqa: E402
+from domain.tool_policy.internal_context import mark_tool_server_approval_context  # noqa: E402
 from domain.ui_compiler import (  # noqa: E402
     ComplexitySignals,
     LeafBudget,
@@ -25,25 +28,38 @@ from domain.ui_compiler import (  # noqa: E402
 )
 
 
-def _inbox_tree() -> dict:
+def _valid_inbox_tree() -> dict:
     return {
-        "id": "inbox",
+        "id": "inbox-page-frame",
         "purpose": "Process unresolved conversations quickly.",
         "density": "compact",
+        "implementationMode": "component-with-slots",
+        "importance": "pageFrame",
+        "responsibilities": {
+            "visualRoles": ["toolbar", "reply-composer"],
+            "controls": [],
+            "mutations": [],
+            "states": [],
+        },
+        "slots": [
+            {"id": "toolbar", "purpose": "Filter controls", "minWidth": 280},
+            {"id": "reply-composer", "purpose": "Reply region", "minWidth": 280},
+        ],
         "children": [
             {
                 "id": "inbox-toolbar",
                 "purpose": "Filter the conversation set.",
                 "density": "compact",
                 "importance": "secondaryRegion",
-                "complexity": {
-                    "uniqueVisualRoles": 6,
-                    "interactiveControls": 3,
-                    "meaningfulStates": 2,
-                    "asyncMutations": 0,
-                    "responsiveTopologies": 1,
-                    "specialLayoutAlgorithms": 0,
+                "responsibilities": {
+                    "visualRoles": ["toolbar"],
+                    "controls": ["query", "onQueryChange", "status-filter"],
+                    "mutations": [],
+                    "states": ["default", "filtered"],
                 },
+                "inputs": ["query"],
+                "events": ["onQueryChange"],
+                "requiredStates": ["default", "filtered"],
                 "allowedPrimitives": ["Button", "SegmentedControl", "SearchField"],
                 "visibleActionBudget": 3,
             },
@@ -60,14 +76,29 @@ def _inbox_tree() -> dict:
                     "heightBehavior": "content",
                     "mobileBehavior": "sticky-bottom",
                 },
-                "complexity": {
-                    "uniqueVisualRoles": 18,
-                    "interactiveControls": 7,
-                    "meaningfulStates": 6,
-                    "asyncMutations": 2,
-                    "responsiveTopologies": 2,
-                    "specialLayoutAlgorithms": 0,
+                "responsibilities": {
+                    "visualRoles": ["reply-composer"],
+                    "controls": [
+                        "draft",
+                        "onDraftChange",
+                        "isSending",
+                        "error",
+                        "onSend",
+                        "onRetry",
+                        "attachments",
+                        "onAttach",
+                    ],
+                    "mutations": ["send-reply"],
+                    "states": ["empty", "editing", "sending", "error", "sent"],
                 },
+                "ownership": [
+                    {
+                        "id": "send-reply",
+                        "controls": ["error", "onSend", "onRetry"],
+                        "mutations": ["send-reply"],
+                        "states": ["sending", "error"],
+                    }
+                ],
                 "inputs": ["draft", "isSending", "error", "attachments"],
                 "events": ["onDraftChange", "onSend", "onRetry", "onAttach"],
                 "requiredStates": ["empty", "editing", "sending", "error", "sent"],
@@ -79,18 +110,20 @@ def _inbox_tree() -> dict:
                         "purpose": "Capture and review the reply draft.",
                         "density": "comfortable",
                         "importance": "primaryRegion",
-                        "layoutEnvelope": {"minWidth": 280, "preferredWidth": 560, "maxWidth": 760},
-                        "complexity": {
-                            "uniqueVisualRoles": 6,
-                            "interactiveControls": 1,
-                            "meaningfulStates": 3,
-                            "asyncMutations": 0,
-                            "responsiveTopologies": 2,
-                            "specialLayoutAlgorithms": 0,
+                        "layoutEnvelope": {
+                            "minWidth": 280,
+                            "preferredWidth": 560,
+                            "maxWidth": 760,
+                        },
+                        "responsibilities": {
+                            "visualRoles": ["reply-composer"],
+                            "controls": ["draft", "onDraftChange"],
+                            "mutations": [],
+                            "states": ["empty", "editing"],
                         },
                         "inputs": ["draft"],
                         "events": ["onDraftChange"],
-                        "requiredStates": ["empty", "editing", "sending"],
+                        "requiredStates": ["empty", "editing"],
                         "allowedPrimitives": ["TextArea"],
                         "visibleActionBudget": 1,
                     },
@@ -99,18 +132,20 @@ def _inbox_tree() -> dict:
                         "purpose": "Expose send, retry, and readiness actions.",
                         "density": "comfortable",
                         "importance": "primaryRegion",
-                        "layoutEnvelope": {"minWidth": 280, "preferredWidth": 560, "maxWidth": 760},
-                        "complexity": {
-                            "uniqueVisualRoles": 5,
-                            "interactiveControls": 3,
-                            "meaningfulStates": 2,
-                            "asyncMutations": 1,
-                            "responsiveTopologies": 2,
-                            "specialLayoutAlgorithms": 0,
+                        "layoutEnvelope": {
+                            "minWidth": 280,
+                            "preferredWidth": 560,
+                            "maxWidth": 760,
+                        },
+                        "responsibilities": {
+                            "visualRoles": [],
+                            "controls": ["isSending", "error", "onSend", "onRetry"],
+                            "mutations": ["send-reply"],
+                            "states": ["sending", "error", "sent"],
                         },
                         "inputs": ["isSending", "error"],
                         "events": ["onSend", "onRetry"],
-                        "requiredStates": ["editing", "sending", "error"],
+                        "requiredStates": ["sending", "error", "sent"],
                         "allowedPrimitives": ["Button", "InlineAlert"],
                         "visibleActionBudget": 3,
                     },
@@ -119,18 +154,19 @@ def _inbox_tree() -> dict:
                         "purpose": "Show attachment state without crowding send controls.",
                         "density": "comfortable",
                         "importance": "secondaryRegion",
-                        "layoutEnvelope": {"minWidth": 280, "preferredWidth": 560, "maxWidth": 760},
-                        "complexity": {
-                            "uniqueVisualRoles": 4,
-                            "interactiveControls": 1,
-                            "meaningfulStates": 2,
-                            "asyncMutations": 0,
-                            "responsiveTopologies": 2,
-                            "specialLayoutAlgorithms": 0,
+                        "layoutEnvelope": {
+                            "minWidth": 280,
+                            "preferredWidth": 560,
+                            "maxWidth": 760,
+                        },
+                        "responsibilities": {
+                            "visualRoles": [],
+                            "controls": ["attachments", "onAttach"],
+                            "mutations": [],
+                            "states": [],
                         },
                         "inputs": ["attachments"],
                         "events": ["onAttach"],
-                        "requiredStates": ["empty", "editing"],
                         "allowedPrimitives": ["IconButton", "InlineAlert"],
                         "visibleActionBudget": 1,
                     },
@@ -154,124 +190,270 @@ def test_complexity_formula_and_budget_violations() -> None:
     assert budget_violations(signals, LeafBudget(max_complexity=40)) == ["complexity"]
 
 
-def test_recursive_planner_uses_split_hints_for_oversized_leaf() -> None:
-    plan = RecursiveUIPlanner().plan(_inbox_tree(), run_id="inbox-demo")
+def test_valid_tree_generates_page_frame_and_leaf_contracts() -> None:
+    plan = RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="inbox-demo")
     contract_by_id = {contract.id: contract for contract in plan.contracts()}
 
-    assert plan.to_dict()["summary"] == {
-        "leafCount": 4,
-        "contractCount": 4,
-        "overBudgetLeafCount": 0,
-    }
+    assert plan.is_executable()
+    assert plan.to_dict()["summary"]["overBudgetLeafCount"] == 0
     assert set(contract_by_id) == {
+        "inbox-page-frame",
         "inbox-toolbar",
         "reply-composer-draft-input",
         "reply-composer-send-controls",
         "reply-composer-attachment-tray",
     }
-    send_contract = contract_by_id["reply-composer-send-controls"]
-    assert send_contract.candidate_count == 2
-    assert send_contract.visible_action_budget == 3
-    assert send_contract.layout_envelope.preferred_width == 560
-    assert not plan.over_budget_leaves()
+    frame = contract_by_id["inbox-page-frame"]
+    assert frame.implementation_mode == "component-with-slots"
+    assert [slot.id for slot in frame.slots] == ["toolbar", "reply-composer"]
+    assert contract_by_id["reply-composer-send-controls"].candidate_count == 2
 
 
-def test_recursive_planner_heuristically_splits_budget_overflow() -> None:
-    page = {
-        "id": "dense-board",
-        "purpose": "Coordinate many work items in one operational page.",
-        "importance": "primaryRegion",
-        "complexity": {
-            "uniqueVisualRoles": 34,
-            "interactiveControls": 11,
-            "meaningfulStates": 10,
-            "asyncMutations": 3,
-            "responsiveTopologies": 4,
-            "specialLayoutAlgorithms": 2,
-        },
-        "inputs": ["query", "filters", "selection"],
-        "events": ["onFilter", "onSelect", "onBulkApply"],
-        "requiredStates": ["empty", "loading", "loaded", "error", "saving"],
-        "allowedPrimitives": ["Button", "Select", "Table", "InlineAlert"],
-    }
-
-    plan = RecursiveUIPlanner().plan(page, run_id="dense-board")
-    leaf_ids = {leaf.node.id for leaf in plan.root.leaves()}
-
-    assert len(leaf_ids) >= 4
-    assert "dense-board-interaction-region" in leaf_ids
-    assert not plan.over_budget_leaves()
-
-
-def test_artifact_store_writes_constitution_blueprint_contracts_and_report(tmp_path: Path) -> None:
-    plan = RecursiveUIPlanner().plan(_inbox_tree(), run_id="inbox-artifacts")
-    store = UICompilerArtifactStore(tmp_path / ".rumi" / "ui")
-
-    artifacts = store.save_plan(plan)
-
-    assert Path(artifacts["constitution"]).is_file()
-    assert Path(artifacts["blueprint"]).is_file()
-    assert Path(artifacts["report"]).is_file()
-    assert len(artifacts["contracts"]) == 4
-    report = json.loads(Path(artifacts["report"]).read_text(encoding="utf-8"))
-    assert report["summary"]["overBudgetLeafCount"] == 0
-
-    with pytest.raises(ValueError):
-        store.save_candidate_manifest(node_id="../reply-composer", candidate_id="a", manifest={})
-
-
-def test_compile_plan_does_not_trust_client_supplied_approved_for_persistence(tmp_path: Path) -> None:
-    denied = compile_ui_plan(
+def test_explicit_children_cannot_hide_parent_complexity() -> None:
+    result = compile_ui_plan(
         {
-            "ui_tree": _inbox_tree(),
-            "run_id": "client-approved",
-            "persist": True,
-            "approved": True,
-            "artifact_root": str(tmp_path),
-        },
-        {},
+            "ui_tree": {
+                "id": "inbox",
+                "complexity": {"interactiveControls": 100, "asyncMutations": 20},
+                "events": ["onReply", "onAssign", "onResolve"],
+                "children": [{"id": "empty-child"}],
+            }
+        }
     )
 
-    assert denied["status"] == "error"
-    assert denied["error"]["code"] == "APPROVAL_REQUIRED"
-    assert not (tmp_path / ".rumi" / "ui" / "blueprints" / "client-approved.json").exists()
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PLAN_NOT_EXECUTABLE"
+    codes = {item["code"] for item in result["data"]["diagnostics"]}
+    assert "REQUIRES_RESPONSIBILITY_IDS" in codes
 
-    allowed = compile_ui_plan(
-        {
-            "ui_tree": _inbox_tree(),
-            "run_id": "approved-context",
-            "persist": True,
-            "artifact_root": str(tmp_path),
-        },
-        {"profile_policy": {"yolo_mode": True}},
+
+def test_split_hints_must_cover_parent_responsibilities() -> None:
+    tree = _valid_inbox_tree()
+    composer = tree["children"][1]
+    composer["splitHints"][1]["responsibilities"]["controls"].remove("onRetry")
+    composer["splitHints"][1]["events"].remove("onRetry")
+
+    result = compile_ui_plan({"ui_tree": tree})
+
+    assert result["status"] == "error"
+    diagnostics = result["data"]["diagnostics"]
+    assert any(
+        item["code"] == "RESPONSIBILITY_COVERAGE_MISSING"
+        and item["details"]["responsibilityId"] == "onRetry"
+        for item in diagnostics
     )
 
-    assert allowed["status"] == "ok"
-    assert (tmp_path / ".rumi" / "ui" / "blueprints" / "approved-context.json").is_file()
+
+def test_input_event_and_mutation_state_ownership_must_stay_together() -> None:
+    tree = _valid_inbox_tree()
+    composer = tree["children"][1]
+    composer["splitHints"][0]["responsibilities"]["controls"].remove("onDraftChange")
+    composer["splitHints"][1]["responsibilities"]["controls"].append("onDraftChange")
+
+    result = compile_ui_plan({"ui_tree": tree})
+
+    assert result["status"] == "error"
+    diagnostics = result["data"]["diagnostics"]
+    assert any(item["code"] == "OWNERSHIP_BOUNDARY_SPLIT" for item in diagnostics)
 
 
-def test_ui_compile_plan_tool_is_registered_and_executes_with_approval_context(tmp_path: Path) -> None:
+def test_budget_overflow_without_semantic_split_is_not_executable() -> None:
+    result = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "dense-board",
+                "purpose": "Coordinate many work items in one operational page.",
+                "importance": "primaryRegion",
+                "responsibilities": {
+                    "visualRoles": ["board", "toolbar", "wip", "details"],
+                    "controls": [
+                        "query",
+                        "onQueryChange",
+                        "filter",
+                        "onFilter",
+                        "select",
+                        "onSelect",
+                        "bulk-action",
+                        "onBulkApply",
+                    ],
+                    "mutations": ["bulk-apply", "status-update"],
+                    "states": ["empty", "loading", "loaded", "error", "saving"],
+                },
+                "inputs": ["query", "filter", "select"],
+                "events": ["onQueryChange", "onFilter", "onSelect", "onBulkApply"],
+            }
+        }
+    )
+
+    assert result["status"] == "error"
+    diagnostics = result["data"]["diagnostics"]
+    assert diagnostics[0]["code"] == "REQUIRES_SEMANTIC_DECOMPOSITION"
+    assert result["data"]["partialPlan"]["summary"]["contractCount"] == 0
+
+
+def test_duplicate_and_unsafe_ids_are_rejected() -> None:
+    duplicate = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "root",
+                "children": [{"id": "toolbar"}, {"id": "toolbar"}],
+            }
+        }
+    )
+    unsafe = compile_ui_plan({"ui_tree": {"id": "a b"}})
+
+    assert duplicate["status"] == "error"
+    assert any(item["code"] == "INVALID_NODE_ID" for item in duplicate["data"]["diagnostics"])
+    assert unsafe["status"] == "error"
+    assert unsafe["error"]["code"] == "PLAN_NOT_EXECUTABLE"
+
+
+def test_config_guardrails_and_resource_limits_are_fail_closed() -> None:
+    too_small_budget = compile_ui_plan(
+        {"ui_tree": {"id": "empty"}, "config": {"leafBudget": {"maxComplexity": 0.1}}}
+    )
+    guardrail_override = compile_ui_plan(
+        {"ui_tree": {"id": "empty"}, "config": {"generation": {"rootMayWriteUi": True}}}
+    )
+    partial = compile_ui_plan({"ui_tree": {"id": "empty"}, "config": {"viewports": [390]}})
+
+    assert too_small_budget["status"] == "error"
+    assert guardrail_override["status"] == "error"
+    assert partial["status"] == "ok"
+    generation = partial["data"]["plan"]["config"]["trustedPolicy"]["generation"]
+    assert generation["rootMayWriteUi"] is False
+    assert generation["regenerateInsteadOfPatch"] is True
+
+
+def test_depth_and_unknown_schema_keys_are_rejected() -> None:
+    tree = {"id": "node-0"}
+    current = tree
+    for index in range(1, 15):
+        child = {"id": f"node-{index}"}
+        current["children"] = [child]
+        current = child
+
+    deep = compile_ui_plan({"ui_tree": tree})
+    unknown = compile_ui_plan({"ui_tree": {"id": "empty", "surprise": True}})
+
+    assert deep["status"] == "error"
+    assert unknown["status"] == "error"
+
+
+def test_read_only_compile_rejects_persist_and_compile_tool_needs_no_approval() -> None:
     ToolRegistry._instance = None
     tool = ToolRegistry().get("tool_ui_compile_plan")
-
-    result = ToolExecutor().execute(
+    persist = compile_ui_plan({"ui_tree": _valid_inbox_tree(), "persist": True})
+    executed = ToolExecutor().execute(
         "tool_ui_compile_plan",
-        {
-            "ui_tree": _inbox_tree(),
-            "run_id": "tool-run",
-            "persist": True,
-            "artifact_root": str(tmp_path),
-        },
-        {
-            "profile_policy": {"yolo_mode": True},
-            "conversation_workspace_dir": str(tmp_path),
-            "principal_id": "defaultspack",
-        },
+        {"ui_tree": _valid_inbox_tree(), "run_id": "tool-run"},
+        {"principal_id": "defaultspack", "profile_policy": {"yolo_mode": True}},
     )
 
     assert tool is not None
-    assert tool["execution"]["handler"] == "domain.ui_compiler.tool:ui_compile_plan"
-    assert result["is_error"] is False
-    assert result["widget"]["type"] == "ui_compile_plan"
-    assert result["widget"]["summary"]["contractCount"] == 4
-    assert (tmp_path / ".rumi" / "ui" / "blueprints" / "tool-run.json").is_file()
+    assert tool["requires_approval"] is False
+    assert tool["write_action"] is False
+    assert tool["execution"]["handler"] == "domain.tool.ui_compiler_tools:ui_compile_plan"
+    assert persist["status"] == "error"
+    assert persist["error"]["code"] == "PERSIST_NOT_SUPPORTED_ON_COMPILE_ENDPOINT"
+    assert executed["is_error"] is False
+    assert executed["widget"]["type"] == "ui_compile_plan"
+
+
+def test_commit_requires_internal_authorization_and_trusted_workspace(tmp_path: Path) -> None:
+    raw_approved = ui_commit_plan(
+        {"ui_tree": _valid_inbox_tree(), "run_id": "raw-approved"},
+        {"_tool_server_approved": True, "conversation_workspace_dir": str(tmp_path)},
+    )
+    raw_yolo = ui_commit_plan(
+        {"ui_tree": _valid_inbox_tree(), "run_id": "raw-yolo"},
+        {"profile_policy": {"yolo_mode": True}, "conversation_workspace_dir": str(tmp_path)},
+    )
+    no_workspace = ui_commit_plan(
+        {"ui_tree": _valid_inbox_tree(), "run_id": "no-workspace"},
+        mark_tool_server_approval_context({}),
+    )
+    allowed = ui_commit_plan(
+        {"ui_tree": _valid_inbox_tree(), "run_id": "approved-run", "artifact_root": "/tmp/nope"},
+        mark_tool_server_approval_context({"conversation_workspace_dir": str(tmp_path)}),
+    )
+
+    assert raw_approved["status"] == "error"
+    assert raw_yolo["status"] == "error"
+    assert no_workspace["error"]["code"] == "WORKSPACE_REQUIRED"
+    assert allowed["status"] == "ok"
+    assert allowed["data"]["artifacts"]["relativePath"] == ".rumi/ui/runs/approved-run"
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "approved-run" / "manifest.json").is_file()
+    assert not Path("/tmp/nope/.rumi/ui/runs/approved-run").exists()
+
+
+def test_artifact_store_is_run_scoped_and_rejects_overwrites(tmp_path: Path) -> None:
+    store = UICompilerArtifactStore(tmp_path / ".rumi" / "ui")
+    plan_a = RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="run-a")
+    plan_b = RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="run-b")
+
+    artifacts_a = store.save_plan(plan_a)
+    artifacts_b = store.save_plan(plan_b)
+
+    assert artifacts_a["relativePath"] == ".rumi/ui/runs/run-a"
+    assert artifacts_b["relativePath"] == ".rumi/ui/runs/run-b"
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "run-a" / "contracts" / "inbox-toolbar.json").is_file()
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "run-b" / "contracts" / "inbox-toolbar.json").is_file()
+    with pytest.raises(FileExistsError):
+        store.save_plan(plan_a)
+
+
+def test_invalid_plan_is_not_persisted(tmp_path: Path) -> None:
+    invalid = RecursiveUIPlanner().plan(
+        {
+            "id": "dense-board",
+            "responsibilities": {
+                "controls": ["a", "b", "c", "d", "e", "f"],
+                "states": ["loading", "error"],
+            },
+        },
+        run_id="invalid-run",
+    )
+
+    assert not invalid.is_executable()
+    with pytest.raises(ValueError):
+        UICompilerArtifactStore(tmp_path / ".rumi" / "ui").save_plan(invalid)
+    assert not (tmp_path / ".rumi" / "ui" / "runs" / "invalid-run").exists()
+
+
+def test_failed_write_leaves_no_partial_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from domain.ui_compiler import artifact_store as artifact_store_module
+
+    store = UICompilerArtifactStore(tmp_path / ".rumi" / "ui")
+    plan = RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="failed-run")
+    original = artifact_store_module._write_json
+
+    def fail_on_report(path: Path, payload: dict) -> None:
+        if path.name == "report.json":
+            raise OSError("disk full")
+        original(path, payload)
+
+    monkeypatch.setattr(artifact_store_module, "_write_json", fail_on_report)
+
+    with pytest.raises(OSError):
+        store.save_plan(plan)
+    assert not (tmp_path / ".rumi" / "ui" / "runs" / "failed-run").exists()
+
+
+def test_concurrent_runs_do_not_mix_artifacts(tmp_path: Path) -> None:
+    store = UICompilerArtifactStore(tmp_path / ".rumi" / "ui")
+
+    def save(run_id: str) -> str:
+        plan = RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id=run_id)
+        return store.save_plan(plan)["relativePath"]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        paths = sorted(pool.map(save, ["concurrent-a", "concurrent-b"]))
+
+    assert paths == [".rumi/ui/runs/concurrent-a", ".rumi/ui/runs/concurrent-b"]
+    for run_id in ("concurrent-a", "concurrent-b"):
+        manifest = json.loads(
+            (tmp_path / ".rumi" / "ui" / "runs" / run_id / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["runId"] == run_id
+        assert manifest["status"] == "valid"

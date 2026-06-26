@@ -1,28 +1,29 @@
 {
-  "id": "tool_ui_compile_plan",
-  "description": "Compile a requested page into a recursive Rumi UI tree and leaf contracts without writing artifacts.",
+  "id": "tool_ui_commit_plan",
+  "description": "Commit a valid recursive Rumi UI plan into the trusted workspace .rumi/ui run bundle.",
   "config": {
-    "tool_id": "tool_ui_compile_plan",
-    "name": "tool_ui_compile_plan",
-    "summary": "Compile recursive UI tree and contracts without writes.",
+    "tool_id": "tool_ui_commit_plan",
+    "name": "tool_ui_commit_plan",
+    "summary": "Commit a valid UI compiler plan into .rumi/ui.",
     "tool_category": "frontend",
     "action_type": "local",
-    "write_action": false,
-    "requires_approval": false,
-    "risk": "low",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "medium",
     "tags": [
       "frontend",
       "ui",
       "planner",
-      "recursive-ui-compiler"
+      "recursive-ui-compiler",
+      "artifact"
     ],
     "metadata": {
       "keywords": [
         "ui compiler",
         "recursive ui",
         "component contract",
-        "compression",
-        "frontend planning"
+        "frontend planning",
+        "artifact commit"
       ]
     },
     "ui": {
@@ -31,8 +32,8 @@
       "group_icon": "layout",
       "item_icon": "layout",
       "widget_kind": "tool_toggle",
-      "composer_label": "UI Compile Plan",
-      "composer_description": "Split a page request into bounded UI contracts.",
+      "composer_label": "UI Commit Plan",
+      "composer_description": "Write a valid UI compiler plan into the trusted workspace artifact bundle.",
       "composer_icon": "layout"
     },
     "schema": {
@@ -42,19 +43,15 @@
         "properties": {
           "ui_tree": {
             "type": "object",
-            "description": "Root UI node with optional children or splitHints."
+            "description": "Root UI node with semantic children or splitHints."
           },
           "config": {
             "type": "object",
-            "description": "Optional recursive UI compiler config and budgets."
+            "description": "Optional request plan options. Trusted compiler policy cannot be overridden."
           },
           "run_id": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
-          },
-          "persist": {
-            "type": "boolean",
-            "description": "Rejected on this read-only compile tool; use tool_ui_commit_plan for approved writes."
           }
         },
         "required": [
@@ -64,7 +61,7 @@
     },
     "execution": {
       "type": "local",
-      "handler": "domain.tool.ui_compiler_tools:ui_compile_plan"
+      "handler": "domain.tool.ui_compiler_tools:ui_commit_plan"
     }
   }
 }

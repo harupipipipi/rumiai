@@ -9,4 +9,5 @@ from domain.ui_compiler.service import compile_ui_plan  # noqa: E402
 
 
 def run(input_data, context):
-    return compile_ui_plan(input_data if isinstance(input_data, dict) else {}, context)
+    del context
+    return compile_ui_plan(input_data if isinstance(input_data, dict) else {})

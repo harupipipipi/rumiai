@@ -8,33 +8,35 @@ from .models import UICompilerConfig
 from .planner import RecursiveUIPlanner
 
 
-def compile_ui_plan(arguments: dict[str, Any] | None, context: dict[str, Any] | None = None) -> dict[str, Any]:
+def compile_ui_plan(arguments: dict[str, Any] | None) -> dict[str, Any]:
     data = arguments if isinstance(arguments, dict) else {}
-    root_payload = data.get("ui_tree") or data.get("uiTree") or data.get("root") or data.get("page")
+    if _truthy(data.get("persist")):
+        return _error(
+            "persist is not supported by the read-only compile endpoint",
+            "PERSIST_NOT_SUPPORTED_ON_COMPILE_ENDPOINT",
+        )
+    root_payload = _root_payload(data)
     if not isinstance(root_payload, dict):
-        return _error("ui_tree dict is required", "INVALID_UI_TREE")
+        return _error("ui_tree object is required", "INVALID_UI_TREE")
 
     try:
         config = UICompilerConfig.from_dict(data.get("config") or {})
         run_id = str(data.get("run_id") or data.get("runId") or "").strip() or None
         plan = RecursiveUIPlanner(config).plan(root_payload, run_id=run_id)
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, ValueError) as exc:
         return _error(str(exc), "INVALID_UI_PLAN")
 
-    payload: dict[str, Any] = {"plan": plan.to_dict()}
-    if _truthy(data.get("persist")):
-        if not _persistence_allowed(context):
-            return _error(
-                "persist requires an internal tool approval context",
-                "APPROVAL_REQUIRED",
-                data={"approval_required": True},
-            )
-        try:
-            store_root = _store_root_from_arguments(data, context)
-            payload["artifacts"] = UICompilerArtifactStore(store_root).save_plan(plan)
-        except (OSError, ValueError) as exc:
-            return _error(str(exc), "ARTIFACT_WRITE_FAILED")
+    if not plan.is_executable():
+        return _error(
+            "UI plan is not executable",
+            "PLAN_NOT_EXECUTABLE",
+            data={
+                "diagnostics": [item.to_dict() for item in plan.diagnostics],
+                "partialPlan": plan.to_dict(),
+            },
+        )
 
+    payload: dict[str, Any] = {"plan": plan.to_dict()}
     return {
         "status": "ok",
         "data": payload,
@@ -42,30 +44,66 @@ def compile_ui_plan(arguments: dict[str, Any] | None, context: dict[str, Any] | 
             "type": "ui_compile_plan",
             "run_id": plan.run_id,
             "summary": payload["plan"]["summary"],
-            "artifacts": payload.get("artifacts"),
         },
     }
 
 
-def _store_root_from_arguments(data: dict[str, Any], context: dict[str, Any] | None) -> Path:
-    raw_root = data.get("artifact_root") or data.get("artifactRoot")
-    if not raw_root and isinstance(context, dict):
-        raw_root = context.get("conversation_workspace_dir") or context.get("workspace_dir")
-    base = Path(str(raw_root)).expanduser() if raw_root else Path.cwd()
-    if base.name == "ui" and base.parent.name == ".rumi":
-        return base
-    return base / ".rumi" / "ui"
+def commit_ui_plan(
+    arguments: dict[str, Any] | None,
+    *,
+    workspace_root: str | Path | None,
+    authorized: bool,
+) -> dict[str, Any]:
+    if not authorized:
+        return _error(
+            "commit requires a verified internal tool approval context",
+            "APPROVAL_REQUIRED",
+            data={"approval_required": True},
+        )
+    if workspace_root is None:
+        return _error("trusted workspace is required", "WORKSPACE_REQUIRED")
+    data = arguments if isinstance(arguments, dict) else {}
+    root_payload = _root_payload(data)
+    if not isinstance(root_payload, dict):
+        return _error("ui_tree object is required", "INVALID_UI_TREE")
+
+    try:
+        config = UICompilerConfig.from_dict(data.get("config") or {})
+        run_id = str(data.get("run_id") or data.get("runId") or "").strip() or None
+        plan = RecursiveUIPlanner(config).plan(root_payload, run_id=run_id)
+    except (RecursionError, TypeError, ValueError) as exc:
+        return _error(str(exc), "INVALID_UI_PLAN")
+
+    if not plan.is_executable():
+        return _error(
+            "invalid UI plan cannot be committed",
+            "PLAN_NOT_EXECUTABLE",
+            data={
+                "diagnostics": [item.to_dict() for item in plan.diagnostics],
+                "partialPlan": plan.to_dict(),
+            },
+        )
+
+    try:
+        workspace = Path(workspace_root).expanduser().resolve()
+        artifacts = UICompilerArtifactStore(workspace / ".rumi" / "ui").save_plan(plan)
+    except (OSError, ValueError) as exc:
+        return _error(str(exc), "ARTIFACT_WRITE_FAILED")
+
+    return {
+        "status": "ok",
+        "data": {"plan": plan.to_dict(), "artifacts": artifacts},
+        "widget": {
+            "type": "ui_commit_plan",
+            "run_id": plan.run_id,
+            "summary": plan.to_dict()["summary"],
+            "artifacts": artifacts,
+        },
+    }
 
 
-def _persistence_allowed(context: dict[str, Any] | None) -> bool:
-    if not isinstance(context, dict):
-        return False
-    if context.get("_tool_server_approved") is True:
-        return True
-    profile_policy = context.get("profile_policy")
-    if isinstance(profile_policy, dict) and profile_policy.get("yolo_mode") is True:
-        return True
-    return False
+def _root_payload(data: dict[str, Any]) -> Any:
+    return data.get("ui_tree") or data.get("uiTree") or data.get("root") or data.get("page")
 
 
 def _truthy(value: Any) -> bool:

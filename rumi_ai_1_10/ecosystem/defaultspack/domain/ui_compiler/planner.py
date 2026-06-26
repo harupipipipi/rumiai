@@ -1,32 +1,17 @@
 from __future__ import annotations
 
-import math
 import uuid
 from typing import Any
 
 from .complexity import budget_violations, calculate_complexity
 from .models import (
     ComponentContract,
-    ComplexitySignals,
-    LeafBudget,
     PlannedNode,
     PlanningDiagnostic,
     UICompilerConfig,
     UINode,
     UIPlan,
 )
-
-
-_HEURISTIC_SPLIT_LABELS = [
-    ("overview", "overview and primary reading path"),
-    ("primary-workspace", "primary work area"),
-    ("interaction-region", "bounded interactive controls"),
-    ("state-feedback", "state and recovery feedback"),
-    ("responsive-adapter", "responsive layout adaptation"),
-    ("supporting-context", "supporting context"),
-    ("overflow-region", "overflow and long-content handling"),
-    ("confirmation-flow", "confirmation and completion flow"),
-]
 
 
 class RecursiveUIPlanner:
@@ -40,20 +25,74 @@ class RecursiveUIPlanner:
 
     def plan(self, root: UINode | dict[str, Any], *, run_id: str | None = None) -> UIPlan:
         self._diagnostics = []
-        node = root if isinstance(root, UINode) else UINode.from_dict(root)
+        try:
+            node = (
+                root
+                if isinstance(root, UINode)
+                else UINode.from_dict(root, limits=self.config.resource_limits)
+            )
+        except ValueError as exc:
+            diagnostics = [
+                PlanningDiagnostic(
+                    code="INVALID_UI_TREE",
+                    message=str(exc),
+                    node_id="",
+                    severity="error",
+                )
+            ]
+            empty = UINode.from_dict({"id": "invalid-plan"}, limits=self.config.resource_limits)
+            return UIPlan(
+                run_id=run_id or f"ui-{uuid.uuid4().hex[:12]}",
+                root=PlannedNode(node=empty, complexity_score=0.0),
+                config=self.config,
+                diagnostics=diagnostics,
+            )
+
+        self._validate_unique_ids(node)
         planned_root = self._plan_node(node, depth=0)
-        return UIPlan(
-            run_id=run_id or f"ui_{uuid.uuid4().hex[:12]}",
+        plan = UIPlan(
+            run_id=run_id or f"ui-{uuid.uuid4().hex[:12]}",
             root=planned_root,
             config=self.config,
             diagnostics=list(self._diagnostics),
         )
+        if len(plan.root.planned_nodes()) > self.config.resource_limits.max_generated_nodes:
+            self._diagnostics.append(
+                PlanningDiagnostic(
+                    code="PLAN_NODE_LIMIT_EXCEEDED",
+                    message="Plan exceeds max generated nodes.",
+                    node_id=node.id,
+                    severity="error",
+                    details={"maxGeneratedNodes": self.config.resource_limits.max_generated_nodes},
+                )
+            )
+            plan = UIPlan(
+                run_id=plan.run_id,
+                root=planned_root,
+                config=self.config,
+                diagnostics=list(self._diagnostics),
+                created_at=plan.created_at,
+            )
+        return plan
 
     def _plan_node(self, node: UINode, *, depth: int) -> PlannedNode:
         score = calculate_complexity(node)
         violations = budget_violations(node, self.config.leaf_budget)
 
+        if depth > self.config.resource_limits.max_plan_depth:
+            self._diagnostics.append(
+                PlanningDiagnostic(
+                    code="PLAN_DEPTH_LIMIT_EXCEEDED",
+                    message="Plan exceeds max plan depth.",
+                    node_id=node.id,
+                    severity="error",
+                    details={"maxPlanDepth": self.config.resource_limits.max_plan_depth},
+                )
+            )
+            return PlannedNode(node=node, complexity_score=score, budget_violations=violations)
+
         if node.children:
+            self._validate_parent_decomposition(node, node.children, split_kind="children")
             children = [self._plan_node(child, depth=depth + 1) for child in node.children]
             return PlannedNode(
                 node=node,
@@ -61,27 +100,44 @@ class RecursiveUIPlanner:
                 budget_violations=[],
                 split_reason="explicit-children",
                 children=children,
-                contract=None,
+                contract=self._contract_for_node(node, score)
+                if self._node_has_contract(node, has_children=True)
+                else None,
             )
 
-        if not violations:
-            return PlannedNode(
-                node=node,
-                complexity_score=score,
-                budget_violations=[],
-                children=[],
-                contract=self._contract_for_leaf(node, score),
-            )
-
-        split_children = self._split_node(node, violations=violations, depth=depth)
-        if not split_children:
+        if violations:
+            if node.split_hints:
+                self._validate_parent_decomposition(node, node.split_hints, split_kind="splitHints")
+                children = [self._plan_node(child, depth=depth + 1) for child in node.split_hints]
+                return PlannedNode(
+                    node=node,
+                    complexity_score=score,
+                    budget_violations=[],
+                    split_reason="semantic-split-hints",
+                    children=children,
+                    contract=self._contract_for_node(node, score)
+                    if self._node_has_contract(node, has_children=True)
+                    else None,
+                )
             self._diagnostics.append(
                 PlanningDiagnostic(
-                    code="oversized_leaf_without_split",
-                    message="Leaf exceeds the recursive UI compiler budget and could not be split.",
+                    code="REQUIRES_SEMANTIC_DECOMPOSITION",
+                    message=(
+                        "Leaf exceeds the recursive UI compiler budget and requires an explicit "
+                        "semantic split; heuristic executable splits are disabled."
+                    ),
                     node_id=node.id,
                     severity="error",
-                    details={"violations": violations, "complexityScore": score},
+                    details={
+                        "violations": violations,
+                        "complexityScore": score,
+                        "suggestedRegions": [
+                            "primary-workspace",
+                            "interaction-region",
+                            "state-feedback",
+                        ],
+                        "executable": False,
+                    },
                 )
             )
             return PlannedNode(
@@ -89,141 +145,237 @@ class RecursiveUIPlanner:
                 complexity_score=score,
                 budget_violations=violations,
                 children=[],
-                contract=self._contract_for_leaf(node, score),
+                contract=None,
             )
 
-        for child in split_children:
-            self._maybe_warn_about_tiny_split(node, child)
-
-        planned_children = [self._plan_node(child, depth=depth + 1) for child in split_children]
         return PlannedNode(
-            node=node.with_children(split_children),
+            node=node,
             complexity_score=score,
             budget_violations=[],
-            split_reason="budget:" + ",".join(violations),
-            children=planned_children,
-            contract=None,
+            children=[],
+            contract=self._contract_for_node(node, score)
+            if self._node_has_contract(node, has_children=False)
+            else None,
         )
 
-    def _contract_for_leaf(self, node: UINode, score: float) -> ComponentContract:
+    def _contract_for_node(self, node: UINode, score: float) -> ComponentContract:
         return ComponentContract.from_node(
             node,
             complexity_score=score,
             candidate_count=self.config.candidates.for_importance(node.importance),
         )
 
-    def _split_node(self, node: UINode, *, violations: list[str], depth: int) -> list[UINode]:
-        del violations
-        if depth > 8:
-            return []
-        if node.split_hints:
-            return list(node.split_hints)
-        return self._heuristic_split(node)
+    @staticmethod
+    def _node_has_contract(node: UINode, *, has_children: bool) -> bool:
+        if has_children:
+            return node.implementation_mode == "component-with-slots"
+        return node.implementation_mode in {"component", "component-with-slots", "repeated-component"}
 
-    def _heuristic_split(self, node: UINode) -> list[UINode]:
-        budget = self.config.leaf_budget
-        signals = node.complexity
-        count = self._required_split_count(signals, budget)
-        if count < 2:
-            return []
+    def _validate_unique_ids(self, node: UINode) -> None:
+        seen: dict[str, str] = {}
 
-        role_parts = _distribute(signals.unique_visual_roles, count)
-        control_parts = _distribute(signals.interactive_controls, count)
-        state_parts = _distribute(signals.meaningful_states, count)
-        mutation_parts = _distribute(signals.async_mutations, count)
-        topology_parts = _distribute(signals.responsive_topologies, count, minimum=1)
-        layout_parts = _distribute(signals.special_layout_algorithms, count)
-        inputs_parts = _chunk_list(node.inputs, count)
-        events_parts = _chunk_list(node.events, count)
-        state_name_parts = _chunk_list(node.required_states, count)
-
-        children: list[UINode] = []
-        for index in range(count):
-            label, purpose_suffix = _HEURISTIC_SPLIT_LABELS[index % len(_HEURISTIC_SPLIT_LABELS)]
-            child_id = f"{node.id}-{label}"
-            child_purpose = node.purpose
-            if child_purpose:
-                child_purpose = f"{child_purpose}: {purpose_suffix}"
-            else:
-                child_purpose = purpose_suffix
-            child_metadata = dict(node.metadata)
-            child_metadata["generatedBy"] = "recursive-ui-planner"
-            child_metadata["parentNodeId"] = node.id
-            children.append(
-                UINode(
-                    id=child_id,
-                    purpose=child_purpose,
-                    density=node.density,
-                    primary_perceptual_task=node.primary_perceptual_task or node.purpose,
-                    importance=node.importance,
-                    complexity=ComplexitySignals(
-                        unique_visual_roles=role_parts[index],
-                        interactive_controls=control_parts[index],
-                        meaningful_states=state_parts[index],
-                        async_mutations=mutation_parts[index],
-                        responsive_topologies=topology_parts[index],
-                        special_layout_algorithms=layout_parts[index],
-                    ),
-                    layout_envelope=node.layout_envelope,
-                    inputs=inputs_parts[index],
-                    events=events_parts[index],
-                    required_states=state_name_parts[index],
-                    allowed_primitives=list(node.allowed_primitives),
-                    visible_action_budget=max(1, min(node.visible_action_budget, budget.max_interactive_controls)),
-                    children=[],
-                    split_hints=[],
-                    metadata=child_metadata,
+        def visit(current: UINode) -> None:
+            folded = current.id.casefold()
+            previous = seen.get(folded)
+            if previous is not None:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="INVALID_NODE_ID",
+                        message="UI node IDs must be globally unique, including case-folded IDs.",
+                        node_id=current.id,
+                        severity="error",
+                        details={"firstNodeId": previous, "duplicateNodeId": current.id},
+                    )
                 )
-            )
-        return children
+            else:
+                seen[folded] = current.id
+            for child in [*current.children, *current.split_hints]:
+                visit(child)
 
-    def _required_split_count(self, signals: ComplexitySignals, budget: LeafBudget) -> int:
-        score = calculate_complexity(signals)
-        counts = [
-            math.ceil(score / budget.max_complexity) if budget.max_complexity else 1,
-            math.ceil(signals.unique_visual_roles / budget.max_visual_roles),
-            math.ceil(signals.interactive_controls / budget.max_interactive_controls),
-            math.ceil(signals.async_mutations / budget.max_mutations),
-            math.ceil(signals.responsive_topologies / budget.max_responsive_topologies),
-            math.ceil(signals.special_layout_algorithms / budget.max_special_layout_algorithms),
-        ]
-        required = max(2, *(count for count in counts if count > 0))
-        return min(required, 12)
+        visit(node)
 
-    def _maybe_warn_about_tiny_split(self, parent: UINode, child: UINode) -> None:
-        child_score = calculate_complexity(child)
-        if (
-            child.complexity.unique_visual_roles < self.config.leaf_budget.min_visual_roles
-            and child.complexity.interactive_controls == 0
-            and child_score < 8
-        ):
+    def _validate_parent_decomposition(
+        self,
+        parent: UINode,
+        children: list[UINode],
+        *,
+        split_kind: str,
+    ) -> None:
+        if _has_unidentified_parent_complexity(parent):
             self._diagnostics.append(
                 PlanningDiagnostic(
-                    code="tiny_split_leaf",
-                    message="Split leaf may be too small for a useful component cluster.",
-                    node_id=child.id,
-                    severity="warning",
-                    details={"parentNodeId": parent.id, "complexityScore": child_score},
+                    code="REQUIRES_RESPONSIBILITY_IDS",
+                    message="Parent node has responsibilities or complexity that must be named before splitting.",
+                    node_id=parent.id,
+                    severity="error",
+                    details={"splitKind": split_kind},
                 )
             )
+            return
+
+        missing_evidence = _missing_complexity_evidence(parent)
+        if missing_evidence:
+            self._diagnostics.append(
+                PlanningDiagnostic(
+                    code="REQUIRES_RESPONSIBILITY_IDS",
+                    message="Parent complexity must be backed by named responsibility IDs before splitting.",
+                    node_id=parent.id,
+                    severity="error",
+                    details={"splitKind": split_kind, "missingEvidence": missing_evidence},
+                )
+            )
+            return
+
+        if not parent.responsibilities.has_any():
+            return
+
+        parent_categories = parent.responsibilities.categories()
+        child_index = _child_responsibility_index(children)
+        for category, ids in parent_categories.items():
+            shared = set(parent.responsibilities.shared)
+            for responsibility_id in ids:
+                owners = child_index.get((category, responsibility_id), [])
+                if not owners:
+                    self._diagnostics.append(
+                        PlanningDiagnostic(
+                            code="RESPONSIBILITY_COVERAGE_MISSING",
+                            message="Split drops a parent responsibility.",
+                            node_id=parent.id,
+                            severity="error",
+                            details={
+                                "splitKind": split_kind,
+                                "category": category,
+                                "responsibilityId": responsibility_id,
+                            },
+                        )
+                    )
+                elif len(owners) > 1 and responsibility_id not in shared:
+                    self._diagnostics.append(
+                        PlanningDiagnostic(
+                            code="RESPONSIBILITY_COVERAGE_DUPLICATE",
+                            message="Split assigns a parent responsibility to multiple children without shared ownership.",
+                            node_id=parent.id,
+                            severity="error",
+                            details={
+                                "splitKind": split_kind,
+                                "category": category,
+                                "responsibilityId": responsibility_id,
+                                "owners": owners,
+                            },
+                        )
+                    )
+
+        self._validate_ownership_groups(parent, children, child_index)
+        self._validate_input_event_pairs(parent, child_index)
+
+    def _validate_ownership_groups(
+        self,
+        parent: UINode,
+        children: list[UINode],
+        child_index: dict[tuple[str, str], list[str]],
+    ) -> None:
+        del children
+        for group in parent.ownership:
+            owners: set[str] = set()
+            for control_id in group.controls:
+                owners.update(child_index.get(("controls", control_id), []))
+            for mutation_id in group.mutations:
+                owners.update(child_index.get(("mutations", mutation_id), []))
+            for state_id in group.states:
+                owners.update(child_index.get(("states", state_id), []))
+            if len(owners) > 1:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="OWNERSHIP_BOUNDARY_SPLIT",
+                        message="Input/event, mutation, and state ownership must stay in one child boundary.",
+                        node_id=parent.id,
+                        severity="error",
+                        details={"ownershipGroupId": group.id, "owners": sorted(owners)},
+                    )
+                )
+
+    def _validate_input_event_pairs(
+        self,
+        parent: UINode,
+        child_index: dict[tuple[str, str], list[str]],
+    ) -> None:
+        for input_id in parent.inputs:
+            input_key = _semantic_key(input_id)
+            for event_id in parent.events:
+                if input_key != _semantic_key(event_id):
+                    continue
+                input_owners = set(child_index.get(("controls", input_id), []))
+                event_owners = set(child_index.get(("controls", event_id), []))
+                if input_owners and event_owners and input_owners != event_owners:
+                    self._diagnostics.append(
+                        PlanningDiagnostic(
+                            code="OWNERSHIP_BOUNDARY_SPLIT",
+                            message="Input and corresponding event must be owned by the same child.",
+                            node_id=parent.id,
+                            severity="error",
+                            details={
+                                "inputId": input_id,
+                                "eventId": event_id,
+                                "inputOwners": sorted(input_owners),
+                                "eventOwners": sorted(event_owners),
+                            },
+                        )
+                    )
 
 
-def _distribute(total: int, count: int, *, minimum: int = 0) -> list[int]:
-    if count <= 0:
-        return []
-    if total <= 0:
-        return [minimum for _ in range(count)]
-    base, remainder = divmod(total, count)
-    result = [base + (1 if index < remainder else 0) for index in range(count)]
-    if minimum:
-        result = [max(minimum, item) for item in result]
-    return result
+def _has_unidentified_parent_complexity(parent: UINode) -> bool:
+    if parent.responsibilities.has_any():
+        return False
+    return (
+        parent.complexity.unique_visual_roles > 0
+        or parent.complexity.interactive_controls > 0
+        or parent.complexity.meaningful_states > 0
+        or parent.complexity.async_mutations > 0
+        or parent.complexity.special_layout_algorithms > 0
+    )
 
 
-def _chunk_list(items: list[str], count: int) -> list[list[str]]:
-    if count <= 0:
-        return []
-    chunks: list[list[str]] = [[] for _ in range(count)]
-    for index, item in enumerate(items):
-        chunks[index % count].append(item)
-    return chunks
+def _missing_complexity_evidence(parent: UINode) -> dict[str, dict[str, int]]:
+    checks = {
+        "visualRoles": (
+            parent.complexity.unique_visual_roles,
+            len(parent.responsibilities.visual_roles),
+        ),
+        "controls": (
+            parent.complexity.interactive_controls,
+            len(parent.responsibilities.controls),
+        ),
+        "mutations": (
+            parent.complexity.async_mutations,
+            len(parent.responsibilities.mutations),
+        ),
+        "states": (
+            parent.complexity.meaningful_states,
+            len(parent.responsibilities.states),
+        ),
+    }
+    missing: dict[str, dict[str, int]] = {}
+    for key, (claimed, evidenced) in checks.items():
+        if claimed > evidenced:
+            missing[key] = {"claimed": claimed, "evidenced": evidenced}
+    return missing
+
+
+def _child_responsibility_index(children: list[UINode]) -> dict[tuple[str, str], list[str]]:
+    index: dict[tuple[str, str], list[str]] = {}
+    for child in children:
+        categories = child.responsibilities.categories()
+        for category, ids in categories.items():
+            for responsibility_id in ids:
+                index.setdefault((category, responsibility_id), []).append(child.id)
+    return index
+
+
+def _semantic_key(value: str) -> str:
+    lowered = str(value or "").strip().lower()
+    if lowered.startswith("on") and len(lowered) > 2:
+        lowered = lowered[2:]
+    for suffix in ("change", "changed", "select", "selected"):
+        if lowered.endswith(suffix) and len(lowered) > len(suffix):
+            lowered = lowered[: -len(suffix)]
+    return lowered.strip("-_s")

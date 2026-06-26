@@ -1,13 +1,39 @@
 from __future__ import annotations
 
+import math
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
 
+SCHEMA_VERSION = 1
+COMPILER_VERSION = "recursive-ui-compiler-pr1.2"
 DEFAULT_VIEWPORTS = [390, 768, 1024, 1440]
 DEFAULT_TEXT_SCALES = [1, 1.25, 2]
 DEFAULT_SCENARIOS = ["default", "long", "empty", "loading", "error"]
+NODE_ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+IMPLEMENTATION_MODES = {
+    "group-only",
+    "component",
+    "component-with-slots",
+    "repeated-component",
+    "composition-only",
+}
+DENSITIES = {"comfortable", "compact", "dataDense", "data-dense"}
+HEIGHT_BEHAVIORS = {"content", "fixed", "fill", "scroll"}
+MOBILE_BEHAVIORS = {"stack", "sticky-bottom", "route", "sheet", "drawer", "hide"}
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def canonical_id(value: str) -> str:
+    raw = str(value or "").strip()
+    if not NODE_ID_RE.fullmatch(raw):
+        raise ValueError(f"invalid node id: {raw!r}")
+    return raw
 
 
 def _camel_or_snake(data: dict[str, Any], snake: str, camel: str, default: Any = None) -> Any:
@@ -18,62 +44,156 @@ def _camel_or_snake(data: dict[str, Any], snake: str, camel: str, default: Any =
     return default
 
 
-def _string_list(value: Any) -> list[str]:
+def _limited_string(value: Any, *, field_name: str, max_length: int) -> str:
+    raw = str(value or "").strip()
+    if len(raw) > max_length:
+        raise ValueError(f"{field_name} exceeds {max_length} characters")
+    return raw
+
+
+def _string_list(value: Any, *, field_name: str, max_items: int, max_length: int) -> list[str]:
     if value is None:
         return []
-    if isinstance(value, str):
-        stripped = value.strip()
-        return [stripped] if stripped else []
     if not isinstance(value, list):
-        return []
+        raise ValueError(f"{field_name} must be a list")
+    if len(value) > max_items:
+        raise ValueError(f"{field_name} exceeds {max_items} items")
     result: list[str] = []
+    seen: set[str] = set()
     for item in value:
-        stripped = str(item or "").strip()
-        if stripped:
-            result.append(stripped)
+        if isinstance(item, dict):
+            item = item.get("id")
+        raw = _limited_string(item, field_name=field_name, max_length=max_length)
+        if not raw:
+            raise ValueError(f"{field_name} contains an empty item")
+        if raw.lower() in seen:
+            raise ValueError(f"{field_name} contains duplicate item: {raw}")
+        seen.add(raw.lower())
+        result.append(raw)
     return result
 
 
-def _non_negative_int(value: Any, default: int = 0) -> int:
+def _non_negative_int(value: Any, *, field_name: str, default: int = 0, max_value: int = 1000) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer")
     try:
         parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    return max(0, parsed)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+    if parsed < 0 or parsed > max_value:
+        raise ValueError(f"{field_name} must be between 0 and {max_value}")
+    return parsed
 
 
-def _positive_int(value: Any, default: int) -> int:
-    parsed = _non_negative_int(value, default)
-    return parsed if parsed > 0 else default
+def _positive_int(value: Any, *, field_name: str, default: int, min_value: int = 1, max_value: int = 1000) -> int:
+    parsed = _non_negative_int(value, field_name=field_name, default=default, max_value=max_value)
+    if parsed < min_value:
+        raise ValueError(f"{field_name} must be at least {min_value}")
+    return parsed
 
 
-def _float_list(value: Any, default: list[float]) -> list[float]:
-    if not isinstance(value, list):
+def _finite_float(
+    value: Any,
+    *,
+    field_name: str,
+    default: float,
+    min_value: float,
+    max_value: float,
+) -> float:
+    if value is None:
+        return default
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be a number") from exc
+    if not math.isfinite(parsed) or parsed < min_value or parsed > max_value:
+        raise ValueError(f"{field_name} must be between {min_value} and {max_value}")
+    return parsed
+
+
+def _int_list(value: Any, *, field_name: str, default: list[int], max_items: int) -> list[int]:
+    if value is None:
         return list(default)
-    result: list[float] = []
-    for item in value:
-        try:
-            parsed = float(item)
-        except (TypeError, ValueError):
-            continue
-        if parsed > 0:
-            result.append(parsed)
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list")
+    if len(value) > max_items:
+        raise ValueError(f"{field_name} exceeds {max_items} items")
+    result = [
+        _positive_int(item, field_name=field_name, default=0, min_value=1, max_value=4096)
+        for item in value
+    ]
     return result or list(default)
 
 
-def _int_list(value: Any, default: list[int]) -> list[int]:
-    if not isinstance(value, list):
+def _float_list(value: Any, *, field_name: str, default: list[float], max_items: int) -> list[float]:
+    if value is None:
         return list(default)
-    result: list[int] = []
-    for item in value:
-        parsed = _non_negative_int(item)
-        if parsed > 0:
-            result.append(parsed)
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list")
+    if len(value) > max_items:
+        raise ValueError(f"{field_name} exceeds {max_items} items")
+    result = [
+        _finite_float(item, field_name=field_name, default=1, min_value=0.5, max_value=2)
+        for item in value
+    ]
     return result or list(default)
 
 
-def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+@dataclass(frozen=True)
+class ResourceLimits:
+    max_input_depth: int = 12
+    max_plan_depth: int = 6
+    max_input_nodes: int = 500
+    max_generated_nodes: int = 500
+    max_children_per_node: int = 8
+    max_split_fanout: int = 6
+    max_string_length: int = 240
+    max_list_length: int = 64
+    max_candidate_count: int = 4
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "maxInputDepth": self.max_input_depth,
+            "maxPlanDepth": self.max_plan_depth,
+            "maxInputNodes": self.max_input_nodes,
+            "maxGeneratedNodes": self.max_generated_nodes,
+            "maxChildrenPerNode": self.max_children_per_node,
+            "maxSplitFanout": self.max_split_fanout,
+            "maxStringLength": self.max_string_length,
+            "maxListLength": self.max_list_length,
+            "maxCandidateCount": self.max_candidate_count,
+        }
+
+
+@dataclass(frozen=True)
+class TrustedCompilerPolicy:
+    generation: dict[str, Any] = field(
+        default_factory=lambda: {
+            "mode": "recursive-zero-to-one",
+            "rootMayWriteUi": False,
+            "regenerateInsteadOfPatch": True,
+            "isolateAgents": "worktree",
+        }
+    )
+    quality: dict[str, Any] = field(
+        default_factory=lambda: {
+            "rejectUnverified": True,
+            "rejectPrimaryTruncation": True,
+            "rejectHorizontalOverflow": True,
+            "rejectArbitraryTokens": True,
+            "maxCompressionScore": 0.35,
+        }
+    )
+    resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "generation": dict(self.generation),
+            "quality": dict(self.quality),
+            "resourceLimits": self.resource_limits.to_dict(),
+        }
 
 
 @dataclass(frozen=True)
@@ -86,20 +206,51 @@ class LayoutEnvelope:
 
     @classmethod
     def from_dict(cls, value: Any) -> "LayoutEnvelope":
-        if not isinstance(value, dict):
+        if value is None:
             return cls()
-        preferred = _camel_or_snake(value, "preferred_width", "preferredWidth")
-        max_width = _camel_or_snake(value, "max_width", "maxWidth")
+        if not isinstance(value, dict):
+            raise ValueError("layoutEnvelope must be an object")
+        min_width = _non_negative_int(
+            _camel_or_snake(value, "min_width", "minWidth"),
+            field_name="layoutEnvelope.minWidth",
+            default=0,
+            max_value=10000,
+        )
+        preferred_raw = _camel_or_snake(value, "preferred_width", "preferredWidth")
+        max_raw = _camel_or_snake(value, "max_width", "maxWidth")
+        preferred = (
+            _non_negative_int(preferred_raw, field_name="layoutEnvelope.preferredWidth", max_value=10000)
+            if preferred_raw is not None
+            else None
+        )
+        max_width = (
+            _non_negative_int(max_raw, field_name="layoutEnvelope.maxWidth", max_value=10000)
+            if max_raw is not None
+            else None
+        )
+        if preferred is not None and preferred < min_width:
+            raise ValueError("layoutEnvelope preferredWidth must be >= minWidth")
+        if max_width is not None:
+            if max_width < min_width:
+                raise ValueError("layoutEnvelope maxWidth must be >= minWidth")
+            if preferred is not None and max_width < preferred:
+                raise ValueError("layoutEnvelope maxWidth must be >= preferredWidth")
+        height_behavior = str(
+            _camel_or_snake(value, "height_behavior", "heightBehavior", "content") or "content"
+        )
+        mobile_behavior = str(
+            _camel_or_snake(value, "mobile_behavior", "mobileBehavior", "stack") or "stack"
+        )
+        if height_behavior not in HEIGHT_BEHAVIORS:
+            raise ValueError(f"invalid heightBehavior: {height_behavior}")
+        if mobile_behavior not in MOBILE_BEHAVIORS:
+            raise ValueError(f"invalid mobileBehavior: {mobile_behavior}")
         return cls(
-            min_width=_non_negative_int(_camel_or_snake(value, "min_width", "minWidth"), 0),
-            preferred_width=_non_negative_int(preferred) if preferred is not None else None,
-            max_width=_non_negative_int(max_width) if max_width is not None else None,
-            height_behavior=str(
-                _camel_or_snake(value, "height_behavior", "heightBehavior", "content") or "content"
-            ),
-            mobile_behavior=str(
-                _camel_or_snake(value, "mobile_behavior", "mobileBehavior", "stack") or "stack"
-            ),
+            min_width=min_width,
+            preferred_width=preferred,
+            max_width=max_width,
+            height_behavior=height_behavior,
+            mobile_behavior=mobile_behavior,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -109,6 +260,187 @@ class LayoutEnvelope:
             "maxWidth": self.max_width,
             "heightBehavior": self.height_behavior,
             "mobileBehavior": self.mobile_behavior,
+        }
+
+
+@dataclass(frozen=True)
+class SlotDefinition:
+    id: str
+    purpose: str = ""
+    min_width: int = 0
+    preferred_width: int | None = None
+    max_width: int | None = None
+
+    @classmethod
+    def from_dict(cls, value: Any, *, limits: ResourceLimits) -> "SlotDefinition":
+        if not isinstance(value, dict):
+            raise ValueError("slot must be an object")
+        envelope = LayoutEnvelope.from_dict(value.get("layoutEnvelope") or value)
+        return cls(
+            id=canonical_id(str(value.get("id") or "")),
+            purpose=_limited_string(
+                value.get("purpose"), field_name="slot.purpose", max_length=limits.max_string_length
+            ),
+            min_width=envelope.min_width,
+            preferred_width=envelope.preferred_width,
+            max_width=envelope.max_width,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "purpose": self.purpose,
+            "minWidth": self.min_width,
+            "preferredWidth": self.preferred_width,
+            "maxWidth": self.max_width,
+        }
+
+
+@dataclass(frozen=True)
+class ResponsibilitySet:
+    visual_roles: list[str] = field(default_factory=list)
+    controls: list[str] = field(default_factory=list)
+    mutations: list[str] = field(default_factory=list)
+    states: list[str] = field(default_factory=list)
+    shared: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, value: Any, *, limits: ResourceLimits) -> "ResponsibilitySet":
+        data = value if isinstance(value, dict) else {}
+        return cls(
+            visual_roles=_responsibility_ids(
+                data.get("visualRoles") or data.get("visual_roles"),
+                field_name="responsibilities.visualRoles",
+                limits=limits,
+            ),
+            controls=_responsibility_ids(
+                data.get("controls"),
+                field_name="responsibilities.controls",
+                limits=limits,
+            ),
+            mutations=_responsibility_ids(
+                data.get("mutations"),
+                field_name="responsibilities.mutations",
+                limits=limits,
+            ),
+            states=_responsibility_ids(
+                data.get("states"),
+                field_name="responsibilities.states",
+                limits=limits,
+            ),
+            shared=_responsibility_ids(
+                data.get("shared"),
+                field_name="responsibilities.shared",
+                limits=limits,
+            ),
+        )
+
+    def merged_with_node_fields(self, *, inputs: list[str], events: list[str], states: list[str]) -> "ResponsibilitySet":
+        return ResponsibilitySet(
+            visual_roles=list(self.visual_roles),
+            controls=_unique([*self.controls, *inputs, *events]),
+            mutations=list(self.mutations),
+            states=_unique([*self.states, *states]),
+            shared=list(self.shared),
+        )
+
+    def has_any(self) -> bool:
+        return bool(self.visual_roles or self.controls or self.mutations or self.states)
+
+    def expected_complexity(self) -> "ComplexitySignals":
+        return ComplexitySignals(
+            unique_visual_roles=len(self.visual_roles),
+            interactive_controls=len(self.controls),
+            meaningful_states=len(self.states),
+            async_mutations=len(self.mutations),
+            responsive_topologies=1,
+            special_layout_algorithms=0,
+        )
+
+    def categories(self) -> dict[str, list[str]]:
+        return {
+            "visualRoles": list(self.visual_roles),
+            "controls": list(self.controls),
+            "mutations": list(self.mutations),
+            "states": list(self.states),
+        }
+
+    def all_ids(self) -> set[str]:
+        ids: set[str] = set()
+        for values in self.categories().values():
+            ids.update(values)
+        return ids
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "visualRoles": list(self.visual_roles),
+            "controls": list(self.controls),
+            "mutations": list(self.mutations),
+            "states": list(self.states),
+            "shared": list(self.shared),
+        }
+
+
+def _responsibility_ids(value: Any, *, field_name: str, limits: ResourceLimits) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{field_name} must be a list")
+    if len(value) > limits.max_list_length:
+        raise ValueError(f"{field_name} exceeds {limits.max_list_length} items")
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in value:
+        if isinstance(item, dict):
+            item = item.get("id")
+        raw = _limited_string(item, field_name=field_name, max_length=limits.max_string_length)
+        if not raw:
+            raise ValueError(f"{field_name} contains an empty id")
+        if raw.lower() in seen:
+            raise ValueError(f"{field_name} contains duplicate id: {raw}")
+        seen.add(raw.lower())
+        result.append(raw)
+    return result
+
+
+def _unique(items: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in items:
+        key = item.lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(item)
+    return result
+
+
+@dataclass(frozen=True)
+class OwnershipGroup:
+    id: str
+    controls: list[str] = field(default_factory=list)
+    mutations: list[str] = field(default_factory=list)
+    states: list[str] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, value: Any, *, limits: ResourceLimits) -> "OwnershipGroup":
+        if not isinstance(value, dict):
+            raise ValueError("ownership group must be an object")
+        return cls(
+            id=canonical_id(str(value.get("id") or "")),
+            controls=_responsibility_ids(value.get("controls"), field_name="ownership.controls", limits=limits),
+            mutations=_responsibility_ids(value.get("mutations"), field_name="ownership.mutations", limits=limits),
+            states=_responsibility_ids(value.get("states"), field_name="ownership.states", limits=limits),
+        )
+
+    def all_ids(self) -> set[str]:
+        return {*self.controls, *self.mutations, *self.states}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "controls": list(self.controls),
+            "mutations": list(self.mutations),
+            "states": list(self.states),
         }
 
 
@@ -127,25 +459,37 @@ class ComplexitySignals:
         nested = data.get("complexity") if isinstance(data.get("complexity"), dict) else data
         return cls(
             unique_visual_roles=_non_negative_int(
-                _camel_or_snake(nested, "unique_visual_roles", "uniqueVisualRoles")
+                _camel_or_snake(nested, "unique_visual_roles", "uniqueVisualRoles"),
+                field_name="complexity.uniqueVisualRoles",
             ),
             interactive_controls=_non_negative_int(
-                _camel_or_snake(nested, "interactive_controls", "interactiveControls")
+                _camel_or_snake(nested, "interactive_controls", "interactiveControls"),
+                field_name="complexity.interactiveControls",
             ),
             meaningful_states=_non_negative_int(
-                _camel_or_snake(nested, "meaningful_states", "meaningfulStates")
+                _camel_or_snake(nested, "meaningful_states", "meaningfulStates"),
+                field_name="complexity.meaningfulStates",
             ),
             async_mutations=_non_negative_int(
-                _camel_or_snake(nested, "async_mutations", "asyncMutations")
+                _camel_or_snake(nested, "async_mutations", "asyncMutations"),
+                field_name="complexity.asyncMutations",
             ),
             responsive_topologies=_positive_int(
                 _camel_or_snake(nested, "responsive_topologies", "responsiveTopologies", 1),
-                1,
+                field_name="complexity.responsiveTopologies",
+                default=1,
+                max_value=12,
             ),
             special_layout_algorithms=_non_negative_int(
-                _camel_or_snake(nested, "special_layout_algorithms", "specialLayoutAlgorithms")
+                _camel_or_snake(nested, "special_layout_algorithms", "specialLayoutAlgorithms"),
+                field_name="complexity.specialLayoutAlgorithms",
+                max_value=12,
             ),
         )
+
+    @classmethod
+    def from_responsibilities(cls, responsibilities: ResponsibilitySet) -> "ComplexitySignals":
+        return responsibilities.expected_complexity()
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -170,50 +514,53 @@ class LeafBudget:
 
     @classmethod
     def from_dict(cls, value: Any) -> "LeafBudget":
-        if not isinstance(value, dict):
+        if value is None:
             return cls()
+        if not isinstance(value, dict):
+            raise ValueError("leafBudget must be an object")
         return cls(
-            max_complexity=float(
-                _camel_or_snake(value, "max_complexity", "maxComplexity", cls.max_complexity)
+            max_complexity=_finite_float(
+                _camel_or_snake(value, "max_complexity", "maxComplexity"),
+                field_name="leafBudget.maxComplexity",
+                default=cls.max_complexity,
+                min_value=8,
+                max_value=80,
             ),
             max_visual_roles=_positive_int(
-                _camel_or_snake(value, "max_visual_roles", "maxVisualRoles", cls.max_visual_roles),
-                cls.max_visual_roles,
+                _camel_or_snake(value, "max_visual_roles", "maxVisualRoles"),
+                field_name="leafBudget.maxVisualRoles",
+                default=cls.max_visual_roles,
+                max_value=40,
             ),
             max_interactive_controls=_positive_int(
-                _camel_or_snake(
-                    value,
-                    "max_interactive_controls",
-                    "maxInteractiveControls",
-                    cls.max_interactive_controls,
-                ),
-                cls.max_interactive_controls,
+                _camel_or_snake(value, "max_interactive_controls", "maxInteractiveControls"),
+                field_name="leafBudget.maxInteractiveControls",
+                default=cls.max_interactive_controls,
+                max_value=20,
             ),
             max_mutations=_positive_int(
-                _camel_or_snake(value, "max_mutations", "maxMutations", cls.max_mutations),
-                cls.max_mutations,
+                _camel_or_snake(value, "max_mutations", "maxMutations"),
+                field_name="leafBudget.maxMutations",
+                default=cls.max_mutations,
+                max_value=10,
             ),
             max_responsive_topologies=_positive_int(
-                _camel_or_snake(
-                    value,
-                    "max_responsive_topologies",
-                    "maxResponsiveTopologies",
-                    cls.max_responsive_topologies,
-                ),
-                cls.max_responsive_topologies,
+                _camel_or_snake(value, "max_responsive_topologies", "maxResponsiveTopologies"),
+                field_name="leafBudget.maxResponsiveTopologies",
+                default=cls.max_responsive_topologies,
+                max_value=6,
             ),
             max_special_layout_algorithms=_positive_int(
-                _camel_or_snake(
-                    value,
-                    "max_special_layout_algorithms",
-                    "maxSpecialLayoutAlgorithms",
-                    cls.max_special_layout_algorithms,
-                ),
-                cls.max_special_layout_algorithms,
+                _camel_or_snake(value, "max_special_layout_algorithms", "maxSpecialLayoutAlgorithms"),
+                field_name="leafBudget.maxSpecialLayoutAlgorithms",
+                default=cls.max_special_layout_algorithms,
+                max_value=6,
             ),
             min_visual_roles=_positive_int(
-                _camel_or_snake(value, "min_visual_roles", "minVisualRoles", cls.min_visual_roles),
-                cls.min_visual_roles,
+                _camel_or_snake(value, "min_visual_roles", "minVisualRoles"),
+                field_name="leafBudget.minVisualRoles",
+                default=cls.min_visual_roles,
+                max_value=12,
             ),
         )
 
@@ -238,24 +585,30 @@ class CandidateBudget:
     secondary_region: int = 1
 
     @classmethod
-    def from_dict(cls, value: Any) -> "CandidateBudget":
-        if not isinstance(value, dict):
+    def from_dict(cls, value: Any, *, limits: ResourceLimits) -> "CandidateBudget":
+        if value is None:
             return cls()
+        if not isinstance(value, dict):
+            raise ValueError("candidates must be an object")
+
+        def candidate_count(key: str, camel: str, default: int) -> int:
+            return _positive_int(
+                _camel_or_snake(value, key, camel),
+                field_name=f"candidates.{camel}",
+                default=default,
+                max_value=limits.max_candidate_count,
+            )
+
         return cls(
-            foundation=_positive_int(value.get("foundation"), cls.foundation),
-            page_frame=_positive_int(_camel_or_snake(value, "page_frame", "pageFrame"), cls.page_frame),
-            primary_region=_positive_int(
-                _camel_or_snake(value, "primary_region", "primaryRegion"),
-                cls.primary_region,
-            ),
-            repeated_core_component=_positive_int(
-                _camel_or_snake(value, "repeated_core_component", "repeatedCoreComponent"),
+            foundation=candidate_count("foundation", "foundation", cls.foundation),
+            page_frame=candidate_count("page_frame", "pageFrame", cls.page_frame),
+            primary_region=candidate_count("primary_region", "primaryRegion", cls.primary_region),
+            repeated_core_component=candidate_count(
+                "repeated_core_component",
+                "repeatedCoreComponent",
                 cls.repeated_core_component,
             ),
-            secondary_region=_positive_int(
-                _camel_or_snake(value, "secondary_region", "secondaryRegion"),
-                cls.secondary_region,
-            ),
+            secondary_region=candidate_count("secondary_region", "secondaryRegion", cls.secondary_region),
         )
 
     def for_importance(self, importance: str) -> int:
@@ -282,53 +635,91 @@ class CandidateBudget:
 
 @dataclass(frozen=True)
 class UICompilerConfig:
-    generation: dict[str, Any] = field(
-        default_factory=lambda: {
-            "mode": "recursive-zero-to-one",
-            "rootMayWriteUi": False,
-            "regenerateInsteadOfPatch": True,
-            "isolateAgents": "worktree",
-        }
-    )
+    trusted_policy: TrustedCompilerPolicy = field(default_factory=TrustedCompilerPolicy)
     leaf_budget: LeafBudget = field(default_factory=LeafBudget)
     candidates: CandidateBudget = field(default_factory=CandidateBudget)
-    quality: dict[str, Any] = field(
-        default_factory=lambda: {
-            "rejectUnverified": True,
-            "rejectPrimaryTruncation": True,
-            "rejectHorizontalOverflow": True,
-            "rejectArbitraryTokens": True,
-            "maxCompressionScore": 0.35,
-        }
-    )
     viewports: list[int] = field(default_factory=lambda: list(DEFAULT_VIEWPORTS))
     text_scales: list[float] = field(default_factory=lambda: list(DEFAULT_TEXT_SCALES))
     scenarios: list[str] = field(default_factory=lambda: list(DEFAULT_SCENARIOS))
 
+    @property
+    def resource_limits(self) -> ResourceLimits:
+        return self.trusted_policy.resource_limits
+
     @classmethod
     def from_dict(cls, value: Any) -> "UICompilerConfig":
-        if not isinstance(value, dict):
+        if value is None:
             return cls()
+        if not isinstance(value, dict):
+            raise ValueError("config must be an object")
+        _reject_unknown_keys(
+            value,
+            {
+                "leafBudget",
+                "leaf_budget",
+                "candidates",
+                "viewports",
+                "textScales",
+                "text_scales",
+                "scenarios",
+                "generation",
+                "quality",
+            },
+            "config",
+        )
+        policy = TrustedCompilerPolicy()
+        _reject_trusted_policy_overrides(value, policy)
+        limits = policy.resource_limits
         return cls(
-            generation=dict(value.get("generation") or cls().generation),
+            trusted_policy=policy,
             leaf_budget=LeafBudget.from_dict(_camel_or_snake(value, "leaf_budget", "leafBudget")),
-            candidates=CandidateBudget.from_dict(value.get("candidates")),
-            quality=dict(value.get("quality") or cls().quality),
-            viewports=_int_list(value.get("viewports"), DEFAULT_VIEWPORTS),
-            text_scales=_float_list(_camel_or_snake(value, "text_scales", "textScales"), DEFAULT_TEXT_SCALES),
-            scenarios=_string_list(value.get("scenarios")) or list(DEFAULT_SCENARIOS),
+            candidates=CandidateBudget.from_dict(value.get("candidates"), limits=limits),
+            viewports=_int_list(value.get("viewports"), field_name="viewports", default=DEFAULT_VIEWPORTS, max_items=8),
+            text_scales=_float_list(
+                _camel_or_snake(value, "text_scales", "textScales"),
+                field_name="textScales",
+                default=DEFAULT_TEXT_SCALES,
+                max_items=6,
+            ),
+            scenarios=_string_list(
+                value.get("scenarios"),
+                field_name="scenarios",
+                max_items=12,
+                max_length=limits.max_string_length,
+            )
+            or list(DEFAULT_SCENARIOS),
         )
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "generation": dict(self.generation),
+            "schemaVersion": SCHEMA_VERSION,
+            "compilerVersion": COMPILER_VERSION,
+            "trustedPolicy": self.trusted_policy.to_dict(),
             "leafBudget": self.leaf_budget.to_dict(),
             "candidates": self.candidates.to_dict(),
-            "quality": dict(self.quality),
             "viewports": list(self.viewports),
             "textScales": list(self.text_scales),
             "scenarios": list(self.scenarios),
         }
+
+
+def _reject_trusted_policy_overrides(value: dict[str, Any], policy: TrustedCompilerPolicy) -> None:
+    generation = value.get("generation")
+    if isinstance(generation, dict):
+        for key, trusted_value in policy.generation.items():
+            if key in generation and generation[key] != trusted_value:
+                raise ValueError(f"generation.{key} is a trusted compiler policy and cannot be overridden")
+    quality = value.get("quality")
+    if isinstance(quality, dict):
+        for key, trusted_value in policy.quality.items():
+            if key in quality and quality[key] != trusted_value:
+                raise ValueError(f"quality.{key} is a trusted compiler policy and cannot be overridden")
+
+
+def _reject_unknown_keys(value: dict[str, Any], allowed: set[str], label: str) -> None:
+    unknown = sorted(str(key) for key in value if str(key) not in allowed)
+    if unknown:
+        raise ValueError(f"{label} contains unsupported keys: {', '.join(unknown)}")
 
 
 @dataclass(frozen=True)
@@ -338,29 +729,77 @@ class UINode:
     density: str = "comfortable"
     primary_perceptual_task: str = ""
     importance: str = "secondaryRegion"
+    implementation_mode: str = "component"
     complexity: ComplexitySignals = field(default_factory=ComplexitySignals)
     layout_envelope: LayoutEnvelope = field(default_factory=LayoutEnvelope)
+    responsibilities: ResponsibilitySet = field(default_factory=ResponsibilitySet)
+    ownership: list[OwnershipGroup] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     required_states: list[str] = field(default_factory=list)
     allowed_primitives: list[str] = field(default_factory=list)
     visible_action_budget: int = 3
+    slots: list[SlotDefinition] = field(default_factory=list)
     children: list["UINode"] = field(default_factory=list)
     split_hints: list["UINode"] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, value: Any) -> "UINode":
+    def from_dict(
+        cls,
+        value: Any,
+        *,
+        limits: ResourceLimits | None = None,
+        depth: int = 0,
+        counter: list[int] | None = None,
+    ) -> "UINode":
+        limits = limits or ResourceLimits()
+        if depth > limits.max_input_depth:
+            raise ValueError("UI tree exceeds max input depth")
         if not isinstance(value, dict):
-            raise ValueError("UI node must be a dict")
-        node_id = str(value.get("id") or "").strip()
-        if not node_id:
-            raise ValueError("UI node id is required")
-        children = [
-            cls.from_dict(item)
-            for item in value.get("children", [])
-            if isinstance(item, dict)
-        ]
+            raise ValueError("UI node must be an object")
+        _reject_unknown_keys(
+            value,
+            {
+                "id",
+                "purpose",
+                "density",
+                "primaryPerceptualTask",
+                "primary_perceptual_task",
+                "importance",
+                "candidateKind",
+                "implementationMode",
+                "implementation_mode",
+                "complexity",
+                "layoutEnvelope",
+                "layout_envelope",
+                "responsibilities",
+                "ownership",
+                "inputs",
+                "events",
+                "requiredStates",
+                "required_states",
+                "allowedPrimitives",
+                "allowed_primitives",
+                "visibleActionBudget",
+                "visible_action_budget",
+                "slots",
+                "children",
+                "splitHints",
+                "split_hints",
+                "decompositionHints",
+                "decomposition_hints",
+                "metadata",
+            },
+            "ui_tree",
+        )
+        counter = counter if counter is not None else [0]
+        counter[0] += 1
+        if counter[0] > limits.max_input_nodes:
+            raise ValueError("UI tree exceeds max input nodes")
+
+        node_id = canonical_id(str(value.get("id") or ""))
+        children_value = value.get("children", [])
         hints_value = (
             value.get("split_hints")
             or value.get("splitHints")
@@ -368,58 +807,119 @@ class UINode:
             or value.get("decompositionHints")
             or []
         )
-        split_hints = [
-            cls.from_dict(item)
-            for item in hints_value
-            if isinstance(item, dict)
+        if not isinstance(children_value, list):
+            raise ValueError("children must be a list")
+        if not isinstance(hints_value, list):
+            raise ValueError("splitHints must be a list")
+        if len(children_value) > limits.max_children_per_node:
+            raise ValueError("children exceeds max children per node")
+        if len(hints_value) > limits.max_children_per_node:
+            raise ValueError("splitHints exceeds max children per node")
+        children = [
+            cls.from_dict(item, limits=limits, depth=depth + 1, counter=counter)
+            for item in children_value
         ]
+        split_hints = [
+            cls.from_dict(item, limits=limits, depth=depth + 1, counter=counter)
+            for item in hints_value
+        ]
+        inputs = _string_list(
+            value.get("inputs"),
+            field_name=f"{node_id}.inputs",
+            max_items=limits.max_list_length,
+            max_length=limits.max_string_length,
+        )
+        events = _string_list(
+            value.get("events"),
+            field_name=f"{node_id}.events",
+            max_items=limits.max_list_length,
+            max_length=limits.max_string_length,
+        )
+        required_states = _string_list(
+            _camel_or_snake(value, "required_states", "requiredStates"),
+            field_name=f"{node_id}.requiredStates",
+            max_items=limits.max_list_length,
+            max_length=limits.max_string_length,
+        )
+        responsibilities = ResponsibilitySet.from_dict(value.get("responsibilities"), limits=limits)
+        responsibilities = responsibilities.merged_with_node_fields(
+            inputs=inputs,
+            events=events,
+            states=required_states,
+        )
+        complexity = ComplexitySignals.from_responsibilities(responsibilities)
+        explicit_complexity = ComplexitySignals.from_dict(value)
+        complexity = ComplexitySignals(
+            unique_visual_roles=max(complexity.unique_visual_roles, explicit_complexity.unique_visual_roles),
+            interactive_controls=max(complexity.interactive_controls, explicit_complexity.interactive_controls),
+            meaningful_states=max(complexity.meaningful_states, explicit_complexity.meaningful_states),
+            async_mutations=max(complexity.async_mutations, explicit_complexity.async_mutations),
+            responsive_topologies=explicit_complexity.responsive_topologies,
+            special_layout_algorithms=explicit_complexity.special_layout_algorithms,
+        )
+        density = str(value.get("density") or "comfortable").strip()
+        if density not in DENSITIES:
+            raise ValueError(f"invalid density: {density}")
+        mode = str(
+            value.get("implementationMode")
+            or value.get("implementation_mode")
+            or ("group-only" if children else "component")
+        )
+        if mode not in IMPLEMENTATION_MODES:
+            raise ValueError(f"invalid implementationMode: {mode}")
+        slots = [
+            SlotDefinition.from_dict(item, limits=limits)
+            for item in (value.get("slots") or [])
+        ]
+        if slots and mode not in {"component-with-slots", "composition-only"}:
+            raise ValueError("slots require component-with-slots or composition-only implementationMode")
+        if mode == "component-with-slots" and not slots:
+            raise ValueError("component-with-slots requires slots")
         return cls(
             id=node_id,
-            purpose=str(value.get("purpose") or "").strip(),
-            density=str(value.get("density") or "comfortable").strip() or "comfortable",
-            primary_perceptual_task=str(
-                _camel_or_snake(value, "primary_perceptual_task", "primaryPerceptualTask", "")
-                or ""
-            ).strip(),
-            importance=str(value.get("importance") or value.get("candidateKind") or "secondaryRegion"),
-            complexity=ComplexitySignals.from_dict(value),
+            purpose=_limited_string(
+                value.get("purpose"), field_name=f"{node_id}.purpose", max_length=limits.max_string_length
+            ),
+            density=density,
+            primary_perceptual_task=_limited_string(
+                _camel_or_snake(value, "primary_perceptual_task", "primaryPerceptualTask", ""),
+                field_name=f"{node_id}.primaryPerceptualTask",
+                max_length=limits.max_string_length,
+            ),
+            importance=_limited_string(
+                value.get("importance") or value.get("candidateKind") or "secondaryRegion",
+                field_name=f"{node_id}.importance",
+                max_length=80,
+            ),
+            implementation_mode=mode,
+            complexity=complexity,
             layout_envelope=LayoutEnvelope.from_dict(
                 _camel_or_snake(value, "layout_envelope", "layoutEnvelope")
             ),
-            inputs=_string_list(value.get("inputs")),
-            events=_string_list(value.get("events")),
-            required_states=_string_list(
-                _camel_or_snake(value, "required_states", "requiredStates")
-            ),
+            responsibilities=responsibilities,
+            ownership=[
+                OwnershipGroup.from_dict(item, limits=limits)
+                for item in (value.get("ownership") or [])
+            ],
+            inputs=inputs,
+            events=events,
+            required_states=required_states,
             allowed_primitives=_string_list(
-                _camel_or_snake(value, "allowed_primitives", "allowedPrimitives")
+                _camel_or_snake(value, "allowed_primitives", "allowedPrimitives"),
+                field_name=f"{node_id}.allowedPrimitives",
+                max_items=limits.max_list_length,
+                max_length=limits.max_string_length,
             ),
             visible_action_budget=_positive_int(
-                _camel_or_snake(value, "visible_action_budget", "visibleActionBudget", 3),
-                3,
+                _camel_or_snake(value, "visible_action_budget", "visibleActionBudget"),
+                field_name=f"{node_id}.visibleActionBudget",
+                default=3,
+                max_value=20,
             ),
+            slots=slots,
             children=children,
             split_hints=split_hints,
             metadata=dict(value.get("metadata") or {}),
-        )
-
-    def with_children(self, children: list["UINode"]) -> "UINode":
-        return UINode(
-            id=self.id,
-            purpose=self.purpose,
-            density=self.density,
-            primary_perceptual_task=self.primary_perceptual_task,
-            importance=self.importance,
-            complexity=self.complexity,
-            layout_envelope=self.layout_envelope,
-            inputs=list(self.inputs),
-            events=list(self.events),
-            required_states=list(self.required_states),
-            allowed_primitives=list(self.allowed_primitives),
-            visible_action_budget=self.visible_action_budget,
-            children=children,
-            split_hints=list(self.split_hints),
-            metadata=dict(self.metadata),
         )
 
     def to_dict(self, *, include_split_hints: bool = False) -> dict[str, Any]:
@@ -429,13 +929,17 @@ class UINode:
             "density": self.density,
             "primaryPerceptualTask": self.primary_perceptual_task,
             "importance": self.importance,
+            "implementationMode": self.implementation_mode,
             "complexity": self.complexity.to_dict(),
             "layoutEnvelope": self.layout_envelope.to_dict(),
+            "responsibilities": self.responsibilities.to_dict(),
+            "ownership": [item.to_dict() for item in self.ownership],
             "inputs": list(self.inputs),
             "events": list(self.events),
             "requiredStates": list(self.required_states),
             "allowedPrimitives": list(self.allowed_primitives),
             "visibleActionBudget": self.visible_action_budget,
+            "slots": [slot.to_dict() for slot in self.slots],
             "children": [
                 child.to_dict(include_split_hints=include_split_hints) for child in self.children
             ],
@@ -454,7 +958,11 @@ class ComponentContract:
     purpose: str
     primary_perceptual_task: str
     density: str
+    implementation_mode: str
     layout_envelope: LayoutEnvelope
+    responsibilities: ResponsibilitySet
+    ownership: list[OwnershipGroup] = field(default_factory=list)
+    slots: list[SlotDefinition] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
     events: list[str] = field(default_factory=list)
     required_states: list[str] = field(default_factory=list)
@@ -478,7 +986,11 @@ class ComponentContract:
             purpose=node.purpose,
             primary_perceptual_task=node.primary_perceptual_task or node.purpose,
             density=node.density,
+            implementation_mode=node.implementation_mode,
             layout_envelope=node.layout_envelope,
+            responsibilities=node.responsibilities,
+            ownership=list(node.ownership),
+            slots=list(node.slots),
             inputs=list(node.inputs),
             events=list(node.events),
             required_states=list(node.required_states),
@@ -492,11 +1004,16 @@ class ComponentContract:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "schemaVersion": SCHEMA_VERSION,
             "id": self.id,
             "purpose": self.purpose,
             "primaryPerceptualTask": self.primary_perceptual_task,
             "density": self.density,
+            "implementationMode": self.implementation_mode,
             "layoutEnvelope": self.layout_envelope.to_dict(),
+            "responsibilities": self.responsibilities.to_dict(),
+            "ownership": [item.to_dict() for item in self.ownership],
+            "slots": [slot.to_dict() for slot in self.slots],
             "inputs": list(self.inputs),
             "events": list(self.events),
             "requiredStates": list(self.required_states),
@@ -516,6 +1033,10 @@ class PlanningDiagnostic:
     node_id: str
     severity: str = "info"
     details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def is_error(self) -> bool:
+        return self.severity == "error"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -544,8 +1065,19 @@ class PlannedNode:
             leaves.extend(child.leaves())
         return leaves
 
+    def planned_nodes(self) -> list["PlannedNode"]:
+        nodes = [self]
+        for child in self.children:
+            nodes.extend(child.planned_nodes())
+        return nodes
+
     def contracts(self) -> list[ComponentContract]:
-        return [leaf.contract for leaf in self.leaves() if leaf.contract is not None]
+        contracts: list[ComponentContract] = []
+        if self.contract is not None:
+            contracts.append(self.contract)
+        for child in self.children:
+            contracts.extend(child.contracts())
+        return contracts
 
     def over_budget_leaves(self) -> list["PlannedNode"]:
         return [leaf for leaf in self.leaves() if leaf.budget_violations]
@@ -556,6 +1088,7 @@ class PlannedNode:
             "purpose": self.node.purpose,
             "density": self.node.density,
             "importance": self.node.importance,
+            "implementationMode": self.node.implementation_mode,
             "complexity": self.node.complexity.to_dict(),
             "complexityScore": round(float(self.complexity_score), 2),
             "budgetViolations": list(self.budget_violations),
@@ -579,17 +1112,30 @@ class UIPlan:
     def over_budget_leaves(self) -> list[PlannedNode]:
         return self.root.over_budget_leaves()
 
+    def has_error_diagnostics(self) -> bool:
+        return any(item.is_error for item in self.diagnostics)
+
+    def is_executable(self) -> bool:
+        return not self.has_error_diagnostics() and not self.over_budget_leaves()
+
     def to_dict(self) -> dict[str, Any]:
+        contracts = self.contracts()
+        leaves = self.root.leaves()
         return {
+            "schemaVersion": SCHEMA_VERSION,
+            "compilerVersion": COMPILER_VERSION,
             "runId": self.run_id,
             "createdAt": self.created_at,
+            "executable": self.is_executable(),
             "config": self.config.to_dict(),
             "root": self.root.to_dict(),
-            "contracts": [contract.to_dict() for contract in self.contracts()],
+            "contracts": [contract.to_dict() for contract in contracts],
             "diagnostics": [diagnostic.to_dict() for diagnostic in self.diagnostics],
             "summary": {
-                "leafCount": len(self.root.leaves()),
-                "contractCount": len(self.contracts()),
+                "nodeCount": len(self.root.planned_nodes()),
+                "leafCount": len(leaves),
+                "contractCount": len(contracts),
                 "overBudgetLeafCount": len(self.over_budget_leaves()),
+                "errorCount": len([item for item in self.diagnostics if item.is_error]),
             },
         }

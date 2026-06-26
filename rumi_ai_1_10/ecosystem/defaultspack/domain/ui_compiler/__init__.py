@@ -8,14 +8,17 @@ from .models import (
     ComplexitySignals,
     LayoutEnvelope,
     LeafBudget,
+    OwnershipGroup,
     PlannedNode,
     PlanningDiagnostic,
+    ResponsibilitySet,
+    SlotDefinition,
     UICompilerConfig,
     UINode,
     UIPlan,
 )
 from .planner import RecursiveUIPlanner
-from .service import compile_ui_plan
+from .service import commit_ui_plan, compile_ui_plan
 
 __all__ = [
     "CandidateBudget",
@@ -23,15 +26,19 @@ __all__ = [
     "ComplexitySignals",
     "LayoutEnvelope",
     "LeafBudget",
+    "OwnershipGroup",
     "PlannedNode",
     "PlanningDiagnostic",
     "RecursiveUIPlanner",
+    "ResponsibilitySet",
+    "SlotDefinition",
     "UICompilerArtifactStore",
     "UICompilerConfig",
     "UINode",
     "UIPlan",
     "budget_violations",
     "calculate_complexity",
+    "commit_ui_plan",
     "compile_ui_plan",
     "is_within_leaf_budget",
 ]
