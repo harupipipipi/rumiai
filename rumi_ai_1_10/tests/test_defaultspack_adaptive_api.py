@@ -27,7 +27,12 @@ def test_adaptive_dispatch_compile_apply_and_activity(tmp_path, monkeypatch: pyt
     assert compiled["status"] == "ok"
     plan = compiled["data"]["plan"]
 
-    applied = dispatch("onboarding_apply", {"profile_id": "coding", "plan": plan}, {})
+    unapproved = dispatch("onboarding_apply", {"profile_id": "coding", "plan": plan}, {})
+    assert unapproved["status"] == "error"
+    assert unapproved["code"] == "APPROVAL_REQUIRED"
+
+    approved_ctx = {"_tool_server_approved": True}
+    applied = dispatch("onboarding_apply", {"profile_id": "coding", "plan": plan}, approved_ctx)
     assert applied["status"] == "ok"
     assert applied["data"]["applied"] is True
 
@@ -62,7 +67,8 @@ def test_adaptive_apply_requires_plan_and_undo_restores_active_profile(
         {},
     )
     assert initial["status"] == "ok"
-    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": initial["data"]["plan"]}, {})["status"] == "ok"
+    approved_ctx = {"_tool_server_approved": True}
+    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": initial["data"]["plan"]}, approved_ctx)["status"] == "ok"
 
     target = dispatch(
         "onboarding_compile",
@@ -70,7 +76,7 @@ def test_adaptive_apply_requires_plan_and_undo_restores_active_profile(
         {},
     )
     assert target["status"] == "ok"
-    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": target["data"]["plan"]}, {})["status"] == "ok"
+    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": target["data"]["plan"]}, approved_ctx)["status"] == "ok"
 
     undone = dispatch("onboarding_undo", {"profile_id": "coding"}, {})
     assert undone["status"] == "ok"
@@ -208,6 +214,27 @@ def test_adaptive_generated_functions_register_into_shared_registry() -> None:
     assert entry.manifest["extensions"]["defaultspack"]["block_module"] == "blocks.adaptive"
 
 
+def test_adaptive_function_route_defaults_ignore_client_operation_override(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from domain.function_runtime.dispatcher import run_defaultspack_function
+
+    result = run_defaultspack_function(
+        "adaptive_onboarding_compile",
+        {
+            "operation": "activity_snapshot",
+            "profile_id": "coding",
+            "answers": {"profile_id": "coding", "preset_id": "maximum_local_autonomy"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["compiled"] is True
+    assert "activity" not in result["data"]
+
+
 def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
@@ -280,6 +307,24 @@ def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch
     assert bounded_search["status"] == "ok"
     assert bounded_search["data"]["count"] == 1
 
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "leaked.txt").write_text("outside-symlink-secret-needle\n", encoding="utf-8")
+    try:
+        (workspace / "linked-outside").symlink_to(outside, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink creation is not available: {exc}")
+    symlink_map = dispatch("context_repository_map", {"workspace_id": "ws1", "max_entries": 20}, {})
+    assert symlink_map["status"] == "ok"
+    assert all("linked-outside" not in item["path"] for item in symlink_map["data"]["entries"])
+    symlink_search = dispatch(
+        "context_code_search",
+        {"workspace_id": "ws1", "query": "outside-symlink-secret-needle", "max_matches": 5},
+        {},
+    )
+    assert symlink_search["status"] == "ok"
+    assert symlink_search["data"]["count"] == 0
+
 
 def test_prepared_actions_redact_secret_and_lease_roundtrip(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
@@ -296,9 +341,99 @@ def test_prepared_actions_redact_secret_and_lease_roundtrip(tmp_path, monkeypatc
 
     lease = dispatch("lease_acquire", {"profile_id": "coding", "resource": "src/App.tsx", "owner": "agent"}, {})
     assert lease["status"] == "ok"
+    wrong_holder = dispatch(
+        "lease_release",
+        {"profile_id": "coding", "id": lease["data"]["lease"]["id"], "holder": "other-agent"},
+        {},
+    )
+    assert wrong_holder["status"] == "error"
+    assert wrong_holder["code"] == "LEASE_HELD"
     released = dispatch("lease_release", {"profile_id": "coding", "id": lease["data"]["lease"]["id"]}, {})
     assert released["status"] == "ok"
     assert released["data"]["lease"]["status"] == "released"
+
+
+def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+
+    from blocks.coding.file_write import run as file_write_run
+    from blocks.coding.git_commit import run as git_commit_run
+    from domain.adaptive.service import dispatch
+    from domain.adaptive.storage import AdaptiveStore
+    from domain.coding.workspace_store import WorkspaceStore
+
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    WorkspaceStore().create(workspace, workspace_id="ws1", trusted=True)
+
+    lease = dispatch(
+        "lease_acquire",
+        {
+            "profile_id": "coding",
+            "workspace_id": "ws1",
+            "resource": "src/App.tsx",
+            "holder": "agent-a",
+            "ttl_seconds": 60,
+        },
+        {},
+    )
+    assert lease["status"] == "ok"
+    assert lease["data"]["lease"]["workspace_id"] == "ws1"
+
+    blocked = file_write_run(
+        {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "blocked"},
+        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+    )
+    assert blocked["status"] == "error"
+    assert blocked["error"]["code"] == "ADAPTIVE_LEASE_HELD"
+    assert not (workspace / "src" / "App.tsx").exists()
+
+    allowed = file_write_run(
+        {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "ok"},
+        {"profile_id": "coding", "principal_id": "agent-a", "_tool_server_approved": True},
+    )
+    assert allowed["status"] == "ok"
+    assert (workspace / "src" / "App.tsx").read_text(encoding="utf-8") == "ok"
+
+    blocked_commit = git_commit_run(
+        {"profile_id": "coding", "workspace_id": "ws1", "message": "try locked file", "paths": ["src/App.tsx"]},
+        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+    )
+    assert blocked_commit["status"] == "error"
+    assert blocked_commit["error"]["code"] == "ADAPTIVE_LEASE_HELD"
+
+    store = AdaptiveStore("coding")
+
+    def expire_src_app(state):
+        leases = state.get("leases") if isinstance(state, dict) and isinstance(state.get("leases"), list) else []
+        for item in leases:
+            if item.get("key") == "src/App.tsx":
+                item["expires_at"] = 1
+        return {"version": 1, "leases": leases}
+
+    store.update_json("orchestration/leases.json", {"version": 1, "leases": []}, expire_src_app)
+    after_expiry = file_write_run(
+        {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "agent b ok"},
+        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+    )
+    assert after_expiry["status"] == "ok"
+
+    worktree_lease = dispatch(
+        "lease_acquire",
+        {"profile_id": "coding", "workspace_id": "ws1", "resource": ".", "holder": "agent-a", "ttl_seconds": 60},
+        {},
+    )
+    assert worktree_lease["status"] == "ok"
+    blocked_by_worktree = file_write_run(
+        {"profile_id": "coding", "workspace_id": "ws1", "path": "docs/notes.txt", "content": "blocked"},
+        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+    )
+    assert blocked_by_worktree["status"] == "error"
+    assert blocked_by_worktree["error"]["code"] == "ADAPTIVE_LEASE_HELD"
+    assert not (workspace / "docs" / "notes.txt").exists()
 
 
 def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
@@ -322,7 +457,16 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     )
     assert recommendations["status"] == "ok"
     assert "degraded" not in recommendations["data"]
-    assert {item["pack_id"] for item in recommendations["data"]["recommendations"]} >= {"coding", "context", "tool"}
+    recommended_pack_ids = {item["pack_id"] for item in recommendations["data"]["recommendations"]}
+    assert recommended_pack_ids >= {
+        "defaultspack",
+        "rumi_default_tools_pack",
+        "rumi_local_agent_pack",
+        "rumi_code_ide_pack",
+        "rumi_workflow_scheduler_pack",
+    }
+    assert all(item["source"] == "setup_pack" for item in recommendations["data"]["recommendations"])
+    assert all(item["setup_pack_id"] == item["pack_id"] for item in recommendations["data"]["recommendations"])
 
     prepared = dispatch(
         "prepared_action_prepare",
@@ -339,6 +483,10 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     assert committed["status"] == "ok"
     assert committed["data"]["executed"] is True
     assert committed["data"]["execution_result"]["enabled"] is True
+    duplicate_commit = dispatch("prepared_action_commit", {"profile_id": "coding", "action_id": action_id}, {})
+    assert duplicate_commit["status"] == "ok"
+    assert duplicate_commit["data"]["duplicate"] is True
+    assert duplicate_commit["data"]["execution_result"]["enabled"] is True
     activity = dispatch("activity_snapshot", {"profile_id": "coding"}, {})
     assert activity["status"] == "ok"
     automation = next(item for item in activity["data"]["automations"] if item["id"] == "automation_daily_context")
@@ -358,6 +506,47 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     assert updated["status"] == "ok"
     assert updated["data"]["automation"]["enabled"] is False
 
+    missing_evidence = dispatch(
+        "skill_candidate_promote",
+        {
+            "profile_id": "coding",
+            "candidate_id": "bad_candidate",
+            "candidate": {"candidate_id": "bad_candidate", "title": "Missing evidence"},
+        },
+        {},
+    )
+    assert missing_evidence["status"] == "error"
+    assert missing_evidence["code"] == "INVALID_INPUT"
+
+    failure_event = dispatch(
+        "event_append",
+        {
+            "profile_id": "coding",
+            "event_type": "adaptive.skill.failure",
+            "payload": {"status": "failed", "case": "install failed"},
+        },
+        {},
+    )
+    success_event = dispatch(
+        "event_append",
+        {
+            "profile_id": "coding",
+            "event_type": "adaptive.skill.verified_success",
+            "payload": {"status": "success", "verified": True, "replay_verified": True},
+        },
+        {},
+    )
+    replay_event = dispatch(
+        "event_append",
+        {
+            "profile_id": "coding",
+            "event_type": "adaptive.skill.replay_verified",
+            "payload": {"status": "verified", "verified": True},
+        },
+        {},
+    )
+    assert failure_event["status"] == success_event["status"] == replay_event["status"] == "ok"
+
     store = AdaptiveStore("coding")
     store.write_json(
         "skills/candidates.json",
@@ -367,7 +556,11 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
                 {
                     "candidate_id": "cand_success_pair",
                     "title": "Retry stable install after cache repair",
-                    "evidence": {"failure_event_id": "fail1", "success_event_id": "success1"},
+                    "evidence": {
+                        "failure_event_id": failure_event["data"]["event"]["event_id"],
+                        "success_event_id": success_event["data"]["event"]["event_id"],
+                        "replay_event_id": replay_event["data"]["event"]["event_id"],
+                    },
                 }
             ],
         },
@@ -375,7 +568,8 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     promoted = dispatch("skill_candidate_promote", {"profile_id": "coding", "candidate_id": "cand_success_pair"}, {})
     assert promoted["status"] == "ok"
     assert promoted["data"]["promoted"] is True
-    assert promoted["data"]["skill"]["status"] == "active"
+    assert promoted["data"]["skill"]["status"] == "canary"
+    assert promoted["data"]["skill"]["canary_state"] == "pending"
     rolled_back = dispatch("skill_candidate_rollback", {"profile_id": "coding", "candidate_id": "cand_success_pair"}, {})
     assert rolled_back["status"] == "ok"
     assert rolled_back["data"]["rolled_back"] is True
@@ -395,6 +589,30 @@ def test_adaptive_pack_skill_automation_and_event_state_are_not_placeholders(
     assert duplicate["status"] == "ok"
     assert duplicate["data"]["duplicate"] is True
     assert duplicate["data"]["event"]["event_id"] == event["data"]["event"]["event_id"]
+
+
+def test_adaptive_event_append_idempotency_is_atomic(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from concurrent.futures import ThreadPoolExecutor
+
+    from domain.adaptive.service import dispatch
+    from domain.adaptive.storage import AdaptiveStore
+
+    payload = {"profile_id": "coding", "event_type": "adaptive.concurrent", "idempotency_key": "same-key"}
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(lambda _: dispatch("event_append", payload, {}), range(8)))
+
+    assert all(result["status"] == "ok" for result in results), results
+    event_ids = {result["data"]["event"]["event_id"] for result in results}
+    assert len(event_ids) == 1
+    rows = [
+        row
+        for row in AdaptiveStore("coding").read_jsonl("events/events.jsonl")
+        if row.get("idempotency_key") == "same-key"
+    ]
+    assert len(rows) == 1
     replay = dispatch("event_replay", {"profile_id": "coding", "limit": 10}, {})
     assert replay["status"] == "ok"
     assert replay["data"]["next_cursor"]
@@ -425,6 +643,13 @@ def test_adaptive_event_delivery_outbox_subscription_and_continuation_lifecycle(
     )
     assert event["status"] == "ok"
     event_id = event["data"]["event"]["event_id"]
+    denied_ack = run_defaultspack_function(
+        "adaptive_event_ack",
+        {"profile_id": "coding", "event_id": event_id, "subscriber_id": "worker-b"},
+        {},
+    )
+    assert denied_ack["status"] == "error"
+    assert denied_ack["code"] == "SUBSCRIPTION_REQUIRED"
     acked = run_defaultspack_function(
         "adaptive_event_ack",
         {"profile_id": "coding", "event_id": event_id, "subscriber_id": "worker-a"},
@@ -457,9 +682,17 @@ def test_adaptive_event_delivery_outbox_subscription_and_continuation_lifecycle(
     assert committed["status"] == "ok"
     assert committed["data"]["execution_status"] == "queued"
     outbox_id = committed["data"]["outbox_id"]
+    duplicate_commit = dispatch(
+        "prepared_action_commit",
+        {"profile_id": "coding", "action_id": prepared["data"]["prepared_action"]["action_id"]},
+        {},
+    )
+    assert duplicate_commit["status"] == "ok"
+    assert duplicate_commit["data"]["duplicate"] is True
+    assert duplicate_commit["data"]["outbox_id"] == outbox_id
     outbox = dispatch("event_outbox", {"profile_id": "coding"}, {})
     assert outbox["status"] == "ok"
-    assert any(item["outbox_id"] == outbox_id and item["status"] == "pending" for item in outbox["data"]["outbox"])
+    assert sum(1 for item in outbox["data"]["outbox"] if item["outbox_id"] == outbox_id and item["status"] == "pending") == 1
 
     replay = dispatch("event_replay", {"profile_id": "coding", "limit": 20}, {})
     continuation_event = next(
@@ -481,10 +714,12 @@ def test_adaptive_event_delivery_outbox_subscription_and_continuation_lifecycle(
 
     resumed = dispatch("continuation_resume", {"profile_id": "coding", "event_id": continuation_event["event_id"]}, {})
     assert resumed["status"] == "ok"
+    assert resumed["data"]["resume_mode"] == "state_only"
     assert resumed["data"]["outbox_item"]["status"] == "completed"
     duplicate = dispatch("continuation_resume", {"profile_id": "coding", "event_id": continuation_event["event_id"]}, {})
     assert duplicate["status"] == "ok"
     assert duplicate["data"]["duplicate"] is True
+    assert duplicate["data"]["resume_mode"] == "state_only"
     activity = dispatch("activity_snapshot", {"profile_id": "coding"}, {})
     assert activity["status"] == "ok"
     assert activity["data"]["event_delivery_summary"]["resumed"] == 1

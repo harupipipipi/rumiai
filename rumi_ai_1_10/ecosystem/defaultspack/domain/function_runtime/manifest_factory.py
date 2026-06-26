@@ -692,7 +692,7 @@ ADAPTIVE_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("adaptive_onboarding_normalize", "onboarding_normalize", "Normalize onboarding answers.", ("adaptive", "onboarding"), "low"),
         ("adaptive_onboarding_compile", "onboarding_compile", "Compile an Operating Profile preview.", ("adaptive", "onboarding"), "medium"),
         ("adaptive_onboarding_simulate", "onboarding_simulate", "Simulate an Operating Profile.", ("adaptive", "onboarding"), "low"),
-        ("adaptive_onboarding_apply", "onboarding_apply", "Apply a signed Operating Profile plan.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_apply", "onboarding_apply", "Apply a signed Operating Profile plan.", ("adaptive", "onboarding"), "high"),
         ("adaptive_onboarding_undo", "onboarding_undo", "Undo the last Operating Profile apply.", ("adaptive", "onboarding"), "medium"),
         ("adaptive_onboarding_history", "onboarding_history", "List onboarding history.", ("adaptive", "onboarding"), "low"),
         ("adaptive_onboarding_rediagnose", "onboarding_rediagnose", "Preview a re-diagnosis.", ("adaptive", "onboarding"), "medium"),

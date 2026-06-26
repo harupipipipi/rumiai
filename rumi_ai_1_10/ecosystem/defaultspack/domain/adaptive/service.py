@@ -19,6 +19,7 @@ from .context import (
     resolve_under,
     workspace_root_from,
 )
+from .lease_guard import AdaptiveLeaseConflict, lease_workspace_binding
 from .storage import AdaptiveStore
 
 
@@ -241,6 +242,11 @@ class AdaptiveService:
         plan = args.get("plan") if isinstance(args.get("plan"), dict) else None
         if plan is None:
             raise AdaptiveError("INVALID_INPUT", "signed onboarding plan is required")
+        if not _onboarding_apply_approved(ctx):
+            raise AdaptiveError(
+                "APPROVAL_REQUIRED",
+                "onboarding.apply requires a trusted local approval context",
+            )
         try:
             from core_runtime.operating_profile import OperatingProfilePlanStore
 
@@ -599,6 +605,8 @@ class AdaptiveService:
         action, actions = self._find_action(args)
         if action.get("status") == "revoked":
             raise AdaptiveError("ACTION_REVOKED", "revoked prepared action cannot be committed")
+        if action.get("status") == "committed":
+            return self._prepared_action_commit_response(action, duplicate=True)
         execution = self._execute_prepared_action(action, args)
         action["status"] = "committed"
         action["committed_at"] = now_iso()
@@ -613,15 +621,7 @@ class AdaptiveService:
             {"action_id": action["action_id"], "execution_status": execution["status"]},
             continuation=execution.get("continuation") if isinstance(execution.get("continuation"), dict) else None,
         )
-        return {
-            "profile_id": self.profile_id,
-            "committed": True,
-            "action": action,
-            "executed": execution["status"] == "executed",
-            "execution_status": execution["status"],
-            "execution_result": execution.get("result"),
-            "outbox_id": execution.get("outbox_id"),
-        }
+        return self._prepared_action_commit_response(action)
 
     def prepared_action_revoke(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
@@ -652,14 +652,24 @@ class AdaptiveService:
             raise AdaptiveError("INVALID_INPUT", "event_type is required")
         idempotency_key = str(args.get("idempotency_key") or "").strip()
         if idempotency_key:
-            for existing in reversed(self.store.read_jsonl("events/events.jsonl")):
-                if existing.get("idempotency_key") == idempotency_key:
-                    return {"profile_id": self.profile_id, "event": existing, "duplicate": True}
+            event = self._event_record(
+                event_type,
+                args.get("payload") if isinstance(args.get("payload"), dict) else {},
+                continuation=args.get("continuation") if isinstance(args.get("continuation"), dict) else None,
+                idempotency_key=idempotency_key,
+            )
+            stored, duplicate = self.store.append_jsonl_once(
+                "events/events.jsonl",
+                event,
+                key="idempotency_key",
+                value=idempotency_key,
+            )
+            return {"profile_id": self.profile_id, "event": stored, "duplicate": duplicate}
         event = self._append_event(
             event_type,
             args.get("payload") if isinstance(args.get("payload"), dict) else {},
             continuation=args.get("continuation") if isinstance(args.get("continuation"), dict) else None,
-            idempotency_key=idempotency_key or None,
+            idempotency_key=None,
         )
         return {"profile_id": self.profile_id, "event": event}
 
@@ -703,6 +713,8 @@ class AdaptiveService:
         event_id = self._event_id_from(args)
         event = self._find_event(event_id)
         subscriber_id = str(args.get("subscriber_id") or args.get("consumer_id") or args.get("subscriber") or "").strip()
+        if subscriber_id:
+            self._require_matching_subscription(subscriber_id, str(event.get("event_type") or ""))
         acknowledged_at = now_iso()
 
         def update(state: Any) -> dict[str, Any]:
@@ -933,6 +945,7 @@ class AdaptiveService:
 
         result = {
             "resumed": True,
+            "resume_mode": "state_only",
             "event_id": event_id,
             "outbox_id": outbox_id or None,
             "continuation": redact(continuation),
@@ -972,6 +985,7 @@ class AdaptiveService:
         return {
             "profile_id": self.profile_id,
             "resumed": True,
+            "resume_mode": "state_only",
             "duplicate": duplicate,
             "resume": response.get("entry"),
             "outbox_item": outbox_item,
@@ -1028,6 +1042,11 @@ class AdaptiveService:
         key = str(args.get("key") or args.get("lease_key") or args.get("resource") or "").strip()
         if not key:
             raise AdaptiveError("INVALID_INPUT", "lease key is required")
+        try:
+            workspace_binding = lease_workspace_binding(args, ctx)
+        except AdaptiveLeaseConflict as exc:
+            code = str(exc.details.get("code") or exc.code) if isinstance(exc.details, dict) else exc.code
+            raise AdaptiveError(code, str(exc), details=exc.details) from exc
         holder = str(args.get("holder") or args.get("owner") or ctx.get("principal_id") or ctx.get("caller") or "anonymous").strip()
         ttl = coerce_int(args.get("ttl_seconds"), 300, minimum=1, maximum=86400)
         now = now_seconds()
@@ -1062,6 +1081,7 @@ class AdaptiveService:
                 "updated_at": now_iso(),
                 "expires_at": now + ttl,
             }
+            lease.update(workspace_binding)
             lease["lease_id"] = lease["id"]
             if bool(args.get("freeze_snapshot", False)):
                 lease["freeze_id"] = self.activity_freeze({"reason": f"lease:{key}"}, ctx)["freeze_id"]
@@ -1382,6 +1402,17 @@ class AdaptiveService:
         subscriptions = state.get("subscriptions") if isinstance(state, dict) else []
         return [item for item in subscriptions if isinstance(item, dict)] if isinstance(subscriptions, list) else []
 
+    def _require_matching_subscription(self, subscriber_id: str, event_type: str) -> None:
+        for subscription in self._event_subscriptions():
+            if subscription.get("status") != "active":
+                continue
+            if str(subscription.get("subscriber_id") or "") != subscriber_id:
+                continue
+            configured_type = str(subscription.get("event_type") or "*").strip() or "*"
+            if configured_type in {"*", event_type}:
+                return
+        raise AdaptiveError("SUBSCRIPTION_REQUIRED", "active matching subscription is required to acknowledge event")
+
     def _event_delivery_summary(self, events: list[dict[str, Any]]) -> dict[str, int]:
         summary = {"pending": 0, "acked": 0, "retry_pending": 0, "dead_letter": 0, "resumed": 0}
         for event in events:
@@ -1481,6 +1512,180 @@ class AdaptiveService:
         return result
 
     def _pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
+        setup_pack_recommendations = self._setup_pack_recommendations(args)
+        if setup_pack_recommendations:
+            return setup_pack_recommendations
+        return self._component_pack_recommendations(args)
+
+    def _setup_pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            from core_runtime.setup_pack import get_setup_pack_manager
+
+            listed = get_setup_pack_manager().list_packs()
+        except Exception:
+            return []
+        packs = listed.get("packs") if isinstance(listed, dict) else []
+        if not isinstance(packs, list):
+            return []
+        signals = self._recommendation_signals(args)
+        limit = coerce_int(args.get("limit"), 12, minimum=1, maximum=50)
+        recommendations: list[dict[str, Any]] = []
+
+        for raw_pack in packs:
+            if not isinstance(raw_pack, dict):
+                continue
+            score, reasons = self._score_setup_pack(raw_pack, signals)
+            if score <= 0:
+                continue
+            pack_id = str(raw_pack.get("pack_id") or "").strip()
+            if not pack_id:
+                continue
+            target_pack_id = str(raw_pack.get("target_pack_id") or pack_id).strip() or pack_id
+            recommendations.append(
+                {
+                    "pack_id": pack_id,
+                    "setup_pack_id": pack_id,
+                    "target_pack_id": target_pack_id,
+                    "id": pack_id,
+                    "label": str(raw_pack.get("display_name") or pack_id),
+                    "description": str(raw_pack.get("description") or ""),
+                    "reason": "; ".join(reasons[:3]),
+                    "reasons": reasons[:5],
+                    "status": "recommended",
+                    "confidence": min(0.99, 0.55 + (score / 200)),
+                    "score": score,
+                    "risk_level": str(raw_pack.get("risk_level") or "medium"),
+                    "supports_all_ok": bool(raw_pack.get("supports_all_ok")),
+                    "required_permissions": raw_pack.get("required_permissions") if isinstance(raw_pack.get("required_permissions"), list) else [],
+                    "install_surfaces": raw_pack.get("install_surfaces") if isinstance(raw_pack.get("install_surfaces"), list) else [],
+                    "selected": bool(raw_pack.get("selected")),
+                    "source": "setup_pack",
+                    "local_only": True,
+                }
+            )
+        recommendations.sort(
+            key=lambda item: (
+                item["selected"],
+                item["score"],
+                item["confidence"],
+                item["risk_level"] == "low",
+                item["pack_id"] == "defaultspack",
+            ),
+            reverse=True,
+        )
+        return recommendations[:limit]
+
+    def _recommendation_signals(self, args: dict[str, Any]) -> set[str]:
+        answers = self._answers_from(args)
+        use_cases = answers.get("use_cases") if isinstance(answers.get("use_cases"), dict) else {}
+        actions = answers.get("actions") if isinstance(answers.get("actions"), dict) else {}
+        selected = {str(key) for key, enabled in use_cases.items() if enabled is not False}
+        signals = {"baseline"}
+        if not selected or {"coding", "uc_coding", "repository", "backend", "code"} & selected:
+            signals.update({"coding", "workspace"})
+        if {"frontend", "ui", "design", "app"} & selected:
+            signals.update({"frontend", "browser", "qa"})
+        if {"research", "uc_research", "evidence", "knowledge"} & selected:
+            signals.update({"research", "knowledge", "evidence"})
+        if {"automation", "uc_automation", "workflow", "scheduler"} & selected:
+            signals.update({"automation", "workflow", "agent"})
+        if str(actions.get("terminal") or "") in {"ask", "allow"}:
+            signals.update({"coding", "tool"})
+        if str(actions.get("browser_control") or "") in {"ask", "allow"}:
+            signals.update({"browser", "qa"})
+        if str(actions.get("external_send") or "") in {"ask", "allow"}:
+            signals.update({"connector", "gateway"})
+        if str(actions.get("computer_control") or "") in {"ask", "allow"}:
+            signals.update({"computer", "tool"})
+        if answers.get("skill_learning_enabled"):
+            signals.update({"prompt", "skill", "knowledge"})
+        if str(answers.get("memory_mode") or "") not in {"", "off"}:
+            signals.update({"memory", "knowledge", "continuity"})
+        return signals
+
+    def _score_setup_pack(self, pack: dict[str, Any], signals: set[str]) -> tuple[int, list[str]]:
+        pack_id = str(pack.get("pack_id") or "")
+        display_name = str(pack.get("display_name") or "")
+        description = str(pack.get("description") or "")
+        marketplace = pack.get("marketplace") if isinstance(pack.get("marketplace"), dict) else {}
+        haystack = " ".join(
+            [
+                pack_id,
+                display_name,
+                description,
+                str(marketplace.get("category") or ""),
+                str(marketplace.get("id") or ""),
+            ]
+        ).lower()
+        keyword_map: dict[str, tuple[str, ...]] = {
+            "baseline": ("defaultspack", "default tools", "local agent"),
+            "coding": ("code", "ide", "devops", "migration", "security review"),
+            "workspace": ("workspace", "sandbox"),
+            "frontend": ("frontend", "ui", "design", "artifact app"),
+            "browser": ("browser", "form", "session replay", "element"),
+            "qa": ("qa", "evidence", "eval", "benchmark"),
+            "research": ("research", "dossier", "experiment", "customer"),
+            "knowledge": ("knowledge", "memory", "document", "meeting"),
+            "evidence": ("evidence", "observability", "review"),
+            "automation": ("automation", "ambient", "workflow", "scheduler"),
+            "workflow": ("workflow", "scheduler", "operations", "sop"),
+            "agent": ("agent", "workroom", "services", "continuity"),
+            "tool": ("tool", "host capabilities", "api toolsmith"),
+            "connector": ("connector", "mcp", "omnichannel", "telephony"),
+            "gateway": ("gateway", "connector", "mcp"),
+            "computer": ("computer", "control"),
+            "prompt": ("prompt", "studio"),
+            "skill": ("prompt", "studio", "marketplace"),
+            "memory": ("memory", "continuity"),
+            "continuity": ("continuity", "memory"),
+        }
+        representative_pack_map: dict[str, tuple[str, ...]] = {
+            "baseline": ("defaultspack", "rumi_default_tools_pack", "rumi_local_agent_pack"),
+            "coding": ("rumi_code_ide_pack", "rumi_default_tools_pack"),
+            "workspace": ("rumi_workspace_pack", "rumi_sandbox_runtime_pack"),
+            "frontend": ("rumi_frontend_design_pack", "rumi_artifact_app_runtime_pack"),
+            "browser": ("rumi_browser_automation_pack", "rumi_browser_element_pack"),
+            "qa": ("rumi_agentic_qa_pack", "rumi_evidence_dossier_pack"),
+            "research": ("rumi_research_pack", "rumi_customer_research_pack"),
+            "knowledge": ("rumi_memory_knowledge_pack", "rumi_knowledge_marketplace_pack"),
+            "evidence": ("rumi_evidence_dossier_pack", "rumi_observability_pack"),
+            "automation": ("rumi_workflow_scheduler_pack", "rumi_ambient_trigger_pack"),
+            "workflow": ("rumi_workflow_scheduler_pack", "rumi_business_ops_pack"),
+            "agent": ("rumi_local_agent_pack", "rumi_agent_services_pack"),
+            "tool": ("rumi_default_tools_pack", "rumi_host_capabilities_pack"),
+            "connector": ("rumi_connector_gateway_pack", "rumi_mcp_gateway_pack"),
+            "gateway": ("rumi_connector_gateway_pack", "rumi_mcp_gateway_pack"),
+            "computer": ("rumi_computer_control_pack",),
+            "prompt": ("rumi_prompt_studio_pack",),
+            "skill": ("rumi_prompt_studio_pack", "rumi_knowledge_marketplace_pack"),
+            "memory": ("rumi_memory_knowledge_pack", "rumi_agent_continuity_pack"),
+            "continuity": ("rumi_agent_continuity_pack", "rumi_memory_knowledge_pack"),
+        }
+        score = 0
+        reasons: list[str] = []
+        if bool(pack.get("recommended")):
+            score += 18
+            reasons.append("bundled setup pack is marked recommended")
+        if bool(pack.get("selected")):
+            score += 10
+            reasons.append("already selected in setup-pack configuration")
+        for signal in sorted(signals):
+            if pack_id in representative_pack_map.get(signal, ()):
+                score += 24
+                reasons.append(f"representative setup pack for {signal}")
+            keywords = keyword_map.get(signal, ())
+            if keywords and any(keyword in haystack for keyword in keywords):
+                score += 14
+                reasons.append(f"matches {signal} onboarding signal")
+        if str(pack.get("risk_level") or "") == "low":
+            score += 4
+        if pack_id == "defaultspack":
+            score += 8
+        if not reasons and score > 0:
+            reasons.append("compatible local setup-pack candidate")
+        return score, reasons
+
+    def _component_pack_recommendations(self, args: dict[str, Any]) -> list[dict[str, Any]]:
         answers = self._answers_from(args)
         use_cases = answers.get("use_cases") if isinstance(answers.get("use_cases"), dict) else {}
         actions = answers.get("actions") if isinstance(answers.get("actions"), dict) else {}
@@ -1563,11 +1768,14 @@ class AdaptiveService:
             return {"version": 1, "candidates": candidates[-500:]}
 
         self.store.update_json("skills/candidates.json", {"version": 1, "candidates": []}, update_candidates)
+        evidence = self._validate_skill_candidate_evidence(selected)
         skill = {
             "skill_id": str(args.get("skill_id") or selected.get("skill_id") or f"skill_{candidate_id}"),
             "candidate_id": candidate_id,
             "title": str(selected.get("title") or selected.get("name") or candidate_id),
-            "status": "active",
+            "status": "canary",
+            "canary_state": "pending",
+            "evidence": evidence,
             "source": redact(selected),
             "promoted_at": now_iso(),
             "updated_at": now_iso(),
@@ -1614,6 +1822,41 @@ class AdaptiveService:
 
         self.store.update_json("skills/candidates.json", {"version": 1, "candidates": []}, update_candidates)
         return {"skill": rolled_back}
+
+    def _validate_skill_candidate_evidence(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        evidence = candidate.get("evidence") if isinstance(candidate.get("evidence"), dict) else {}
+        failure_id = str(evidence.get("failure_event_id") or "").strip()
+        success_id = str(evidence.get("success_event_id") or "").strip()
+        replay_id = str(evidence.get("replay_event_id") or "").strip()
+        if not failure_id or not success_id:
+            raise AdaptiveError("INVALID_INPUT", "skill promotion requires failure_event_id and success_event_id evidence")
+        failure = self._event_by_id(failure_id)
+        success = self._event_by_id(success_id)
+        replay = self._event_by_id(replay_id) if replay_id else None
+        if failure is None:
+            raise AdaptiveError("INVALID_INPUT", "failure evidence event not found")
+        if success is None:
+            raise AdaptiveError("INVALID_INPUT", "success evidence event not found")
+        if not _event_indicates_failure(failure):
+            raise AdaptiveError("INVALID_INPUT", "failure evidence must describe a failed episode")
+        if not _event_indicates_verified_success(success):
+            raise AdaptiveError("INVALID_INPUT", "success evidence must describe a verified successful episode")
+        if replay is None and not _event_payload_bool(success, "replay_verified"):
+            raise AdaptiveError("INVALID_INPUT", "skill promotion requires replay evidence")
+        if replay is not None and not _event_indicates_verified_success(replay):
+            raise AdaptiveError("INVALID_INPUT", "replay evidence must describe a verified successful replay")
+        return {
+            "failure_event_id": failure_id,
+            "success_event_id": success_id,
+            "replay_event_id": replay_id or success_id,
+            "canary_required": True,
+        }
+
+    def _event_by_id(self, event_id: str) -> dict[str, Any] | None:
+        for event in reversed(self.store.read_jsonl("events/events.jsonl")):
+            if event.get("event_id") == event_id or event.get("id") == event_id:
+                return event
+        return None
 
     # State helpers
 
@@ -1783,6 +2026,22 @@ class AdaptiveService:
         continuation: dict[str, Any] | None = None,
         idempotency_key: str | None = None,
     ) -> dict[str, Any]:
+        event = self._event_record(
+            event_type,
+            payload,
+            continuation=continuation,
+            idempotency_key=idempotency_key,
+        )
+        return self.store.append_jsonl("events/events.jsonl", event)
+
+    def _event_record(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        continuation: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
         event = {
             "event_id": str(uuid.uuid4()),
             "profile_id": self.profile_id,
@@ -1796,7 +2055,7 @@ class AdaptiveService:
         }
         event["id"] = event["event_id"]
         event["type"] = event["event_type"]
-        return self.store.append_jsonl("events/events.jsonl", event)
+        return event
 
     def _prepared_actions(self) -> list[dict[str, Any]]:
         state = self.store.read_json("prepared/actions.json", {"version": 1, "actions": []})
@@ -1815,6 +2074,19 @@ class AdaptiveService:
             if action.get("action_id") == action_id or action.get("id") == action_id:
                 return action, actions
         raise AdaptiveError("NOT_FOUND", "prepared action not found")
+
+    def _prepared_action_commit_response(self, action: dict[str, Any], *, duplicate: bool = False) -> dict[str, Any]:
+        execution_status = str(action.get("execution_status") or "committed")
+        return {
+            "profile_id": self.profile_id,
+            "committed": True,
+            "duplicate": bool(duplicate),
+            "action": action,
+            "executed": execution_status == "executed",
+            "execution_status": execution_status,
+            "execution_result": action.get("execution_result"),
+            "outbox_id": action.get("outbox_id"),
+        }
 
     def _conflicts(self) -> list[dict[str, Any]]:
         state = self.store.read_json("memory/conflicts.json", {"version": 1, "conflicts": []})
@@ -1860,12 +2132,15 @@ def _relative(root: Path, path: Path) -> str:
 
 
 def _bounded_walk(root: Path, start: Path, *, max_depth: int, max_entries: int) -> list[Path]:
+    root = root.resolve()
+    start = start.resolve(strict=False)
+    if not _inside_root(root, start) or path_is_restricted(root, start):
+        return []
     if start.is_file():
         return [start]
-    root = root.resolve()
-    start = start.resolve()
     entries: list[Path] = []
     stack: list[tuple[Path, int]] = [(start, 0)]
+    seen_dirs = {str(start)}
     while stack and len(entries) < max_entries:
         current, depth = stack.pop()
         if depth >= max_depth:
@@ -1875,14 +2150,61 @@ def _bounded_walk(root: Path, start: Path, *, max_depth: int, max_entries: int) 
         except OSError:
             continue
         for child in children:
-            if _should_skip(child) or path_is_restricted(root, child):
+            resolved_child = child.resolve(strict=False)
+            if (
+                _should_skip(child)
+                or _should_skip(resolved_child)
+                or not _inside_root(root, resolved_child)
+                or path_is_restricted(root, resolved_child)
+            ):
                 continue
-            entries.append(child)
+            entries.append(resolved_child)
             if len(entries) >= max_entries:
                 break
-            if child.is_dir():
-                stack.append((child, depth + 1))
+            if resolved_child.is_dir():
+                key = str(resolved_child)
+                if key not in seen_dirs:
+                    seen_dirs.add(key)
+                    stack.append((resolved_child, depth + 1))
     return entries
+
+
+def _inside_root(root: Path, path: Path) -> bool:
+    try:
+        path.resolve(strict=False).relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _onboarding_apply_approved(ctx: dict[str, Any] | None) -> bool:
+    return isinstance(ctx, dict) and ctx.get("_tool_server_approved") is True
+
+
+def _event_payload(event: dict[str, Any]) -> dict[str, Any]:
+    payload = event.get("payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _event_payload_bool(event: dict[str, Any], key: str) -> bool:
+    return _event_payload(event).get(key) is True
+
+
+def _event_status(event: dict[str, Any]) -> str:
+    payload = _event_payload(event)
+    return str(payload.get("status") or event.get("status") or event.get("event_type") or "").strip().lower()
+
+
+def _event_indicates_failure(event: dict[str, Any]) -> bool:
+    status = _event_status(event)
+    return any(token in status for token in ("fail", "error", "exception", "regression"))
+
+
+def _event_indicates_verified_success(event: dict[str, Any]) -> bool:
+    payload = _event_payload(event)
+    status = _event_status(event)
+    success_status = any(token in status for token in ("success", "succeed", "passed", "verified"))
+    return bool(payload.get("verified") is True and success_status)
 
 
 def _file_entry(root: Path, path: Path) -> dict[str, Any]:

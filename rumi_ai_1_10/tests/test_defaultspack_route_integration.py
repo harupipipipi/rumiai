@@ -135,6 +135,9 @@ def test_template_function_routes_join_canonical_transport_registry():
 
 
 def test_adaptive_function_routes_join_canonical_transport_registry():
+    import json
+    from pathlib import Path
+
     from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
     canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
@@ -166,6 +169,27 @@ def test_adaptive_function_routes_join_canonical_transport_registry():
         canonical[("POST", "/api/continuations/resume")].function_id
         == "adaptive_continuation_resume"
     )
+
+    ecosystem_path = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack" / "ecosystem.json"
+    ecosystem_routes = json.loads(ecosystem_path.read_text(encoding="utf-8"))["api_routes"]
+    ecosystem_adaptive = {
+        (str(route["method"]).upper(), route.get("path") or route.get("path_pattern")): route
+        for route in ecosystem_routes
+        if str(route.get("function_id") or "").startswith("adaptive_")
+    }
+    canonical_adaptive = {
+        key: spec
+        for key, spec in canonical.items()
+        if str(spec.function_id or "").startswith("adaptive_")
+    }
+    assert set(ecosystem_adaptive) == set(canonical_adaptive)
+    for key, spec in canonical_adaptive.items():
+        route = ecosystem_adaptive[key]
+        assert route["function_id"] == spec.function_id
+        if spec.path_inject:
+            assert route.get("path_param_map") == spec.path_inject
+        if spec.sensitive:
+            assert route.get("sensitive") is True
 
 
 def test_inactive_template_function_routes_are_not_registered(tmp_path):

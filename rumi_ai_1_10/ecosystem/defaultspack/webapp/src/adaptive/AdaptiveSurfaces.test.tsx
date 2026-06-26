@@ -145,13 +145,15 @@ test("automation updates use the local automation route without high-risk prepar
 });
 
 test("ResourceBanner renders API errors without demo fallback copy", () => {
+  const longError = "backend rejected compile because signed plan metadata is missing settings revision and pack digest";
   const html = renderToStaticMarkup(createElement(ResourceBanner, {
     status: "error",
-    error: "backend rejected compile",
+    error: longError,
   }));
 
   assert.match(html, /Adaptive API error/);
-  assert.match(html, /backend rejected compile/);
+  assert.match(html, /signed plan metadata is missing settings revision/);
+  assert.match(html, /title="backend rejected compile because signed plan metadata is missing settings revision and pack digest"/);
   assert.doesNotMatch(html, /Demo adaptive state/);
   assert.doesNotMatch(html, /Local placeholder adaptive state/);
 });
@@ -188,6 +190,16 @@ test("adaptive surfaces do not render demo payloads unless initial state is expl
 
   assert.match(html, /Adaptive activity is unavailable/);
   assert.doesNotMatch(html, /Review queue/);
+});
+
+test("OnboardingShell without live data does not expose demo operation buttons", () => {
+  const html = renderToStaticMarkup(createElement(OnboardingShell));
+
+  assert.match(html, /Adaptive onboarding is unavailable/);
+  assert.doesNotMatch(html, /Normalize onboarding answers/);
+  assert.doesNotMatch(html, /Compile onboarding profile/);
+  assert.doesNotMatch(html, /Simulate onboarding profile/);
+  assert.doesNotMatch(html, /Apply signed onboarding profile plan/);
 });
 
 test("evidence, repository, and budget panels render compact degraded surfaces", () => {

@@ -5,11 +5,13 @@
     "adaptive",
     "onboarding"
   ],
-  "risk": "medium",
+  "risk": "high",
   "requires": [
     "adaptive.onboarding.apply"
   ],
-  "caller_requires": [],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",

@@ -105,7 +105,7 @@ export function ResourceBanner({
     }`}>
       <span className="flex min-w-0 items-center gap-2">
         <AlertTriangle size={13} className="shrink-0" aria-hidden="true" />
-        <span className="truncate">
+        <span className="min-w-0 whitespace-normal break-words" title={error ?? undefined}>
           {isError ? "Adaptive API error." : "Local placeholder adaptive state."}
           {error ? ` ${error}` : ""}
         </span>

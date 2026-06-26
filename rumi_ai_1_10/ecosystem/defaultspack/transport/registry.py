@@ -2061,7 +2061,7 @@ _ADAPTIVE_HTTP_ROUTE_SPECS = [
     _adaptive_http_route("POST", "/api/onboarding/answers/normalize", "adaptive_onboarding_normalize"),
     _adaptive_http_route("POST", "/api/onboarding/compile", "adaptive_onboarding_compile"),
     _adaptive_http_route("POST", "/api/onboarding/simulate", "adaptive_onboarding_simulate"),
-    _adaptive_http_route("POST", "/api/onboarding/apply", "adaptive_onboarding_apply"),
+    _adaptive_http_route("POST", "/api/onboarding/apply", "adaptive_onboarding_apply", sensitive=True),
     _adaptive_http_route("POST", "/api/onboarding/undo", "adaptive_onboarding_undo"),
     _adaptive_http_route("GET", "/api/onboarding/history", "adaptive_onboarding_history"),
     _adaptive_http_route("POST", "/api/onboarding/rediagnose", "adaptive_onboarding_rediagnose"),
