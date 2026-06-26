@@ -1,0 +1,347 @@
+import { defaultspackApiFetch, explainDefaultspackApiError } from "../../lib/api";
+import { normalizeDesktopProvisioningStatus, normalizeDesktopStatus, normalizeSandboxState } from "./types";
+import type {
+  CreateDesktopRequest,
+  DesktopAccessPolicy,
+  DesktopAccessRequest,
+  DesktopControlLeaseGrant,
+  DesktopControlLeaseRenewal,
+  DesktopFrameQuality,
+  DesktopFrameResult,
+  DesktopInputRequest,
+  DesktopInstance,
+  DesktopRules,
+  RuntimeDoctorResult,
+  RuntimeOperation,
+  RuntimeProvidersResponse,
+  SandboxInstance,
+  SandboxTemplate,
+} from "./types";
+
+type ApiEnvelope<T> =
+  | { status: "ok"; data: T }
+  | { status: "error"; error: { code?: string; message?: string } };
+
+function encodeId(value: string): string {
+  return encodeURIComponent(value);
+}
+
+function requestId(prefix: string): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await defaultspackApiFetch(path, init);
+  let payload: ApiEnvelope<T>;
+  try {
+    payload = await response.json() as ApiEnvelope<T>;
+  } catch {
+    throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+  }
+  if (!response.ok || payload.status === "error") {
+    throw new Error(explainDefaultspackApiError(
+      response.status,
+      payload.status === "error" ? payload.error : undefined,
+      response.statusText,
+    ));
+  }
+  return payload.data;
+}
+
+function numberHeader(response: Response, names: string[], fallback: number): number {
+  for (const name of names) {
+    const raw = response.headers.get(name);
+    if (!raw) continue;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
+
+function stringHeader(response: Response, names: string[], fallback: string | null = null): string | null {
+  for (const name of names) {
+    const value = response.headers.get(name);
+    if (value && value.trim()) return value.trim();
+  }
+  return fallback;
+}
+
+function normalizeSandboxInstance(instance: SandboxInstance): SandboxInstance {
+  const state = normalizeSandboxState(instance.state ?? instance.status);
+  return {
+    ...instance,
+    state,
+    status: state,
+  };
+}
+
+function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
+  return {
+    ...instance,
+    status: normalizeDesktopStatus(instance.status),
+    provisioning: instance.provisioning
+      ? {
+          ...instance.provisioning,
+          status: normalizeDesktopProvisioningStatus(instance.provisioning.status),
+        }
+      : instance.provisioning,
+  };
+}
+
+function normalizeLeaseExpiresAt(value: unknown): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+    return new Date(milliseconds).toISOString();
+  }
+  return typeof value === "string" ? value : "";
+}
+
+function normalizeDesktopLeaseGrant(lease: DesktopControlLeaseGrant & { expires_at?: unknown }): DesktopControlLeaseGrant {
+  return {
+    ...lease,
+    expires_at: normalizeLeaseExpiresAt(lease.expires_at),
+  };
+}
+
+function normalizeDesktopLeaseRenewal(lease: DesktopControlLeaseRenewal & { expires_at?: unknown }): DesktopControlLeaseRenewal {
+  return {
+    ...lease,
+    expires_at: normalizeLeaseExpiresAt(lease.expires_at),
+  };
+}
+
+export async function fetchDesktopFrame(
+  seatId: string,
+  options: {
+    afterSeq?: number | null;
+    quality?: DesktopFrameQuality;
+    accessKey?: string | null;
+    signal?: AbortSignal;
+  } = {},
+): Promise<DesktopFrameResult> {
+  const query = new URLSearchParams();
+  if (typeof options.afterSeq === "number") query.set("after", String(options.afterSeq));
+  if (options.quality) query.set("quality", options.quality);
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const response = await defaultspackApiFetch(`/api/desktops/${encodeId(seatId)}/frame${suffix}`, {
+    method: "GET",
+    headers: {
+      Accept: "image/webp,image/jpeg,image/png",
+      ...(options.accessKey ? { "X-Rumi-Desktop-Access-Key": options.accessKey } : {}),
+    },
+    cache: "no-store",
+    signal: options.signal,
+  });
+
+  if (response.status === 204) {
+    return { status: "not_modified", seat_id: seatId, after_seq: options.afterSeq ?? null };
+  }
+  if (!response.ok) {
+    throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+  }
+
+  const blob = await response.blob();
+  const fallbackSeq = typeof options.afterSeq === "number" ? options.afterSeq + 1 : 0;
+  return {
+    status: "frame",
+    seat_id: seatId,
+    frame_seq: numberHeader(response, ["X-Rumi-Frame-Seq", "X-Frame-Seq"], fallbackSeq),
+    width: numberHeader(response, ["X-Rumi-Frame-Width", "X-Frame-Width"], 0),
+    height: numberHeader(response, ["X-Rumi-Frame-Height", "X-Frame-Height"], 0),
+    mime_type: response.headers.get("Content-Type")?.split(";")[0]?.trim() || blob.type || "image/jpeg",
+    blob,
+    captured_at: stringHeader(response, ["X-Rumi-Captured-At", "X-Captured-At"]),
+  };
+}
+
+export const sandboxesApi = {
+  listRuntimeProviders() {
+    return request<RuntimeProvidersResponse>("/api/runtime/providers", { cache: "no-store" });
+  },
+
+  runRuntimeDoctor() {
+    return request<RuntimeDoctorResult>("/api/runtime/doctor", {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId("doctor") }),
+    });
+  },
+
+  ensureRuntime(providerId?: string | null) {
+    return request<RuntimeOperation>("/api/runtime/ensure", {
+      method: "POST",
+      body: JSON.stringify({
+        request_id: requestId("ensure"),
+        provider_id: providerId || undefined,
+      }),
+    });
+  },
+
+  getRuntimeOperation(operationId: string) {
+    return request<RuntimeOperation>(`/api/runtime/operations/${encodeId(operationId)}`, { cache: "no-store" });
+  },
+
+  cancelRuntimeOperation(operationId: string) {
+    return request<RuntimeOperation>(`/api/runtime/operations/${encodeId(operationId)}/cancel`, {
+      method: "POST",
+      body: JSON.stringify({ request_id: requestId("runtime-cancel") }),
+    });
+  },
+
+  listSandboxTemplates() {
+    return request<{ templates: SandboxTemplate[] }>("/api/sandbox/templates", { cache: "no-store" });
+  },
+
+  listSandboxes() {
+    return request<{ sandboxes: SandboxInstance[] }>("/api/sandboxes", { cache: "no-store" })
+      .then((payload) => ({ sandboxes: payload.sandboxes.map(normalizeSandboxInstance) }));
+  },
+
+  listDesktops() {
+    return request<{ desktops: DesktopInstance[] }>("/api/desktops", { cache: "no-store" })
+      .then((payload) => ({ desktops: payload.desktops.map(normalizeDesktopInstance) }));
+  },
+
+  createDesktop(payload: CreateDesktopRequest) {
+    return request<DesktopInstance>("/api/desktops", {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        request_id: payload.request_id ?? requestId("desktop-create"),
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  startDesktop(seatId: string, accessKey?: string | null) {
+    return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/start`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-start"),
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  stopDesktop(seatId: string, accessKey?: string | null) {
+    return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/stop`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-stop"),
+        confirm_destructive: true,
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  restartDesktop(seatId: string, accessKey?: string | null) {
+    return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/restart`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-restart"),
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  deleteDesktop(seatId: string, accessKey?: string | null) {
+    const query = new URLSearchParams({
+      confirm_destructive: "true",
+      request_id: requestId("desktop-delete"),
+    });
+    return request<{ deleted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}?${query.toString()}`, {
+      method: "DELETE",
+      headers: {
+        ...(accessKey ? { "X-Rumi-Desktop-Access-Key": accessKey } : {}),
+      },
+    });
+  },
+
+  updateDesktopRules(
+    seatId: string,
+    payload: {
+      role?: string | null;
+      rules?: DesktopRules | string[] | null;
+      access?: DesktopAccessPolicy & { access_key?: string };
+      access_key?: string;
+    },
+  ) {
+    return request<DesktopInstance>(`/api/desktops/${encodeId(seatId)}/rules`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        request_id: requestId("desktop-rules"),
+      }),
+    }).then(normalizeDesktopInstance);
+  },
+
+  requestDesktopAccess(seatId: string, reason?: string) {
+    return request<DesktopAccessRequest>(`/api/desktops/${encodeId(seatId)}/access-requests`, {
+      method: "POST",
+      body: JSON.stringify({
+        reason,
+        request_id: requestId("desktop-access"),
+      }),
+    });
+  },
+
+  grantDesktopAccess(seatId: string, accessRequestId: string, approved = true) {
+    return request<DesktopAccessRequest>(
+      `/api/desktops/${encodeId(seatId)}/access-requests/${encodeId(accessRequestId)}/grant`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          approved,
+          request_id: requestId("desktop-access-grant"),
+        }),
+      },
+    );
+  },
+
+  fetchDesktopFrame,
+
+  acquireDesktopControl(seatId: string, accessKey?: string | null) {
+    return request<DesktopControlLeaseGrant>(`/api/desktops/${encodeId(seatId)}/control/acquire`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        request_id: requestId("desktop-control-acquire"),
+      }),
+    }).then(normalizeDesktopLeaseGrant);
+  },
+
+  renewDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {
+    return request<DesktopControlLeaseRenewal>(`/api/desktops/${encodeId(seatId)}/control/renew`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        lease_token: leaseToken,
+        request_id: requestId("desktop-control-renew"),
+      }),
+    }).then(normalizeDesktopLeaseRenewal);
+  },
+
+  releaseDesktopControl(seatId: string, leaseToken: string, accessKey?: string | null) {
+    return request<{ released: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}/control/release`, {
+      method: "POST",
+      body: JSON.stringify({
+        access_key: accessKey || undefined,
+        lease_token: leaseToken,
+        request_id: requestId("desktop-control-release"),
+      }),
+    });
+  },
+
+  sendDesktopInput(seatId: string, payload: DesktopInputRequest) {
+    return request<{ accepted: boolean; seat_id: string }>(`/api/desktops/${encodeId(seatId)}/input`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...payload,
+        client_action_id: payload.client_action_id ?? requestId("desktop-action"),
+        request_id: payload.request_id ?? requestId("desktop-input"),
+      }),
+    });
+  },
+};

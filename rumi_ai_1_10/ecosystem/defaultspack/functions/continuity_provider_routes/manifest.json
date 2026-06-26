@@ -1,0 +1,44 @@
+{
+  "function_id": "continuity_provider_routes",
+  "description": "List API provider routes eligible for continuity.",
+  "tags": [
+    "continuity",
+    "provider"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.provider_routes",
+    "defaultspack.continuity.provider_routes",
+    "defaults.continuity.provider.routes",
+    "defaultspack.continuity.provider.routes"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "provider_routes"
+      }
+    }
+  }
+}

@@ -2829,7 +2829,7 @@ export function ComposerRenderer({
                     ))}
                   </div>
                 </div>
-                
+
                 <div className="rumi-composer-toolbar flex items-center justify-between border-t border-white/5 pt-2">
                   <div className="flex min-w-0 items-center gap-2 overflow-hidden">
                     {newConversationInlineActionWidgets.map((widget) => (

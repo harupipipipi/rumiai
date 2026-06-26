@@ -1621,7 +1621,19 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 
-            if isinstance(result, dict) and result.get("_static"):
+            if isinstance(result, dict) and result.get("_binary"):
+                self._send_binary(
+                    int(result.get("status_code", 200)),
+                    result.get("content_type", "application/octet-stream"),
+                    result.get("body", b""),
+                    result.get("headers") if isinstance(result.get("headers"), dict) else None,
+                )
+            elif isinstance(result, dict) and result.get("_empty"):
+                self._send_empty(
+                    int(result.get("status_code", 204)),
+                    result.get("headers") if isinstance(result.get("headers"), dict) else None,
+                )
+            elif isinstance(result, dict) and result.get("_static"):
                 self._send_static(
                     200, result.get("content_type", "text/html"), result.get("body", "")
                 )
@@ -1711,6 +1723,36 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body_bytes)
         except BrokenPipeError:
             pass
+
+    def _send_binary(self, status_code, content_type, body, headers=None):
+        if isinstance(body, str):
+            body_bytes = body.encode("utf-8")
+        else:
+            body_bytes = body or b""
+        self.send_response(status_code)
+        self._send_cors_headers()
+        self.send_header("Content-Type", str(content_type or "application/octet-stream"))
+        self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            if str(key).lower() in {"content-type", "content-length"}:
+                continue
+            self.send_header(str(key), str(value))
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self.end_headers()
+        try:
+            self.wfile.write(body_bytes)
+        except BrokenPipeError:
+            pass
+
+    def _send_empty(self, status_code=204, headers=None):
+        self.send_response(status_code)
+        self._send_cors_headers()
+        for key, value in (headers or {}).items():
+            if str(key).lower() in {"content-type", "content-length"}:
+                continue
+            self.send_header(str(key), str(value))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _sensitive_request_error(self, method, path, request_data=None):
         route_sensitive, route_local_only = self._route_metadata_flags(method, path)

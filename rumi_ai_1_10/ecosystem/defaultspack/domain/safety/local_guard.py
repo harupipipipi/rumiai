@@ -50,6 +50,9 @@ SENSITIVE_LOCAL_PATHS = {
     "/api/tools/browser-computer",
     "/api/tools/create",
     "/api/tools/mcp/connect",
+    "/api/runtime/ensure",
+    "/api/runtime/update",
+    "/api/runtime/uninstall",
     "/api/container",
     "/api/container/settings",
 }
@@ -61,6 +64,9 @@ METHOD_SENSITIVE_LOCAL_PATHS = {
 
 SENSITIVE_LOCAL_PREFIXES = (
     "/api/authority/",
+    "/api/runtime/operations/",
+    "/api/sandboxes/",
+    "/api/desktops/",
     "/api/container/",
     "/api/agent/self-improvement/",
     "/api/memory/memo/",
@@ -68,6 +74,8 @@ SENSITIVE_LOCAL_PREFIXES = (
 
 METHOD_SENSITIVE_LOCAL_PREFIXES = (
     ("/api/authority/requests/", {"POST", "DELETE"}, ()),
+    ("/api/sandboxes", {"POST"}, ()),
+    ("/api/desktops", {"POST"}, ()),
     ("/api/tools/", {"PUT", "DELETE"}, ("/api/tools/browser-companion/bridge/",)),
     ("/api/tools/", {"POST"}, ("/api/tools/browser-companion/bridge/", "/api/tools/invoke")),
 )

@@ -2699,6 +2699,141 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.ambient.status
+  defaults.continuity.cancel:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.cancel
+  defaults.continuity.checkpoint:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.checkpoint
+  defaults.continuity.list.nodes:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.list.nodes
+  defaults.continuity.list_nodes:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.list_nodes
+  defaults.continuity.node.probe:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.node.probe
+  defaults.continuity.node.remove:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.node.remove
+  defaults.continuity.pairing.accept:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.pairing.accept
+  defaults.continuity.pairing.start:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.pairing.start
+  defaults.continuity.pairing_accept:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.pairing_accept
+  defaults.continuity.pairing_start:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.pairing_start
+  defaults.continuity.plan.handoff:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.plan.handoff
+  defaults.continuity.plan_handoff:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.plan_handoff
+  defaults.continuity.probe.node:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.probe.node
+  defaults.continuity.probe.provider.route:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.probe.provider.route
+  defaults.continuity.probe_node:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.probe_node
+  defaults.continuity.probe_provider_route:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.probe_provider_route
+  defaults.continuity.provider.extensions:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider.extensions
+  defaults.continuity.provider.routes:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider.routes
+  defaults.continuity.provider_route.probe:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider_route.probe
+  defaults.continuity.provider_route.set_fallbacks:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider_route.set_fallbacks
+  defaults.continuity.provider_extensions:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider_extensions
+  defaults.continuity.provider_routes:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.provider_routes
+  defaults.continuity.remove.node:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.remove.node
+  defaults.continuity.remove_node:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.remove_node
+  defaults.continuity.set.provider.fallbacks:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.set.provider.fallbacks
+  defaults.continuity.set_provider_fallbacks:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.set_provider_fallbacks
+  defaults.continuity.status:
+    owner: continuity
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.continuity.status
   defaults.tool.names:
     owner: tool
     reason: legacy caller compatibility

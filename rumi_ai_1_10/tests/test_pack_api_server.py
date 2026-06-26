@@ -228,6 +228,31 @@ class TestClientDisconnectHandling:
 
 
 class TestCheckAuth:
+    def test_scoped_bearer_sets_authenticated_principal(self, tmp_path) -> None:
+        from core_runtime.access_tokens import (
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
+
+        manager = ScopedAccessTokenManager(tokens_dir=tmp_path, secret_key="test-secret")
+        issued = manager.issue_token(
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+        )
+        reset_scoped_access_token_manager_for_tests(manager)
+        handler = _make_handler(headers=_make_headers(Authorization=f"Bearer {issued.access_token}"))
+
+        try:
+            assert handler._check_auth("GET", "/api/packs") is True
+            assert handler._request_auth_mode == "bearer"
+            assert handler._authenticated_principal.profile_id == "work"
+            assert handler._authenticated_principal.principal_id == "profile:work__surface:mobile__device:phone-1"
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
+
     def test_auth_success_hmac_manager(self) -> None:
         """HMACKeyManager.verify_token が True を返す → 認証成功"""
         mock_mgr = MagicMock()
@@ -277,6 +302,59 @@ class TestCheckAuth:
             internal_token="",
         )
         assert handler._check_auth("GET", "/api/packs") is False
+
+    def test_defaultspack_request_data_strips_credentials_from_forwarded_headers(self) -> None:
+        handler = _make_handler(
+            path="/api/ai/provider-key",
+            headers=_make_headers(
+                Authorization="Bearer root-token",
+                Cookie="rumi_panel_session=session",
+                X_Rumi_Csrf="csrf-token",
+                X_Test="kept",
+            ),
+        )
+
+        request_data = handler._defaultspack_request_data("GET")
+
+        assert request_data["_headers"] == {"X-Test": "kept"}
+
+    def test_defaultspack_request_data_body_cannot_overwrite_reserved_server_context(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        handler = _make_handler(
+            path="/api/test?status=query",
+            headers=_make_headers(X_Test="kept"),
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="phone-1",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+
+        request_data = handler._defaultspack_request_data(
+            "POST",
+            body={
+                "_headers": {"Authorization": "Bearer forged"},
+                "_authenticated_principal": {"profile_id": "evil"},
+                "_authority_subject": {"profile_id": "evil"},
+                "_method": "GET",
+                "_actual_method": "GET",
+                "status": "body",
+            },
+        )
+
+        assert request_data["status"] == "body"
+        assert request_data["_headers"] == {"X-Test": "kept"}
+        assert request_data["_authenticated_principal"]["profile_id"] == "work"
+        assert request_data["_authority_subject"]["profile_id"] == "work"
+        assert request_data["_authority_subject"]["principal_id"] == "profile:work__surface:mobile__device:phone-1"
+        assert request_data["_method"] == "POST"
+        assert request_data["_actual_method"] == "POST"
 
     def test_panel_session_auth_success_for_get(self) -> None:
         panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")

@@ -12,6 +12,7 @@ import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -2319,6 +2320,7 @@ function ChatApp() {
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
+  const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   useEffect(() => {
@@ -2619,7 +2621,7 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -5173,6 +5175,15 @@ function ChatApp() {
     openKanbanScope();
   };
 
+  const handleDesktopsModeOpen = () => {
+    const existingDesktopsTab = workspaceTabs.find((tab) => tab.kind === "desktops");
+    if (existingDesktopsTab) {
+      activateWorkspaceTab(existingDesktopsTab);
+      return;
+    }
+    handleWorkspaceTabCreate("desktops");
+  };
+
   const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
     setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
       ? {
@@ -5292,6 +5303,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -5320,6 +5333,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -5386,7 +5401,9 @@ function ChatApp() {
               </div>
             )}
 
-            {isKanbanMode ? (
+            {isDesktopsWorkspace ? (
+              <DesktopMonitorWorkspace />
+            ) : isKanbanMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <KanbanWorkspacePanel
                   activeConversationId={activeConversationId}

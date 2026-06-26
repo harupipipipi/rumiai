@@ -27,6 +27,11 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
         "source": "opencode_go_docs",
+        "tool_calls": True,
+        "reasoning": True,
+        "vision": True,
+        "vision_verified": True,
+        "thinking_disabled_for_tool_calls": True,
     },
     {
         "model_id": "glm-5.1",
@@ -140,15 +145,19 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
 ]
-_OPENCODE_GO_TOOL_CALL_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
-_OPENCODE_GO_REASONING_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_NATIVE_THINKING_MODELS = {"kimi-k2.6"}
+_OPENCODE_GO_DISABLE_THINKING_FOR_TOOL_MODELS = {"kimi-k2.6"}
+_OPENCODE_GO_OPENAI_VISION_MODELS = {"kimi-k2.6"}
 
 
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     defaults = dict(spec.get("defaults", {}))
-    tool_calls = spec["model_id"] in _OPENCODE_GO_TOOL_CALL_MODELS
+    tool_calls = bool(spec.get("tool_calls", spec["model_id"] in _OPENCODE_GO_TOOL_CALL_MODELS))
     reasoning = bool(spec.get("reasoning", spec["model_id"] in _OPENCODE_GO_REASONING_MODELS))
-    verified_reasoning_effort = spec["model_id"] in _OPENCODE_GO_REASONING_MODELS
+    verified_reasoning_effort = spec["model_id"] in _OPENCODE_GO_REASONING_EFFORT_MODELS
     metadata = {
         "transport": spec["transport"],
         "endpoint_path": spec["endpoint_path"],
@@ -158,7 +167,12 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         metadata["tool_calls_verified"] = True
     if verified_reasoning_effort:
         metadata["reasoning_effort_verified"] = True
-    for key in ("experimental", "vision_unverified"):
+    for key in (
+        "experimental",
+        "vision_unverified",
+        "vision_verified",
+        "thinking_disabled_for_tool_calls",
+    ):
         if spec.get(key):
             metadata[key] = True
     return {
@@ -227,6 +241,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "stream_options",
         "tool_choice",
         "reasoning_effort",
+        "thinking",
     }
     _MESSAGES_PARAM_KEYS = {
         "temperature",
@@ -436,12 +451,25 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
             resp.close()
 
     @staticmethod
-    def _model_params(params, *, supports_tools: bool, supports_reasoning: bool):
+    def _model_params(
+        params,
+        *,
+        model_id: str,
+        supports_tools: bool,
+        supports_reasoning_effort: bool,
+        supports_native_thinking: bool,
+        tools_present: bool,
+    ):
         filtered = dict(params or {})
         if not supports_tools:
             filtered.pop("tool_choice", None)
             filtered.pop("parallel_tool_calls", None)
-        if not supports_reasoning:
+        if not supports_reasoning_effort:
+            filtered.pop("reasoning_effort", None)
+        if not supports_native_thinking:
+            filtered.pop("thinking", None)
+        if tools_present and model_id in _OPENCODE_GO_DISABLE_THINKING_FOR_TOOL_MODELS:
+            filtered["thinking"] = {"type": "disabled"}
             filtered.pop("reasoning_effort", None)
         if "request_timeout" in (params or {}):
             filtered["request_timeout"] = params["request_timeout"]
@@ -454,9 +482,17 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         if model_id in self.ANTHROPIC_MESSAGES_MODELS:
             return self._complete_messages(model_id, messages, params)
         supports_tools = model_id in self.TOOL_CALL_MODELS
-        supports_reasoning = model_id in _OPENCODE_GO_REASONING_MODELS
+        supports_reasoning_effort = model_id in _OPENCODE_GO_REASONING_EFFORT_MODELS
+        supports_native_thinking = model_id in _OPENCODE_GO_NATIVE_THINKING_MODELS
         forward_tools = tools if supports_tools else []
-        forward_params = self._model_params(params, supports_tools=supports_tools, supports_reasoning=supports_reasoning)
+        forward_params = self._model_params(
+            params,
+            model_id=model_id,
+            supports_tools=supports_tools,
+            supports_reasoning_effort=supports_reasoning_effort,
+            supports_native_thinking=supports_native_thinking,
+            tools_present=bool(forward_tools),
+        )
         return super().complete(model_id, messages, forward_tools, forward_params)
 
     def stream(self, model, messages, tools, params):
@@ -465,9 +501,17 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
             yield from self._stream_messages(model_id, messages, params)
             return
         supports_tools = model_id in self.TOOL_CALL_MODELS
-        supports_reasoning = model_id in _OPENCODE_GO_REASONING_MODELS
+        supports_reasoning_effort = model_id in _OPENCODE_GO_REASONING_EFFORT_MODELS
+        supports_native_thinking = model_id in _OPENCODE_GO_NATIVE_THINKING_MODELS
         forward_tools = tools if supports_tools else []
-        forward_params = self._model_params(params, supports_tools=supports_tools, supports_reasoning=supports_reasoning)
+        forward_params = self._model_params(
+            params,
+            model_id=model_id,
+            supports_tools=supports_tools,
+            supports_reasoning_effort=supports_reasoning_effort,
+            supports_native_thinking=supports_native_thinking,
+            tools_present=bool(forward_tools),
+        )
         yield from super().stream(model_id, messages, forward_tools, forward_params)
 
     def embed(self, model, input_text):
@@ -476,8 +520,47 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
     def image_gen(self, model, prompt, params):
         raise NotImplementedError("OpenCode Go does not support image generation.")
 
+    @staticmethod
+    def _anthropic_image_source(image):
+        if image.startswith("data:"):
+            header, b64 = image.split(",", 1) if "," in image else ("", image)
+            media = "image/png"
+            if "image/jpeg" in header:
+                media = "image/jpeg"
+            elif "image/gif" in header:
+                media = "image/gif"
+            elif "image/webp" in header:
+                media = "image/webp"
+            return {"type": "base64", "media_type": media, "data": b64}
+        if image.startswith("http"):
+            return {"type": "url", "url": image}
+        return {"type": "base64", "media_type": "image/png", "data": image}
+
     def image_analyze(self, model, image, prompt):
-        raise NotImplementedError("OpenCode Go vision support is not verified.")
+        model_id = self._assert_supported_model(model)
+        if model_id in _OPENCODE_GO_OPENAI_VISION_MODELS:
+            return super().image_analyze(model_id, image, prompt)
+        if model_id in self.ANTHROPIC_MESSAGES_MODELS:
+            body = {
+                "model": model_id,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": self._anthropic_image_source(image)},
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
+                "max_tokens": 4096,
+            }
+            raw = self._request_messages_json("/messages", body)
+            text = ""
+            for block in raw.get("content", []):
+                if block.get("type") == "text":
+                    text += block.get("text", "")
+            return {"text": text}
+        raise NotImplementedError("OpenCode Go vision support is not verified for this model.")
 
     def transcribe(self, model, audio, params):
         raise NotImplementedError("OpenCode Go does not support audio transcription.")

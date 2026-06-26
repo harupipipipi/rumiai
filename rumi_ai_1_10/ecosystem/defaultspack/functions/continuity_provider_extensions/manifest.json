@@ -1,0 +1,45 @@
+{
+  "function_id": "continuity_provider_extensions",
+  "description": "List portable provider extension requirements.",
+  "tags": [
+    "continuity",
+    "provider",
+    "extension"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.provider_extensions",
+    "defaultspack.continuity.provider_extensions",
+    "defaults.continuity.provider.extensions",
+    "defaultspack.continuity.provider.extensions"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "provider_extensions"
+      }
+    }
+  }
+}

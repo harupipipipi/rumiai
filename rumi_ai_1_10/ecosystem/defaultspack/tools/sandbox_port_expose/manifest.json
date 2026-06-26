@@ -1,0 +1,41 @@
+{
+  "id": "sandbox_port_expose",
+  "description": "Expose or resolve a port from an existing managed sandbox.",
+  "config": {
+    "tool_id": "sandbox_port_expose",
+    "name": "Sandbox Port Expose",
+    "summary": "Expose or resolve a managed sandbox port.",
+    "tool_category": "sandbox",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["sandbox", "port", "network", "agent_os"],
+    "ui": {
+      "group_id": "sandbox",
+      "group_label": "Sandbox",
+      "group_icon": "terminal",
+      "item_icon": "radio-tower",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sandbox Port",
+      "composer_description": "Expose or resolve a port from an existing managed sandbox.",
+      "composer_icon": "radio-tower"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "sandbox_id": { "type": "string" },
+          "port": { "type": "integer" },
+          "protocol": { "type": "string", "enum": ["http", "https", "tcp"] }
+        },
+        "required": ["sandbox_id", "port"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.sandbox_tools:sandbox_port_expose"
+    }
+  }
+}
