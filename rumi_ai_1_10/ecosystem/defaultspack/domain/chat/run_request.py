@@ -638,6 +638,18 @@ def prepare_chat_run(
         tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
         agent_id=tool_context.get("agent_id") if isinstance(tool_context, dict) else None,
     )
+    provider_compat_tool_ids = {
+        str(item).strip()
+        for item in (
+            tool_context.get("caller_provider_tool_ids")
+            if isinstance(tool_context, dict)
+            and isinstance(tool_context.get("caller_provider_tool_ids"), list)
+            else []
+        )
+        if str(item or "").strip()
+    }
+    if provider_compat_tool_ids:
+        connected_names = {name for name in connected_names if name not in provider_compat_tool_ids}
     tool_context["chat_references"] = chat_references
     tool_context["history_json_path"] = chat_references["history_json_path"]
     skill_eval = RuntimeSkillTriggerService().evaluate(
@@ -2219,9 +2231,10 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
 
     raw_tools = input_data.get("tools")
     if isinstance(raw_tools, list):
+        include = _coerce_tool_items(raw_tools)
         return NormalizedToolSelection(
             mode="manual" if raw_tools else "none",
-            include=list(raw_tools),
+            include=include,
             source="tools",
         )
 
@@ -2348,6 +2361,29 @@ def _coerce_tool_items(value: Any) -> list[Any]:
             if stripped:
                 result.append(stripped)
     return result
+
+
+def _caller_provider_tool_definitions(input_data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_tools = input_data.get("tools") if isinstance(input_data, dict) else None
+    if not isinstance(raw_tools, list):
+        return []
+    provider_tools: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    target_only_keys = {"kind", "id", "tool_id", "service_id"}
+    for item in raw_tools:
+        if not isinstance(item, dict):
+            continue
+        if normalize_tool_target(item) is not None and set(item).issubset(target_only_keys):
+            continue
+        name = tool_name_from_definition(item)
+        if not name:
+            continue
+        key = _tool_definition_id(item) or name
+        if key in seen:
+            continue
+        seen.add(key)
+        provider_tools.append(dict(item))
+    return provider_tools
 
 
 def _invalid_tool_selection_items_reason(value: Any) -> str | None:
@@ -2749,8 +2785,16 @@ def _available_tools(
     user_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     selection = _normalize_tool_selection(input_data)
+    caller_provider_tools = _caller_provider_tool_definitions(input_data)
     resolved_context = resolve_runtime_profile_context(context or {})
     resolved_context["tool_selection"] = _tool_selection_metadata(selection)
+    caller_provider_tool_ids = [
+        tool_name_from_definition(tool)
+        for tool in caller_provider_tools
+        if tool_name_from_definition(tool)
+    ]
+    if caller_provider_tool_ids:
+        resolved_context["caller_provider_tool_ids"] = caller_provider_tool_ids
     agent_id = input_data.get("agent_id") or resolved_context.get("agent_id")
     requested_tool_ids = _requested_tool_ids_from_selection(selection)
     runtime_profile, agent_id = _runtime_profile_with_policy_connected_tools(
@@ -2875,6 +2919,11 @@ def _available_tools(
                 }
             except Exception:
                 filtered = []
+    filtered = _merge_tool_definitions(filtered, caller_provider_tools)
+    if caller_provider_tool_ids:
+        selection_metadata = resolved_context.get("tool_selection")
+        if isinstance(selection_metadata, dict):
+            selection_metadata["provider_compat_tool_ids"] = caller_provider_tool_ids
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
 

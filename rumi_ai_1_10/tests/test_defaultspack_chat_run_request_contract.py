@@ -113,7 +113,7 @@ def test_tool_selection_rejects_raw_tool_definition_dict():
     assert error == "params.tool_selection.include must contain only string IDs or {kind, id} targets"
 
 
-def test_legacy_tools_raw_definition_does_not_attach_provider_tool(tmp_path, monkeypatch):
+def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
 
@@ -137,7 +137,9 @@ def test_legacy_tools_raw_definition_does_not_attach_provider_tool(tmp_path, mon
         {},
     )
 
-    assert "attacker_tool" not in _external_provider_tool_names(prepared)
+    assert "attacker_tool" in _external_provider_tool_names(prepared)
+    assert prepared.tool_context["tool_selection"]["provider_compat_tool_ids"] == ["attacker_tool"]
+    assert "attacker_tool" not in prepared.connected_tool_names
     ChatStore._instance = None
 
 
