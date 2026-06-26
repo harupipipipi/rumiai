@@ -1158,13 +1158,28 @@ class AdaptiveService:
         return {"profile_id": profile_id, "profile": profile, "found": profile is not None}
 
     def operating_profile_preview(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-        del ctx
-        return self.onboarding_compile({"profile": args.get("profile") or args.get("draft") or {}}, {})
+        payload = dict(args)
+        route_id = str(args.get("id") or "").strip()
+        if route_id:
+            answers = payload.get("answers")
+            if isinstance(answers, dict):
+                payload["answers"] = {**answers, "profile_id": route_id}
+            else:
+                profile = payload.get("profile")
+                if isinstance(profile, dict):
+                    payload["profile"] = {**profile, "profile_id": route_id}
+                else:
+                    draft = payload.get("draft")
+                    if isinstance(draft, dict):
+                        payload["draft"] = {**draft, "profile_id": route_id}
+                    else:
+                        payload["profile"] = {"profile_id": route_id}
+        return self.onboarding_compile(payload, ctx)
 
     def operating_profile_activate(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
         del ctx
         self._ensure_not_frozen("operating_profile.activate")
-        target = str(args.get("target_profile_id") or args.get("profile_id") or self.profile_id)
+        target = str(args.get("target_profile_id") or args.get("id") or args.get("profile_id") or self.profile_id)
         try:
             from core_runtime.startup_profiles import StartupProfileManager
 

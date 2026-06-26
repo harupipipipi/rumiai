@@ -28,7 +28,10 @@ test("OnboardingShell renders the adaptive setup steps", () => {
   assert.match(html, /Normalize/);
   assert.match(html, /Compile/);
   assert.match(html, /Simulate/);
-  assert.match(html, /Apply/);
+  assert.match(html, /Apply unavailable/);
+  assert.match(html, /aria-label="Apply unavailable: approval flow is not connected"/);
+  assert.match(html, /title="Approval flow is not connected."/);
+  assert.match(html, /disabled=""/);
 });
 
 test("onboarding draft helpers preserve controlled checkbox and radio changes", () => {

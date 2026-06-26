@@ -25,7 +25,6 @@ import type {
 } from "../lib/adaptiveApi";
 import {
   adaptiveOnboardingActionIds,
-  applyAdaptiveOnboardingPlan,
   compileAdaptiveOnboardingAnswers,
   fetchAdaptiveOnboarding,
   normalizeAdaptiveOnboardingAnswers,
@@ -62,7 +61,7 @@ const steps = [
 
 type StepId = (typeof steps)[number]["id"];
 
-type OnboardingOperation = "normalize" | "compile" | "simulate" | "apply";
+type OnboardingOperation = "normalize" | "compile" | "simulate";
 
 const presetOptions: Array<{ value: AdaptiveOnboardingPreset; label: string; summary: string }> = [
   { value: "discussion_only", label: "Discussion only", summary: "Draft and discuss; writes stay blocked." },
@@ -124,7 +123,6 @@ const operationLabels: Record<OnboardingOperation, string> = {
   normalize: "Normalize",
   compile: "Compile",
   simulate: "Simulate",
-  apply: "Apply",
 };
 
 function permissionActionId(id: string): AdaptiveOnboardingActionId | null {
@@ -623,6 +621,7 @@ export function OnboardingShell({ initialState }: { initialState?: AdaptiveOnboa
   const [activeIndex, setActiveIndex] = useState(initialIndex > 0 ? initialIndex : 0);
   const activeStep = steps[activeIndex] ?? steps[0];
   const progress = useMemo(() => `${activeIndex + 1} / ${steps.length}`, [activeIndex]);
+  const applyDisabledReason = "Approval flow is not connected.";
   const setDraft = (next: AdaptiveOnboardingAnswers) => {
     setDraftTouched(true);
     setResult(null);
@@ -637,11 +636,6 @@ export function OnboardingShell({ initialState }: { initialState?: AdaptiveOnboa
   }, [data, draftTouched]);
 
   const runOperation = async (operation: OnboardingOperation) => {
-    if (operation === "apply" && !result?.plan) {
-      setOperationMessage(null);
-      setOperationError("Apply requires a signed plan from Compile or Simulate.");
-      return;
-    }
     setBusyAction(operation);
     setOperationError(null);
     setOperationMessage(null);
@@ -651,16 +645,9 @@ export function OnboardingShell({ initialState }: { initialState?: AdaptiveOnboa
           ? await normalizeAdaptiveOnboardingAnswers(draft)
           : operation === "compile"
             ? await compileAdaptiveOnboardingAnswers(draft)
-            : operation === "simulate"
-              ? await simulateAdaptiveOnboardingAnswers(draft)
-              : await applyAdaptiveOnboardingPlan(draft, result?.plan);
+            : await simulateAdaptiveOnboardingAnswers(draft);
       setResult(nextResult);
-      setOperationMessage(
-        operation === "apply"
-          ? `Applied onboarding profile${nextResult.planId ? ` with plan ${nextResult.planId}` : ""}.`
-          : `${operationLabels[operation]} completed.`,
-      );
-      if (operation === "apply") refresh();
+      setOperationMessage(`${operationLabels[operation]} completed.`);
     } catch (err) {
       setOperationError(`${operationLabels[operation]} failed. ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -712,11 +699,11 @@ export function OnboardingShell({ initialState }: { initialState?: AdaptiveOnboa
         <button
           type="button"
           className={adaptivePrimaryControlClass}
-          onClick={() => void runOperation("apply")}
-          disabled={busyAction !== null || !result?.plan}
-          aria-label="Apply signed onboarding profile plan"
+          disabled
+          title={applyDisabledReason}
+          aria-label="Apply unavailable: approval flow is not connected"
         >
-          Apply
+          Apply unavailable
         </button>
       </div>
       <ResultPanel result={result} message={operationMessage} error={operationError} />

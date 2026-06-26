@@ -85,6 +85,55 @@ def test_adaptive_apply_requires_plan_and_undo_restores_active_profile(
     assert restored.preset_id == "discussion_only"
 
 
+def test_operating_profile_preview_forwards_route_id_and_answers(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from domain.adaptive.service import dispatch
+
+    preview = dispatch(
+        "operating_profiles_preview",
+        {
+            "id": "route-profile",
+            "answers": {
+                "profile_id": "body-profile",
+                "preset": "balanced_local",
+                "actions": {"local_write": "allow"},
+            },
+        },
+        {},
+    )
+
+    assert preview["status"] == "ok"
+    profile = preview["data"]["profile"]
+    assert profile["profile_id"] == "route-profile"
+    assert profile["answers"]["profile_id"] == "route-profile"
+    assert profile["policy"]["local_write"] == "allow"
+
+
+def test_operating_profile_activate_honors_route_id_without_body_profile(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from core_runtime import startup_profiles
+    from domain.adaptive.service import dispatch
+
+    activated: dict[str, str] = {}
+
+    class FakeStartupProfileManager:
+        def activate_profile(self, profile_id: str) -> dict[str, str]:
+            activated["profile_id"] = profile_id
+            return {"profile_id": profile_id, "activated": True}
+
+    monkeypatch.setattr(startup_profiles, "StartupProfileManager", FakeStartupProfileManager)
+
+    result = dispatch("operating_profiles_activate", {"id": "route-profile"}, {})
+
+    assert result["status"] == "ok"
+    assert activated == {"profile_id": "route-profile"}
+    assert result["data"]["profile_id"] == "route-profile"
+
+
 def test_adaptive_freeze_blocks_real_tool_and_public_function_dispatch(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
