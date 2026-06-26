@@ -81,6 +81,14 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
         feature="pairing_admin",
     ),
     MobileRouteContract(
+        "GET",
+        "/api/mobile/v1/pairings/{id}/review",
+        block_module="blocks.mobile.pairing",
+        path_inject={"id": "pairing_id"},
+        defaults={"action": "review"},
+        feature="pairing_admin",
+    ),
+    MobileRouteContract(
         "POST",
         "/api/mobile/v1/pairings/{id}/reject",
         block_module="blocks.mobile.pairing",

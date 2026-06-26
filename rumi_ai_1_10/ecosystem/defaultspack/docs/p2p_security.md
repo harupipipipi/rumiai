@@ -73,6 +73,11 @@ metadata, and `expiresAt`.
   Split device token pickup is a separate `POST
   /api/mobile/v1/pairings/{id}/token/pickup` JSON-body request containing the
   QR-only pickup secret and claimed `device_id`.
+- PC approval UI reads claim details from the admin-only
+  `GET /api/mobile/v1/pairings/{id}/review` route. That route is local-only,
+  requires panel/local auth, and returns fingerprints plus a `claim_hash`
+  rather than raw keys, pairing code, or pickup secrets. The approve call must
+  echo that `claim_hash`; a changed claim is rejected before token issuance.
 - Credential transfer is disabled by default behind
   `RUMI_MOBILE_CREDENTIAL_TRANSFER=1` until encrypted device-bound delivery is
   complete. Plaintext or wrapper-only payloads fail closed.

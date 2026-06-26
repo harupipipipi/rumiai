@@ -1,5 +1,12 @@
 import { api } from "../../../lib/api";
-import type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, P2PPairing } from "../../../lib/api";
+import type {
+  MobilePairingApprovePayload,
+  MobilePairingReview,
+  MobilePairingStatus,
+  MobileDevice,
+  MobileDevicesResponse,
+  P2PPairing,
+} from "../../../lib/api";
 
 export const mobileApiResources = {
   startPairing(payload?: {
@@ -17,8 +24,12 @@ export const mobileApiResources = {
     return api.getMobilePairingStatus(pairingId);
   },
 
-  approvePairing(pairingId: string) {
-    return api.approveMobilePairing(pairingId);
+  getPairingReview(pairingId: string): Promise<MobilePairingReview> {
+    return api.getMobilePairingReview(pairingId);
+  },
+
+  approvePairing(pairingId: string, payload: MobilePairingApprovePayload) {
+    return api.approveMobilePairing(pairingId, payload);
   },
 
   rejectPairing(pairingId: string, reason?: string) {
@@ -35,4 +46,11 @@ export const mobileApiResources = {
 
 };
 
-export type { MobilePairingStatus, MobileDevice, MobileDevicesResponse, P2PPairing };
+export type {
+  MobilePairingApprovePayload,
+  MobilePairingReview,
+  MobilePairingStatus,
+  MobileDevice,
+  MobileDevicesResponse,
+  P2PPairing,
+};

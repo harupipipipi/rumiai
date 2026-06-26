@@ -4,7 +4,7 @@ import { Loader2, ShieldCheck, ShieldX, Smartphone, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
-import type { MobilePairingStatus } from "../features/mobile/resources/mobileApiResources";
+import type { MobilePairingReview, MobilePairingStatus } from "../features/mobile/resources/mobileApiResources";
 
 type MobilePairingApprovalProps = {
   pairingId: string;
@@ -37,6 +37,9 @@ export function MobilePairingApproval({
   onClose,
 }: MobilePairingApprovalProps) {
   const [status, setStatus] = useState<MobilePairingStatus | null>(null);
+  const [review, setReview] = useState<MobilePairingReview | null>(null);
+  const [reviewBusy, setReviewBusy] = useState(false);
+  const [reviewError, setReviewError] = useState("");
   const [busy, setBusy] = useState<"approve" | "reject" | "">("");
   const [error, setError] = useState("");
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -56,6 +59,13 @@ export function MobilePairingApproval({
       stopPolling();
     };
   }, [stopPolling]);
+
+  useEffect(() => {
+    setStatus(null);
+    setReview(null);
+    setReviewError("");
+    setError("");
+  }, [pairingId]);
 
   useEffect(() => {
     if (!pairingId) return;
@@ -91,11 +101,44 @@ export function MobilePairingApproval({
     };
   }, [pairingId, onApproved, onRejected, onExpired, stopPolling]);
 
+  const loadReview = useCallback(async () => {
+    setReviewBusy(true);
+    setReviewError("");
+    try {
+      const result = await mobileApiResources.getPairingReview(pairingId);
+      if (!mountedRef.current) return;
+      setReview(result);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setReview(null);
+      setReviewError(err instanceof Error ? err.message : "接続要求の詳細を取得できませんでした");
+    } finally {
+      if (mountedRef.current) setReviewBusy(false);
+    }
+  }, [pairingId]);
+
+  useEffect(() => {
+    if (status?.status !== "claimed") {
+      setReview(null);
+      setReviewError("");
+      return;
+    }
+    if (review?.pairing.pairing_id === pairingId || reviewBusy || reviewError) return;
+    void loadReview();
+  }, [loadReview, pairingId, review?.pairing.pairing_id, reviewBusy, reviewError, status?.status]);
+
   const handleApprove = async () => {
+    if (!review) {
+      setError("接続要求の詳細を取得してから承認してください");
+      return;
+    }
     setBusy("approve");
     setError("");
     try {
-      await mobileApiResources.approvePairing(pairingId);
+      await mobileApiResources.approvePairing(pairingId, {
+        claim_hash: review.claim_hash,
+        scopes: review.claim.requested_scopes,
+      });
       onApproved?.(pairingId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "承認に失敗しました");
@@ -117,11 +160,15 @@ export function MobilePairingApproval({
     }
   };
 
-  const isClaimed = status?.status === "claimed" || Boolean(status?.claimed_device_id);
+  const isClaimed = status?.status === "claimed";
   const isFinished = status?.status === "approved" || status?.status === "rejected" || status?.status === "expired";
-  const confirmationCode = status?.confirmation_code ?? "";
-  const deviceLabel = status?.claimed_device_label ?? "Rumi Mobile";
-  const requestedScopes = status?.requested_scopes ?? [];
+  const confirmationCode = review?.claim.verification_code ?? "";
+  const deviceLabel = review?.claim.device_label ?? "Rumi Mobile";
+  const devicePreview = review?.claim.device_id_preview ?? "";
+  const requestedScopes = review?.claim.requested_scopes ?? [];
+  const signingFingerprint = review?.claim.signing_key_fingerprint ?? "";
+  const encryptionFingerprint = review?.claim.encryption_key_fingerprint ?? "";
+  const canApprove = busy === "" && Boolean(review) && !reviewBusy && !reviewError;
 
   if (!isClaimed || isFinished) return null;
 
@@ -159,35 +206,75 @@ export function MobilePairingApproval({
             </div>
 
             <div className="mt-5 space-y-4">
-              <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                <div className="text-[11px] uppercase text-zinc-500">デバイス</div>
-                <div className="mt-1 text-sm font-medium text-zinc-100">{deviceLabel}</div>
-              </div>
-
-              {requestedScopes.length > 0 && (
-                <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
-                  <div className="text-[11px] uppercase text-zinc-500">要求された権限</div>
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {requestedScopes.map((scope) => (
-                      <span
-                        key={scope}
-                        className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300"
-                      >
-                        {scopeLabel(scope)}
-                      </span>
-                    ))}
-                  </div>
+              {reviewBusy && !review && (
+                <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 text-xs text-zinc-400">
+                  <Loader2 size={14} className="animate-spin" />
+                  接続要求の詳細を確認しています
                 </div>
               )}
 
-              {confirmationCode && (
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
-                  <div className="text-[11px] uppercase text-emerald-400">確認コード</div>
-                  <div className="mt-1 text-lg font-semibold text-emerald-200">{confirmationCode}</div>
-                  <div className="mt-1 text-[11px] text-emerald-400/70">
-                    スマホに表示されているコードと一致することを確認してください
+              {reviewError && !review && (
+                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+                  <div className="text-xs font-medium text-amber-100">接続要求の詳細を取得できませんでした</div>
+                  <div className="mt-1 text-[11px] leading-5 text-amber-200/80">
+                    安全のため、詳細を確認できるまで承認できません。
                   </div>
+                  <button
+                    type="button"
+                    disabled={reviewBusy}
+                    onClick={() => void loadReview()}
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg border border-amber-500/40 px-3 py-1.5 text-[11px] text-amber-100 hover:bg-amber-500/10 disabled:opacity-50"
+                  >
+                    {reviewBusy && <Loader2 size={12} className="animate-spin" />}
+                    再試行
+                  </button>
                 </div>
+              )}
+
+              {review && (
+                <>
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <div className="text-[11px] uppercase text-zinc-500">デバイス</div>
+                    <div className="mt-1 text-sm font-medium text-zinc-100">{deviceLabel}</div>
+                    {devicePreview && <div className="mt-1 font-mono text-[11px] text-zinc-500">{devicePreview}</div>}
+                  </div>
+
+                  {confirmationCode && (
+                    <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
+                      <div className="text-[11px] uppercase text-emerald-400">確認コード</div>
+                      <div className="mt-1 text-lg font-semibold text-emerald-200">{confirmationCode}</div>
+                      <div className="mt-1 text-[11px] text-emerald-400/70">
+                        スマホに表示されているコードと一致することを確認してください
+                      </div>
+                    </div>
+                  )}
+
+                  {requestedScopes.length > 0 && (
+                    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                      <div className="text-[11px] uppercase text-zinc-500">許可する権限</div>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {requestedScopes.map((scope) => (
+                          <span
+                            key={scope}
+                            className="rounded-full border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-[11px] text-zinc-300"
+                          >
+                            {scopeLabel(scope)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+                    <div className="text-[11px] uppercase text-zinc-500">セキュリティ</div>
+                    <div className="mt-2 space-y-1 text-[11px] text-zinc-400">
+                      <div>トークンは端末公開鍵で暗号化</div>
+                      <div>pickup secretはPOST bodyのみ</div>
+                      {encryptionFingerprint && <div className="font-mono">{encryptionFingerprint}</div>}
+                      {signingFingerprint && <div className="font-mono">{signingFingerprint}</div>}
+                    </div>
+                  </div>
+                </>
               )}
             </div>
 
@@ -214,11 +301,11 @@ export function MobilePairingApproval({
               </button>
               <button
                 type="button"
-                disabled={busy !== ""}
+                disabled={!canApprove}
                 onClick={() => void handleApprove()}
                 className={cn(
                   "flex flex-1 items-center justify-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors",
-                  busy === "approve"
+                  !canApprove
                     ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
                     : "border-emerald-600 bg-emerald-600 text-white hover:bg-emerald-500",
                 )}

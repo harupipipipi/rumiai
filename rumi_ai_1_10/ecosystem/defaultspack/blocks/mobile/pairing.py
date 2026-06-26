@@ -83,6 +83,19 @@ def _public_pairing(pairing: dict) -> dict:
     }
 
 
+def review(input_data, context=None):
+    args = _merged(input_data)
+    pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
+    if not pairing_id:
+        return error("pairing_id is required", "INVALID_INPUT")
+    s = _settings(input_data, context)
+    manager = PairingManager(s.store_path)
+    session = manager.get_pairing(pairing_id)
+    if session is None:
+        return error("pairing not found", "PAIRING_NOT_FOUND")
+    return ok(session.review_dict())
+
+
 def claim(input_data, context=None):
     args = _merged(input_data)
     pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
@@ -124,10 +137,14 @@ def approve(input_data, context=None):
     pairing_id = str(args.get("pairing_id") or args.get("id") or "").strip()
     if not pairing_id:
         return error("pairing_id is required", "INVALID_INPUT")
+    claim_hash = str(args.get("claim_hash") or args.get("claimHash") or "").strip()
+    if not claim_hash:
+        return error("claim_hash is required", "CLAIM_HASH_REQUIRED")
     s = _settings(input_data, context)
     manager = PairingManager(s.store_path)
     result = manager.approve_pairing_v2(
         pairing_id,
+        claim_hash=claim_hash,
         scopes=args.get("scopes") if isinstance(args.get("scopes"), list) else None,
     )
     if not result.get("ok"):
@@ -186,7 +203,6 @@ def approve(input_data, context=None):
         "device": {
             "device_id": result["device_id"],
             "label": result.get("device_label") or "",
-            "public_key": result.get("device_public_key") or "",
         },
         "profile_id": profile_id,
         "device_key": key_registration,
@@ -354,6 +370,7 @@ def run(input_data, context=None):
     args = _merged(input_data)
     action = str(args.get("action") or "").strip().lower()
     handlers = {
+        "review": review,
         "claim": claim,
         "approve": approve,
         "reject": reject,

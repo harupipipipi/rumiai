@@ -626,6 +626,7 @@ def prompt_http_route_specs() -> List[HttpRouteSpec]:
 def _mobile_http_route_specs() -> list[HttpRouteSpec]:
     from ecosystem.defaultspack.domain.mobile.contract import iter_mobile_route_contracts
 
+    admin_features = {"pairing_admin", "device_admin", "credentials_admin"}
     return [
         HttpRouteSpec(
             route.method,
@@ -635,6 +636,8 @@ def _mobile_http_route_specs() -> list[HttpRouteSpec]:
             fallback_block_module=route.fallback_block_module or route.block_module,
             path_inject=dict(route.path_inject),
             defaults=dict(route.defaults),
+            sensitive=route.feature in admin_features,
+            local_only=route.feature in admin_features,
         )
         for route in iter_mobile_route_contracts()
     ]

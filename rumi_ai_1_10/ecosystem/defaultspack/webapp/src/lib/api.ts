@@ -947,12 +947,38 @@ export type MobileDevicesResponse = {
 export type MobilePairingStatus = {
   pairing_id: string;
   status: string;
-  claimed_device_id?: string;
-  claimed_device_label?: string;
-  confirmation_code?: string;
-  requested_scopes?: string[];
   expires_at?: number;
   token_pickup_consumed_at?: number;
+};
+
+export type MobilePairingReview = {
+  pairing: {
+    pairing_id: string;
+    status: string;
+    expires_at: number;
+    claimed_at?: number;
+  };
+  claim: {
+    device_label: string;
+    device_id_preview?: string;
+    requested_scopes: string[];
+    allowed_scopes: string[];
+    denied_scopes?: string[];
+    signing_key_fingerprint?: string;
+    encryption_key_fingerprint?: string;
+    verification_code?: string;
+  };
+  security?: {
+    token_delivery?: string;
+    pickup?: string;
+    public_status_minimized?: boolean;
+  };
+  claim_hash: string;
+};
+
+export type MobilePairingApprovePayload = {
+  claim_hash: string;
+  scopes?: string[];
 };
 
 export type ConversationListOptions = {
@@ -3676,10 +3702,17 @@ export const api = {
     );
   },
 
-  approveMobilePairing(pairingId: string) {
+  getMobilePairingReview(pairingId: string) {
+    return request<MobilePairingReview>(
+      `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/review`,
+      { cache: "no-store" },
+    );
+  },
+
+  approveMobilePairing(pairingId: string, payload: MobilePairingApprovePayload) {
     return request<{ ok: boolean; token_delivery?: string; device?: MobileDevice }>(
       `/api/mobile/v1/pairings/${encodeURIComponent(pairingId)}/approve`,
-      { method: "POST", body: JSON.stringify({}) },
+      { method: "POST", body: JSON.stringify(payload) },
     );
   },
 

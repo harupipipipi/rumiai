@@ -27,7 +27,7 @@ def run(input_data, context=None):
         _route_entry(route)
         for route in iter_mobile_route_contracts()
         if route.pattern.startswith("/api/mobile/v1/")
-        and not route.feature.startswith("pairing_admin")
+        and not route.feature.endswith("_admin")
     ]
     return ok(
         {

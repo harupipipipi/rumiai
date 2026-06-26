@@ -35,6 +35,7 @@ def test_mobile_manifest_exposes_facade_without_authority_routes():
     assert routes
     assert all(route["path"].startswith("/api/mobile/v1/") for route in routes)
     assert all(not route["path"].startswith("/api/authority/") for route in routes)
+    assert all(not str(route.get("feature", "")).endswith("_admin") for route in routes)
     assert data["authority_routes"] == []
     assert "mobile_client" in data["token_roles"]
     assert "mobile_approver" in data["token_roles"]
@@ -143,6 +144,9 @@ def test_mobile_route_contract_is_reflected_in_registry():
         assert spec.fallback_block_module == (
             route.fallback_block_module or route.block_module
         )
+        if route.feature.endswith("_admin"):
+            assert spec.sensitive is True
+            assert spec.local_only is True
 
 
 def test_mobile_route_contract_legacy_routes_build_fallback_table():

@@ -66,6 +66,19 @@ def _decrypt_delivery_envelope(private_key, envelope: dict, *, pairing_id: str, 
     return json.loads(clear.decode("utf-8"))
 
 
+def _review_claim(store_path: str, pairing_id: str) -> dict:
+    from blocks.mobile.pairing import run
+
+    review = run({
+        "action": "review",
+        "store_path": store_path,
+        "pairing_id": pairing_id,
+    }, None)
+    assert review["status"] == "ok"
+    assert review["data"]["claim_hash"].startswith("sha256:")
+    return review["data"]
+
+
 def test_pairing_v2_claim_approve_flow():
     from domain.p2p.pairing import PairingManager
     from domain.p2p.device_store import DeviceStore
@@ -281,6 +294,112 @@ def test_pairing_approve_rejects_scopes_outside_claimed_grant():
     assert result["denied_scopes"] == ["chat.write"]
 
 
+def test_pairing_approve_rejects_changed_claim_hash():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    pm = PairingManager(tmp)
+    session = pm.start_pairing(capabilities=["chat.read"])
+    claim = pm.claim_pairing(
+        session.pairing_id,
+        code=session.code,
+        device_id="d1",
+        requested_capabilities=["chat.read"],
+    )
+    assert claim["ok"]
+
+    result = pm.approve_pairing_v2(
+        session.pairing_id,
+        claim_hash="sha256:" + "0" * 64,
+        scopes=["chat.read"],
+    )
+
+    assert not result["ok"]
+    assert result["code"] == "PAIRING_CLAIM_CHANGED"
+
+
+def test_mobile_pairing_review_returns_admin_claim_details_without_secrets():
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(
+        capabilities=["chat.read", "chat.write", "tools.observe"],
+    )
+    _private_key, public_key = _x25519_keypair()
+    claim = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "device_label": "Haru iPhone",
+        "public_key": "pk-mobile",
+        "encryption_public_key": public_key,
+        "requested_capabilities": ["chat.read", "chat.write"],
+    }, None)
+    assert claim["status"] == "ok"
+
+    public_status = run({
+        "action": "status",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+    assert public_status["status"] == "ok"
+    assert "claimed_device_label" not in public_status["data"]
+    assert "requested_scopes" not in public_status["data"]
+    assert "claim_hash" not in public_status["data"]
+
+    review = run({
+        "action": "review",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+
+    assert review["status"] == "ok"
+    data = review["data"]
+    assert data["pairing"]["status"] == "claimed"
+    assert data["claim"]["device_label"] == "Haru iPhone"
+    assert data["claim"]["device_id_preview"].startswith("mobile")
+    assert data["claim"]["requested_scopes"] == ["chat.read", "chat.write"]
+    assert data["claim"]["allowed_scopes"] == ["chat.read", "chat.write", "tools.observe"]
+    assert data["claim"]["verification_code"]
+    assert data["claim"]["signing_key_fingerprint"].startswith("ed25519:")
+    assert data["claim"]["encryption_key_fingerprint"].startswith("x25519:")
+    assert data["security"]["public_status_minimized"] is True
+    assert data["claim_hash"].startswith("sha256:")
+    review_blob = json.dumps(data, ensure_ascii=False)
+    assert session.code not in review_blob
+    assert session.token_pickup_secret not in review_blob
+
+
+def test_mobile_pairing_approve_requires_review_claim_hash():
+    from domain.p2p.pairing import PairingManager
+    from blocks.mobile.pairing import run
+
+    tmp = tempfile.mkdtemp()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read"])
+    _private_key, public_key = _x25519_keypair()
+    claim = run({
+        "action": "claim",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+        "code": session.code,
+        "device_id": "mobile-1",
+        "encryption_public_key": public_key,
+    }, None)
+    assert claim["status"] == "ok"
+
+    approved = run({
+        "action": "approve",
+        "store_path": tmp,
+        "pairing_id": session.pairing_id,
+    }, None)
+
+    assert approved["status"] == "error"
+    assert approved["error"]["code"] == "CLAIM_HASH_REQUIRED"
+
+
 def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     from domain.p2p.device_store import DeviceStore
     from domain.p2p.pairing import PairingManager
@@ -307,10 +426,13 @@ def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     assert claim["data"]["pairing"]["status"] == "claimed"
     assert "code" not in claim["data"]["pairing"]
 
+    review = _review_claim(tmp, session.pairing_id)
     approved = run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
+        "claim_hash": review["claim_hash"],
+        "scopes": review["claim"]["requested_scopes"],
     }, None)
     assert approved["status"] == "ok"
     assert approved["data"]["pairing"]["status"] == "approved"
@@ -319,6 +441,7 @@ def test_mobile_pairing_token_pickup_uses_post_body_not_status_query():
     assert "approval_token" not in approved["data"]
     assert "client_access_token" not in approved["data"]
     assert "approver_access_token" not in approved["data"]
+    assert "public_key" not in approved["data"]["device"]
 
     without_code = run({
         "action": "status",
@@ -454,10 +577,13 @@ def test_mobile_pairing_status_rejects_wrong_pickup_secret_without_rotating():
         "device_id": "mobile-1",
         "encryption_public_key": public_key,
     }, None)["status"] == "ok"
+    review = _review_claim(tmp, session.pairing_id)
     assert run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
+        "claim_hash": review["claim_hash"],
+        "scopes": review["claim"]["requested_scopes"],
     }, None)["status"] == "ok"
     issued = DeviceStore(tmp).get_device("mobile-1")
     assert issued is not None
@@ -516,10 +642,13 @@ def test_mobile_pairing_approve_rolls_back_when_delivery_store_fails(monkeypatch
 
     monkeypatch.setattr(PairingManager, "store_token_delivery", fail_store)
 
+    review = _review_claim(tmp, session.pairing_id)
     result = pairing_block.run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
+        "claim_hash": review["claim_hash"],
+        "scopes": review["claim"]["requested_scopes"],
     }, None)
 
     assert result["status"] == "error"
@@ -591,10 +720,13 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     assert claim["status"] == "ok"
     assert "code" not in claim["data"]["pairing"]
 
+    review = _review_claim(tmp, session.pairing_id)
     approved = run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
+        "claim_hash": review["claim_hash"],
+        "scopes": review["claim"]["requested_scopes"],
     }, None)
     assert approved["status"] == "ok"
     assert "code" not in approved["data"]["pairing"]
@@ -602,6 +734,7 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     assert "approval_token" not in approved["data"]
     assert "client_access_token" not in approved["data"]
     assert "approver_access_token" not in approved["data"]
+    assert "public_key" not in approved["data"]["device"]
 
     status = run({
         "action": "pickup_token_delivery",
@@ -658,10 +791,13 @@ def test_mobile_pairing_status_returns_pc_label(monkeypatch):
     }, None)
     assert claim["status"] == "ok"
 
+    review = _review_claim(tmp, session.pairing_id)
     approved = run({
         "action": "approve",
         "store_path": tmp,
         "pairing_id": session.pairing_id,
+        "claim_hash": review["claim_hash"],
+        "scopes": review["claim"]["requested_scopes"],
     }, None)
     assert approved["status"] == "ok"
 

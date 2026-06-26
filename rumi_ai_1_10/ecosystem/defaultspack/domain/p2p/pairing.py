@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import json
+import base64
 import hashlib
 import hmac
+import json
 import os
 import secrets
 import time
@@ -63,6 +64,57 @@ def _new_pickup_secret() -> str:
 def _scope_not_allowed(requested: list[str], allowed: list[str]) -> list[str]:
     allowed_set = set(allowed)
     return sorted(scope for scope in requested if scope not in allowed_set)
+
+
+def _stable_claim_payload(session: "PairingSession") -> dict[str, Any]:
+    return {
+        "pairing_id": session.pairing_id,
+        "claimed_device_id": session.claimed_device_id,
+        "claimed_device_public_key": session.claimed_device_public_key,
+        "claimed_device_encryption_public_key": session.claimed_device_encryption_public_key,
+        "claimed_capabilities": list(session.claimed_capabilities),
+    }
+
+
+def _digest_b32(value: bytes, *, length: int = 8) -> str:
+    return base64.b32encode(value).decode("ascii").rstrip("=")[:length]
+
+
+def _claim_digest(session: "PairingSession") -> bytes:
+    payload = json.dumps(
+        _stable_claim_payload(session),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).digest()
+
+
+def _claim_hash(session: "PairingSession") -> str:
+    return "sha256:" + _claim_digest(session).hex()
+
+
+def _claim_verification_code(session: "PairingSession") -> str:
+    code = _digest_b32(_claim_digest(session), length=8)
+    return f"{code[:4]}-{code[4:]}"
+
+
+def _fingerprint(value: str, *, prefix: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    digest = hashlib.sha256(cleaned.encode("utf-8")).digest()
+    code = _digest_b32(digest, length=8)
+    return f"{prefix}:{code[:4]}-{code[4:]}"
+
+
+def _preview_id(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= 12:
+        return cleaned
+    return f"{cleaned[:8]}...{cleaned[-4:]}"
 
 
 @dataclass
@@ -147,6 +199,50 @@ class PairingSession:
             "token_pickup_consumed_at": int(self.token_pickup_consumed_at),
             "token_delivery_ready": bool(self.token_delivery_envelope),
             "token_delivery_created_at": int(self.token_delivery_created_at),
+        }
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            "pairing_id": self.pairing_id,
+            "status": self.status,
+            "expires_at": int(self.expires_at),
+        }
+
+    def claim_hash(self) -> str:
+        return _claim_hash(self)
+
+    def review_dict(self) -> dict[str, Any]:
+        requested_scopes = list(self.claimed_capabilities)
+        allowed_scopes = list(self.capabilities)
+        return {
+            "pairing": {
+                "pairing_id": self.pairing_id,
+                "status": self.status,
+                "expires_at": int(self.expires_at),
+                "claimed_at": int(self.claimed_at),
+            },
+            "claim": {
+                "device_label": self.claimed_device_label or "Rumi Mobile",
+                "device_id_preview": _preview_id(self.claimed_device_id),
+                "requested_scopes": requested_scopes,
+                "allowed_scopes": allowed_scopes,
+                "denied_scopes": _scope_not_allowed(requested_scopes, allowed_scopes),
+                "signing_key_fingerprint": _fingerprint(
+                    self.claimed_device_public_key,
+                    prefix="ed25519",
+                ),
+                "encryption_key_fingerprint": _fingerprint(
+                    self.claimed_device_encryption_public_key,
+                    prefix="x25519",
+                ),
+                "verification_code": _claim_verification_code(self),
+            },
+            "security": {
+                "token_delivery": "x25519-aes-gcm",
+                "pickup": "post-body-only",
+                "public_status_minimized": True,
+            },
+            "claim_hash": self.claim_hash(),
         }
 
     def to_storage_dict(self) -> dict[str, Any]:
@@ -334,6 +430,7 @@ class PairingManager:
         self,
         pairing_id: str,
         *,
+        claim_hash: str = "",
         scopes: list[str] | None = None,
         now_ms: int | None = None,
     ) -> dict[str, Any]:
@@ -359,6 +456,15 @@ class PairingManager:
                 session.reason = "expired"
                 self._replace(session)
                 return {"ok": False, "reason": "pairing code expired", "code": "PAIRING_EXPIRED"}
+            expected_claim_hash = session.claim_hash()
+            provided_claim_hash = str(claim_hash or "").strip()
+            if provided_claim_hash and not hmac.compare_digest(provided_claim_hash, expected_claim_hash):
+                return {
+                    "ok": False,
+                    "reason": "pairing claim changed; refresh approval details",
+                    "code": "PAIRING_CLAIM_CHANGED",
+                    "claim_hash": expected_claim_hash,
+                }
             allowed = list(session.claimed_capabilities or session.capabilities or _DEFAULT_MOBILE_SCOPES)
             requested = _string_list(scopes)
             denied = _scope_not_allowed(requested, allowed)
