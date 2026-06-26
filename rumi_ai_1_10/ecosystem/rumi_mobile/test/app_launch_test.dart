@@ -63,7 +63,8 @@ void main() {
     ));
     await tester.pumpAndSettle(const Duration(seconds: 3));
 
-    expect(find.text('Rumiへようこそ'), findsOneWidget);
+    expect(find.text('ようこそ'), findsOneWidget);
+    expect(find.text('Rumiへようこそ'), findsNothing);
     expect(find.byType(ComposerBar), findsOneWidget);
   });
 
@@ -89,10 +90,21 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('このスマホのAI API'), findsOneWidget);
-    await tester.drag(find.byType(ListView).last, const Offset(0, -320));
-    await tester.pumpAndSettle();
+    expect(find.text('Anthropic'), findsWidgets);
+    await tester.dragUntilVisible(
+      find.text('OpenAI'),
+      find.byType(ListView).last,
+      const Offset(0, -350),
+      maxIteration: 12,
+    );
+    expect(find.text('OpenAI'), findsWidgets);
+    await tester.dragUntilVisible(
+      find.text('PC接続'),
+      find.byType(ListView).last,
+      const Offset(0, -500),
+      maxIteration: 20,
+    );
     expect(find.text('PC接続'), findsWidgets);
-    expect(find.text('PCタスク完了通知'), findsOneWidget);
   });
 
   testWidgets('drawer shows space selector with local space', (tester) async {

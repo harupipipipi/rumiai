@@ -21,6 +21,19 @@ void main() {
     expect(api.label, 'main');
   });
 
+  test('parses rumi_api provider payload for mobile provider config', () {
+    final payload = parseQrPayload(
+      '{"kind":"rumi_api","providerId":"google","apiId":"main","baseUrl":"https://generativelanguage.googleapis.com/v1beta/openai","apiKey":"sk-google","model":"gemini-2.5-pro","label":"Google","apiCompatibility":"openai"}',
+    );
+    expect(payload, isA<QrApiImport>());
+    final api = payload as QrApiImport;
+    expect(api.providerId, 'google');
+    expect(api.apiId, 'main');
+    expect(api.apiKey, 'sk-google');
+    expect(api.model, 'gemini-2.5-pro');
+    expect(api.apiCompatibility, 'openai');
+  });
+
   test('parses plain url as QrUrl', () {
     final payload = parseQrPayload('https://rumi-mobile.pages.dev');
     expect(payload, isA<QrUrl>());

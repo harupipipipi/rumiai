@@ -10,6 +10,7 @@ import '../platform/platform_services.dart';
 import '../qr/qr_payload.dart';
 import '../qr/qr_scanner_screen.dart';
 import 'api_config_store.dart';
+import 'defaultspack_mobile_providers.g.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({
@@ -81,7 +82,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final api = await widget.configStore.loadApi();
-    final providerConfigs = await widget.configStore.loadProviderConfigs();
+    final savedProviderConfigs = await widget.configStore.loadProviderConfigs();
+    final providerConfigs = _mergeDefaultProviderConfigs(savedProviderConfigs);
     final pc = await widget.configStore.loadPc();
     final notificationSettings =
         await widget.configStore.loadNotificationSettings();
@@ -115,6 +117,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   ApiConfig _buildConfig() => ApiConfig(
+        providerId: 'openai-compatible',
         baseUrl: _baseUrl.text.trim(),
         apiKey: _apiKey.text.trim(),
         model: _model.text.trim().isEmpty
@@ -123,6 +126,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         label: _label.text.trim(),
         systemPrompt: _systemPrompt.text.trim(),
         temperature: _config.temperature,
+        apiCompatibility: 'openai',
       );
 
   Future<void> _save() async {
@@ -173,6 +177,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       return;
     }
     if (payload is QrApiImport) {
+      final providerId = payload.providerId?.trim() ?? '';
+      if (providerId.isNotEmpty) {
+        await _importProviderApi(payload);
+        return;
+      }
       setState(() {
         _baseUrl.text = payload.baseUrl;
         _apiKey.text = payload.apiKey;
@@ -184,6 +193,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
         }
       });
       _toast('API/モデルを取り込みました。保存してください。');
+    }
+  }
+
+  Future<void> _importProviderApi(QrApiImport payload) async {
+    final providerId = payload.providerId!.trim();
+    final existing = _providerConfigById(_providerConfigs, providerId);
+    final fallback =
+        _providerConfigById(defaultspackMobileProviderConfigs, providerId);
+    final source = existing ?? fallback;
+    if (source == null) {
+      setState(() {
+        _baseUrl.text = payload.baseUrl;
+        _apiKey.text = payload.apiKey;
+        if (payload.model?.isNotEmpty == true) _model.text = payload.model!;
+        if (payload.label?.isNotEmpty == true) _label.text = payload.label!;
+      });
+      _toast('未登録providerのAPIを取り込みました。高度な設定から保存してください。');
+      return;
+    }
+    final next = source.copyWith(
+      apiKey: payload.apiKey,
+      label: payload.label?.trim().isNotEmpty == true
+          ? payload.label!.trim()
+          : source.label,
+      baseUrl: payload.baseUrl.trim().isNotEmpty
+          ? payload.baseUrl.trim()
+          : source.baseUrl,
+      model: payload.model?.trim().isNotEmpty == true
+          ? payload.model!.trim()
+          : source.model,
+      apiCompatibility: payload.apiCompatibility?.trim().isNotEmpty == true
+          ? payload.apiCompatibility!.trim()
+          : source.apiCompatibility,
+    );
+    final nextProviders = [
+      for (final provider in _providerConfigs)
+        if (provider.providerId != providerId) provider,
+      next,
+    ]..sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
+    await widget.configStore.saveProviderConfigs(nextProviders);
+    if (!mounted) return;
+    setState(() => _providerConfigs = nextProviders);
+    if (next.isConfigured && _providerRunsOnMobile(next)) {
+      await _activateMobileProvider(next);
+    } else {
+      _toast('${next.effectiveLabel} のAPI Keyを取り込みました');
     }
   }
 
@@ -478,6 +533,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  MobileProviderConfig? _providerConfigById(
+    Iterable<MobileProviderConfig> configs,
+    String providerId,
+  ) {
+    for (final config in configs) {
+      if (config.providerId == providerId) return config;
+    }
+    return null;
+  }
+
+  List<MobileProviderConfig> _mergeDefaultProviderConfigs(
+    List<MobileProviderConfig> savedConfigs,
+  ) {
+    final byProvider = {
+      for (final config in defaultspackMobileProviderConfigs)
+        if (_shouldShowMobileProviderConfig(config)) config.providerId: config,
+    };
+    for (final saved in savedConfigs) {
+      final fallback = byProvider[saved.providerId];
+      byProvider[saved.providerId] = fallback == null
+          ? saved
+          : fallback.copyWith(
+              label: saved.label,
+              apiKey: saved.apiKey,
+              baseUrl: saved.baseUrl.trim().isNotEmpty
+                  ? saved.baseUrl
+                  : fallback.baseUrl,
+              model:
+                  saved.model.trim().isNotEmpty ? saved.model : fallback.model,
+              openaiCompatible: saved.openaiCompatible,
+              local: saved.local,
+              catalogOnly: saved.catalogOnly,
+              apiCompatibility: saved.apiCompatibility,
+            );
+    }
+    final merged = byProvider.values.toList()
+      ..sort((a, b) => a.effectiveLabel.compareTo(b.effectiveLabel));
+    return merged;
+  }
+
+  bool _shouldShowMobileProviderConfig(MobileProviderConfig provider) {
+    final providerId = provider.providerId.trim();
+    if (providerId.isEmpty) return false;
+    if (providerId == 'human-operator' || providerId == 'xiaomi-mimo') {
+      return false;
+    }
+    if (provider.local && provider.baseUrl.startsWith('local://')) {
+      return false;
+    }
+    return true;
+  }
+
   Future<void> _fetchPcCatalog() async {
     final pc = _pc;
     if (pc == null || !pc.isConfigured) {
@@ -532,6 +639,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final openaiCompatible = provider.openaiCompatible ||
           _usesOpenAiCompatibleFallback(provider) ||
           _baseUrlLooksOpenAiCompatible(baseUrl);
+      final apiCompatibility =
+          _apiCompatibilityForProvider(provider, baseUrl: baseUrl);
       merged.add(
         MobileProviderConfig(
           providerId: provider.providerId,
@@ -545,6 +654,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           openaiCompatible: openaiCompatible,
           local: provider.local,
           catalogOnly: provider.catalogOnly,
+          apiCompatibility: apiCompatibility,
         ),
       );
     }
@@ -596,7 +706,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   bool _usesOpenAiCompatibleFallback(ProviderEntry provider) {
-    return provider.providerId == 'google' || provider.providerId == 'gemini';
+    return provider.providerId == 'deepseek' ||
+        provider.providerId == 'google' ||
+        provider.providerId == 'gemini' ||
+        provider.providerId == 'openai' ||
+        provider.providerId == 'openrouter';
   }
 
   bool _baseUrlLooksOpenAiCompatible(String baseUrl) {
@@ -607,6 +721,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
         lower.contains('/v1/');
   }
 
+  String _apiCompatibilityForProvider(
+    ProviderEntry provider, {
+    required String baseUrl,
+  }) {
+    final caps = provider.capabilities.map((cap) => cap.toLowerCase()).toSet();
+    if (provider.providerId == 'anthropic' ||
+        provider.providerId == 'opencode-zen' ||
+        provider.providerId == 'opencode-go' ||
+        caps.contains('anthropic_compatible')) {
+      return 'anthropic_messages';
+    }
+    if (provider.openaiCompatible ||
+        _usesOpenAiCompatibleFallback(provider) ||
+        caps.contains('openai_compatible') ||
+        caps.contains('openai_compatible_if_confirmed') ||
+        _baseUrlLooksOpenAiCompatible(baseUrl)) {
+      return 'openai';
+    }
+    return 'unsupported';
+  }
+
+  bool _providerRunsOnMobile(MobileProviderConfig provider) {
+    final compatibility = provider.apiCompatibility.trim();
+    return provider.baseUrl.trim().isNotEmpty &&
+        provider.model.trim().isNotEmpty &&
+        (compatibility == 'openai' ||
+            compatibility == 'anthropic_messages' ||
+            provider.providerId == 'anthropic');
+  }
+
   bool _isActiveMobileProvider(MobileProviderConfig provider) {
     return _config.providerId == provider.providerId &&
         _config.baseUrl == provider.baseUrl &&
@@ -614,7 +758,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _activateMobileProvider(MobileProviderConfig provider) async {
-    if (!provider.isConfigured) {
+    if (!provider.isConfigured || !_providerRunsOnMobile(provider)) {
       await _editMobileProvider(provider);
       return;
     }
@@ -635,6 +779,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _editMobileProvider(MobileProviderConfig provider) async {
     final label = TextEditingController(text: provider.label);
     final apiKey = TextEditingController(text: provider.apiKey);
+    final baseUrl = TextEditingController(text: provider.baseUrl);
+    final model = TextEditingController(text: provider.model);
     final saved = await showModalBottomSheet<MobileProviderConfig>(
       context: context,
       isScrollControlled: true,
@@ -675,6 +821,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   prefixIcon: Icon(Icons.key_outlined),
                 ),
               ),
+              const SizedBox(height: 12),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  dividerColor: Colors.transparent,
+                ),
+                child: ExpansionTile(
+                  tilePadding: EdgeInsets.zero,
+                  childrenPadding: EdgeInsets.zero,
+                  title: const Text('高度な設定'),
+                  subtitle:
+                      const Text('通常は変更不要です。provider側のURL/モデルが必要な時だけ使います。'),
+                  children: [
+                    TextField(
+                      controller: baseUrl,
+                      keyboardType: TextInputType.url,
+                      decoration: const InputDecoration(
+                        labelText: 'API Base URL',
+                        prefixIcon: Icon(Icons.cloud_outlined),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: model,
+                      decoration: const InputDecoration(
+                        labelText: 'モデル',
+                        prefixIcon: Icon(Icons.model_training_outlined),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 16),
               Row(
                 children: [
@@ -695,6 +872,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           provider.copyWith(
                             label: label.text.trim(),
                             apiKey: apiKey.text.trim(),
+                            baseUrl: baseUrl.text.trim(),
+                            model: model.text.trim(),
                           ),
                         );
                       },
@@ -709,6 +888,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     label.dispose();
     apiKey.dispose();
+    baseUrl.dispose();
+    model.dispose();
     if (saved == null) return;
     final nextProviders = [
       for (final existing in _providerConfigs)
@@ -784,6 +965,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _MobileProviderCard(
                   provider: provider,
                   active: _isActiveMobileProvider(provider),
+                  supported: _providerRunsOnMobile(provider),
                   onUse: () => unawaited(_activateMobileProvider(provider)),
                   onEdit: () => unawaited(_editMobileProvider(provider)),
                 ),
@@ -794,57 +976,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               const _ProviderHintCard(),
               const SizedBox(height: 12),
             ],
-            Text(
-              'OpenAI互換を直接設定',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _baseUrl,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                labelText: 'API Base URL',
-                hintText: 'https://api.openai.com/v1',
-                prefixIcon: Icon(Icons.cloud_outlined),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _apiKey,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'API Key',
-                prefixIcon: Icon(Icons.key_outlined),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _model,
-              decoration: const InputDecoration(
-                labelText: 'モデル',
-                hintText: 'gpt-4o-mini',
-                prefixIcon: Icon(Icons.model_training_outlined),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _label,
-              decoration: const InputDecoration(
-                labelText: 'ラベル (任意)',
-                prefixIcon: Icon(Icons.label_outline),
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _systemPrompt,
-              minLines: 2,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                labelText: 'システムプロンプト (任意)',
-                prefixIcon: Icon(Icons.terminal_outlined),
-              ),
-            ),
-            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -856,19 +987,95 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: FilledButton.icon(
-                    icon: _saving
+                  child: FilledButton.tonalIcon(
+                    icon: _fetchingCatalog
                         ? const SizedBox(
                             width: 16,
                             height: 16,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Icon(Icons.save_outlined),
-                    label: const Text('保存'),
-                    onPressed: _saving ? null : _save,
+                        : const Icon(Icons.cloud_download_outlined),
+                    label: const Text('PCから取得'),
+                    onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            Theme(
+              data:
+                  Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.tune_outlined),
+                title: const Text('高度な設定'),
+                subtitle: const Text(
+                    'OpenAI互換APIをURLから直接設定します。通常は上のproviderを使ってください。'),
+                children: [
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: _baseUrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'API Base URL',
+                      hintText: 'https://api.openai.com/v1',
+                      prefixIcon: Icon(Icons.cloud_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _apiKey,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'API Key',
+                      prefixIcon: Icon(Icons.key_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _model,
+                    decoration: const InputDecoration(
+                      labelText: 'モデル',
+                      hintText: 'gpt-4o-mini',
+                      prefixIcon: Icon(Icons.model_training_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _label,
+                    decoration: const InputDecoration(
+                      labelText: 'ラベル (任意)',
+                      prefixIcon: Icon(Icons.label_outline),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _systemPrompt,
+                    minLines: 2,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: 'システムプロンプト (任意)',
+                      prefixIcon: Icon(Icons.terminal_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                      label: const Text('直接設定を保存'),
+                      onPressed: _saving ? null : _save,
+                    ),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 28),
             _SectionTitle(
@@ -1179,12 +1386,14 @@ class _MobileProviderCard extends StatelessWidget {
   const _MobileProviderCard({
     required this.provider,
     required this.active,
+    required this.supported,
     required this.onUse,
     required this.onEdit,
   });
 
   final MobileProviderConfig provider;
   final bool active;
+  final bool supported;
   final VoidCallback onUse;
   final VoidCallback onEdit;
 
@@ -1192,8 +1401,6 @@ class _MobileProviderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final configured = provider.isConfigured;
-    final supported = provider.baseUrl.trim().isNotEmpty &&
-        (provider.openaiCompatible || provider.providerId == 'anthropic');
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1243,7 +1450,7 @@ class _MobileProviderCard extends StatelessWidget {
           if (!supported) ...[
             const SizedBox(height: 4),
             Text(
-              'このproviderはスマホ単体の送信URLをPCから取得できていません',
+              'このproviderはスマホ単体で使うURL/互換形式が未設定です。API Keyから高度な設定を開いてください。',
               style: TextStyle(fontSize: 12, color: scheme.error),
             ),
           ],

@@ -23,7 +23,8 @@ class OpenAiClient {
     if (!config.isConfigured) {
       throw const OpenAiException('APIのURLとキーを設定してください。');
     }
-    if (config.providerId == 'anthropic') {
+    if (config.apiCompatibility == 'anthropic_messages' ||
+        config.providerId == 'anthropic') {
       yield* _streamAnthropic(config: config, history: history);
       return;
     }

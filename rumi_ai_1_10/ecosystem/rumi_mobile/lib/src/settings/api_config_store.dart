@@ -12,6 +12,7 @@ class ApiConfig {
     this.label = '',
     this.systemPrompt = '',
     this.temperature = 0.7,
+    this.apiCompatibility = 'openai',
   });
 
   static const empty = ApiConfig(
@@ -33,6 +34,7 @@ class ApiConfig {
   final String label;
   final String systemPrompt;
   final double temperature;
+  final String apiCompatibility;
 
   bool get isConfigured =>
       baseUrl.trim().isNotEmpty && apiKey.trim().isNotEmpty;
@@ -45,6 +47,7 @@ class ApiConfig {
     String? label,
     String? systemPrompt,
     double? temperature,
+    String? apiCompatibility,
   }) {
     return ApiConfig(
       baseUrl: baseUrl ?? this.baseUrl,
@@ -54,6 +57,7 @@ class ApiConfig {
       label: label ?? this.label,
       systemPrompt: systemPrompt ?? this.systemPrompt,
       temperature: temperature ?? this.temperature,
+      apiCompatibility: apiCompatibility ?? this.apiCompatibility,
     );
   }
 
@@ -65,6 +69,7 @@ class ApiConfig {
         'label': label,
         'systemPrompt': systemPrompt,
         'temperature': temperature,
+        'apiCompatibility': apiCompatibility,
       };
 
   factory ApiConfig.fromJson(Map<String, dynamic> json) => ApiConfig(
@@ -75,7 +80,15 @@ class ApiConfig {
         label: json['label'] as String? ?? '',
         systemPrompt: json['systemPrompt'] as String? ?? '',
         temperature: (json['temperature'] as num?)?.toDouble() ?? 0.7,
+        apiCompatibility: json['apiCompatibility'] as String? ??
+            _defaultApiCompatibility(json['providerId'] as String? ?? ''),
       );
+}
+
+String _defaultApiCompatibility(String providerId) {
+  return providerId == 'anthropic' || providerId == 'opencode-zen'
+      ? 'anthropic_messages'
+      : 'openai';
 }
 
 class MobileProviderConfig {
@@ -89,6 +102,7 @@ class MobileProviderConfig {
     this.openaiCompatible = true,
     this.local = false,
     this.catalogOnly = false,
+    this.apiCompatibility = 'openai',
   });
 
   final String providerId;
@@ -100,6 +114,7 @@ class MobileProviderConfig {
   final bool openaiCompatible;
   final bool local;
   final bool catalogOnly;
+  final String apiCompatibility;
 
   String get effectiveLabel {
     final custom = label.trim();
@@ -125,6 +140,7 @@ class MobileProviderConfig {
     bool? openaiCompatible,
     bool? local,
     bool? catalogOnly,
+    String? apiCompatibility,
   }) {
     return MobileProviderConfig(
       providerId: providerId ?? this.providerId,
@@ -136,6 +152,7 @@ class MobileProviderConfig {
       openaiCompatible: openaiCompatible ?? this.openaiCompatible,
       local: local ?? this.local,
       catalogOnly: catalogOnly ?? this.catalogOnly,
+      apiCompatibility: apiCompatibility ?? this.apiCompatibility,
     );
   }
 
@@ -151,6 +168,7 @@ class MobileProviderConfig {
       label: effectiveLabel,
       systemPrompt: systemPrompt,
       temperature: temperature,
+      apiCompatibility: apiCompatibility,
     );
   }
 
@@ -164,6 +182,7 @@ class MobileProviderConfig {
         'openaiCompatible': openaiCompatible,
         'local': local,
         'catalogOnly': catalogOnly,
+        'apiCompatibility': apiCompatibility,
       };
 
   factory MobileProviderConfig.fromJson(Map<String, dynamic> json) {
@@ -177,6 +196,8 @@ class MobileProviderConfig {
       openaiCompatible: json['openaiCompatible'] as bool? ?? true,
       local: json['local'] as bool? ?? false,
       catalogOnly: json['catalogOnly'] as bool? ?? false,
+      apiCompatibility: json['apiCompatibility'] as String? ??
+          _defaultApiCompatibility(json['providerId'] as String? ?? ''),
     );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/space.dart';
 import 'chat_models.dart';
+import 'defaultspack_action_icon.dart';
 
 class ChatDrawer extends StatelessWidget {
   const ChatDrawer({
@@ -61,7 +62,9 @@ class ChatDrawer extends StatelessWidget {
                 ),
                 IconButton(
                   tooltip: '新規チャット',
-                  icon: const Icon(Icons.edit_square),
+                  icon: const DefaultspackActionIcon(
+                    kind: DefaultspackActionIconKind.newChat,
+                  ),
                   onPressed: onNewChat,
                 ),
               ],
@@ -71,7 +74,10 @@ class ChatDrawer extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: FilledButton.icon(
               onPressed: onNewChat,
-              icon: const Icon(Icons.add),
+              icon: const DefaultspackActionIcon(
+                kind: DefaultspackActionIconKind.newChat,
+                size: 18,
+              ),
               label: const Text('新規チャット'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(44),

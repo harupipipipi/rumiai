@@ -17,8 +17,8 @@ import '../domain/space.dart';
 import '../platform/platform_services.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
-import '../app_theme.dart';
 import 'chat_drawer.dart';
+import 'defaultspack_action_icon.dart';
 import 'chat_models.dart';
 import 'chat_store.dart';
 import 'composer_bar.dart';
@@ -1770,7 +1770,9 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               IconButton(
                 tooltip: '新規チャット',
-                icon: const Icon(Icons.add_comment_outlined),
+                icon: const DefaultspackActionIcon(
+                  kind: DefaultspackActionIconKind.newChat,
+                ),
                 onPressed: _newChat,
               ),
             ],
@@ -2111,17 +2113,9 @@ class _EmptyState extends StatelessWidget {
   final VoidCallback onAdd;
   final bool busy;
 
-  static const _suggestions = [
-    '今日のニュースを要約して',
-    'PythonでFizzBuzzを書いて',
-    'アイデア出しを手伝って',
-    'この文章を校正して',
-  ];
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final colors = theme.extension<RumiColors>() ?? RumiColors.dark;
     return Column(
       children: [
         Expanded(
@@ -2131,45 +2125,12 @@ class _EmptyState extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: colors.accent,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    child: const Icon(
-                      Icons.auto_awesome,
-                      color: Colors.white,
-                      size: 28,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
                   Text(
-                    'Rumiへようこそ',
-                    style: theme.textTheme.titleLarge?.copyWith(
+                    'ようこそ',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    '何でも聞いてください。スマホ単体でも動作します。',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  const SizedBox(height: 24),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    alignment: WrapAlignment.center,
-                    children: _suggestions
-                        .map(
-                          (s) => ActionChip(
-                            label: Text(s),
-                            onPressed: busy ? null : () => onSuggest(s),
-                          ),
-                        )
-                        .toList(),
                   ),
                 ],
               ),

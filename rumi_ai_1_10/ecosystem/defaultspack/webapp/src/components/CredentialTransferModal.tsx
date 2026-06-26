@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check, Loader2, Send, Smartphone, X } from "lucide-react";
+import QRCode from "qrcode";
+import { Check, Loader2, QrCode, Send, Smartphone, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
@@ -19,7 +20,10 @@ type CredentialTransferModalProps = {
 export function CredentialTransferModal({
   providerId,
   providerLabel,
+  apiKey,
   apiId,
+  baseUrl,
+  defaultModel,
   onClose,
 }: CredentialTransferModalProps) {
   const [devices, setDevices] = useState<MobileDevice[]>([]);
@@ -28,6 +32,8 @@ export function CredentialTransferModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [qrDataUrl, setQrDataUrl] = useState("");
+  const [qrError, setQrError] = useState("");
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -82,6 +88,48 @@ export function CredentialTransferModal({
   };
 
   const displayName = providerLabel || providerId;
+  const qrPayload = useMemo(() => {
+    if (!apiKey?.trim()) return "";
+    return JSON.stringify({
+      kind: "rumi_api",
+      version: 1,
+      providerId,
+      provider_id: providerId,
+      apiId,
+      api_id: apiId,
+      label: displayName,
+      apiKey,
+      api_key: apiKey,
+      baseUrl: baseUrl ?? "",
+      baseUrlLabel: baseUrl ?? "",
+      model: defaultModel ?? "",
+      apiCompatibility: providerApiCompatibility(providerId),
+      api_compatibility: providerApiCompatibility(providerId),
+    });
+  }, [apiId, apiKey, baseUrl, defaultModel, displayName, providerId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!qrPayload) {
+      setQrDataUrl("");
+      setQrError("");
+      return;
+    }
+    QRCode.toDataURL(qrPayload, { errorCorrectionLevel: "M", margin: 2, width: 280 })
+      .then((url) => {
+        if (cancelled) return;
+        setQrDataUrl(url);
+        setQrError("");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setQrDataUrl("");
+        setQrError(err instanceof Error ? err.message : "QR生成に失敗しました");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [qrPayload]);
 
   return (
     <AnimatePresence>
@@ -127,8 +175,27 @@ export function CredentialTransferModal({
               <>
                 <h3 className="text-sm font-medium text-zinc-100">API設定の転送</h3>
                 <p className="mt-1 text-xs text-zinc-500">
-                  {displayName}「{apiId ?? "main"}」を保存しました。このAPI設定をペア済みの端末にもコピーしますか？
+                  {displayName}「{apiId ?? "main"}」を保存しました。スマホ側の設定で「QRで取り込む」から読み込めます。
                 </p>
+
+                <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+                  <div className="mb-3 flex items-center gap-2 text-xs font-medium text-zinc-300">
+                    <QrCode size={14} />
+                    Rumi Mobile QR
+                  </div>
+                  <div className="flex justify-center rounded-xl border border-zinc-800 bg-zinc-950 p-4">
+                    {qrDataUrl ? (
+                      <img src={qrDataUrl} alt="API設定QR" className="h-52 w-52 rounded-xl bg-white p-2" />
+                    ) : (
+                      <div className="grid h-52 w-52 place-items-center text-center text-xs text-zinc-500">
+                        {qrError || "QRを準備しています"}
+                      </div>
+                    )}
+                  </div>
+                  <p className="mt-3 text-[11px] leading-5 text-zinc-500">
+                    QRには今回入力したAPI keyが含まれます。読み取りが終わったら閉じてください。
+                  </p>
+                </div>
 
                 <div className="mt-4">
                   {loading ? (
@@ -215,4 +282,11 @@ export function CredentialTransferModal({
       </motion.div>
     </AnimatePresence>
   );
+}
+
+function providerApiCompatibility(providerId: string): "openai" | "anthropic_messages" {
+  if (providerId === "anthropic" || providerId === "opencode-zen" || providerId === "opencode-go") {
+    return "anthropic_messages";
+  }
+  return "openai";
 }

@@ -58,7 +58,7 @@ void main() {
         home: child,
       );
 
-  testWidgets('chat screen renders empty state with suggestions and composer',
+  testWidgets('chat screen renders simple empty state with composer',
       (tester) async {
     await tester.binding.setSurfaceSize(const Size(393, 852));
     final store = ChatStore(storage: _FakeChatStorage());
@@ -75,10 +75,11 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 30));
 
-    expect(find.text('Rumiへようこそ'), findsOneWidget);
-    expect(find.byType(ActionChip), findsNWidgets(4));
+    expect(find.text('ようこそ'), findsOneWidget);
+    expect(find.text('Rumiへようこそ'), findsNothing);
+    expect(find.byType(ActionChip), findsNothing);
     expect(find.byType(ComposerBar), findsOneWidget);
-    expect(find.byIcon(Icons.add_comment_outlined), findsOneWidget);
+    expect(find.byTooltip('新規チャット'), findsOneWidget);
     expect(find.byIcon(Icons.settings_outlined), findsNothing);
     expect(tester.takeException(), isNull);
   });

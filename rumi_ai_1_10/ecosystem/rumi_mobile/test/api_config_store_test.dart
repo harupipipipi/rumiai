@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:rumi_remote_app/src/settings/defaultspack_mobile_providers.g.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
 class _FakeSecureStorage implements SecureKeyValueStorage {
@@ -57,6 +58,7 @@ void main() {
         apiKey: 'sk-one',
         baseUrl: 'https://openrouter.ai/api/v1',
         model: 'openai/gpt-4o-mini',
+        apiCompatibility: 'openai',
       ),
     );
     await store.upsertProviderConfig(
@@ -67,6 +69,7 @@ void main() {
         apiKey: 'sk-two',
         baseUrl: 'https://openrouter.ai/api/v1',
         model: 'openai/gpt-4o-mini',
+        apiCompatibility: 'openai',
       ),
     );
 
@@ -75,5 +78,40 @@ void main() {
     expect(configs.single.providerId, 'openrouter');
     expect(configs.single.label, 'Router 2');
     expect(configs.single.apiKey, 'sk-two');
+    expect(configs.single.apiCompatibility, 'openai');
+  });
+
+  test('api config persists anthropic-compatible provider mode', () async {
+    final store = ApiConfigStore(storage: _FakeSecureStorage());
+
+    await store.saveApi(
+      const ApiConfig(
+        providerId: 'opencode-zen',
+        baseUrl: 'https://opencode.ai/zen',
+        apiKey: 'sk-zen',
+        model: 'minimax-m3-free',
+        apiCompatibility: 'anthropic_messages',
+      ),
+    );
+
+    final config = await store.loadApi();
+    expect(config.providerId, 'opencode-zen');
+    expect(config.apiCompatibility, 'anthropic_messages');
+  });
+
+  test('defaultspack mobile provider catalog includes direct providers',
+      () async {
+    final byId = {
+      for (final provider in defaultspackMobileProviderConfigs)
+        provider.providerId: provider,
+    };
+
+    expect(byId['openai']?.baseUrl, 'https://api.openai.com/v1');
+    expect(byId['google']?.apiCompatibility, 'openai');
+    expect(byId['anthropic']?.apiCompatibility, 'anthropic_messages');
+    expect(
+      byId['xiaomi-token-plan-ams']?.baseUrl,
+      'https://token-plan-ams.xiaomimimo.com/v1',
+    );
   });
 }

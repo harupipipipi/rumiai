@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
+import { CredentialTransferModal } from "../components/CredentialTransferModal";
 import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
 import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
 import {
@@ -369,6 +370,23 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
   assert.match(html, /openai:main:\*\*\*/);
   assert.match(html, /placeholder="openai API key"/);
   assert.match(html, />Save</);
+});
+
+test("CredentialTransferModal exposes QR import surface for provider keys", () => {
+  const html = renderToStaticMarkup(
+    createElement(CredentialTransferModal, {
+      providerId: "anthropic",
+      providerLabel: "Anthropic",
+      apiKey: "sk-ant-test",
+      apiId: "main",
+      onClose: () => undefined,
+    }),
+  );
+
+  assert.match(html, /API設定の転送/);
+  assert.match(html, /Rumi Mobile QR/);
+  assert.match(html, /QRを準備しています/);
+  assert.match(html, /Anthropic/);
 });
 
 test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {

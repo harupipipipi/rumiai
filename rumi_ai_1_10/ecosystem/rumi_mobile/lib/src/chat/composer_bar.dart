@@ -96,6 +96,7 @@ class _ComposerBarState extends State<ComposerBar> {
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10),
                   ),
+                  onTapOutside: (_) => _focus.unfocus(),
                   onSubmitted: (_) => _send(),
                 ),
               ),
