@@ -417,6 +417,7 @@ def _register_defaults(container: DIContainer) -> None:
         vr = c.get_or_none("vocab_registry")
         return FunctionRegistry(vocab_registry=vr)
 
+    # --- Managed sandbox boundary ---
     def _managed_sandbox_supervisor_factory() -> Any:
         from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
 

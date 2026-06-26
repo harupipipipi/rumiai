@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "kind": "rumi.sandbox.template",
+  "id": "desktop.linux_native",
+  "version": "1.0.0",
+  "display_name": "Linux Native Desktop",
+  "summary": "Rumi-owned Linux Xvfb/Openbox desktop seat for the local linux_native provider. This template does not claim exec, file, VM, or container isolation.",
+  "source_pack_id": "rumi_sandbox_runtime_pack",
+  "runtime": {
+    "os": "linux",
+    "provider": "linux_native",
+    "provider_requirements": [
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot"
+    ],
+    "capabilities": [
+      "sandbox.desktop",
+      "sandbox.desktop_input",
+      "sandbox.snapshot"
+    ],
+    "packages": [
+      {
+        "manager": "host",
+        "name": "xvfb",
+        "version": "detected"
+      },
+      {
+        "manager": "host",
+        "name": "openbox",
+        "version": "detected"
+      }
+    ]
+  },
+  "policy": {
+    "filesystem": {
+      "mode": "host_process_no_workspace_mount",
+      "workspace": {
+        "access": "none",
+        "requires_user_selection": false,
+        "writeback_requires_approval": true
+      },
+      "host_mounts": [],
+      "arbitrary_host_mounts": false
+    },
+    "network": {
+      "mode": "host_shared",
+      "allowlist": [],
+      "requires_approval": false
+    },
+    "secrets": {
+      "mode": "deny",
+      "ambient": false,
+      "mounts": []
+    },
+    "desktop": {
+      "enabled": true,
+      "display_backend": "xvfb_openbox",
+      "visible_host_window": false,
+      "width": 1440,
+      "height": 900,
+      "starter": "empty",
+      "profile": "ephemeral"
+    },
+    "resources": {
+      "cpu": 1,
+      "memory_mb": 1024,
+      "timeout_seconds": 14400,
+      "max_output_bytes": 1048576
+    },
+    "lifecycle": {
+      "ttl_seconds": 14400,
+      "persistence": "ephemeral",
+      "destroy_on_idle": true
+    },
+    "approvals": {
+      "network_broaden": "deny",
+      "secret_mount": "deny",
+      "host_writeback": "required",
+      "persistence": "deny"
+    }
+  },
+  "allowed_operations": [
+    "desktop.observe",
+    "desktop.input.with_lease",
+    "desktop.snapshot"
+  ],
+  "user_overrides": {
+    "narrow_only": true,
+    "allowed_fields": [
+      "name",
+      "resolution",
+      "starter",
+      "agent_assignment"
+    ]
+  },
+  "contract": {
+    "no_backend_entrypoint": true,
+    "no_provider_command": true,
+    "no_arbitrary_host_mounts": true,
+    "no_privileged_mode": true,
+    "no_ambient_host_environment": true,
+    "public_exec_requires_argv": true,
+    "human_control_requires_lease": true,
+    "vm_isolation_claimed": false,
+    "container_isolation_claimed": false
+  }
+}

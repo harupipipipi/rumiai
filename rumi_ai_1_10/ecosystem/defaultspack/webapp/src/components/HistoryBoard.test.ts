@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   buildCalendarMonthDays,
   buildCompactHistoryRailItems,
   buildGroupsFromChats,
   buildHistoryCalendarSummary,
+  HistoryBoard,
   loadCustomGroups,
   type ChatItem,
   type CustomGroupInfo,
@@ -257,4 +260,49 @@ test("history chat drag payload becomes composer metadata widget", () => {
     tags: ["coding"],
   });
   assert.deepEqual(parsed, widget);
+});
+
+test("HistoryBoard places Desktops directly below Kanban in full layout", () => {
+  const html = renderToStaticMarkup(createElement(HistoryBoard, {
+    activeChatId: null,
+    chatItems: [],
+    onChatSelect: () => undefined,
+    onNewTask: () => undefined,
+    onKanbanOpen: () => undefined,
+    onDesktopsOpen: () => undefined,
+    isDesktopsActive: true,
+    onSettingsClick: () => undefined,
+  }));
+
+  const calendarIndex = html.indexOf(">Calendar<");
+  const kanbanIndex = html.indexOf(">Kanban<");
+  const desktopsIndex = html.indexOf(">Desktops<");
+
+  assert.ok(calendarIndex >= 0);
+  assert.ok(kanbanIndex > calendarIndex);
+  assert.ok(desktopsIndex > kanbanIndex);
+  assert.match(html, /aria-current="page"/);
+});
+
+test("HistoryBoard places Desktops directly below Kanban in compact rail", () => {
+  const html = renderToStaticMarkup(createElement(HistoryBoard, {
+    activeChatId: null,
+    chatItems: [],
+    onChatSelect: () => undefined,
+    onNewTask: () => undefined,
+    onKanbanOpen: () => undefined,
+    onDesktopsOpen: () => undefined,
+    isDesktopsActive: true,
+    onSettingsClick: () => undefined,
+    isCompact: true,
+  }));
+
+  const calendarIndex = html.indexOf("title=\"Calendar\"");
+  const kanbanIndex = html.indexOf("title=\"Kanban\"");
+  const desktopsIndex = html.indexOf("title=\"Desktops\"");
+
+  assert.ok(calendarIndex >= 0);
+  assert.ok(kanbanIndex > calendarIndex);
+  assert.ok(desktopsIndex > kanbanIndex);
+  assert.match(html, /aria-current="page"/);
 });

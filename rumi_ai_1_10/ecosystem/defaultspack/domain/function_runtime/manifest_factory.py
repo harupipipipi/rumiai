@@ -815,6 +815,122 @@ EXTERNAL_INPUT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+CONTINUITY_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "continuity_list_nodes",
+        "List paired Rumi Node and cloud continuity destinations.",
+        ("continuity", "node"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "nodes_list"},
+        aliases=("defaults.continuity.list_nodes", "defaultspack.continuity.list_nodes", "continuity.list_nodes"),
+    ),
+    _spec(
+        "continuity_pairing_start",
+        "Start an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_start"},
+        aliases=("defaults.continuity.pairing.start", "defaultspack.continuity.pairing.start"),
+    ),
+    _spec(
+        "continuity_pairing_accept",
+        "Accept an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_accept"},
+        aliases=("defaults.continuity.pairing.accept", "defaultspack.continuity.pairing.accept"),
+    ),
+    _spec(
+        "continuity_remove_node",
+        "Remove a paired continuity destination.",
+        ("continuity", "node"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_delete"},
+        aliases=("defaults.continuity.node.remove", "defaultspack.continuity.node.remove"),
+    ),
+    _spec(
+        "continuity_probe_node",
+        "Probe a continuity destination without exporting credentials.",
+        ("continuity", "node", "probe"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_probe"},
+        aliases=("defaults.continuity.node.probe", "defaultspack.continuity.node.probe"),
+    ),
+    _spec(
+        "continuity_provider_routes",
+        "List API provider routes eligible for continuity.",
+        ("continuity", "provider"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_routes"},
+        aliases=("defaults.continuity.provider_routes", "defaultspack.continuity.provider_routes"),
+    ),
+    _spec(
+        "continuity_probe_provider_route",
+        "Probe a provider route against a continuity destination.",
+        ("continuity", "provider", "probe"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_probe"},
+        aliases=("defaults.continuity.provider_route.probe", "defaultspack.continuity.provider_route.probe"),
+    ),
+    _spec(
+        "continuity_set_provider_fallbacks",
+        "Set explicit continuity fallback route ordering.",
+        ("continuity", "provider", "fallback"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_set_fallbacks"},
+        aliases=("defaults.continuity.provider_route.set_fallbacks", "defaultspack.continuity.provider_route.set_fallbacks"),
+    ),
+    _spec(
+        "continuity_provider_extensions",
+        "List portable provider extension requirements.",
+        ("continuity", "provider", "extension"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_extensions"},
+        aliases=("defaults.continuity.provider_extensions", "defaultspack.continuity.provider_extensions"),
+    ),
+    _spec(
+        "continuity_plan_handoff",
+        "Plan a continuity handoff and run provider, credential, runtime, and destination preflight.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "plan"},
+        aliases=("defaults.continuity.plan_handoff", "defaultspack.continuity.plan_handoff", "continuity.plan_handoff"),
+    ),
+    _spec(
+        "continuity_status",
+        "Get a continuity handoff operation status.",
+        ("continuity", "handoff"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_get"},
+        aliases=("defaults.continuity.status", "defaultspack.continuity.status", "continuity.status"),
+    ),
+    _spec(
+        "continuity_cancel",
+        "Cancel a continuity handoff before cutover.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_cancel"},
+        aliases=("defaults.continuity.cancel", "defaultspack.continuity.cancel", "continuity.cancel"),
+    ),
+    _spec(
+        "continuity_checkpoint",
+        "Create a continuity checkpoint without cutting over to another destination.",
+        ("continuity", "checkpoint"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "checkpoint"},
+        aliases=("defaults.continuity.checkpoint", "defaultspack.continuity.checkpoint", "continuity.checkpoint"),
+    ),
+)
+
+
 FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
@@ -833,6 +949,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
     + EXTERNAL_INPUT_FUNCTIONS
+    + CONTINUITY_FUNCTIONS
 )
 
 

@@ -12,6 +12,7 @@ import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } fr
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
+import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
@@ -29,6 +30,13 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
     renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
     component: "ModelApiRoutesSettingsField",
     render: ModelApiRoutesSettingsFieldRenderer,
+  },
+  {
+    id: "builtin-settings-continuity",
+    types: ["continuity"],
+    renderers: ["continuity", "ContinuitySettingsField"],
+    component: "ContinuitySettingsField",
+    render: ContinuitySettingsField,
   },
 ]);
 
@@ -78,6 +86,7 @@ function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): 
     || type === "external_tokens"
     || type === "public_url"
     || type === "model_api_routes"
+    || type === "continuity"
     || type === "device_lock"
     || type === "slash_commands"
     || field.id.endsWith("_setup_guide")
@@ -3129,7 +3138,7 @@ export function SettingsModalRenderer({
               </nav>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                {(pinnedSettingsPlacements.length > 0 || settingsPlacementCandidates.length > 0) && (
+                {pinnedSettingsPlacements.length > 0 && (
                   <section className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
@@ -3140,15 +3149,9 @@ export function SettingsModalRenderer({
                         {pinnedSettingsPlacements.length} pinned
                       </span>
                     </div>
-                    {pinnedSettingsPlacements.length > 0 ? (
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        {pinnedSettingsPlacements.map(renderSettingsPlacement)}
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/20 px-4 py-3 text-xs text-zinc-500">
-                        まだ pinned placement はありません。右上の + から追加できます。
-                      </div>
-                    )}
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      {pinnedSettingsPlacements.map(renderSettingsPlacement)}
+                    </div>
                   </section>
                 )}
                 {activeSection && (

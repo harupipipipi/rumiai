@@ -50,7 +50,8 @@ ANTHROPIC_MESSAGES_MODELS = [
     "qwen3.7-max",
     "qwen3.6-plus",
 ]
-TOOL_CALL_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
+TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5-pro", "mimo-v2.5"}
+REASONING_EFFORT_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
 LIVE_SMOKE_MODEL = os.environ.get("RUMI_OPENCODE_GO_LIVE_MODEL", "minimax-m3")
 
 
@@ -116,6 +117,16 @@ def test_opencode_go_catalog_includes_all_models():
     assert k27["metadata"]["endpoint_path"] == "/chat/completions"
     assert k27["metadata"]["source"] == "opencode_go_docs"
 
+    kimi = models["opencode-go/kimi-k2.6"]
+    assert kimi["metadata"]["transport"] == "openai_chat_completions"
+    assert {"vision", "reasoning", "tool_calls"}.issubset(set(kimi["capabilities"]))
+    assert kimi["metadata"]["capabilities"]["vision"] is True
+    assert kimi["metadata"]["capabilities"]["tool_calls"] is True
+    assert kimi["metadata"]["capabilities"]["reasoning"] is True
+    assert kimi["metadata"]["tool_calls_verified"] is True
+    assert kimi["metadata"]["vision_verified"] is True
+    assert kimi["metadata"]["thinking_disabled_for_tool_calls"] is True
+
     qwen_max = models["opencode-go/qwen3.7-max"]
     assert qwen_max["defaults"]["reasoning"] is True
     assert qwen_max["metadata"]["transport"] == "anthropic_messages"
@@ -144,11 +155,19 @@ def test_opencode_go_catalog_includes_all_models():
         assert model_entry["metadata"]["tool_calls_verified"] is True
         assert model_entry["supports_thinking"] is True
         assert model_entry["metadata"]["capabilities"]["reasoning"] is True
-        assert model_entry["metadata"]["reasoning_effort_verified"] is True
+        if model_id in REASONING_EFFORT_MODELS:
+            assert model_entry["metadata"]["reasoning_effort_verified"] is True
+        else:
+            assert "reasoning_effort_verified" not in model_entry["metadata"]
 
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
 
     legacy_models = {item["id"]: item for item in list_model_catalog("opencode-go")}
+    legacy_kimi = legacy_models["opencode-go/kimi-k2.6"]
+    assert legacy_kimi["supports_vision"] is True
+    assert legacy_kimi["supports_image_input"] is True
+    assert legacy_kimi["supports_tool_calling"] is True
+    assert legacy_kimi["supports_thinking"] is True
     legacy_qwen37 = legacy_models["opencode-go/qwen3.7-plus"]
     assert legacy_qwen37["supports_vision"] is True
     assert legacy_qwen37["supports_image_input"] is True
@@ -239,13 +258,101 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     if model in TOOL_CALL_MODELS:
         assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
         assert captured["body"]["tool_choice"] == "auto"
-        assert captured["body"]["reasoning_effort"] == "high"
+        if model == "kimi-k2.6":
+            assert captured["body"]["thinking"] == {"type": "disabled"}
+            assert "reasoning_effort" not in captured["body"]
+        else:
+            assert captured["body"]["reasoning_effort"] == "high"
+            assert "thinking" not in captured["body"]
     else:
         assert "tools" not in captured["body"]
         assert "tool_choice" not in captured["body"]
         assert "reasoning_effort" not in captured["body"]
-    assert "thinking" not in captured["body"]
+        assert "thinking" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_go_kimi_preserves_native_thinking_without_tools(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_test",
+            "model": "kimi-k2.6",
+            "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            "usage": {},
+        }
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        provider.complete(
+            "opencode-go/kimi-k2.6",
+            [{"role": "user", "content": "Say OK"}],
+            [],
+            {"thinking": {"type": "enabled"}, "max_tokens": 8},
+        )
+
+    assert captured["path"] == "/chat/completions"
+    assert captured["body"]["thinking"] == {"type": "enabled"}
+    assert "tools" not in captured["body"]
+
+
+def test_opencode_go_kimi_image_analyze_uses_chat_vision(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {"choices": [{"message": {"content": "terminal visible"}}]}
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        result = provider.image_analyze(
+            "opencode-go/kimi-k2.6",
+            "data:image/png;base64,AAAA",
+            "Describe the screen.",
+        )
+
+    assert result == {"text": "terminal visible"}
+    assert captured["path"] == "/chat/completions"
+    assert captured["body"]["model"] == "kimi-k2.6"
+    content = captured["body"]["messages"][0]["content"]
+    assert content[0]["type"] == "text"
+    assert content[1]["type"] == "image_url"
+
+
+def test_opencode_go_messages_vision_uses_messages_endpoint(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_messages_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {"content": [{"type": "text", "text": "image seen"}]}
+
+    with patch.object(provider, "_request_messages_json", side_effect=fake_request_messages_json):
+        result = provider.image_analyze(
+            "opencode-go/qwen3.7-plus",
+            "data:image/png;base64,AAAA",
+            "Describe the screen.",
+        )
+
+    assert result == {"text": "image seen"}
+    assert captured["path"] == "/messages"
+    assert captured["body"]["model"] == "qwen3.7-plus"
+    content = captured["body"]["messages"][0]["content"]
+    assert content[0]["type"] == "image"
+    assert content[0]["source"] == {
+        "type": "base64",
+        "media_type": "image/png",
+        "data": "AAAA",
+    }
+    assert content[1] == {"type": "text", "text": "Describe the screen."}
 
 
 @pytest.mark.parametrize("model", ANTHROPIC_MESSAGES_MODELS)

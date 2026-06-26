@@ -1,0 +1,47 @@
+{
+  "function_id": "continuity_probe_node",
+  "description": "Probe a continuity destination without exporting credentials.",
+  "tags": [
+    "continuity",
+    "node",
+    "probe"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.probe_node",
+    "defaultspack.continuity.probe_node",
+    "defaults.continuity.probe.node",
+    "defaultspack.continuity.probe.node",
+    "defaults.continuity.node.probe",
+    "defaultspack.continuity.node.probe"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "node_probe"
+      }
+    }
+  }
+}

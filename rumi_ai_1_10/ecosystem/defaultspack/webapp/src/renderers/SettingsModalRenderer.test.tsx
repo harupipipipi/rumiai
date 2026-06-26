@@ -430,6 +430,106 @@ test("SettingsModalRenderer renders template model_api_routes through registered
   assert.match(html, /google\/main/);
 });
 
+test("SettingsModalRenderer renders continuity handoff controls", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "continuity",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "continuity",
+          label: "Continuity",
+          fields: [
+            {
+              id: "handoff",
+              label: "Cloud / Device Handoff",
+              type: "continuity",
+              default: {
+                sandbox_id: "sandbox-demo",
+                mode: "move",
+                destination_node_id: "node-workstation",
+                route_id: "route-openai",
+                local_node: {
+                  node_id: "node-source",
+                  display_name: "MacBook",
+                  destination_kind: "source",
+                  online: true,
+                },
+                nodes: [
+                  {
+                    node_id: "node-workstation",
+                    display_name: "Workstation",
+                    destination_kind: "cloud_node",
+                    platform: "Linux",
+                    online: true,
+                  },
+                ],
+                routes: [
+                  {
+                    route_id: "route-openai",
+                    provider_id: "openai",
+                    api_id: "primary",
+                    model_id: "gpt-4.1",
+                    qualified_route: "openai/primary/gpt-4.1",
+                    endpoint_class: "public_https",
+                    credential_ref: "RUMIAPI_OPENAI_PRIMARY",
+                    portable: true,
+                  },
+                ],
+                operations: [
+                  {
+                    operation_id: "handoff-demo",
+                    status: "COMPLETED",
+                    sandbox_id: "sandbox-demo",
+                    destination_node_id: "node-workstation",
+                  },
+                ],
+              },
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        continuity: {
+          handoff: {
+            sandbox_id: "sandbox-demo",
+            destination_node_id: "node-workstation",
+            route_id: "route-openai",
+            mode: "move",
+          },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="continuity"/);
+  assert.match(html, /Workstation/);
+  assert.match(html, /openai\/primary\/gpt-4\.1/);
+  assert.match(html, /handoff-demo/);
+  assert.match(html, /Current primary/);
+  assert.match(html, /Source/);
+  assert.match(html, /Destination/);
+  assert.match(html, /planning-only/);
+  assert.match(html, /Source primary/);
+  assert.match(html, /Review plan/);
+  assert.match(html, /Completed/);
+  assert.doesNotMatch(html, /Return to this device/);
+  assert.doesNotMatch(html, /Switch primary/);
+  assert.doesNotMatch(html, /Move primary/);
+  assert.match(html, /Advanced routing details/);
+  assert.doesNotMatch(html, /COMPLETED/);
+});
+
 test("Settings > Tools contains tool experience settings tabs", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
@@ -485,6 +585,62 @@ test("Settings > Tools contains tool experience settings tabs", () => {
   assert.match(html, /高度な設定/);
   assert.match(html, /既定の使い方/);
   assert.match(html, /自動で選ぶ/);
+});
+
+test("Settings > Tools defaults to the tool experience overview", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: {
+          filters: [],
+          items: [
+            {
+              id: "vision_tool",
+              label: "Vision Tool",
+              category: "tool",
+              description: "Inspect images",
+              tool_info: {
+                requires_approval: true,
+                requires_model_capabilities: ["model.image_input"],
+                attachment_policy: "images_only",
+              },
+            },
+          ],
+        },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "tools",
+          label: "Tools",
+          fields: [
+            { id: "keep_selected_tools_after_send", label: "Keep Selected Tools", type: "toggle", default: true },
+          ],
+        },
+      ],
+      settingsValues: {
+        tools: {
+          keep_selected_tools_after_send: true,
+          disabled_tool_ids: [],
+          hidden_tool_ids: [],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /1件/);
+  assert.match(html, /選んだ機能を回答内に表示/);
+  assert.doesNotMatch(html, /Tool details/);
 });
 
 test("settings surface pinned placements render in the modal", () => {

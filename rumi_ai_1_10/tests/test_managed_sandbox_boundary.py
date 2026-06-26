@@ -488,6 +488,19 @@ def test_setup_doctor_includes_managed_sandbox_readiness(tmp_path, monkeypatch):
     ]
 
 
+def test_default_di_registers_managed_sandbox_supervisor():
+    from core_runtime.di_container import get_container, reset_container
+    from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor
+
+    reset_container()
+    try:
+        supervisor = get_container().get_or_none("managed_sandbox_supervisor")
+    finally:
+        reset_container()
+
+    assert isinstance(supervisor, ManagedSandboxSupervisor)
+
+
 def test_bwrap_provider_doctor_requires_working_user_systemd(tmp_path, monkeypatch):
     from ecosystem.defaultspack.backend.sandbox import models
     from ecosystem.defaultspack.backend.sandbox.providers import managed_ubuntu
@@ -512,7 +525,7 @@ def test_bwrap_provider_doctor_requires_working_user_systemd(tmp_path, monkeypat
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setattr(managed_ubuntu, "_unprivileged_userns_available", lambda: True)
 
-    status = managed_ubuntu.BwrapHostProvider().doctor(models.RuntimeRequirements(profile_id="work"))
+    status = managed_ubuntu.BwrapHostProvider().doctor(models.RuntimeRequirements(provider_id="bwrap_host"))
 
     assert status.ready is False
     assert "systemd:user_scope" in status.missing_requirements

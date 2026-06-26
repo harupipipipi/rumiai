@@ -103,6 +103,8 @@ export type HistoryBoardRendererProps = {
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
+  onDesktopsOpen?: () => void;
+  isDesktopsActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
