@@ -133,22 +133,16 @@ def normalize_tool_target(value: Any) -> ToolTarget | None:
     if not isinstance(value, dict):
         return None
     kind = str(value.get("kind") or value.get("type") or "").strip().lower()
-    target_id = str(
-        value.get("id")
-        or value.get("tool_id")
-        or value.get("service_id")
-        or value.get("name")
-        or (
-            value.get("function", {}).get("name")
-            if isinstance(value.get("function"), dict)
-            else ""
-        )
-        or ""
-    ).strip()
+    if kind not in {"tool", "service"}:
+        if value.get("tool_id") and not value.get("service_id"):
+            kind = "tool"
+        elif value.get("service_id") and not value.get("tool_id"):
+            kind = "service"
+    target_id = str(value.get("id") or value.get("tool_id") or value.get("service_id") or "").strip()
     if not target_id:
         return None
     if kind not in {"tool", "service"}:
-        kind = "service" if value.get("service_id") and not value.get("tool_id") else "tool"
+        return None
     return ToolTarget(kind, target_id)
 
 

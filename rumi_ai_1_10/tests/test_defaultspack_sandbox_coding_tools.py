@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import tarfile
+import uuid
 from pathlib import Path
 
 
@@ -13,9 +14,21 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 def _sandbox_context(manager, workspace: Path, *, conversation_id: str = "conv-test") -> dict:
+    from domain.coding.workspace_store import WorkspaceStore
+
+    store = getattr(manager, "_workspace_store", None)
+    if store is None:
+        store = WorkspaceStore(manager.state_dir.parent / "sandbox-test-workspaces.json")
+        manager._workspace_store = store
+    record = store.create(
+        workspace,
+        workspace_id="test-" + uuid.uuid4().hex,
+        trusted=True,
+        metadata={"owner_profile_id": "work"},
+    )
     return {
         "sandbox_workspace_manager": manager,
-        "workspace_root": str(workspace),
+        "workspace_id": record["workspace_id"],
         "conversation_id": conversation_id,
         "profile_id": "work",
     }
@@ -392,6 +405,17 @@ def test_sandbox_terminal_response_marks_nonzero_exit_as_failed():
     assert result["exit_code"] == 2
 
 
+def test_sandbox_terminal_wrapper_output_read_is_bounded(tmp_path):
+    from backend.sandbox.isolation import supervisor
+
+    output_path = tmp_path / "sandbox.stdout"
+    output_path.write_bytes(b"x" * 1024)
+
+    text = supervisor._read_text_if_present(output_path, max_bytes=32)
+
+    assert len(text.encode("utf-8")) == 33
+
+
 def test_sandbox_workspace_rejects_client_root_and_sandbox_id(tmp_path):
     from blocks.coding import sandbox_file_write
     from domain.coding.sandbox_workspace import SandboxWorkspaceManager
@@ -410,7 +434,7 @@ def test_sandbox_workspace_rejects_client_root_and_sandbox_id(tmp_path):
     )
 
     assert root_result["status"] == "error"
-    assert "workspace_root must come from trusted server context" in root_result["error"]["message"]
+    assert "workspace_root is not accepted by sandbox coding" in root_result["error"]["message"]
     assert id_result["status"] == "error"
     assert "sandbox_id is assigned by the server" in id_result["error"]["message"]
 
@@ -471,24 +495,33 @@ def test_sandbox_workspace_requires_trusted_owned_workspace_id(tmp_path, monkeyp
     assert missing_result["status"] == "error"
 
 
-def test_sandbox_workspace_rejects_root_and_home_context(tmp_path):
+def test_sandbox_workspace_rejects_context_root_and_cwd_injection(tmp_path):
     from blocks.coding import sandbox_file_write
     from domain.coding.sandbox_workspace import SandboxWorkspaceManager
 
     manager = SandboxWorkspaceManager(tmp_path / "sandbox-state")
-    root_result = sandbox_file_write.run(
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    valid_context = _sandbox_context(manager, workspace)
+    context_root_result = sandbox_file_write.run(
         {"path": "a.txt", "content": "x"},
-        {"sandbox_workspace_manager": manager, "workspace_root": "/", "conversation_id": "conv"},
+        {**valid_context, "workspace_root": "/tmp/attacker"},
     )
-    home_result = sandbox_file_write.run(
+    nested_result = sandbox_file_write.run(
         {"path": "a.txt", "content": "x"},
-        {"sandbox_workspace_manager": manager, "workspace_root": str(Path.home()), "conversation_id": "conv"},
+        {**valid_context, "inputs": {"workspace_root": str(Path.home())}},
+    )
+    policy_result = sandbox_file_write.run(
+        {"path": "a.txt", "content": "x"},
+        {**valid_context, "profile_policy": {"cwd": "/tmp/attacker"}},
     )
 
-    assert root_result["status"] == "error"
-    assert "filesystem root" in root_result["error"]["message"]
-    assert home_result["status"] == "error"
-    assert "home directory" in home_result["error"]["message"]
+    assert context_root_result["status"] == "error"
+    assert "workspace_root is not accepted by sandbox coding" in context_root_result["error"]["message"]
+    assert nested_result["status"] == "error"
+    assert "workspace_root is not accepted by sandbox coding" in nested_result["error"]["message"]
+    assert policy_result["status"] == "error"
+    assert "cwd is not accepted by sandbox coding" in policy_result["error"]["message"]
 
 
 def test_sandbox_state_owner_mismatch_does_not_delete_existing_state(tmp_path):
@@ -572,6 +605,28 @@ def test_lima_export_tar_is_capped_before_replacing_workspace(tmp_path, monkeypa
     else:
         raise AssertionError("oversized Lima export should be rejected")
     assert (root / "keep.txt").read_text(encoding="utf-8") == "keep"
+
+
+def test_lima_attestation_binds_instance_config(monkeypatch):
+    from backend.sandbox.isolation import supervisor
+
+    payload = {
+        "name": "rumi-safe",
+        "config": {"mounts": [{"location": "/tmp/work", "writable": True}], "networks": []},
+        "mounts": [{"location": "/tmp/work", "writable": True}],
+        "networks": [],
+        "network": {"enabled": False},
+        "vmType": "qemu",
+        "arch": "aarch64",
+    }
+    expected_hash = supervisor._stable_lima_config_hash("rumi-safe", payload)
+
+    monkeypatch.setenv(supervisor.LIMA_CONFIG_HASH_ENV, expected_hash)
+    monkeypatch.setattr(supervisor, "_lima_instance_config_hash", lambda limactl, instance: expected_hash)
+    assert supervisor._verify_lima_instance_attestation("/usr/bin/limactl", "rumi-safe") is None
+
+    monkeypatch.setattr(supervisor, "_lima_instance_config_hash", lambda limactl, instance: "changed")
+    assert "config changed" in supervisor._verify_lima_instance_attestation("/usr/bin/limactl", "rumi-safe")
 
 
 def test_untrusted_tool_context_cannot_supply_sandbox_session_id():

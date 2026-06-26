@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 
 import { api } from "../../lib/api";
-import type { PendingToolReview, ToolReviewDraft, ToolSelectionMode, ToolSelectionRequest, ToolTarget } from "./types";
+import type { ConversationToolPreferences, PendingToolReview, ToolReviewDraft, ToolSelectionChip, ToolSelectionMode, ToolSelectionRequest, ToolTarget } from "./types";
 
 type ControllerInput = {
   settingsValues: Record<string, Record<string, unknown>>;
   selectedToolIds: string[];
   setSelectedToolIds: (toolIds: string[]) => void;
+  conversationPreferences?: ConversationToolPreferences;
 };
 
 type BuildRequestInput = {
@@ -29,6 +30,7 @@ export function useToolSelectionController({
   settingsValues,
   selectedToolIds,
   setSelectedToolIds,
+  conversationPreferences = {},
 }: ControllerInput) {
   const [turnModeOverride, setTurnModeOverride] = useState<ToolSelectionMode | null>(null);
   const [turnExclude, setTurnExclude] = useState<ToolTarget[]>([]);
@@ -40,11 +42,36 @@ export function useToolSelectionController({
     return MODES.has(raw) ? raw : "auto";
   }, [settingsValues.tools?.default_mode]);
 
-  const effectiveMode = turnModeOverride ?? defaultMode;
+  const conversationMode = conversationPreferences.mode && MODES.has(conversationPreferences.mode)
+    ? conversationPreferences.mode
+    : undefined;
+  const effectiveMode = turnModeOverride ?? conversationMode ?? defaultMode;
   const turnInclude = useMemo<ToolTarget[]>(
     () => selectedToolIds.map((id) => ({ kind: "tool", id })),
     [selectedToolIds],
   );
+  const conversationInclude = useMemo(
+    () => normalizeTargets(conversationPreferences.include),
+    [conversationPreferences.include],
+  );
+  const conversationExclude = useMemo(
+    () => normalizeTargets(conversationPreferences.exclude),
+    [conversationPreferences.exclude],
+  );
+  const overrideChips = useMemo<ToolSelectionChip[]>(() => {
+    const turnExcludeKeys = new Set(turnExclude.map(targetKey));
+    const turnIncludeKeys = new Set(turnInclude.map(targetKey));
+    return [
+      ...conversationInclude
+        .filter((target) => !turnExcludeKeys.has(targetKey(target)))
+        .map((target) => ({ ...target, scope: "conversation" as const, intent: "include" as const, removable: true })),
+      ...conversationExclude
+        .filter((target) => !turnIncludeKeys.has(targetKey(target)))
+        .map((target) => ({ ...target, scope: "conversation" as const, intent: "exclude" as const, removable: false })),
+      ...turnInclude.map((target) => ({ ...target, scope: "turn" as const, intent: "include" as const, removable: true })),
+      ...turnExclude.map((target) => ({ ...target, scope: "turn" as const, intent: "exclude" as const, removable: true })),
+    ];
+  }, [conversationExclude, conversationInclude, turnExclude, turnInclude]);
 
   const setTurnMode = (mode: ToolSelectionMode | null) => {
     setTurnModeOverride(mode);
@@ -61,7 +88,13 @@ export function useToolSelectionController({
   };
 
   const removeTarget = (target: ToolTarget) => {
-    if (target.kind === "tool") {
+    const scoped = target as ToolSelectionChip;
+    if (scoped.scope === "conversation" && scoped.intent === "include") {
+      setTurnExclude((current) => mergeTargets(current, [target]));
+      return;
+    }
+    if (scoped.scope === "conversation") return;
+    if (target.kind === "tool" && scoped.intent !== "exclude") {
       setSelectedToolIds(selectedToolIds.filter((id) => id !== target.id));
       return;
     }
@@ -70,29 +103,34 @@ export function useToolSelectionController({
 
   const buildRequest = ({ toolIds, mentionedToolIds = [] }: BuildRequestInput): ToolSelectionRequest => {
     const uniqueToolIds = [...new Set([...toolIds, ...mentionedToolIds].filter(Boolean))];
+    const turnTargets = uniqueToolIds.map((id) => ({ kind: "tool" as const, id }));
+    const include = mergeTargets(conversationInclude, turnTargets);
+    const exclude = mergeTargets(conversationExclude, turnExclude);
+    const hasTurnOverrides = turnTargets.length > 0 || turnExclude.length > 0 || Boolean(turnModeOverride);
+    const scope = hasTurnOverrides ? "turn" : (conversationInclude.length || conversationExclude.length || conversationMode ? "conversation" : "turn");
     if (effectiveMode === "none") {
       return {
         mode: "none",
         include: [],
-        exclude: [],
-        scope: "turn",
+        exclude,
+        scope,
         must_use: false,
       };
     }
     if (effectiveMode === "manual" || (effectiveMode === "auto" && uniqueToolIds.length > 0)) {
       return {
         mode: "manual",
-        include: uniqueToolIds.map((id) => ({ kind: "tool", id })),
-        exclude: turnExclude,
-        scope: "turn",
+        include,
+        exclude,
+        scope,
         must_use: false,
       };
     }
     return {
       mode: effectiveMode,
-      include: uniqueToolIds.map((id) => ({ kind: "tool", id })),
-      exclude: turnExclude,
-      scope: "turn",
+      include,
+      exclude,
+      scope,
       must_use: false,
     };
   };
@@ -134,7 +172,7 @@ export function useToolSelectionController({
       mode: include.length ? "manual" : "none",
       include,
       exclude: pendingReview.request.exclude ?? [],
-      scope: "turn",
+      scope: pendingReview.request.scope ?? "turn",
       must_use: false,
       preview_id: pendingReview.previewId,
     };
@@ -148,7 +186,7 @@ export function useToolSelectionController({
       mode: "none",
       include: [],
       exclude: [],
-      scope: "turn",
+      scope: pendingReview.request.scope ?? "turn",
       must_use: false,
       preview_id: pendingReview.previewId,
     };
@@ -172,7 +210,8 @@ export function useToolSelectionController({
       turnModeOverride,
       turnInclude,
       turnExclude,
-      conversationPreferences: {},
+      conversationPreferences,
+      overrideChips,
       pendingReview,
       latestDecision,
     },
@@ -186,4 +225,37 @@ export function useToolSelectionController({
     cancelReview,
     clearTurnStateAfterSend,
   };
+}
+
+function normalizeTargets(value: ToolTarget[] | undefined): ToolTarget[] {
+  if (!Array.isArray(value)) return [];
+  const result: ToolTarget[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || (item.kind !== "tool" && item.kind !== "service") || !item.id?.trim()) continue;
+    const target = { kind: item.kind, id: item.id.trim() };
+    const key = targetKey(target);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(target);
+  }
+  return result;
+}
+
+function mergeTargets(...groups: ToolTarget[][]): ToolTarget[] {
+  const result: ToolTarget[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    for (const target of group) {
+      const key = targetKey(target);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(target);
+    }
+  }
+  return result;
+}
+
+function targetKey(target: ToolTarget): string {
+  return `${target.kind}:${target.id}`;
 }

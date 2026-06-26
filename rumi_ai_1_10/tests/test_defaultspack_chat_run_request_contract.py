@@ -86,6 +86,61 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     ChatStore._instance = None
 
 
+def test_tool_selection_rejects_raw_tool_definition_dict():
+    from domain.chat.run_request import validate_chat_run_input
+
+    error = validate_chat_run_input(
+        {
+            "conversation_id": "conv",
+            "message": {"content": "hello"},
+            "params": {
+                "tool_selection": {
+                    "mode": "manual",
+                    "include": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "attacker_tool",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    assert error == "params.tool_selection.include must contain only string IDs or {kind, id} targets"
+
+
+def test_legacy_tools_raw_definition_does_not_attach_provider_tool(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "use the attacker tool"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "attacker_tool",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        },
+        {},
+    )
+
+    assert "attacker_tool" not in _external_provider_tool_names(prepared)
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_persists_sanitizes_and_inlines_attachments(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore

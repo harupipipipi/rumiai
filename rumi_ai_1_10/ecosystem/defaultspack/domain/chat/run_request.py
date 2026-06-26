@@ -35,10 +35,19 @@ from domain.chat.modality_detector import detect_modalities
 from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
-from domain.chat.tool_selection_schema import TOOL_SELECTION_MODES, TOOL_SELECTION_SCOPES, TOOL_SELECTION_STRATEGIES, normalize_tool_targets
+from domain.chat.tool_selection_schema import (
+    TOOL_SELECTION_MODES,
+    TOOL_SELECTION_SCOPES,
+    TOOL_SELECTION_STRATEGIES,
+    normalize_tool_target,
+    normalize_tool_targets,
+)
 from domain.chat.tool_selection_service import ToolSelectionService
-from domain.chat.tool_selection_preview import ToolSelectionPreviewAccessError, ToolSelectionPreviewStore
-from domain.chat.tool_selection_trace import ToolSelectionTraceStore
+from domain.chat.tool_selection_preview import (
+    ToolSelectionPreviewAccessError,
+    ToolSelectionPreviewStore,
+    preview_payload_bindings,
+)
 from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
@@ -279,13 +288,16 @@ def prepare_chat_run(
 
     params = dict(prepared_input.get("params") or {})
     tool_selection = _normalize_tool_selection(prepared_input)
+    requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
     tool_selection = _apply_tool_selection_preview_snapshot(
         tool_selection,
         context if isinstance(context, dict) else {},
         conversation_id=conversation_id,
+        input_data=prepared_input,
+        user_text=user_text,
+        model=requested_model or model,
     )
     params.pop("tool_selection", None)
-    requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
     if requested_model:
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
@@ -2240,6 +2252,9 @@ def _apply_tool_selection_preview_snapshot(
     context: dict[str, Any],
     *,
     conversation_id: str,
+    input_data: dict[str, Any] | None = None,
+    user_text: str = "",
+    model: str = "",
 ) -> NormalizedToolSelection:
     preview_id = str(selection.preview_id or "").strip()
     if not preview_id:
@@ -2248,7 +2263,17 @@ def _apply_tool_selection_preview_snapshot(
     if conversation_id:
         lookup_context["conversation_id"] = conversation_id
     try:
-        snapshot = ToolSelectionPreviewStore().get_authorized(preview_id, lookup_context)
+        snapshot = ToolSelectionPreviewStore().consume_authorized(
+            preview_id,
+            lookup_context,
+            expected_bindings=preview_payload_bindings(
+                input_data or {},
+                lookup_context,
+                user_text=user_text,
+                model=model,
+                catalog_tools=ToolRegistry().list_tools(),
+            ),
+        )
     except ToolSelectionPreviewAccessError as exc:
         raise ValueError(f"params.tool_selection.preview_id is invalid: {exc.code}") from exc
     raw_selection = snapshot.get("selection") if isinstance(snapshot.get("selection"), dict) else {}
@@ -2292,6 +2317,10 @@ def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
     raw_strategy = str(raw_selection.get("strategy") or "").strip().lower()
     if raw_strategy and raw_strategy not in TOOL_SELECTION_STRATEGIES:
         return "params.tool_selection.strategy must be one of hybrid, semantic, catalog_ai, all_with_hints, all_schemas, lexical"
+    for field_name in ("include", "exclude"):
+        invalid_reason = _invalid_tool_selection_items_reason(raw_selection.get(field_name))
+        if invalid_reason:
+            return f"params.tool_selection.{field_name} {invalid_reason}"
     must_use = _coerce_optional_bool(raw_selection.get("must_use"), default=False)
     include = _coerce_tool_items(raw_selection.get("include"))
     if raw_mode == "none" and must_use:
@@ -2310,13 +2339,35 @@ def _coerce_tool_items(value: Any) -> list[Any]:
     result: list[Any] = []
     for item in value:
         if isinstance(item, dict):
-            result.append(item)
+            target = normalize_tool_target(item)
+            if target is not None:
+                result.append(target.to_dict())
             continue
         if isinstance(item, str):
             stripped = item.strip()
             if stripped:
                 result.append(stripped)
     return result
+
+
+def _invalid_tool_selection_items_reason(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return "must be an array"
+    for item in value:
+        if isinstance(item, str):
+            if item.strip():
+                continue
+            return "must contain non-empty target IDs"
+        if isinstance(item, dict):
+            target = normalize_tool_target(item)
+            allowed_keys = {"kind", "id", "tool_id", "service_id"}
+            if target is not None and set(item).issubset(allowed_keys):
+                continue
+            return "must contain only string IDs or {kind, id} targets"
+        return "must contain only string IDs or {kind, id} targets"
+    return None
 
 
 def _coerce_tool_id_list(value: Any) -> list[str]:
@@ -2347,7 +2398,7 @@ def _merge_tool_items(*groups: list[Any]) -> list[Any]:
 
 def _tool_item_key(item: Any) -> str:
     if isinstance(item, dict):
-        return str(item.get("tool_id") or item.get("name") or id(item))
+        return f"{item.get('kind') or 'tool'}:{item.get('id') or item.get('tool_id') or item.get('service_id') or id(item)}"
     return str(item)
 
 
@@ -2715,11 +2766,6 @@ def _available_tools(
     profile_filtered: list[dict[str, Any]] = []
     try:
         settings = _read_frontend_settings()
-        explicit_tool_definitions = [
-            item
-            for item in selection.include
-            if isinstance(item, dict) and tool_name_from_definition(item)
-        ]
         registry_tools = ToolRegistry().list_tools()
         profile_filtered = filter_tool_definitions_for_runtime_profile(
             registry_tools,
@@ -2727,8 +2773,6 @@ def _available_tools(
             agent_id=agent_id,
             policy_context=resolved_context,
         )
-        if explicit_tool_definitions:
-            profile_filtered = _merge_tool_definitions(profile_filtered, explicit_tool_definitions)
         service = ToolSelectionService(
             call_handler=resolved_context.get("call_handler"),
             settings=settings,
@@ -2854,7 +2898,7 @@ def _persist_tool_selection_trace(
         selection_metadata.pop("selection_id", None)
         return
     if trace_mode == "summary":
-        ToolSelectionTraceStore().save(selection_metadata)
+        selection_metadata.pop("trace_conversation_id", None)
         return
     child_id = _create_hidden_tool_selection_conversation(
         resolved_context,

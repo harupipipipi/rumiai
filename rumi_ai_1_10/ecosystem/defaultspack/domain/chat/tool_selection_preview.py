@@ -5,6 +5,7 @@ import os
 import re
 import tempfile
 import time
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,33 @@ class ToolSelectionPreviewStore:
             )
         return snapshot
 
+    def consume_authorized(
+        self,
+        preview_id: str,
+        context: dict[str, Any] | None,
+        *,
+        expected_bindings: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        candidate = str(preview_id or "").strip()
+        if not _valid_preview_id(candidate):
+            raise ToolSelectionPreviewAccessError("Tool selection preview not found", "NOT_FOUND")
+        snapshot = self.get_authorized(candidate, context)
+        _validate_expected_bindings(snapshot, expected_bindings or {})
+        path = self._root / f"{candidate}.json"
+        used_path = self._root / f"{candidate}.used.json"
+        try:
+            os.replace(path, used_path)
+        except FileNotFoundError as exc:
+            raise ToolSelectionPreviewAccessError("Tool selection preview was already used", "USED") from exc
+        except OSError as exc:
+            raise ToolSelectionPreviewAccessError("Tool selection preview could not be consumed", "CONSUME_FAILED") from exc
+        snapshot["used_at_epoch"] = time.time()
+        try:
+            self._atomic_write_json(used_path, snapshot)
+        except OSError:
+            pass
+        return snapshot
+
     def _atomic_write_json(self, path: Path, payload: dict[str, Any]) -> None:
         fd, tmp_name = tempfile.mkstemp(
             dir=str(path.parent),
@@ -103,8 +131,99 @@ def preview_context_metadata(context: dict[str, Any] | None, *, conversation_id:
     }
 
 
+def preview_payload_bindings(
+    input_data: dict[str, Any] | None,
+    context: dict[str, Any] | None = None,
+    *,
+    user_text: str = "",
+    model: str = "",
+    catalog_tools: list[dict[str, Any]] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    payload = input_data if isinstance(input_data, dict) else {}
+    safe_context = context if isinstance(context, dict) else {}
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    message = payload.get("message") if isinstance(payload.get("message"), dict) else {}
+    return {
+        "message_hash": _stable_hash(user_text or payload.get("user_text") or payload.get("text") or message.get("content") or ""),
+        "attachment_metadata_hash": _stable_hash(_attachment_metadata_for_binding(payload, message)),
+        "model_hash": _stable_hash(model or payload.get("model") or params.get("model") or params.get("profile_id") or ""),
+        "catalog_hash": _stable_hash(_catalog_identity(catalog_tools or [])),
+        "policy_settings_hash": _stable_hash(
+            {
+                "profile_policy": safe_context.get("profile_policy") if isinstance(safe_context.get("profile_policy"), dict) else {},
+                "conversation_tool_preferences": (
+                    safe_context.get("conversation_tool_preferences")
+                    if isinstance(safe_context.get("conversation_tool_preferences"), dict)
+                    else {}
+                ),
+                "tool_settings": (settings or {}).get("tools") if isinstance((settings or {}).get("tools"), dict) else {},
+            }
+        ),
+    }
+
+
 def _valid_preview_id(value: str) -> bool:
     return bool(_PREVIEW_ID_RE.match(str(value or "").strip()))
+
+
+def _validate_expected_bindings(snapshot: dict[str, Any], expected: dict[str, str]) -> None:
+    stored = snapshot.get("bindings") if isinstance(snapshot.get("bindings"), dict) else {}
+    for key, stored_value in stored.items():
+        if not stored_value:
+            continue
+        expected_value = expected.get(key)
+        if expected_value and str(expected_value) != str(stored_value):
+            raise ToolSelectionPreviewAccessError("Tool selection preview no longer matches this request", "PAYLOAD_MISMATCH")
+
+
+def _stable_hash(value: Any) -> str:
+    try:
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    except TypeError:
+        encoded = str(value)
+    return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _attachment_metadata_for_binding(payload: dict[str, Any], message: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = payload.get("attachment_metadata")
+    if raw is None:
+        raw = message.get("attachments")
+    if not isinstance(raw, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            result.append({"value": str(item)})
+            continue
+        result.append(
+            {
+                key: item.get(key)
+                for key in ("name", "file_name", "filename", "mime_type", "type", "size", "media_type", "kind")
+                if item.get(key) not in (None, "")
+            }
+        )
+    return result
+
+
+def _catalog_identity(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    identity: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip()
+        if not tool_id:
+            continue
+        identity.append(
+            {
+                "id": tool_id,
+                "service": str(tool.get("service_id") or tool.get("service") or "").strip(),
+                "risk": str(tool.get("risk") or "").strip(),
+                "requires_approval": bool(tool.get("requires_approval", False)),
+            }
+        )
+    identity.sort(key=lambda item: item["id"])
+    return identity
 
 
 def _is_expired(snapshot: dict[str, Any]) -> bool:

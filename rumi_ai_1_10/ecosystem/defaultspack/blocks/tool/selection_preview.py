@@ -11,6 +11,7 @@ from domain.chat.tool_selection_preview import (
     PREVIEW_TTL_SECONDS,
     ToolSelectionPreviewStore,
     preview_context_metadata,
+    preview_payload_bindings,
 )
 from domain.chat.tool_selection_service import ToolSelectionService
 from domain.chat.tool_selection_schema import normalize_tool_targets
@@ -44,8 +45,9 @@ def run(input_data, context):
     user_text = str(input_data.get("user_text") or input_data.get("text") or input_data.get("message") or "")
     resolved_context = resolve_runtime_profile_context(context if isinstance(context, dict) else {})
     try:
+        registry_tools = ToolRegistry().list_tools()
         tools = filter_tool_definitions_for_runtime_profile(
-            ToolRegistry().list_tools(),
+            registry_tools,
             resolved_context.get("runtime_profile"),
             policy_context=resolved_context,
         )
@@ -65,6 +67,13 @@ def run(input_data, context):
                 conversation_id=str(input_data.get("conversation_id") or ""),
             ),
             "expires_at_epoch": expires_at_epoch,
+            "bindings": preview_payload_bindings(
+                input_data,
+                resolved_context,
+                user_text=user_text,
+                model=str(input_data.get("model") or ""),
+                catalog_tools=registry_tools,
+            ),
             "selection": {
                 "mode": selection.mode,
                 "strategy": trace.get("strategy") or selection.strategy,

@@ -599,6 +599,37 @@ def test_full_tool_selection_trace_creates_hidden_child_conversation(tmp_path, m
     assert [item["id"] for item in visible] == [parent["id"]]
 
 
+def test_summary_tool_selection_trace_does_not_persist_json(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_SELECTION_TRACE_DIR", str(tmp_path / "traces"))
+
+    from domain.chat import run_request
+    from domain.chat.tool_selection_schema import ToolSelectionDecision
+
+    context = {
+        "conversation_id": "conv-summary",
+        "_authenticated_principal": {"profile_id": "profile-alice"},
+        "tool_selection": {"selection_id": "sel-summary", "strategy": "semantic"},
+    }
+    run_request._persist_tool_selection_trace(
+        context,
+        {"tools": {"selector_trace": "summary"}},
+        ToolSelectionDecision(
+            selection_id="sel-summary",
+            mode="auto",
+            strategy="semantic",
+            stage="semantic",
+            selected_tools=[{"tool_id": "web_search"}],
+        ),
+        user_text="search the web",
+        trace={"selection_id": "sel-summary", "input": "technical trace"},
+    )
+
+    trace_dir = tmp_path / "traces"
+    assert context["tool_selection"]["trace_mode"] == "summary"
+    assert "trace_conversation_id" not in context["tool_selection"]
+    assert not trace_dir.exists() or list(trace_dir.glob("*.json")) == []
+
+
 def test_tool_selection_summary_trace_requires_owner_and_expiry(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_SELECTION_TRACE_DIR", str(tmp_path / "traces"))
 
@@ -770,11 +801,77 @@ def test_tool_selection_preview_snapshot_overrides_tampered_selection(tmp_path, 
     assert hydrated.review is True
     assert hydrated.source == "tool_selection_preview"
 
-    with pytest.raises(ValueError, match="FORBIDDEN"):
+    with pytest.raises(ValueError, match="NOT_FOUND"):
         run_request._apply_tool_selection_preview_snapshot(
             selection,
+            {"_authenticated_principal": {"profile_id": "profile-alice"}},
+            conversation_id="conv-a",
+        )
+
+    ToolSelectionPreviewStore().save(
+        {
+            "preview_id": "preview-b",
+            "owner_profile_id": "profile-alice",
+            "conversation_id": "conv-a",
+            "expires_at_epoch": 9_999_999_999,
+            "selection": {
+                "mode": "review",
+                "strategy": "catalog_ai",
+                "scope": "turn",
+                "include": [{"kind": "tool", "id": "web_search"}],
+                "exclude": [],
+                "must_use": True,
+                "review": True,
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="FORBIDDEN"):
+        run_request._apply_tool_selection_preview_snapshot(
+            run_request.NormalizedToolSelection(mode="review", preview_id="preview-b"),
             {"_authenticated_principal": {"profile_id": "profile-bob"}},
             conversation_id="conv-a",
+        )
+
+
+def test_tool_selection_preview_snapshot_rejects_payload_swap(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_TOOL_SELECTION_PREVIEW_DIR", str(tmp_path / "previews"))
+
+    from domain.chat import run_request
+    from domain.chat.tool_selection_preview import ToolSelectionPreviewStore, preview_payload_bindings
+
+    original_input = {"message": {"content": "search cats"}, "params": {"model": "stub/default"}}
+    ToolSelectionPreviewStore().save(
+        {
+            "preview_id": "preview-bound",
+            "owner_profile_id": "profile-alice",
+            "conversation_id": "conv-a",
+            "expires_at_epoch": 9_999_999_999,
+            "bindings": preview_payload_bindings(
+                original_input,
+                {"_authenticated_principal": {"profile_id": "profile-alice"}},
+                user_text="search cats",
+                model="stub/default",
+            ),
+            "selection": {
+                "mode": "review",
+                "strategy": "semantic",
+                "scope": "turn",
+                "include": [{"kind": "tool", "id": "web_search"}],
+                "exclude": [],
+                "must_use": False,
+                "review": True,
+            },
+        }
+    )
+
+    with pytest.raises(ValueError, match="PAYLOAD_MISMATCH"):
+        run_request._apply_tool_selection_preview_snapshot(
+            run_request.NormalizedToolSelection(mode="review", preview_id="preview-bound"),
+            {"_authenticated_principal": {"profile_id": "profile-alice"}},
+            conversation_id="conv-a",
+            input_data={"message": {"content": "search dogs"}, "params": {"model": "stub/default"}},
+            user_text="search dogs",
+            model="stub/default",
         )
 
 

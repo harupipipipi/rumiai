@@ -8,12 +8,19 @@ export type ConversationToolPreferences = {
   exclude?: ToolTarget[];
 };
 
+export type ToolSelectionChip = ToolTarget & {
+  scope: "turn" | "conversation";
+  intent: "include" | "exclude";
+  removable?: boolean;
+};
+
 export type ToolSelectionUiState = {
   effectiveMode: ToolSelectionMode;
   turnModeOverride: ToolSelectionMode | null;
   turnInclude: ToolTarget[];
   turnExclude: ToolTarget[];
   conversationPreferences: ConversationToolPreferences;
+  overrideChips: ToolSelectionChip[];
   pendingReview: PendingToolReview | null;
   latestDecision: ToolSelectionPreviewResponse["decision"] | null;
 };

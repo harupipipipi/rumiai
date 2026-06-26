@@ -29,6 +29,7 @@ import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview"
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
 import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
+import type { ConversationToolPreferences } from "./features/tools/types";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
 import {
   AUTHORITY_WAITING_TEXT,
@@ -139,6 +140,46 @@ function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
     if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
   }
   return [...new Set(ids)];
+}
+
+function parseConversationToolPreferences(metadata: unknown): ConversationToolPreferences {
+  const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).tool_preferences
+    : null;
+  const raw = source && typeof source === "object" && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : {};
+  const mode = typeof raw.mode === "string" && ["auto", "review", "manual", "none"].includes(raw.mode)
+    ? raw.mode as ConversationToolPreferences["mode"]
+    : undefined;
+  return {
+    mode,
+    include: normalizeConversationToolTargets(raw.include),
+    exclude: normalizeConversationToolTargets(raw.exclude),
+  };
+}
+
+function normalizeConversationToolTargets(value: unknown): ToolTarget[] {
+  if (!Array.isArray(value)) return [];
+  const targets: ToolTarget[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    let target: ToolTarget | null = null;
+    if (typeof item === "string" && item.trim()) {
+      target = { kind: "tool", id: item.trim() };
+    } else if (item && typeof item === "object") {
+      const raw = item as Record<string, unknown>;
+      const kind = raw.kind === "service" ? "service" : raw.kind === "tool" ? "tool" : null;
+      const id = typeof raw.id === "string" ? raw.id.trim() : "";
+      if (kind && id) target = { kind, id };
+    }
+    if (!target) continue;
+    const key = `${target.kind}:${target.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push(target);
+  }
+  return targets;
 }
 
 type CalendarCell = {
@@ -2464,10 +2505,15 @@ function ChatApp() {
     .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const activeConversationToolPreferences = useMemo(
+    () => parseConversationToolPreferences(activeConversation?.metadata),
+    [activeConversation?.id, activeConversation?.metadata],
+  );
   const toolSelectionController = useToolSelectionController({
     settingsValues,
     selectedToolIds,
     setSelectedToolIds: setStoredSelectedToolIds,
+    conversationPreferences: activeConversationToolPreferences,
   });
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
@@ -5397,7 +5443,7 @@ function ChatApp() {
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
-      toolSelectionTargets={toolSelectionController.state.turnInclude}
+      toolSelectionTargets={toolSelectionController.state.overrideChips}
       toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}

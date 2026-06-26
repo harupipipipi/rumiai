@@ -22,6 +22,7 @@ from domain.coding.workspace_jail import (
     WorkspaceJail,
 )
 from domain.coding.workspace_resolver import WorkspaceResolver
+from domain.coding.workspace_store import WorkspaceStore
 
 
 MAX_SANDBOX_WORKSPACE_FILES = 4000
@@ -58,15 +59,33 @@ class SandboxWorkspace:
 class SandboxWorkspaceManager:
     """Maintain copy-on-write coding workspaces for sandbox-only tools."""
 
-    def __init__(self, state_dir: str | os.PathLike[str] | None = None) -> None:
+    def __init__(
+        self,
+        state_dir: str | os.PathLike[str] | None = None,
+        *,
+        workspace_store: WorkspaceStore | None = None,
+    ) -> None:
         self.state_dir = Path(state_dir) if state_dir is not None else _default_state_dir()
+        self._workspace_store = workspace_store
 
     def prepare(self, input_data: dict[str, Any] | None, context: dict[str, Any] | None) -> SandboxWorkspace:
         args = input_data or {}
         ctx = context or {}
         _reject_external_workspace_root(args)
+        _reject_external_workspace_root(ctx)
+        if isinstance(ctx.get("inputs"), dict):
+            _reject_external_workspace_root(ctx["inputs"])
+        if isinstance(ctx.get("profile_policy"), dict):
+            _reject_external_workspace_root(ctx["profile_policy"])
         _reject_external_sandbox_id(args)
-        resolution = WorkspaceResolver().resolve(_resolver_args(args), ctx, allow_cwd_fallback=False)
+        workspace_id = _sandbox_workspace_id(args, ctx)
+        if not workspace_id:
+            raise ValueError("workspace_id is required for sandbox coding")
+        resolution = WorkspaceResolver(self._workspace_store).resolve(
+            {"workspace_id": workspace_id},
+            {},
+            allow_cwd_fallback=False,
+        )
         _validate_workspace_resolution(resolution, ctx)
         host_root = Path(resolution.root_path).expanduser().resolve()
         if not host_root.is_dir():
@@ -281,7 +300,7 @@ def _lock_for_sandbox(state_root: Path) -> threading.RLock:
 def _reject_external_workspace_root(args: dict[str, Any]) -> None:
     for key in ("workspace_root", "cwd"):
         if args.get(key) not in (None, ""):
-            raise ValueError(f"{key} must come from trusted server context")
+            raise ValueError(f"{key} is not accepted by sandbox coding; use workspace_id")
 
 
 def _reject_external_sandbox_id(args: dict[str, Any]) -> None:
@@ -290,8 +309,12 @@ def _reject_external_sandbox_id(args: dict[str, Any]) -> None:
             raise ValueError(f"{key} is assigned by the server")
 
 
-def _resolver_args(args: dict[str, Any]) -> dict[str, Any]:
-    return {"workspace_id": args.get("workspace_id")} if args.get("workspace_id") not in (None, "") else {}
+def _sandbox_workspace_id(args: dict[str, Any], context: dict[str, Any]) -> str:
+    for source in (args, context):
+        value = str(source.get("workspace_id") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _validate_workspace_resolution(resolution: Any, context: dict[str, Any]) -> None:

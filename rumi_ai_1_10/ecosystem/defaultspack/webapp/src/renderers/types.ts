@@ -9,7 +9,7 @@ import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
 import type { ActionApprovalMode } from "../features/tools/ActionApprovalControl";
-import type { PendingToolReview } from "../features/tools/types";
+import type { PendingToolReview, ToolSelectionChip } from "../features/tools/types";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -175,7 +175,7 @@ export type ComposerRendererProps = {
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
   actionApprovalMode?: ActionApprovalMode;
-  toolSelectionTargets?: ToolTarget[];
+  toolSelectionTargets?: ToolSelectionChip[];
   toolSelectionReview?: PendingToolReview | null;
   keyboardButtonNavigation?: boolean;
   steerStatus?: string | null;

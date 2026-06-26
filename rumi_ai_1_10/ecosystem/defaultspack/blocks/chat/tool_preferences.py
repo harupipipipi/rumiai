@@ -9,6 +9,7 @@ from domain.chat.tool_selection_schema import (
     TOOL_SELECTION_MODES,
     TOOL_SELECTION_SCOPES,
     TOOL_SELECTION_STRATEGIES,
+    normalize_tool_target,
     normalize_tool_targets,
 )
 
@@ -112,6 +113,15 @@ def _sanitize_targets(value):
         raise ValueError("preferences include/exclude must be arrays")
     if len(value) > _MAX_TARGETS:
         raise ValueError("preferences include/exclude is too large")
+    for item in value:
+        if isinstance(item, str) and item.strip():
+            continue
+        if isinstance(item, dict):
+            target = normalize_tool_target(item)
+            allowed_keys = {"kind", "id", "tool_id", "service_id"}
+            if target is not None and set(item).issubset(allowed_keys):
+                continue
+        raise ValueError("preferences include/exclude must contain only string IDs or {kind, id} targets")
     targets = normalize_tool_targets(value)
     result = []
     for target in targets[:_MAX_TARGETS]:

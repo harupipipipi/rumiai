@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 import os
 import platform
@@ -35,6 +36,7 @@ MAX_CODING_WORKSPACE_EXPORT_FILES = 8000
 MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
 LIMA_NETWORK_ATTEST_ENV = "RUMI_SANDBOX_LIMA_NETWORK_ISOLATED"
+LIMA_CONFIG_HASH_ENV = "RUMI_SANDBOX_LIMA_CONFIG_HASH"
 
 
 class ManagedSandboxSupervisor:
@@ -248,6 +250,13 @@ class ManagedSandboxSupervisor:
             return self._unavailable(
                 request,
                 "Lima sandbox network isolation is not attested; set RUMI_SANDBOX_LIMA_NETWORK_ISOLATED=true for a networkless VM",
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        attestation_error = _verify_lima_instance_attestation(limactl, instance)
+        if attestation_error:
+            return self._unavailable(
+                request,
+                attestation_error,
                 error_type=SANDBOX_RUNTIME_UNAVAILABLE,
             )
         sandbox_id = _sandbox_id(request)
@@ -621,9 +630,11 @@ def _completed_from_wrapper_files(
     return subprocess.CompletedProcess(command, returncode, stdout=stdout, stderr=stderr)
 
 
-def _read_text_if_present(path: Path, *, fallback: str | None = "") -> str:
+def _read_text_if_present(path: Path, *, fallback: str | None = "", max_bytes: int = MAX_SANDBOX_TERMINAL_OUTPUT_BYTES + 1) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as handle:
+            raw = handle.read(max(1, int(max_bytes)) + 1)
+        return raw.decode("utf-8", errors="replace")
     except OSError:
         return fallback or ""
 
@@ -701,6 +712,69 @@ def _decode_bytes(value: bytes | str | None) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     return str(value or "")
+
+
+def _verify_lima_instance_attestation(limactl: str, instance: str) -> str | None:
+    expected_hash = str(os.environ.get(LIMA_CONFIG_HASH_ENV) or "").strip().lower()
+    if not expected_hash:
+        return "Lima sandbox config is not attested; set RUMI_SANDBOX_LIMA_CONFIG_HASH for the approved instance config"
+    try:
+        current_hash = _lima_instance_config_hash(limactl, instance)
+    except Exception as exc:
+        return "Lima sandbox config attestation failed: " + str(exc)
+    if current_hash != expected_hash:
+        return "Lima sandbox config changed; refusing to run untrusted coding tools"
+    return None
+
+
+def _lima_instance_config_hash(limactl: str, instance: str) -> str:
+    proc = subprocess.run(
+        [limactl, "list", instance, "--format", "json"],
+        capture_output=True,
+        timeout=5,
+        close_fds=True,
+    )
+    if proc.returncode != 0:
+        raise ValueError(_decode_bytes(proc.stderr) or "limactl list failed")
+    try:
+        payload = json.loads(_decode_bytes(proc.stdout))
+    except json.JSONDecodeError as exc:
+        raise ValueError("limactl returned invalid JSON") from exc
+    return _stable_lima_config_hash(instance, payload)
+
+
+def _stable_lima_config_hash(instance: str, payload: Any) -> str:
+    relevant = _stable_lima_config_payload(instance, payload)
+    encoded = json.dumps(relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _stable_lima_config_payload(instance: str, payload: Any) -> dict[str, Any]:
+    item: dict[str, Any]
+    if isinstance(payload, list):
+        item = next(
+            (
+                entry
+                for entry in payload
+                if isinstance(entry, dict)
+                and str(entry.get("name") or entry.get("instance") or entry.get("inst") or "").strip() == instance
+            ),
+            payload[0] if payload and isinstance(payload[0], dict) else {},
+        )
+    elif isinstance(payload, dict):
+        item = payload
+    else:
+        item = {}
+    return {
+        "instance": instance,
+        "config": item.get("config") if isinstance(item.get("config"), dict) else {},
+        "mounts": item.get("mounts") if isinstance(item.get("mounts"), list) else [],
+        "networks": item.get("networks") if isinstance(item.get("networks"), list) else [],
+        "network": item.get("network") if isinstance(item.get("network"), dict) else {},
+        "mountType": item.get("mountType"),
+        "vmType": item.get("vmType"),
+        "arch": item.get("arch"),
+    }
 
 
 def _tar_directory(root: Path) -> bytes:
