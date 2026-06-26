@@ -93,6 +93,7 @@ class RecursiveUIPlanner:
 
         if node.children:
             self._validate_parent_decomposition(node, node.children, split_kind="children")
+            self._validate_slot_assignments(node, node.children, split_kind="children")
             children = [self._plan_node(child, depth=depth + 1) for child in node.children]
             return PlannedNode(
                 node=node,
@@ -108,6 +109,7 @@ class RecursiveUIPlanner:
         if violations:
             if node.split_hints:
                 self._validate_parent_decomposition(node, node.split_hints, split_kind="splitHints")
+                self._validate_slot_assignments(node, node.split_hints, split_kind="splitHints")
                 children = [self._plan_node(child, depth=depth + 1) for child in node.split_hints]
                 return PlannedNode(
                     node=node,
@@ -148,14 +150,35 @@ class RecursiveUIPlanner:
                 contract=None,
             )
 
+        self._validate_slot_assignments(node, [], split_kind="leaf")
+        contract = (
+            self._contract_for_node(node, score)
+            if self._node_has_contract(node, has_children=False)
+            else None
+        )
+        if contract is None:
+            self._diagnostics.append(
+                PlanningDiagnostic(
+                    code="UNIMPLEMENTED_LEAF_NODE",
+                    message="Leaf nodes must produce an executable component contract.",
+                    node_id=node.id,
+                    severity="error",
+                    details={
+                        "implementationMode": node.implementation_mode,
+                        "allowedLeafModes": [
+                            "component",
+                            "component-with-slots",
+                            "repeated-component",
+                        ],
+                    },
+                )
+            )
         return PlannedNode(
             node=node,
             complexity_score=score,
             budget_violations=[],
             children=[],
-            contract=self._contract_for_node(node, score)
-            if self._node_has_contract(node, has_children=False)
-            else None,
+            contract=contract,
         )
 
     def _contract_for_node(self, node: UINode, score: float) -> ComponentContract:
@@ -236,6 +259,8 @@ class RecursiveUIPlanner:
             for responsibility_id in ids:
                 owners = child_index.get((category, responsibility_id), [])
                 if not owners:
+                    if _parent_contract_can_own_responsibility(parent, category):
+                        continue
                     self._diagnostics.append(
                         PlanningDiagnostic(
                             code="RESPONSIBILITY_COVERAGE_MISSING",
@@ -322,6 +347,89 @@ class RecursiveUIPlanner:
                         )
                     )
 
+    def _validate_slot_assignments(
+        self,
+        parent: UINode,
+        children: list[UINode],
+        *,
+        split_kind: str,
+    ) -> None:
+        if not parent.slots:
+            return
+
+        child_ids = {child.id for child in children}
+        assignments_by_child: dict[str, list[str]] = {}
+        seen_slots: set[str] = set()
+        for slot in parent.slots:
+            folded = slot.id.casefold()
+            if folded in seen_slots:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="DUPLICATE_SLOT_ID",
+                        message="Slot IDs must be unique within a node.",
+                        node_id=parent.id,
+                        severity="error",
+                        details={"slotId": slot.id, "splitKind": split_kind},
+                    )
+                )
+            seen_slots.add(folded)
+
+            if slot.accepts_node_id is None:
+                if slot.required:
+                    self._diagnostics.append(
+                        PlanningDiagnostic(
+                            code="REQUIRED_SLOT_UNASSIGNED",
+                            message="Required slots must declare the child node they accept.",
+                            node_id=parent.id,
+                            severity="error",
+                            details={"slotId": slot.id, "splitKind": split_kind},
+                        )
+                    )
+                continue
+            if slot.accepts_node_id not in child_ids:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="SLOT_ACCEPTS_UNKNOWN_CHILD",
+                        message="Slot acceptsNodeId must reference one of the node's children.",
+                        node_id=parent.id,
+                        severity="error",
+                        details={
+                            "slotId": slot.id,
+                            "acceptsNodeId": slot.accepts_node_id,
+                            "splitKind": split_kind,
+                        },
+                    )
+                )
+                continue
+            assignments_by_child.setdefault(slot.accepts_node_id, []).append(slot.id)
+
+        for child in children:
+            assigned_slots = assignments_by_child.get(child.id, [])
+            if not assigned_slots:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="CHILD_SLOT_ASSIGNMENT_MISSING",
+                        message="Every child of a slotted component must be assigned to a slot.",
+                        node_id=parent.id,
+                        severity="error",
+                        details={"childNodeId": child.id, "splitKind": split_kind},
+                    )
+                )
+            elif len(assigned_slots) > 1:
+                self._diagnostics.append(
+                    PlanningDiagnostic(
+                        code="CHILD_SLOT_ASSIGNMENT_DUPLICATE",
+                        message="A child node cannot be assigned to multiple slots.",
+                        node_id=parent.id,
+                        severity="error",
+                        details={
+                            "childNodeId": child.id,
+                            "slotIds": sorted(assigned_slots),
+                            "splitKind": split_kind,
+                        },
+                    )
+                )
+
 
 def _has_unidentified_parent_complexity(parent: UINode) -> bool:
     if parent.responsibilities.has_any():
@@ -331,6 +439,7 @@ def _has_unidentified_parent_complexity(parent: UINode) -> bool:
         or parent.complexity.interactive_controls > 0
         or parent.complexity.meaningful_states > 0
         or parent.complexity.async_mutations > 0
+        or parent.complexity.responsive_topologies > 0
         or parent.complexity.special_layout_algorithms > 0
     )
 
@@ -353,6 +462,14 @@ def _missing_complexity_evidence(parent: UINode) -> dict[str, dict[str, int]]:
             parent.complexity.meaningful_states,
             len(parent.responsibilities.states),
         ),
+        "layoutAlgorithms": (
+            parent.complexity.special_layout_algorithms,
+            len(parent.responsibilities.layout_algorithms),
+        ),
+        "responsiveTopologies": (
+            parent.complexity.responsive_topologies,
+            len(parent.responsibilities.responsive_topologies),
+        ),
     }
     missing: dict[str, dict[str, int]] = {}
     for key, (claimed, evidenced) in checks.items():
@@ -369,6 +486,13 @@ def _child_responsibility_index(children: list[UINode]) -> dict[tuple[str, str],
             for responsibility_id in ids:
                 index.setdefault((category, responsibility_id), []).append(child.id)
     return index
+
+
+def _parent_contract_can_own_responsibility(parent: UINode, category: str) -> bool:
+    return (
+        category in {"layoutAlgorithms", "responsiveTopologies"}
+        and parent.implementation_mode == "component-with-slots"
+    )
 
 
 def _semantic_key(value: str) -> str:

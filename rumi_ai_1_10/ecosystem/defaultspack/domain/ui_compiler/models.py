@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import re
 from dataclasses import dataclass, field
@@ -8,7 +9,7 @@ from typing import Any
 
 
 SCHEMA_VERSION = 1
-COMPILER_VERSION = "recursive-ui-compiler-pr1.2"
+COMPILER_VERSION = "recursive-ui-compiler-pr1.3"
 DEFAULT_VIEWPORTS = [390, 768, 1024, 1440]
 DEFAULT_TEXT_SCALES = [1, 1.25, 2]
 DEFAULT_SCENARIOS = ["default", "long", "empty", "loading", "error"]
@@ -152,6 +153,12 @@ class ResourceLimits:
     max_string_length: int = 240
     max_list_length: int = 64
     max_candidate_count: int = 4
+    max_slots_per_node: int = 8
+    max_ownership_groups_per_node: int = 32
+    max_metadata_bytes: int = 8192
+    max_metadata_depth: int = 4
+    max_metadata_keys: int = 32
+    max_metadata_string_length: int = 240
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -164,6 +171,12 @@ class ResourceLimits:
             "maxStringLength": self.max_string_length,
             "maxListLength": self.max_list_length,
             "maxCandidateCount": self.max_candidate_count,
+            "maxSlotsPerNode": self.max_slots_per_node,
+            "maxOwnershipGroupsPerNode": self.max_ownership_groups_per_node,
+            "maxMetadataBytes": self.max_metadata_bytes,
+            "maxMetadataDepth": self.max_metadata_depth,
+            "maxMetadataKeys": self.max_metadata_keys,
+            "maxMetadataStringLength": self.max_metadata_string_length,
         }
 
 
@@ -267,6 +280,8 @@ class LayoutEnvelope:
 class SlotDefinition:
     id: str
     purpose: str = ""
+    accepts_node_id: str | None = None
+    required: bool = True
     min_width: int = 0
     preferred_width: int | None = None
     max_width: int | None = None
@@ -275,12 +290,46 @@ class SlotDefinition:
     def from_dict(cls, value: Any, *, limits: ResourceLimits) -> "SlotDefinition":
         if not isinstance(value, dict):
             raise ValueError("slot must be an object")
+        _reject_unknown_keys(
+            value,
+            {
+                "id",
+                "purpose",
+                "acceptsNodeId",
+                "accepts_node_id",
+                "required",
+                "minWidth",
+                "min_width",
+                "preferredWidth",
+                "preferred_width",
+                "maxWidth",
+                "max_width",
+                "layoutEnvelope",
+                "layout_envelope",
+                "heightBehavior",
+                "height_behavior",
+                "mobileBehavior",
+                "mobile_behavior",
+            },
+            "slot",
+        )
         envelope = LayoutEnvelope.from_dict(value.get("layoutEnvelope") or value)
+        accepts_raw = _camel_or_snake(value, "accepts_node_id", "acceptsNodeId")
+        accepts_node_id = canonical_id(str(accepts_raw)) if accepts_raw not in (None, "") else None
+        required_raw = value.get("required")
+        if required_raw is None:
+            required = True
+        elif isinstance(required_raw, bool):
+            required = required_raw
+        else:
+            raise ValueError("slot.required must be a boolean")
         return cls(
             id=canonical_id(str(value.get("id") or "")),
             purpose=_limited_string(
                 value.get("purpose"), field_name="slot.purpose", max_length=limits.max_string_length
             ),
+            accepts_node_id=accepts_node_id,
+            required=required,
             min_width=envelope.min_width,
             preferred_width=envelope.preferred_width,
             max_width=envelope.max_width,
@@ -290,6 +339,8 @@ class SlotDefinition:
         return {
             "id": self.id,
             "purpose": self.purpose,
+            "acceptsNodeId": self.accepts_node_id,
+            "required": self.required,
             "minWidth": self.min_width,
             "preferredWidth": self.preferred_width,
             "maxWidth": self.max_width,
@@ -302,6 +353,8 @@ class ResponsibilitySet:
     controls: list[str] = field(default_factory=list)
     mutations: list[str] = field(default_factory=list)
     states: list[str] = field(default_factory=list)
+    layout_algorithms: list[str] = field(default_factory=list)
+    responsive_topologies: list[str] = field(default_factory=list)
     shared: list[str] = field(default_factory=list)
 
     @classmethod
@@ -328,6 +381,16 @@ class ResponsibilitySet:
                 field_name="responsibilities.states",
                 limits=limits,
             ),
+            layout_algorithms=_responsibility_ids(
+                data.get("layoutAlgorithms") or data.get("layout_algorithms"),
+                field_name="responsibilities.layoutAlgorithms",
+                limits=limits,
+            ),
+            responsive_topologies=_responsibility_ids(
+                data.get("responsiveTopologies") or data.get("responsive_topologies"),
+                field_name="responsibilities.responsiveTopologies",
+                limits=limits,
+            ),
             shared=_responsibility_ids(
                 data.get("shared"),
                 field_name="responsibilities.shared",
@@ -341,11 +404,20 @@ class ResponsibilitySet:
             controls=_unique([*self.controls, *inputs, *events]),
             mutations=list(self.mutations),
             states=_unique([*self.states, *states]),
+            layout_algorithms=list(self.layout_algorithms),
+            responsive_topologies=list(self.responsive_topologies),
             shared=list(self.shared),
         )
 
     def has_any(self) -> bool:
-        return bool(self.visual_roles or self.controls or self.mutations or self.states)
+        return bool(
+            self.visual_roles
+            or self.controls
+            or self.mutations
+            or self.states
+            or self.layout_algorithms
+            or self.responsive_topologies
+        )
 
     def expected_complexity(self) -> "ComplexitySignals":
         return ComplexitySignals(
@@ -353,8 +425,8 @@ class ResponsibilitySet:
             interactive_controls=len(self.controls),
             meaningful_states=len(self.states),
             async_mutations=len(self.mutations),
-            responsive_topologies=1,
-            special_layout_algorithms=0,
+            responsive_topologies=max(1, len(self.responsive_topologies)),
+            special_layout_algorithms=len(self.layout_algorithms),
         )
 
     def categories(self) -> dict[str, list[str]]:
@@ -363,6 +435,8 @@ class ResponsibilitySet:
             "controls": list(self.controls),
             "mutations": list(self.mutations),
             "states": list(self.states),
+            "layoutAlgorithms": list(self.layout_algorithms),
+            "responsiveTopologies": list(self.responsive_topologies),
         }
 
     def all_ids(self) -> set[str]:
@@ -377,6 +451,8 @@ class ResponsibilitySet:
             "controls": list(self.controls),
             "mutations": list(self.mutations),
             "states": list(self.states),
+            "layoutAlgorithms": list(self.layout_algorithms),
+            "responsiveTopologies": list(self.responsive_topologies),
             "shared": list(self.shared),
         }
 
@@ -412,6 +488,15 @@ def _unique(items: list[str]) -> list[str]:
             seen.add(key)
             result.append(item)
     return result
+
+
+def _reject_duplicate_slot_ids(slots: list[SlotDefinition]) -> None:
+    seen: set[str] = set()
+    for slot in slots:
+        key = slot.id.casefold()
+        if key in seen:
+            raise ValueError(f"slots contain duplicate id: {slot.id}")
+        seen.add(key)
 
 
 @dataclass(frozen=True)
@@ -705,12 +790,18 @@ class UICompilerConfig:
 
 def _reject_trusted_policy_overrides(value: dict[str, Any], policy: TrustedCompilerPolicy) -> None:
     generation = value.get("generation")
-    if isinstance(generation, dict):
+    if generation is not None:
+        if not isinstance(generation, dict):
+            raise ValueError("generation must be an object")
+        _reject_unknown_keys(generation, set(policy.generation), "generation")
         for key, trusted_value in policy.generation.items():
             if key in generation and generation[key] != trusted_value:
                 raise ValueError(f"generation.{key} is a trusted compiler policy and cannot be overridden")
     quality = value.get("quality")
-    if isinstance(quality, dict):
+    if quality is not None:
+        if not isinstance(quality, dict):
+            raise ValueError("quality must be an object")
+        _reject_unknown_keys(quality, set(policy.quality), "quality")
         for key, trusted_value in policy.quality.items():
             if key in quality and quality[key] != trusted_value:
                 raise ValueError(f"quality.{key} is a trusted compiler policy and cannot be overridden")
@@ -720,6 +811,68 @@ def _reject_unknown_keys(value: dict[str, Any], allowed: set[str], label: str) -
     unknown = sorted(str(key) for key in value if str(key) not in allowed)
     if unknown:
         raise ValueError(f"{label} contains unsupported keys: {', '.join(unknown)}")
+
+
+def _validate_metadata(value: Any, *, limits: ResourceLimits) -> dict[str, Any]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError("metadata must be an object")
+    key_count = 0
+
+    def visit(current: Any, *, depth: int, field_name: str) -> Any:
+        nonlocal key_count
+        if depth > limits.max_metadata_depth:
+            raise ValueError("metadata exceeds max depth")
+        if isinstance(current, dict):
+            key_count += len(current)
+            if key_count > limits.max_metadata_keys:
+                raise ValueError("metadata exceeds max key count")
+            result: dict[str, Any] = {}
+            for raw_key, raw_value in current.items():
+                if not isinstance(raw_key, str):
+                    raise ValueError("metadata keys must be strings")
+                key = _limited_string(
+                    raw_key,
+                    field_name=f"{field_name}.key",
+                    max_length=limits.max_metadata_string_length,
+                )
+                if not key:
+                    raise ValueError("metadata contains an empty key")
+                result[key] = visit(raw_value, depth=depth + 1, field_name=f"{field_name}.{key}")
+            return result
+        if isinstance(current, list):
+            if len(current) > limits.max_list_length:
+                raise ValueError("metadata list exceeds max list length")
+            return [
+                visit(item, depth=depth + 1, field_name=f"{field_name}[]")
+                for item in current
+            ]
+        if isinstance(current, str):
+            return _limited_string(
+                current,
+                field_name=field_name,
+                max_length=limits.max_metadata_string_length,
+            )
+        if isinstance(current, bool) or current is None or isinstance(current, int):
+            return current
+        if isinstance(current, float):
+            if not math.isfinite(current):
+                raise ValueError("metadata numbers must be finite")
+            return current
+        raise ValueError("metadata must contain only JSON scalar, object, or list values")
+
+    metadata = visit(value, depth=0, field_name="metadata")
+    encoded = json.dumps(
+        metadata,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+        allow_nan=False,
+    )
+    if len(encoded.encode("utf-8")) > limits.max_metadata_bytes:
+        raise ValueError("metadata exceeds max byte size")
+    return metadata
 
 
 @dataclass(frozen=True)
@@ -867,14 +1020,29 @@ class UINode:
         )
         if mode not in IMPLEMENTATION_MODES:
             raise ValueError(f"invalid implementationMode: {mode}")
+        slots_value = value.get("slots", [])
+        if slots_value is None:
+            slots_value = []
+        if not isinstance(slots_value, list):
+            raise ValueError("slots must be a list")
+        if len(slots_value) > limits.max_slots_per_node:
+            raise ValueError("slots exceeds max slots per node")
         slots = [
             SlotDefinition.from_dict(item, limits=limits)
-            for item in (value.get("slots") or [])
+            for item in slots_value
         ]
+        _reject_duplicate_slot_ids(slots)
         if slots and mode not in {"component-with-slots", "composition-only"}:
             raise ValueError("slots require component-with-slots or composition-only implementationMode")
         if mode == "component-with-slots" and not slots:
             raise ValueError("component-with-slots requires slots")
+        ownership_value = value.get("ownership", [])
+        if ownership_value is None:
+            ownership_value = []
+        if not isinstance(ownership_value, list):
+            raise ValueError("ownership must be a list")
+        if len(ownership_value) > limits.max_ownership_groups_per_node:
+            raise ValueError("ownership exceeds max ownership groups per node")
         return cls(
             id=node_id,
             purpose=_limited_string(
@@ -899,7 +1067,7 @@ class UINode:
             responsibilities=responsibilities,
             ownership=[
                 OwnershipGroup.from_dict(item, limits=limits)
-                for item in (value.get("ownership") or [])
+                for item in ownership_value
             ],
             inputs=inputs,
             events=events,
@@ -919,7 +1087,7 @@ class UINode:
             slots=slots,
             children=children,
             split_hints=split_hints,
-            metadata=dict(value.get("metadata") or {}),
+            metadata=_validate_metadata(value.get("metadata"), limits=limits),
         )
 
     def to_dict(self, *, include_split_hints: bool = False) -> dict[str, Any]:
@@ -1014,6 +1182,11 @@ class ComponentContract:
             "responsibilities": self.responsibilities.to_dict(),
             "ownership": [item.to_dict() for item in self.ownership],
             "slots": [slot.to_dict() for slot in self.slots],
+            "slotMappings": [
+                {"slotId": slot.id, "nodeId": slot.accepts_node_id}
+                for slot in self.slots
+                if slot.accepts_node_id
+            ],
             "inputs": list(self.inputs),
             "events": list(self.events),
             "requiredStates": list(self.required_states),
@@ -1082,6 +1255,9 @@ class PlannedNode:
     def over_budget_leaves(self) -> list["PlannedNode"]:
         return [leaf for leaf in self.leaves() if leaf.budget_violations]
 
+    def unimplemented_leaves(self) -> list["PlannedNode"]:
+        return [leaf for leaf in self.leaves() if leaf.contract is None]
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.node.id,
@@ -1112,11 +1288,18 @@ class UIPlan:
     def over_budget_leaves(self) -> list[PlannedNode]:
         return self.root.over_budget_leaves()
 
+    def unimplemented_leaves(self) -> list[PlannedNode]:
+        return self.root.unimplemented_leaves()
+
     def has_error_diagnostics(self) -> bool:
         return any(item.is_error for item in self.diagnostics)
 
     def is_executable(self) -> bool:
-        return not self.has_error_diagnostics() and not self.over_budget_leaves()
+        return (
+            not self.has_error_diagnostics()
+            and not self.over_budget_leaves()
+            and not self.unimplemented_leaves()
+        )
 
     def to_dict(self) -> dict[str, Any]:
         contracts = self.contracts()
@@ -1136,6 +1319,7 @@ class UIPlan:
                 "leafCount": len(leaves),
                 "contractCount": len(contracts),
                 "overBudgetLeafCount": len(self.over_budget_leaves()),
+                "unimplementedLeafCount": len(self.unimplemented_leaves()),
                 "errorCount": len([item for item in self.diagnostics if item.is_error]),
             },
         }

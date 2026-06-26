@@ -40,10 +40,21 @@ def _valid_inbox_tree() -> dict:
             "controls": [],
             "mutations": [],
             "states": [],
+            "responsiveTopologies": ["inbox-two-region-frame"],
         },
         "slots": [
-            {"id": "toolbar", "purpose": "Filter controls", "minWidth": 280},
-            {"id": "reply-composer", "purpose": "Reply region", "minWidth": 280},
+            {
+                "id": "toolbar",
+                "acceptsNodeId": "inbox-toolbar",
+                "purpose": "Filter controls",
+                "minWidth": 280,
+            },
+            {
+                "id": "reply-composer",
+                "acceptsNodeId": "reply-composer",
+                "purpose": "Reply region",
+                "minWidth": 280,
+            },
         ],
         "children": [
             {
@@ -90,6 +101,7 @@ def _valid_inbox_tree() -> dict:
                     ],
                     "mutations": ["send-reply"],
                     "states": ["empty", "editing", "sending", "error", "sent"],
+                    "responsiveTopologies": ["composer-mobile-stack"],
                 },
                 "ownership": [
                     {
@@ -120,6 +132,7 @@ def _valid_inbox_tree() -> dict:
                             "controls": ["draft", "onDraftChange"],
                             "mutations": [],
                             "states": ["empty", "editing"],
+                            "responsiveTopologies": ["composer-mobile-stack"],
                         },
                         "inputs": ["draft"],
                         "events": ["onDraftChange"],
@@ -206,7 +219,44 @@ def test_valid_tree_generates_page_frame_and_leaf_contracts() -> None:
     frame = contract_by_id["inbox-page-frame"]
     assert frame.implementation_mode == "component-with-slots"
     assert [slot.id for slot in frame.slots] == ["toolbar", "reply-composer"]
+    frame_payload = frame.to_dict()
+    assert frame_payload["slots"][0]["acceptsNodeId"] == "inbox-toolbar"
+    assert frame_payload["slotMappings"] == [
+        {"slotId": "toolbar", "nodeId": "inbox-toolbar"},
+        {"slotId": "reply-composer", "nodeId": "reply-composer"},
+    ]
     assert contract_by_id["reply-composer-send-controls"].candidate_count == 2
+
+
+def test_contractless_leaf_is_not_executable() -> None:
+    result = compile_ui_plan({"ui_tree": {"id": "root", "implementationMode": "group-only"}})
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PLAN_NOT_EXECUTABLE"
+    partial = result["data"]["partialPlan"]
+    assert partial["summary"]["unimplementedLeafCount"] == 1
+    assert any(item["code"] == "UNIMPLEMENTED_LEAF_NODE" for item in partial["diagnostics"])
+
+
+def test_component_slots_must_map_to_children() -> None:
+    tree = _valid_inbox_tree()
+    tree["slots"][0].pop("acceptsNodeId")
+    unknown = _valid_inbox_tree()
+    unknown["slots"][1]["acceptsNodeId"] = "missing-region"
+
+    missing = compile_ui_plan({"ui_tree": tree})
+    bad_ref = compile_ui_plan({"ui_tree": unknown})
+
+    assert missing["status"] == "error"
+    assert any(
+        item["code"] == "REQUIRED_SLOT_UNASSIGNED"
+        for item in missing["data"]["partialPlan"]["diagnostics"]
+    )
+    assert bad_ref["status"] == "error"
+    assert any(
+        item["code"] == "SLOT_ACCEPTS_UNKNOWN_CHILD"
+        for item in bad_ref["data"]["partialPlan"]["diagnostics"]
+    )
 
 
 def test_explicit_children_cannot_hide_parent_complexity() -> None:
@@ -241,6 +291,76 @@ def test_split_hints_must_cover_parent_responsibilities() -> None:
         item["code"] == "RESPONSIBILITY_COVERAGE_MISSING"
         and item["details"]["responsibilityId"] == "onRetry"
         for item in diagnostics
+    )
+
+
+def test_layout_and_responsive_responsibilities_must_be_named_and_covered() -> None:
+    unnamed = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "calendar-page",
+                "complexity": {
+                    "uniqueVisualRoles": 1,
+                    "specialLayoutAlgorithms": 1,
+                    "responsiveTopologies": 2,
+                },
+                "responsibilities": {
+                    "visualRoles": ["calendar-grid"],
+                    "responsiveTopologies": ["desktop-week-grid"],
+                },
+                "children": [
+                    {
+                        "id": "calendar-grid",
+                        "responsibilities": {
+                            "visualRoles": ["calendar-grid"],
+                            "responsiveTopologies": ["desktop-week-grid"],
+                        },
+                    }
+                ],
+            }
+        }
+    )
+    dropped = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "calendar-page",
+                "complexity": {
+                    "uniqueVisualRoles": 1,
+                    "specialLayoutAlgorithms": 1,
+                    "responsiveTopologies": 1,
+                },
+                "responsibilities": {
+                    "visualRoles": ["calendar-grid"],
+                    "layoutAlgorithms": ["overlap-layout"],
+                    "responsiveTopologies": ["desktop-week-grid"],
+                },
+                "children": [
+                    {
+                        "id": "calendar-grid",
+                        "responsibilities": {
+                            "visualRoles": ["calendar-grid"],
+                            "responsiveTopologies": ["desktop-week-grid"],
+                        },
+                    }
+                ],
+            }
+        }
+    )
+
+    assert unnamed["status"] == "error"
+    unnamed_diagnostics = unnamed["data"]["partialPlan"]["diagnostics"]
+    assert any(
+        item["code"] == "REQUIRES_RESPONSIBILITY_IDS"
+        and "layoutAlgorithms" in item["details"]["missingEvidence"]
+        and "responsiveTopologies" in item["details"]["missingEvidence"]
+        for item in unnamed_diagnostics
+    )
+    assert dropped["status"] == "error"
+    assert any(
+        item["code"] == "RESPONSIBILITY_COVERAGE_MISSING"
+        and item["details"]["category"] == "layoutAlgorithms"
+        and item["details"]["responsibilityId"] == "overlap-layout"
+        for item in dropped["data"]["partialPlan"]["diagnostics"]
     )
 
 
@@ -315,10 +435,14 @@ def test_config_guardrails_and_resource_limits_are_fail_closed() -> None:
     guardrail_override = compile_ui_plan(
         {"ui_tree": {"id": "empty"}, "config": {"generation": {"rootMayWriteUi": True}}}
     )
+    unknown_nested_policy = compile_ui_plan(
+        {"ui_tree": {"id": "empty"}, "config": {"generation": {"unknown": True}}}
+    )
     partial = compile_ui_plan({"ui_tree": {"id": "empty"}, "config": {"viewports": [390]}})
 
     assert too_small_budget["status"] == "error"
     assert guardrail_override["status"] == "error"
+    assert unknown_nested_policy["status"] == "error"
     assert partial["status"] == "ok"
     generation = partial["data"]["plan"]["config"]["trustedPolicy"]["generation"]
     assert generation["rootMayWriteUi"] is False
@@ -338,6 +462,48 @@ def test_depth_and_unknown_schema_keys_are_rejected() -> None:
 
     assert deep["status"] == "error"
     assert unknown["status"] == "error"
+
+
+def test_slots_ownership_and_metadata_are_resource_limited() -> None:
+    too_many_slots = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "frame",
+                "implementationMode": "component-with-slots",
+                "slots": [
+                    {
+                        "id": f"slot-{index}",
+                        "acceptsNodeId": f"child-{index}",
+                    }
+                    for index in range(9)
+                ],
+            }
+        }
+    )
+    too_many_ownership_groups = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "editor",
+                "ownership": [
+                    {"id": f"group-{index}"}
+                    for index in range(33)
+                ],
+            }
+        }
+    )
+    huge_metadata = compile_ui_plan(
+        {
+            "ui_tree": {
+                "id": "editor",
+                "metadata": {"blob": "x" * 9000},
+            }
+        }
+    )
+
+    assert too_many_slots["status"] == "error"
+    assert too_many_slots["error"]["code"] == "PLAN_NOT_EXECUTABLE"
+    assert too_many_ownership_groups["status"] == "error"
+    assert huge_metadata["status"] == "error"
 
 
 def test_read_only_compile_rejects_persist_and_compile_tool_needs_no_approval() -> None:
