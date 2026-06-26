@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import logging
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
+
+
+logger = logging.getLogger(__name__)
 
 
 def sandbox_template_catalog(defaultspack_root: str | Path | None = None) -> list[dict[str, Any]]:
@@ -62,14 +66,17 @@ def _sandbox_template_contributions(defaultspack_root: str | Path | None) -> lis
 def _template_catalog(defaultspack_root: str | Path | None) -> dict[str, Any]:
     try:
         from ecosystem.defaultspack.domain.templates.catalog_runtime import get_template_catalog_snapshot
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to import sandbox template catalog runtime via ecosystem path.", exc_info=exc)
         try:
             from domain.templates.catalog_runtime import get_template_catalog_snapshot
-        except Exception:
+        except Exception as fallback_exc:
+            logger.warning("Unable to import sandbox template catalog runtime via local path.", exc_info=fallback_exc)
             return {}
     try:
         snapshot = get_template_catalog_snapshot(defaultspack_root=defaultspack_root)
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to load sandbox template catalog snapshot.", exc_info=exc)
         return {}
     catalog = getattr(snapshot, "catalog", {})
     return catalog if isinstance(catalog, dict) else {}

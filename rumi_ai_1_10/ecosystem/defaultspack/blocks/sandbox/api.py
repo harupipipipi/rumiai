@@ -84,6 +84,7 @@ class _SandboxApiService:
 
 
 _SERVICE: _SandboxApiService | None = None
+_SERVICE_LOCK = threading.RLock()
 
 
 def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None):
@@ -161,16 +162,18 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
 
 def _service() -> _SandboxApiService:
     global _SERVICE
-    if _SERVICE is None:
-        _SERVICE = _SandboxApiService(start_lifecycle_sweeper=True)
-    return _SERVICE
+    with _SERVICE_LOCK:
+        if _SERVICE is None:
+            _SERVICE = _SandboxApiService(start_lifecycle_sweeper=True)
+        return _SERVICE
 
 
 def _reset_service_for_tests(service: _SandboxApiService | None = None) -> None:
     global _SERVICE
-    if _SERVICE is not None and _SERVICE is not service and hasattr(_SERVICE, "close"):
-        _SERVICE.close()
-    _SERVICE = service
+    with _SERVICE_LOCK:
+        if _SERVICE is not None and _SERVICE is not service and hasattr(_SERVICE, "close"):
+            _SERVICE.close()
+        _SERVICE = service
 
 
 def _operation_store(service: _SandboxApiService) -> RuntimeOperationStore:

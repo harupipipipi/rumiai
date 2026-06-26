@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from .manifest_factory import FunctionSpec, manifest_for
 
 TRUST_BUILTIN = "builtin"
 TEMPLATE_RUNTIME_ENTRYPOINT = "template_runner.py:run"
+logger = logging.getLogger(__name__)
 
 
 def _pack_root() -> Path:
@@ -31,7 +33,8 @@ def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
         catalog = catalog_runtime.get_template_catalog_snapshot(
             defaultspack_root=defaultspack_root or _pack_root()
         ).catalog
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to load function runtime template catalog.", exc_info=exc)
         return {}
     return catalog if isinstance(catalog, dict) else {}
 
@@ -45,7 +48,8 @@ def _clear_template_catalog_cache() -> None:
                 "ecosystem.defaultspack.domain.templates.catalog_runtime"
             )
         catalog_runtime.invalidate_template_catalog()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to clear function runtime template catalog cache.", exc_info=exc)
         pass
 
 

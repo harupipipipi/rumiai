@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import threading
 from typing import Any
 
 try:
@@ -11,7 +13,9 @@ from ecosystem.defaultspack.backend.continuity import ContinuityCoordinator
 from ecosystem.defaultspack.backend.continuity.errors import ContinuityError
 
 
+logger = logging.getLogger(__name__)
 _COORDINATOR: ContinuityCoordinator | None = None
+_COORDINATOR_LOCK = threading.RLock()
 
 
 def _sandbox_manager():
@@ -19,20 +23,23 @@ def _sandbox_manager():
         from ecosystem.defaultspack.blocks.sandbox.api import _service
 
         return _service().manager
-    except Exception:
+    except Exception as exc:
+        logger.warning("Continuity sandbox manager unavailable; continuing without desktop handoff manager.", exc_info=exc)
         return None
 
 
 def _coordinator() -> ContinuityCoordinator:
     global _COORDINATOR
-    if _COORDINATOR is None:
-        _COORDINATOR = ContinuityCoordinator(sandbox_manager=_sandbox_manager())
-    return _COORDINATOR
+    with _COORDINATOR_LOCK:
+        if _COORDINATOR is None:
+            _COORDINATOR = ContinuityCoordinator(sandbox_manager=_sandbox_manager())
+        return _COORDINATOR
 
 
 def _reset_for_tests(coordinator: ContinuityCoordinator | None = None) -> None:
     global _COORDINATOR
-    _COORDINATOR = coordinator
+    with _COORDINATOR_LOCK:
+        _COORDINATOR = coordinator
 
 
 def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None):

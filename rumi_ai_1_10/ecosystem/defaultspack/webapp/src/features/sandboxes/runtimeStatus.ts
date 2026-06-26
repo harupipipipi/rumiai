@@ -12,6 +12,9 @@ const DESKTOP_RUNTIME_CAPABILITIES = [
   "sandbox.snapshot",
 ] as const;
 
+const DIAGNOSTIC_SECRET_KEY_PATTERN =
+  /(api[_-]?key|authorization|bearer|credential|password|private[_-]?key|secret|token)/i;
+
 export type RuntimeAvailability =
   | {
       status: "ready";
@@ -206,7 +209,37 @@ export function diagnosticsText(value: {
       runtime_doctor: value.doctor,
       error: value.error ?? undefined,
     },
-    null,
+    (_key, diagnosticValue) => redactDiagnosticsValue(diagnosticValue),
     2,
+  );
+}
+
+export function redactDiagnosticsValue(value: unknown): unknown {
+  return redactDiagnosticsValueInner(value, new WeakSet<object>(), "");
+}
+
+function redactDiagnosticsValueInner(
+  value: unknown,
+  seen: WeakSet<object>,
+  key: string,
+): unknown {
+  if (key && DIAGNOSTIC_SECRET_KEY_PATTERN.test(key)) {
+    return "[redacted]";
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  if (seen.has(value)) {
+    return "[circular]";
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    return value.map((item) => redactDiagnosticsValueInner(item, seen, ""));
+  }
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([entryKey, item]) => [
+      entryKey,
+      redactDiagnosticsValueInner(item, seen, entryKey),
+    ]),
   );
 }

@@ -946,6 +946,24 @@ def test_sandbox_file_patch_and_port_tools_require_approval(tmp_path, monkeypatc
     assert port["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
 
 
+def test_sandbox_exec_does_not_trust_raw_profile_policy_yolo(tmp_path, monkeypatch):
+    from domain.tool import sandbox_tools
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"raw yolo_mode must not reach sandbox api: {payload}")
+
+    monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    result = sandbox_tools.sandbox_exec(
+        {"argv": ["pwd"]},
+        {"workspace_root": str(tmp_path), "profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
 def test_python_and_node_exec_code_use_coding_templates(tmp_path, monkeypatch):
     from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
@@ -1174,6 +1192,18 @@ def test_sandbox_exec_direct_call_requires_server_side_approval(tmp_path):
     from domain.tool.sandbox_tools import sandbox_exec
 
     result = sandbox_exec({"argv": ["pwd"]}, {"workspace_root": str(tmp_path), "_tool_server_approved": True})
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"
+
+
+def test_sandbox_exec_direct_call_rejects_forged_token_valid_flag(tmp_path):
+    from domain.tool.sandbox_tools import sandbox_exec
+
+    result = sandbox_exec(
+        {"argv": ["pwd"]},
+        {"workspace_root": str(tmp_path), "_tool_server_approval_token_valid": True},
+    )
 
     assert result["is_error"] is True
     assert result["widget"]["error"]["code"] == "SANDBOX_APPROVAL_REQUIRED"

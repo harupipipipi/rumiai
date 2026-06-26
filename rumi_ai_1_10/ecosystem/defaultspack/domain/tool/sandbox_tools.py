@@ -6,7 +6,10 @@ import sys
 from typing import Any
 
 from domain.coding.terminal_policy import SHELL_ESCAPE_MARKERS
-from domain.tool_policy.internal_context import internal_tool_decision_allows
+from domain.tool_policy.internal_context import (
+    internal_tool_decision_allows,
+    tool_server_approval_context_is_internal,
+)
 
 from ._agent_os_common import err, now_slug, ok, workspace
 
@@ -162,10 +165,7 @@ def package_install_plan(arguments: dict[str, Any], context: dict[str, Any] | No
 def _require_server_side_approval(context: dict[str, Any] | None) -> dict[str, Any] | None:
     if internal_tool_decision_allows(context):
         return None
-    if isinstance(context, dict) and context.get("_tool_server_approval_token_valid") is True:
-        return None
-    policy = context.get("profile_policy") if isinstance(context, dict) else {}
-    if isinstance(policy, dict) and str(policy.get("yolo_mode")).lower() == "true":
+    if tool_server_approval_context_is_internal(context):
         return None
     return err("sandbox execution requires a server-side approval decision", "SANDBOX_APPROVAL_REQUIRED")
 

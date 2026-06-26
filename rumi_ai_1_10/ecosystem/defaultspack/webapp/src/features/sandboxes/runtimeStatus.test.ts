@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runtimeAvailability } from "./runtimeStatus";
+import { diagnosticsText, runtimeAvailability } from "./runtimeStatus";
 import { normalizeDesktopStatus } from "./types";
 
 test("runtimeAvailability does not treat available provider as ready without ready flag", () => {
@@ -101,4 +101,37 @@ test("normalizeDesktopStatus maps sandbox ready and busy states to running", () 
   assert.equal(normalizeDesktopStatus("ready"), "running");
   assert.equal(normalizeDesktopStatus("busy"), "running");
   assert.equal(normalizeDesktopStatus("not-a-status"), "unknown");
+});
+
+test("diagnosticsText redacts secret-like diagnostic values", () => {
+  const text = diagnosticsText({
+    providersResponse: {
+      providers: [
+        {
+          provider_id: "linux_native",
+          status: "error",
+          diagnostics: {
+            api_key: "sk-test-secret",
+            nested: { accessToken: "runtime-token" },
+            safe: "visible",
+          },
+        },
+      ],
+    },
+    doctor: {
+      status: "error",
+      diagnostics: {
+        credential_ref: "credential-secret",
+        command: "xvfb",
+      },
+    },
+    error: "plain error",
+  });
+
+  assert.match(text, /"safe": "visible"/);
+  assert.match(text, /"command": "xvfb"/);
+  assert.match(text, /\[redacted\]/);
+  assert.doesNotMatch(text, /sk-test-secret/);
+  assert.doesNotMatch(text, /runtime-token/);
+  assert.doesNotMatch(text, /credential-secret/);
 });

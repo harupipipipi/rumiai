@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import multiprocessing
 import os
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,24 @@ DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+def _json_store_increment_worker(path: str, barrier, queue) -> None:
+    from ecosystem.defaultspack.backend.continuity.store import JsonFileStore
+
+    store = JsonFileStore(path)
+    try:
+        barrier.wait(timeout=10)
+
+        def _increment(data):
+            current = int(data.get("value") or 0)
+            time.sleep(0.1)
+            data["value"] = current + 1
+            return data, data["value"]
+
+        queue.put(("ok", store.update(_increment)))
+    except BaseException as exc:  # pragma: no cover - surfaced through parent process assertion
+        queue.put(("error", repr(exc)))
 
 
 @pytest.fixture()
@@ -166,6 +186,33 @@ def test_checkpoint_manifest_rejects_secret_looking_state(continuity_env):
             }
         )
     assert exc.value.code == "CHECKPOINT_SECRET_LEAK"
+
+
+def test_json_file_store_update_is_cross_process_atomic(continuity_env):
+    from ecosystem.defaultspack.backend.continuity.store import JsonFileStore
+
+    path = Path(os.environ["RUMI_DEFAULTSPACK_CONTINUITY_DIR"]) / "race.json"
+    JsonFileStore(path).write({"value": 0})
+    ctx = multiprocessing.get_context("spawn")
+    barrier = ctx.Barrier(2)
+    queue = ctx.Queue()
+    processes = [
+        ctx.Process(target=_json_store_increment_worker, args=(str(path), barrier, queue))
+        for _ in range(2)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=15)
+    for process in processes:
+        if process.is_alive():
+            process.terminate()
+            process.join(timeout=5)
+    results = [queue.get(timeout=5) for _ in processes]
+
+    assert all(process.exitcode == 0 for process in processes)
+    assert all(status == "ok" for status, _ in results)
+    assert JsonFileStore(path).read()["value"] == 2
 
 
 def test_continuity_routes_and_ai_functions_are_registered():
