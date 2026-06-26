@@ -35,7 +35,7 @@ def _mock_seat_click_success():
 def test_click_through_seat_returns_driver(controller):
     svc = _mock_seat_click_success()
     controller._computer_seat = svc
-    result = controller.run("computer.click", {"x": 50, "y": 50, "physical": True}, yolo_mode=True)
+    result = controller.run("computer.click", {"x": 50, "y": 50, "physical": True, "target": "desktop"}, yolo_mode=True)
     assert result["executed"] is True
     assert result["driver"] == "mac_accessibility"
 

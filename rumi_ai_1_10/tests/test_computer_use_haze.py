@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import importlib
 import json
 import shutil
 import subprocess
@@ -26,35 +25,25 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
 
 @contextmanager
 def _default_tools_function_imports():
-    isolated_roots = ("browser_computer", "browser_use", "computer_use", "domain", "functions")
+    isolated_roots = ("browser_computer", "browser_use", "computer_use", "functions")
     saved_modules = {
         name: module
         for name, module in sys.modules.items()
         if name in isolated_roots or any(name.startswith(f"{root}.") for root in isolated_roots)
     }
-    for name in list(sys.modules):
-        if name == "domain" or name.startswith("domain."):
-            sys.modules.pop(name, None)
-    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
-    importlib.import_module("domain.host_bridge.computer_router")
     sys.path.insert(0, str(RUMI_DEFAULT_TOOLS_FUNCTIONS))
     try:
         yield
     finally:
-        for path in (str(RUMI_DEFAULT_TOOLS_FUNCTIONS), str(RUMI_DEFAULT_TOOLS_ROOT), str(DEFAULTSPACK_ROOT)):
+        for path in (str(RUMI_DEFAULT_TOOLS_FUNCTIONS), str(RUMI_DEFAULT_TOOLS_ROOT)):
             while path in sys.path:
                 sys.path.remove(path)
         for name in list(sys.modules):
             if name in isolated_roots or any(name.startswith(f"{root}.") for root in isolated_roots):
-                if name == "domain" or name.startswith("domain."):
-                    sys.modules.pop(name, None)
-                elif name in saved_modules:
+                if name in saved_modules:
                     sys.modules[name] = saved_modules[name]
                 else:
                     sys.modules.pop(name, None)
-        for path in (str(ROOT), str(DEFAULTSPACK_ROOT)):
-            if path not in sys.path:
-                sys.path.insert(0, path)
 
 
 def test_edge_haze_manager_noops_off_macos(tmp_path, monkeypatch):
@@ -544,11 +533,7 @@ def test_browser_computer_run_ends_haze_sequence_and_removes_lease(tmp_path, mon
         from browser_computer import main as browser_computer_main
         from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
 
-        monkeypatch.syspath_prepend(str(DEFAULTSPACK_ROOT))
-        for module_name in list(sys.modules):
-            if module_name == "domain" or module_name.startswith("domain.host_bridge"):
-                sys.modules.pop(module_name, None)
-        router = importlib.import_module("domain.host_bridge.computer_router")
+        from ecosystem.defaultspack.domain.host_bridge import computer_router as router
 
         terminated: list[int] = []
         monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))

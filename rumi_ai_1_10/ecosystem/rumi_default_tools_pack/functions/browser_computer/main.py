@@ -18,8 +18,6 @@ _SEQUENCE_ID_KEYS = (
 
 
 def run(context, args):
-    from domain.host_bridge.computer_router import run_computer_action
-
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})
     tool_name = str(args.get("tool_name") or "browser_computer").strip() or "browser_computer"
@@ -40,6 +38,7 @@ def run(context, args):
     payload = _payload_with_context_defaults(action, payload, context)
     sequence_id = _sequence_id_from_mapping(payload)
     try:
+        run_computer_action = _run_computer_action()
         result = run_computer_action(
             action,
             payload,
@@ -59,6 +58,14 @@ def run(context, args):
         return tool_result(summary, widget={"type": tool_name, **result}, is_error=bool(result.get("is_error")))
     finally:
         _end_haze_sequence(sequence_id)
+
+
+def _run_computer_action():
+    try:
+        from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
+    except ImportError:
+        from domain.host_bridge.computer_router import run_computer_action
+    return run_computer_action
 
 
 def _payload_with_context_defaults(action, payload, context):
@@ -118,9 +125,9 @@ def _end_haze_sequence(sequence_id):
         return
     try:
         try:
-            from domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
-        except ImportError:
             from ecosystem.rumi_default_tools_pack.domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
+        except ImportError:
+            from domain.computer.mac.edge_haze import ComputerUseEdgeHazeManager
 
         pack_root = Path(__file__).resolve().parents[2]
         ComputerUseEdgeHazeManager.from_pack_root(pack_root).end_sequence(sequence_id)

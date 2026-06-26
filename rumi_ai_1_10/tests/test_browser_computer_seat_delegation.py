@@ -89,12 +89,13 @@ def test_click_delegates_to_seat(controller):
             "x": 100,
             "y": 200,
             "physical": True,
+            "target": "desktop",
             "approval_token": "bypass",
             "include_screenshot": False,
         },
         yolo_mode=True,
     )
-    assert result["executed"] is True
+    assert result["executed"] is True, result
     assert result["action"] == "computer.click"
     svc.click.assert_called_once()
 

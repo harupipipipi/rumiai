@@ -268,3 +268,7 @@ def _approval_module():
 
 sys.modules.setdefault("domain.host_bridge.computer_router", sys.modules[__name__])
 sys.modules.setdefault("ecosystem.defaultspack.domain.host_bridge.computer_router", sys.modules[__name__])
+for _parent_name in ("domain.host_bridge", "ecosystem.defaultspack.domain.host_bridge"):
+    _parent = sys.modules.get(_parent_name)
+    if _parent is not None:
+        setattr(_parent, "computer_router", sys.modules[__name__])

@@ -5191,11 +5191,16 @@ $proc = Get-Process -Id $procId -ErrorAction SilentlyContinue
     @staticmethod
     def _approval_module():
         try:
-            from domain.safety import approval
+            from ecosystem.defaultspack.domain.safety import approval
 
             return approval
         except Exception:
-            return None
+            try:
+                from domain.safety import approval
+
+                return approval
+            except Exception:
+                return None
 
     def _read_approvals(self) -> dict[str, Any]:
         try:
