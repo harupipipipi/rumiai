@@ -373,14 +373,20 @@ def test_commit_requires_internal_authorization_and_trusted_workspace(tmp_path: 
         {"ui_tree": _valid_inbox_tree(), "run_id": "no-workspace"},
         mark_tool_server_approval_context({}),
     )
-    allowed = ui_commit_plan(
+    outside_root = ui_commit_plan(
         {"ui_tree": _valid_inbox_tree(), "run_id": "approved-run", "artifact_root": "/tmp/nope"},
+        mark_tool_server_approval_context({"conversation_workspace_dir": str(tmp_path)}),
+    )
+    allowed = ui_commit_plan(
+        {"ui_tree": _valid_inbox_tree(), "run_id": "approved-run"},
         mark_tool_server_approval_context({"conversation_workspace_dir": str(tmp_path)}),
     )
 
     assert raw_approved["status"] == "error"
     assert raw_yolo["status"] == "error"
     assert no_workspace["error"]["code"] == "WORKSPACE_REQUIRED"
+    assert outside_root["status"] == "error"
+    assert outside_root["error"]["code"] == "INVALID_REQUEST"
     assert allowed["status"] == "ok"
     assert allowed["data"]["artifacts"]["relativePath"] == ".rumi/ui/runs/approved-run"
     assert (tmp_path / ".rumi" / "ui" / "runs" / "approved-run" / "manifest.json").is_file()
@@ -401,6 +407,16 @@ def test_artifact_store_is_run_scoped_and_rejects_overwrites(tmp_path: Path) -> 
     assert (tmp_path / ".rumi" / "ui" / "runs" / "run-b" / "contracts" / "inbox-toolbar.json").is_file()
     with pytest.raises(FileExistsError):
         store.save_plan(plan_a)
+
+    idempotent_first = store.save_plan(
+        RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="run-c"),
+        idempotency_key="same-request",
+    )
+    idempotent_second = store.save_plan(
+        RecursiveUIPlanner().plan(_valid_inbox_tree(), run_id="run-c"),
+        idempotency_key="same-request",
+    )
+    assert idempotent_second == idempotent_first
 
 
 def test_invalid_plan_is_not_persisted(tmp_path: Path) -> None:

@@ -48,13 +48,26 @@ class UICompilerArtifactStore:
         lock_path = self.root / "runs" / f"{run_id}.lock"
         lock_fd = _acquire_lock(lock_path)
         staging = self.root / "runs" / ".staging" / f"{run_id}-{uuid.uuid4().hex}"
+        blueprint = plan.to_dict()
+        plan_hash = _hash_payload(blueprint)
         try:
             if run_root.exists():
+                existing = _read_manifest(run_root)
+                if (
+                    idempotency_key
+                    and existing.get("idempotencyKey") == idempotency_key
+                    and existing.get("planHash") == plan_hash
+                ):
+                    return self._artifact_response(
+                        run_id=run_id,
+                        constitution_hash=str(existing.get("constitutionHash") or constitution["hash"]),
+                        plan_hash=plan_hash,
+                        contract_paths=list(existing.get("files", {}).get("contracts") or []),
+                    )
                 raise FileExistsError(f"UI compiler run already exists: {run_id}")
             staging.mkdir(parents=True)
             (staging / "contracts").mkdir()
 
-            blueprint = plan.to_dict()
             contract_paths = [
                 self._write_staged_contract(staging, contract)
                 for contract in plan.contracts()
@@ -68,7 +81,6 @@ class UICompilerArtifactStore:
                 "diagnostics": [item.to_dict() for item in plan.diagnostics],
             }
             _write_json(staging / "report.json", report)
-            plan_hash = _hash_payload(blueprint)
             manifest = {
                 "schemaVersion": SCHEMA_VERSION,
                 "compilerVersion": COMPILER_VERSION,
@@ -98,11 +110,27 @@ class UICompilerArtifactStore:
             except FileNotFoundError:
                 pass
 
+        return self._artifact_response(
+            run_id=run_id,
+            constitution_hash=constitution["hash"],
+            plan_hash=plan_hash,
+            contract_paths=contract_paths,
+        )
+
+    def _artifact_response(
+        self,
+        *,
+        run_id: str,
+        constitution_hash: str,
+        plan_hash: str,
+        contract_paths: list[str],
+    ) -> dict[str, Any]:
+        run_root = self.root / "runs" / run_id
         return {
             "artifactId": f"run/{run_id}",
             "relativePath": _relative_to_root(run_root, self.root.parent.parent),
             "runId": run_id,
-            "constitutionHash": constitution["hash"],
+            "constitutionHash": constitution_hash,
             "planHash": plan_hash,
             "manifest": _relative_to_root(run_root / "manifest.json", self.root.parent.parent),
             "blueprint": _relative_to_root(run_root / "blueprint.json", self.root.parent.parent),
@@ -172,6 +200,14 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             tmp_path.unlink()
         except FileNotFoundError:
             pass
+
+
+def _read_manifest(run_root: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads((run_root / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> None:

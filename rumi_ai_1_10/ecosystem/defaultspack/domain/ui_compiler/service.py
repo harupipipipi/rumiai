@@ -10,6 +10,12 @@ from .planner import RecursiveUIPlanner
 
 def compile_ui_plan(arguments: dict[str, Any] | None) -> dict[str, Any]:
     data = arguments if isinstance(arguments, dict) else {}
+    unsupported = _unsupported_keys(
+        data,
+        {"ui_tree", "uiTree", "root", "page", "config", "run_id", "runId", "persist"},
+    )
+    if unsupported:
+        return _error(f"unsupported request keys: {', '.join(unsupported)}", "INVALID_REQUEST")
     if _truthy(data.get("persist")):
         return _error(
             "persist is not supported by the read-only compile endpoint",
@@ -63,6 +69,12 @@ def commit_ui_plan(
     if workspace_root is None:
         return _error("trusted workspace is required", "WORKSPACE_REQUIRED")
     data = arguments if isinstance(arguments, dict) else {}
+    unsupported = _unsupported_keys(
+        data,
+        {"ui_tree", "uiTree", "root", "page", "config", "run_id", "runId", "idempotency_key", "idempotencyKey"},
+    )
+    if unsupported:
+        return _error(f"unsupported request keys: {', '.join(unsupported)}", "INVALID_REQUEST")
     root_payload = _root_payload(data)
     if not isinstance(root_payload, dict):
         return _error("ui_tree object is required", "INVALID_UI_TREE")
@@ -86,7 +98,10 @@ def commit_ui_plan(
 
     try:
         workspace = Path(workspace_root).expanduser().resolve()
-        artifacts = UICompilerArtifactStore(workspace / ".rumi" / "ui").save_plan(plan)
+        artifacts = UICompilerArtifactStore(workspace / ".rumi" / "ui").save_plan(
+            plan,
+            idempotency_key=str(data.get("idempotency_key") or data.get("idempotencyKey") or "") or None,
+        )
     except (OSError, ValueError) as exc:
         return _error(str(exc), "ARTIFACT_WRITE_FAILED")
 
@@ -104,6 +119,10 @@ def commit_ui_plan(
 
 def _root_payload(data: dict[str, Any]) -> Any:
     return data.get("ui_tree") or data.get("uiTree") or data.get("root") or data.get("page")
+
+
+def _unsupported_keys(data: dict[str, Any], allowed: set[str]) -> list[str]:
+    return sorted(str(key) for key in data if str(key) not in allowed)
 
 
 def _truthy(value: Any) -> bool:
