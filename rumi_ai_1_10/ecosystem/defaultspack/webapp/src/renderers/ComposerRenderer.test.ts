@@ -8,7 +8,9 @@ import {
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
+  composerHelperCopy,
   composerModelControlWidth,
+  composerPlaceholderCopy,
   modelDropdownPlacementClassName,
   modelCandidateMenuKeyAction,
   modelCandidatePopupStyleForAnchor,
@@ -433,8 +435,11 @@ test("new conversation composer input is not locked to one visual line", () => {
     }),
   );
 
-  assert.match(html, /rumi-composer-input-new-overlay/);
-  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[22px\]/);
+  assert.doesNotMatch(html, /rumi-composer-input-new-overlay/);
+  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[24px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*max-h-\[150px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*text-zinc-100/);
+  assert.doesNotMatch(html, /rumi-composer-input-new[^"]*text-transparent/);
   assert.doesNotMatch(html, /rumi-composer-input-new[^"]*\sh-\[22px\]/);
   assert.match(html, /style="[^"]*flex:0 1 9ch;min-width:5.5rem;max-width:12rem/);
 });
@@ -524,9 +529,11 @@ test("composer uses the main input as steer while generating", () => {
     }),
   );
 
-  assert.match(html, /実行中のAIへステアを入力/);
-  assert.match(html, /Enterでステアを送信/);
-  assert.match(html, /title="ステアを送る"/);
+  assert.match(html, /追加の指示を入力/);
+  assert.match(html, /Enterで追加指示を送信/);
+  assert.match(html, /title="追加指示を送る"/);
+  assert.doesNotMatch(html, /実行中のAIへステアを入力/);
+  assert.doesNotMatch(html, /AI実行中/);
   assert.doesNotMatch(html, /textarea[^>]*disabled/);
   assert.doesNotMatch(html, /これがステア/);
   assert.doesNotMatch(html, /フォローアップの変更を求める/);
@@ -713,5 +720,28 @@ test("coding workspace picker renders selected workspace and trust affordance", 
   );
 
   assert.match(html, /Main Repo/);
-  assert.match(html, /Trust workspace/);
+  assert.match(html, /ShieldQuestion|text-amber-300/);
+  assert.match(html, /rumi-workspace-picker-action is-trust/);
+  assert.match(html, /aria-label="Main Repo を信頼"/);
+});
+
+test("composer copy resolver suppresses internal template implementation copy", () => {
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: false,
+    mode: "chat",
+    placeholder: "メッセージを入力...",
+    templatePlaceholder: "メッセージを入力... /context text で会話をTXT化",
+  }), "メッセージを入力...");
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: true,
+    mode: "chat",
+  }), "追加の指示を入力");
+  assert.equal(composerHelperCopy({
+    isSteerMode: false,
+    hasInput: false,
+    slashCommands: false,
+    atMentions: false,
+    fileAttachments: true,
+    templateHelp: "Template-composed composer: slash commands, mentions, files",
+  }), "Enterで送信 · ファイル添付対応");
 });
