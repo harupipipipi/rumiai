@@ -58,8 +58,8 @@
         "part_id": "ai_chat",
         "surface": "chat",
         "enabled": true,
-        "placeholder": "メッセージを入力... /context text で会話をTXT化",
-        "help": "Template-composed composer: slash commands, mentions, files, voice, and optional context TXT materialization.",
+        "placeholder": "メッセージを入力...",
+        "help": "Enterで送信。必要に応じて / でコマンド、@ で候補を開けます。",
         "accepted_modalities": [
           "text",
           "files",
@@ -95,8 +95,8 @@
           "long-context-txt",
           "long_context_txt"
         ],
-        "label": "Context TXT",
-        "description": "Materialize the current conversation context as text.",
+        "label": "会話メモ",
+        "description": "現在の会話をテキストにまとめます。",
         "category": "chat",
         "visibility": "default",
         "risk": "medium",
