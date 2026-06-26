@@ -58,6 +58,14 @@ function summaryValue(summary: RumiLogSummary | null, key: SummaryKey): number {
   return Number(summary?.[key] ?? 0);
 }
 
+function normalizedLogEvents(value: unknown): RumiLogEvent[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizedLogSummary(value: unknown): RumiLogSummary | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as RumiLogSummary : null;
+}
+
 function filterKind(filter: LogFilter): string | string[] | null {
   if (filter === "conversation") return ["agent.message", "agent.note"];
   if (filter === "task") return ["task.created", "task.updated", "agent.assigned", "plan.created"];
@@ -197,8 +205,8 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
         limit: 30,
         kind: filterKind(filter),
       });
-      setEvents(result.events);
-      setSummary(result.summary);
+      setEvents(normalizedLogEvents(result.events));
+      setSummary(normalizedLogSummary(result.summary));
     } catch (err) {
       setStatus(err instanceof Error ? err.message : String(err));
     }
@@ -214,8 +222,8 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
     setStatus(null);
     try {
       const result = await codingResources.seedRumiLogPlan({ workspace_id: workspaceId });
-      setEvents(result.events);
-      setSummary(result.summary);
+      setEvents(normalizedLogEvents(result.events));
+      setSummary(normalizedLogSummary(result.summary));
       setFilter("all");
       setStatus(result.created ? "agent room created" : "agent room already exists");
     } catch (err) {
@@ -245,8 +253,8 @@ export function RumiLogPanel({ workspaceId }: { workspaceId?: string | null }) {
           ...(taskId ? { task_id: taskId } : {}),
         },
       });
-      setEvents(result.events);
-      setSummary(result.summary);
+      setEvents(normalizedLogEvents(result.events));
+      setSummary(normalizedLogSummary(result.summary));
       setFilter("all");
       setNote("");
     } catch (err) {

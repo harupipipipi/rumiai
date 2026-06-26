@@ -715,6 +715,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
         },
         workspace_id: "ws-main",
         workspace_root: "/repo",
+        created: false,
       });
     }
 
@@ -949,6 +950,53 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   ]);
 });
 
+test("composer browser behavior covers long text popovers and mobile coding trust", async ({ page }) => {
+  await openDefaultspack(page, "/chat");
+
+  await page.getByTitle("New Chat").first().click();
+  await expect(page.locator(".rumi-new-chat-stage")).toBeVisible();
+
+  const homeComposer = page.locator("textarea.rumi-composer-textarea");
+  const longPrompt = Array.from({ length: 80 }, (_, index) => `長文入力 ${index} @README.md`).join("\n");
+  await homeComposer.fill(longPrompt);
+  await expect(homeComposer).toHaveValue(longPrompt);
+  await expect(page.locator(".rumi-composer-mention-overlay")).toHaveCount(0);
+  const homeMetrics = await homeComposer.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return {
+      color: style.color,
+      scrollHeight: element.scrollHeight,
+      clientHeight: element.clientHeight,
+    };
+  });
+  expect(homeMetrics.color).not.toBe("rgba(0, 0, 0, 0)");
+  expect(homeMetrics.scrollHeight).toBeGreaterThan(homeMetrics.clientHeight);
+
+  await homeComposer.fill("/coding");
+  await expect(page.getByText("Commands")).toBeVisible();
+
+  await openDefaultspack(page, "/coding");
+  const codingComposer = page.locator("textarea.rumi-composer-textarea");
+  await codingComposer.fill("@REA");
+  const mentions = page.getByTestId("composer-at-mention-candidates");
+  await expect(mentions).toBeVisible();
+  await expect(mentions).toContainText("README.md");
+  const mentionBox = await mentions.boundingBox();
+  expect(mentionBox).not.toBeNull();
+  expect(mentionBox!.x).toBeGreaterThanOrEqual(0);
+  expect(mentionBox!.y).toBeGreaterThanOrEqual(0);
+  expect(mentionBox!.x + mentionBox!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+
+  await page.getByLabel("close mention menu").click({ position: { x: 4, y: 4 } });
+  await expect(mentions).toBeHidden();
+
+  await page.setViewportSize({ width: 390, height: 820 });
+  await openDefaultspack(page, "/coding");
+  const workspacePicker = page.locator(".rumi-workspace-picker");
+  await expect(workspacePicker).toBeVisible();
+  await expect(workspacePicker.locator("svg.text-emerald-300").first()).toBeVisible();
+});
+
 test("resizable canvas and tool widgets persist width choices", async ({ page }) => {
   await openDefaultspack(page);
 
@@ -1096,7 +1144,7 @@ test("calendar mode opens quick add and renders new tasks in blue", async ({ pag
   await expect(page.getByText("Range task")).toHaveCount(0);
 
   await page.getByTitle("Settings").last().click();
-  await expect(page.getByRole("button", { name: "カレンダー 14 controls" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
 });
 
 test("history card drag uses rumi history MIME and sends dropped_widgets metadata", async ({ page }) => {

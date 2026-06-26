@@ -274,16 +274,10 @@ body {
 }
 
 .rumi-composer-frame {
-  transform-origin: 50% 100%;
   transition:
-    transform 180ms ease,
     border-color 180ms ease,
     background-color 180ms ease,
     box-shadow 220ms ease;
-}
-
-.rumi-composer-frame:focus-within {
-  transform: translateY(-1px);
 }
 
 .rumi-composer-new {
@@ -300,16 +294,8 @@ body {
     box-shadow 220ms ease;
 }
 
-.rumi-composer-input-new-overlay {
-  min-height: 22px;
-}
-
 .rumi-composer-model-dock {
   filter: drop-shadow(0 16px 38px rgba(0, 0, 0, 0.32));
-}
-
-.rumi-composer-dock-rail {
-  transition: gap 180ms ease;
 }
 
 .rumi-composer-dock-control {
@@ -345,12 +331,6 @@ body {
     min-height: 20px;
     padding-inline: 0;
     padding-top: 0;
-    font-size: 14px;
-    line-height: 20px;
-  }
-
-  .rumi-composer-input-new-overlay {
-    min-height: 20px;
     font-size: 14px;
     line-height: 20px;
   }
@@ -525,27 +505,25 @@ body {
     0 12px 34px rgba(0, 0, 0, 0.2);
 }
 
-.rumi-loading-bars span {
+.rumi-loading-bars {
+  position: relative;
   display: block;
-  width: 4px;
-  border-radius: 2px;
-  background: #a1a1aa;
-  animation: rumi-loading-bar 940ms ease-in-out infinite;
+  width: 1.75rem;
+  height: 0.125rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(113, 113, 122, 0.3);
 }
 
-.rumi-loading-bars span:nth-child(1) {
-  height: 9px;
-  animation-delay: 0ms;
-}
-
-.rumi-loading-bars span:nth-child(2) {
-  height: 15px;
-  animation-delay: 120ms;
-}
-
-.rumi-loading-bars span:nth-child(3) {
-  height: 11px;
-  animation-delay: 240ms;
+.rumi-loading-bars span {
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  display: block;
+  width: 0.75rem;
+  border-radius: 999px;
+  background: rgba(212, 212, 216, 0.86);
+  animation: rumi-loading-bar 1.25s ease-in-out infinite;
 }
 
 .rumi-tool-activity summary::-webkit-details-marker {
@@ -690,12 +668,10 @@ body {
   from {
     opacity: 0;
     filter: blur(6px);
-    transform: translateY(22px) scale(0.985);
   }
   to {
     opacity: 1;
     filter: blur(0);
-    transform: translateY(0) scale(1);
   }
 }
 
@@ -714,11 +690,9 @@ body {
 @keyframes rumi-composer-send {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
   }
   to {
     opacity: 0.92;
-    transform: translateY(-10px) scale(0.992);
   }
 }
 
@@ -761,14 +735,17 @@ body {
 }
 
 @keyframes rumi-loading-bar {
-  0%,
-  100% {
-    opacity: 0.42;
-    transform: scaleY(0.62);
+  0% {
+    opacity: 0.25;
+    transform: translateX(-0.8rem);
   }
-  45% {
+  35%,
+  70% {
     opacity: 1;
-    transform: scaleY(1);
+  }
+  100% {
+    opacity: 0.2;
+    transform: translateX(1.85rem);
   }
 }
 
