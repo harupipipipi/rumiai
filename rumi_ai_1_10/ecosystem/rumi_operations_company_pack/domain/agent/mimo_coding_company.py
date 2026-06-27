@@ -36,6 +36,8 @@ DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
 DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
 DEFAULT_DOCKER_WORKER_COUNT = 3
+DEFAULT_MAX_TOOL_CALLS = 80
+MAX_TOOL_CALLS_LIMIT = 200
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -207,6 +209,7 @@ TOOL_ALLOWLIST = [
     "coding_file_restore",
     "coding_git_status",
     "coding_git_diff",
+    "coding_git_push",
     "coding_terminal_exec",
     "sandbox_exec",
     "python_exec",
@@ -256,6 +259,7 @@ ROLE_DEFINITIONS = [
             "coding_file_patch",
             "coding_git_status",
             "coding_git_diff",
+            "coding_git_push",
             "coding_terminal_exec",
             "sandbox_exec",
             "python_exec",
@@ -465,7 +469,11 @@ class MimoCodingCompanyRuntime:
         autonomy_board = deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state))
         qa_swarm_plan = deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state))
         docker_swarm = self._docker_swarm_with_monitoring(
-            deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state())
+            deepcopy(
+                state.get("docker_swarm")
+                if isinstance(state.get("docker_swarm"), dict)
+                else self._docker_swarm_state(workspace_root=state.get("workspace_root"))
+            )
         )
         return {
             "profile_id": PROFILE_ID,
@@ -481,6 +489,12 @@ class MimoCodingCompanyRuntime:
                 "main_model": state.get("main_model") or DEFAULT_MAIN_MODEL,
                 "vision_model": state.get("vision_model") or DEFAULT_VISION_MODEL,
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
+                "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
+                **self._workspace_metadata(
+                    workspace_id=state.get("workspace_id"),
+                    workspace_label=state.get("workspace_label"),
+                    workspace_root=state.get("workspace_root"),
+                ),
                 "utility_models": deepcopy(state.get("utility_models") if isinstance(state.get("utility_models"), dict) else UTILITY_MODELS),
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
                 "docker_swarm": docker_swarm,
@@ -498,6 +512,32 @@ class MimoCodingCompanyRuntime:
             "updated_at": timestamp(),
         }
 
+    @staticmethod
+    def _max_tool_calls(value: int | None) -> int:
+        try:
+            parsed = int(value if value not in (None, "") else DEFAULT_MAX_TOOL_CALLS)
+        except (TypeError, ValueError):
+            parsed = DEFAULT_MAX_TOOL_CALLS
+        return max(1, min(parsed, MAX_TOOL_CALLS_LIMIT))
+
+    @staticmethod
+    def _workspace_metadata(
+        *,
+        workspace_id: str | None = None,
+        workspace_label: str | None = None,
+        workspace_root: str | None = None,
+    ) -> dict[str, str]:
+        metadata: dict[str, str] = {}
+        for key, value in (
+            ("workspace_id", workspace_id),
+            ("workspace_label", workspace_label),
+            ("workspace_root", workspace_root),
+        ):
+            cleaned = str(value or "").strip()
+            if cleaned:
+                metadata[key] = cleaned
+        return metadata
+
     def bootstrap(
         self,
         *,
@@ -511,6 +551,10 @@ class MimoCodingCompanyRuntime:
         qa_targets: list[str] | None = None,
         docker_worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
         docker_personas: list[str] | None = None,
+        max_tool_calls: int | None = DEFAULT_MAX_TOOL_CALLS,
+        workspace_id: str | None = None,
+        workspace_label: str | None = None,
+        workspace_root: str | None = None,
         seed_tasks: bool = True,
         seed_knowledge: bool = True,
         run_initial_review_now: bool = False,
@@ -520,11 +564,21 @@ class MimoCodingCompanyRuntime:
         selected_fast_model = self._allowed_model(fast_model or DEFAULT_FAST_MODEL)
         cleaned_targets = self._clean_targets(qa_targets)
         cleaned_personas = self._clean_personas(docker_personas)
+        workspace_metadata = self._workspace_metadata(
+            workspace_id=workspace_id,
+            workspace_label=workspace_label,
+            workspace_root=workspace_root,
+        )
+        safe_max_tool_calls = self._max_tool_calls(max_tool_calls)
 
         self._define_roles(main_model, selected_vision_model, selected_fast_model)
         state = self._load_state()
         org_id = self._ensure_org(state, main_model, selected_vision_model, selected_fast_model)
-        conversation_id = self._ensure_conversation(state, model=main_model)
+        conversation_id = self._ensure_conversation(
+            state,
+            model=main_model,
+            workspace_metadata=workspace_metadata,
+        )
         self._apply_model_preferences(main_model, selected_vision_model, selected_fast_model)
         state["org_id"] = org_id
         state["conversation_id"] = conversation_id
@@ -532,6 +586,8 @@ class MimoCodingCompanyRuntime:
         state["main_model"] = main_model
         state["vision_model"] = selected_vision_model
         state["fast_model"] = selected_fast_model
+        state["max_tool_calls"] = safe_max_tool_calls
+        state.update(workspace_metadata)
         state["utility_models"] = {
             **dict(UTILITY_MODELS),
             "subagent_default": main_model,
@@ -547,6 +603,7 @@ class MimoCodingCompanyRuntime:
             worker_count=max(1, min(int(docker_worker_count or DEFAULT_DOCKER_WORKER_COUNT), 16)),
             persona_ids=cleaned_personas,
             qa_targets=cleaned_targets,
+            workspace_root=workspace_metadata.get("workspace_root"),
         )
         state["autonomy_board"] = self._autonomy_board(state)
         state["qa_swarm_plan"] = self._qa_swarm_plan(state)
@@ -707,6 +764,7 @@ class MimoCodingCompanyRuntime:
         worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
         persona_ids: list[str] | None = None,
         qa_targets: list[str] | None = None,
+        workspace_root: str | None = None,
     ) -> dict[str, Any]:
         personas = self._clean_personas(persona_ids)
         targets = list(qa_targets or [])
@@ -736,16 +794,16 @@ class MimoCodingCompanyRuntime:
             "entrypoint_path": str(bundle_dir / "worker-entrypoint.sh"),
             "workers": workers,
         }
-        return self._materialize_docker_swarm_artifacts(swarm_state)
+        return self._materialize_docker_swarm_artifacts(swarm_state, workspace_root=workspace_root)
 
-    def _materialize_docker_swarm_artifacts(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
+    def _materialize_docker_swarm_artifacts(self, swarm_state: dict[str, Any], *, workspace_root: str | None = None) -> dict[str, Any]:
         runtime_dir = self._docker_runtime_dir()
         assignments_dir = runtime_dir / "assignments"
         status_dir = runtime_dir / "status"
         assignments_dir.mkdir(parents=True, exist_ok=True)
         status_dir.mkdir(parents=True, exist_ok=True)
         bundle_dir = Path(str(swarm_state.get("bundle_dir") or self._docker_bundle_dir()))
-        workspace_root = self._workspace_root()
+        mounted_workspace_root = Path(str(workspace_root)).expanduser().resolve() if str(workspace_root or "").strip() else self._workspace_root()
         project_name = self._docker_project_name()
         workers: list[dict[str, Any]] = []
         assignment_paths: dict[str, str] = {}
@@ -775,7 +833,7 @@ class MimoCodingCompanyRuntime:
             self._render_docker_swarm_compose(
                 bundle_dir=bundle_dir,
                 project_name=project_name,
-                workspace_root=workspace_root,
+                workspace_root=mounted_workspace_root,
                 runtime_dir=runtime_dir,
                 workers=workers,
             ),
@@ -1046,9 +1104,16 @@ class MimoCodingCompanyRuntime:
             )
         return str(org_id)
 
-    def _ensure_conversation(self, state: dict[str, Any], *, model: str) -> str:
+    def _ensure_conversation(
+        self,
+        state: dict[str, Any],
+        *,
+        model: str,
+        workspace_metadata: dict[str, str] | None = None,
+    ) -> str:
         from domain.chat.store import ChatStore
 
+        workspace_metadata = dict(workspace_metadata or {})
         store = ChatStore()
         conversation_id = state.get("conversation_id")
         if conversation_id and store.get_conversation(conversation_id):
@@ -1065,6 +1130,7 @@ class MimoCodingCompanyRuntime:
                         "profile_id": PROFILE_ID,
                         "client_manager_agent_id": "client_manager",
                         "company_id": COMPANY_ID,
+                        **workspace_metadata,
                     },
                 },
             )
@@ -1080,6 +1146,7 @@ class MimoCodingCompanyRuntime:
                 "profile_id": PROFILE_ID,
                 "client_manager_agent_id": "client_manager",
                 "company_id": COMPANY_ID,
+                **workspace_metadata,
             },
         )
         store.update_conversation(conversation["id"], {"title": "MiMo Coding Company"})
@@ -1116,6 +1183,12 @@ class MimoCodingCompanyRuntime:
                 "main_model": state.get("main_model") or DEFAULT_MAIN_MODEL,
                 "vision_model": state.get("vision_model") or DEFAULT_VISION_MODEL,
                 "fast_model": state.get("fast_model") or DEFAULT_FAST_MODEL,
+                "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
+                **self._workspace_metadata(
+                    workspace_id=state.get("workspace_id"),
+                    workspace_label=state.get("workspace_label"),
+                    workspace_root=state.get("workspace_root"),
+                ),
                 "self_improving": True,
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
                 "docker_swarm": docker_swarm,
@@ -1258,8 +1331,9 @@ class MimoCodingCompanyRuntime:
             return True
         return status not in TERMINAL_TASK_STATUSES
 
-    def _schedule_policy(self) -> dict[str, Any]:
-        return {
+    def _schedule_policy(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = state if isinstance(state, dict) else {}
+        policy = {
             "profile_id": PROFILE_ID,
             "non_stop": True,
             "allow_shell": True,
@@ -1269,9 +1343,13 @@ class MimoCodingCompanyRuntime:
             "delete_actions_require_approval": True,
             "terminal_actions_require_approval": False,
             "normal_status_silent": True,
+            "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
             "tool_allowlist": TOOL_ALLOWLIST,
             "model_allowlist": current_model_allowlist(),
         }
+        if state.get("workspace_id"):
+            policy["workspace_id"] = state["workspace_id"]
+        return policy
 
     def _ensure_interval_schedule(
         self,
@@ -1298,12 +1376,17 @@ class MimoCodingCompanyRuntime:
             "agent_id": agent_id,
             "thinking_level": "high",
             "tools": list(tools),
-            "tool_policy": self._schedule_policy(),
+            "tool_policy": self._schedule_policy(state),
             "metadata": {
                 "profile_id": PROFILE_ID,
                 "company_id": COMPANY_ID,
                 "conversation_id": state.get("conversation_id"),
                 "loop_key": key,
+                **self._workspace_metadata(
+                    workspace_id=state.get("workspace_id"),
+                    workspace_label=state.get("workspace_label"),
+                    workspace_root=state.get("workspace_root"),
+                ),
             },
         }
         config = {"value": safe_minutes, "unit": "minutes"}
@@ -1345,12 +1428,17 @@ class MimoCodingCompanyRuntime:
             "agent_id": agent_id,
             "thinking_level": "high",
             "tools": list(tools),
-            "tool_policy": self._schedule_policy(),
+            "tool_policy": self._schedule_policy(state),
             "metadata": {
                 "profile_id": PROFILE_ID,
                 "company_id": COMPANY_ID,
                 "conversation_id": state.get("conversation_id"),
                 "loop_key": key,
+                **self._workspace_metadata(
+                    workspace_id=state.get("workspace_id"),
+                    workspace_label=state.get("workspace_label"),
+                    workspace_root=state.get("workspace_root"),
+                ),
             },
         }
         config = {"run_at": run_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")}

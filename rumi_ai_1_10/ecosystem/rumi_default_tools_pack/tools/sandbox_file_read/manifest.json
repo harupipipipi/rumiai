@@ -1,0 +1,42 @@
+{
+  "id": "sandbox_file_read",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Sandbox Read File",
+  "description": "Read a file from a sandbox-only coding workspace.",
+  "enabled": true,
+  "config": {
+    "name": "sandbox_file_read",
+    "summary": "Read a sandbox file",
+    "tags": ["sandbox", "coding", "file", "read"],
+    "ui": {
+      "group_id": "sandbox/coding/files",
+      "group_label": "Sandbox Files",
+      "group_icon": "box",
+      "widget_kind": "tool_toggle"
+    },
+    "tool_category": "sandbox",
+    "action_type": "sandbox_read",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["sandbox.workspace.read"],
+    "requires_approval": false,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {"type": "string"},
+          "path": {"type": "string"},
+          "start_line": {"type": "integer", "minimum": 1},
+          "end_line": {"type": "integer", "minimum": 1},
+          "max_chars": {"type": "integer", "minimum": 1},
+          "max_output_chars": {"type": "integer", "minimum": 1},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["path"]
+      }
+    },
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:sandbox_file_read"}
+  }
+}

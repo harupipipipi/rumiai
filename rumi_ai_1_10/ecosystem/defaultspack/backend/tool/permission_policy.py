@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from domain.tool.autonomy import autonomous_tool_execution_allowed
-from domain.tool.security import is_safe_first_party_memo_tool
+from domain.tool.security import is_safe_first_party_memo_tool, is_sandbox_capability_tool, untrusted_tool_security_rejection
 
 
 _ACTION_ALLOW = "allow"
@@ -182,6 +182,16 @@ class ToolPermissionPolicyStore:
         if matched_by == "default_action" and isinstance(tool, dict) and is_safe_first_party_memo_tool(tool):
             action = _ACTION_ALLOW
             matched_by = "first_party_memo"
+            matched_value = tool_id or display_name or tool_name
+
+        security_rejection = untrusted_tool_security_rejection(tool) if isinstance(tool, dict) else None
+        if security_rejection is not None:
+            action = _ACTION_DENY
+            matched_by = "tool_security"
+            matched_value = security_rejection
+        elif matched_by == "default_action" and isinstance(tool, dict) and is_sandbox_capability_tool(tool):
+            action = _ACTION_ALLOW
+            matched_by = "sandbox_capability"
             matched_value = tool_id or display_name or tool_name
 
         allowed = action == _ACTION_ALLOW

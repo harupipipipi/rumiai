@@ -47,6 +47,45 @@ def test_fallback_sorting_keeps_static_agent_company_status_before_generic_statu
     )
 
 
+def test_http_route_spec_preserves_authority_metadata_on_handler():
+    from ecosystem.defaultspack.transport.registry import (
+        HttpRouteSpec,
+        build_http_routes_from_specs,
+    )
+
+    class Server:
+        def _handle_mobile_chat(self, request_data, path_params):
+            return {"status": "ok"}
+
+    routes = build_http_routes_from_specs(
+        Server(),
+        [
+            HttpRouteSpec(
+                "POST",
+                "/api/mobile/v1/chat",
+                handler_name="_handle_mobile_chat",
+                permission_id="mobile.chat.send",
+                owner_pack_id="defaultspack",
+                provider_id="rumi",
+                frontend_id="mobile",
+                audience="kernel_api",
+                resource_template={"surface_id": "mobile", "device_id": "{body.device_id}"},
+                core_only=False,
+            ),
+        ],
+    )
+
+    _method, _compiled, handler, _source, _path_inject = routes[0]
+    assert getattr(handler, "__rumi_route_authority__") == {
+        "permission_id": "mobile.chat.send",
+        "owner_pack_id": "defaultspack",
+        "provider_id": "rumi",
+        "frontend_id": "mobile",
+        "audience": "kernel_api",
+        "resource_template": {"surface_id": "mobile", "device_id": "{body.device_id}"},
+    }
+
+
 def test_chat_send_fallback_specs_target_chat_turn_flow():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 
@@ -63,6 +102,22 @@ def test_chat_send_fallback_specs_target_chat_turn_flow():
     assert stream.flow_id == "defaultspack.chat_stream_turn"
     assert stream.fallback_block_module == "blocks.chat.stream"
     assert stream.path_inject == {"id": "conversation_id"}
+
+
+def test_tool_selection_resource_routes_have_authority_metadata():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    preferences = specs[("PUT", "/api/chat/conversations/{id}/tool-preferences")]
+    assert preferences.permission_id == "chat.tool_preferences.write"
+    assert preferences.owner_pack_id == "defaultspack"
+    assert preferences.resource_template == {"conversation_id": "{path.id}"}
+
+    trace = specs[("GET", "/api/tools/selection/traces/{trace_id}")]
+    assert trace.permission_id == "tool_selection.trace.read"
+    assert trace.owner_pack_id == "defaultspack"
+    assert trace.resource_template == {"trace_id": "{path.trace_id}"}
 
 
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():

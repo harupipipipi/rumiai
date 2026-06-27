@@ -1374,6 +1374,66 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.terminal_stream
+  defaults.sandbox.artifact.export:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.artifact.export
+  defaults.sandbox.artifact_export:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.artifact_export
+  defaults.sandbox.diff.preview:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.diff.preview
+  defaults.sandbox.diff_preview:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.diff_preview
+  defaults.sandbox.file.patch:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file.patch
+  defaults.sandbox.file.read:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file.read
+  defaults.sandbox.file.write:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file.write
+  defaults.sandbox.file_patch:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file_patch
+  defaults.sandbox.file_read:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file_read
+  defaults.sandbox.file_write:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.file_write
+  defaults.sandbox.terminal.exec:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.terminal.exec
+  defaults.sandbox.terminal_exec:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.sandbox.terminal_exec
   defaults.computer.click:
     owner: computer
     reason: legacy caller compatibility

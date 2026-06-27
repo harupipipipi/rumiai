@@ -5,7 +5,7 @@ import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil,
 import { cn } from "../lib/cn";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
-import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
+import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
@@ -3161,37 +3161,36 @@ export function SettingsModalRenderer({
                       {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
                     </div>
                     {activeSection.id === "tools" && (
-                      <ToolSettingsPanel
+                      <ToolExperienceSettingsPanel
                         tools={(catalog?.sidebar.items ?? []).filter((item) => item.category === "tool")}
-                        disabledToolIds={Array.isArray(settingsValues.tools?.disabled_tool_ids)
-                          ? settingsValues.tools?.disabled_tool_ids.map((item) => String(item)).filter(Boolean)
-                          : []}
-                        hiddenToolIds={Array.isArray(settingsValues.tools?.hidden_tool_ids)
-                          ? settingsValues.tools?.hidden_tool_ids.map((item) => String(item)).filter(Boolean)
-                          : []}
+                        settingsValues={settingsValues}
                         onSettingChange={onSettingChange}
                       />
                     )}
                     {activeSection.id === "system_info" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
                     )}
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {visiblePrimaryFields.map(renderField)}
-                    </div>
-                    {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-                        {t(locale, "settings.noFields")}
-                      </div>
-                    )}
-                    {visibleAdvancedFields.length > 0 && (
-                      <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
-                        <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
-                          {t(locale, "settings.advanced")}
-                        </summary>
-                        <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
-                          {visibleAdvancedFields.map(renderField)}
+                    {activeSection.id !== "tools" && (
+                      <>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          {visiblePrimaryFields.map(renderField)}
                         </div>
-                      </details>
+                        {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                            {t(locale, "settings.noFields")}
+                          </div>
+                        )}
+                        {visibleAdvancedFields.length > 0 && (
+                          <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
+                            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
+                              {t(locale, "settings.advanced")}
+                            </summary>
+                            <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
+                              {visibleAdvancedFields.map(renderField)}
+                            </div>
+                          </details>
+                        )}
+                      </>
                     )}
                   </section>
                 )}

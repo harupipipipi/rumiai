@@ -16,6 +16,7 @@ FetchFn = Callable[[str, float], str]
 MAX_RESPONSE_BYTES = 1024 * 1024
 MAX_SEARCH_SCAN_RESULTS = 20
 ENRICHED_SUMMARY_LIMIT = 500
+DEFAULT_TOKEN_CHAR_RATIO = 4
 ALLOWED_CONTENT_PREFIXES = (
     "application/json",
     "application/x-json",
@@ -194,6 +195,71 @@ class ProviderResult:
             "summary": self.summary,
             "network_enabled": self.network_enabled,
         }
+
+
+def _output_budget(max_chars: Any = None, max_tokens: Any = None, *, default: int | None = None) -> int | None:
+    candidates: list[int] = []
+    for value, ratio in ((max_chars, 1), (max_tokens, DEFAULT_TOKEN_CHAR_RATIO)):
+        if value is None or value == "":
+            continue
+        try:
+            parsed = int(value)
+        except Exception:
+            continue
+        if parsed > 0:
+            candidates.append(parsed * ratio)
+    if not candidates:
+        return default
+    return max(200, min(min(candidates), 40_000))
+
+
+def _clip_text(value: Any, max_chars: int) -> tuple[str, bool]:
+    text = str(value or "")
+    if len(text) <= max_chars:
+        return text, False
+    return text[: max(0, max_chars - 28)].rstrip() + "\n[truncated]", True
+
+
+def compact_provider_result(
+    result: ProviderResult,
+    *,
+    max_chars: Any = None,
+    max_tokens: Any = None,
+) -> ProviderResult:
+    budget = _output_budget(max_chars, max_tokens)
+    if budget is None:
+        return result
+    sources = list(result.sources or [])
+    if not sources:
+        return result
+    per_source = max(80, min(800, budget // max(1, len(sources))))
+    truncated = False
+    compact_sources: list[dict[str, Any]] = []
+    for source in sources:
+        item = dict(source)
+        item_truncated = False
+        for key in ("summary", "snippet", "excerpt", "content"):
+            if key not in item:
+                continue
+            clipped, did_truncate = _clip_text(item.get(key), per_source)
+            item[key] = clipped
+            item_truncated = item_truncated or did_truncate
+            truncated = truncated or did_truncate
+        if item_truncated:
+            metadata = dict(item.get("metadata") if isinstance(item.get("metadata"), dict) else {})
+            metadata["output_compacted"] = True
+            item["metadata"] = metadata
+        compact_sources.append(item)
+    summary = result.summary
+    if truncated:
+        summary = f"{summary} Source text was compacted to fit the requested output budget."
+    return ProviderResult(
+        result.query,
+        result.provider,
+        compact_sources,
+        summary,
+        result.network_enabled,
+    )
 
 
 class ExternalWebProvider:

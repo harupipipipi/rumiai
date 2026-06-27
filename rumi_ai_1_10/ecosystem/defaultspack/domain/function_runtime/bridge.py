@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _REQUEST_CONTEXT_KEYS = {
     "_tool_server_approved",
+    "_authenticated_principal",
+    "_authority_subject",
     "approval_id",
     "authority_principal_id",
     "conversation_id",
@@ -92,9 +94,40 @@ def _sanitized_request_context(context: dict[str, Any] | None) -> dict[str, Any]
             value = context[key]
             if isinstance(value, (str, int, float, bool)) or value is None:
                 sanitized[key] = value
+            elif key in {"_authenticated_principal", "_authority_subject"} and isinstance(value, dict):
+                sanitized[key] = _sanitized_principal_context(value)
     authority = _sanitized_authority_context(context.get("authority"))
     if authority:
         sanitized["authority"] = authority
+    return sanitized
+
+
+def _sanitized_principal_context(raw: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "auth_mode",
+        "token_id",
+        "profile_id",
+        "surface_id",
+        "device_id",
+        "role",
+        "issued_at",
+        "expires_at",
+        "core_role",
+        "principal_id",
+    }
+    sanitized: dict[str, Any] = {}
+    for key in allowed:
+        if key not in raw:
+            continue
+        value = raw.get(key)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized[key] = value
+    audiences = raw.get("audiences")
+    if isinstance(audiences, list):
+        sanitized["audiences"] = [str(item) for item in audiences if str(item or "").strip()]
+    facets = raw.get("facet_principal_ids")
+    if isinstance(facets, list):
+        sanitized["facet_principal_ids"] = [str(item) for item in facets if str(item or "").strip()]
     return sanitized
 
 

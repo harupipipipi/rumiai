@@ -1,0 +1,64 @@
+{
+  "function_id": "sandbox_diff_preview",
+  "description": "Preview sandbox-only workspace changes as a diff.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "diff"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.workspace.diff"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.diff_preview",
+    "defaultspack.sandbox.diff_preview",
+    "defaults.sandbox.diff.preview",
+    "defaultspack.sandbox.diff.preview"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_output_chars": {
+        "type": "integer",
+        "minimum": 1
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_diff_preview",
+      "default_args": {}
+    }
+  }
+}

@@ -117,6 +117,7 @@ class TestUserFunctionDockerExecution(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="rumi_test_w255_")
         self.executor = _make_executor()
+        self.executor._entry_requires_managed_sandbox = MagicMock(return_value=False)
 
     def tearDown(self):
         shutil.rmtree(self.tmpdir, ignore_errors=True)
@@ -404,7 +405,7 @@ class TestDockerFallback(unittest.TestCase):
     @patch(f"{_CE_MODULE}.shutil")
     @patch.dict(os.environ, {"RUMI_ALLOW_HOST_FALLBACK": "1"})
     def test_docker_unavailable_fallback(self, mock_shutil, mock_subprocess):
-        """When Docker is not available, user function falls back to host subprocess."""
+        """When Docker is not available, user function fails closed at the managed sandbox boundary."""
         mock_shutil.which.return_value = None  # Docker not available
         output_json = json.dumps({"fallback": True})
         mock_subprocess.run.return_value = _make_subprocess_result(
@@ -423,13 +424,9 @@ class TestDockerFallback(unittest.TestCase):
                 principal_id="p1", entry=entry, args={},
                 request_id="r1", start_time=time.time(),
             )
-        self.assertTrue(resp.success)
-        self.assertEqual(resp.output, {"fallback": True})
-        # Verify Docker was NOT called (no docker run command)
-        call_args = mock_subprocess.run.call_args
-        cmd = call_args[0][0] if call_args[0] else call_args[1].get("args", [])
-        # Should be [sys.executable, runner_file] not ["docker", "run", ...]
-        self.assertNotEqual(cmd[0], "docker")
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "SANDBOX_RUNTIME_UNAVAILABLE")
+        mock_subprocess.run.assert_not_called()
 
 
 class TestContainerNameFormat(unittest.TestCase):

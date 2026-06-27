@@ -998,8 +998,14 @@ export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
+  run_id?: string;
+  seq?: number;
   message?: string;
   phase?: string;
+  status?: string;
+  summary?: string;
+  next_action?: string;
+  nextAction?: string;
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
@@ -1763,12 +1769,62 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
+export type ToolSelectionScope = "turn" | "conversation";
+export type ToolSelectionStrategy = "hybrid" | "semantic" | "catalog_ai" | "all_with_hints" | "all_schemas" | "lexical";
+export type ToolTarget = { kind: "tool" | "service"; id: string };
+
 export type ToolSelectionRequest = {
-  mode?: "auto" | "manual" | "none";
-  include?: string[];
-  exclude?: string[];
-  scope?: "turn";
+  mode?: ToolSelectionMode;
+  strategy?: ToolSelectionStrategy | null;
+  include?: Array<string | ToolTarget>;
+  exclude?: Array<string | ToolTarget>;
+  scope?: ToolSelectionScope;
   must_use?: boolean;
+  preview_id?: string | null;
+};
+
+export type ToolCatalogService = {
+  service_id: string;
+  label: string;
+  summary?: string;
+  connection_status?: string;
+  tool_count?: number;
+  action_classes?: string[];
+};
+
+export type ToolCatalogTool = {
+  tool_id: string;
+  service_id: string;
+  service_label: string;
+  name: string;
+  summary?: string;
+  action_class: string;
+  risk?: string;
+  requires_explicit_intent?: boolean;
+  connection_status?: string;
+  minimum_permission?: string;
+  tags?: string[];
+  permission?: Record<string, unknown>;
+};
+
+export type ToolCatalogResponse = {
+  services: ToolCatalogService[];
+  tools: ToolCatalogTool[];
+  count: number;
+};
+
+export type ToolSelectionPreviewResponse = {
+  preview_id: string;
+  expires_at: string;
+  decision: {
+    selected_tools: string[];
+    selected_services: ToolCatalogService[];
+    recommendations: Array<{ tool_id: string; confidence?: number; reason?: string }>;
+    permission_summary: Record<string, number>;
+    fallbacks?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  };
 };
 
 type SendMessageOptions = {
@@ -1800,6 +1856,10 @@ export type ChatToolStreamEvent = ChatActivityEvent & {
     | "browser_screenshot"
     | "approval_requested"
     | "ai_retry_scheduled"
+    | "tool_selection_started"
+    | "tool_selection_completed"
+    | "tool_selection_fallback"
+    | "tool_selection_reviewed"
     | "task_failed";
 };
 
@@ -2563,6 +2623,45 @@ export const api = {
     return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
   },
 
+  toolCatalog() {
+    return request<ToolCatalogResponse>("/api/tools/catalog", { cache: "no-store" });
+  },
+
+  previewToolSelection(payload: {
+    conversation_id?: string | null;
+    user_text?: string;
+    text?: string;
+    attachment_metadata?: unknown[];
+    tool_selection?: ToolSelectionRequest;
+    model?: string | null;
+  }) {
+    return request<ToolSelectionPreviewResponse>("/api/tools/selection/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rebuildToolEmbeddingIndex(payload: { model?: string | null }) {
+    return request<Record<string, unknown>>("/api/tools/embedding-index/rebuild", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getConversationToolPreferences(conversationId: string) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { cache: "no-store" },
+    );
+  },
+
+  updateConversationToolPreferences(conversationId: string, preferences: Record<string, unknown>) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { method: "PUT", body: JSON.stringify({ preferences }) },
+    );
+  },
+
   executeUiCommand(payload: {
     command: string;
     args?: Record<string, unknown>;
@@ -3002,12 +3101,16 @@ export const api = {
     heartbeat_minutes?: number;
     review_interval_minutes?: number;
     qa_interval_minutes?: number;
+    max_tool_calls?: number;
     model?: string;
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
     docker_worker_count?: number;
     docker_personas?: string[];
+    workspace_id?: string | null;
+    workspace_label?: string | null;
+    workspace_root?: string | null;
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;

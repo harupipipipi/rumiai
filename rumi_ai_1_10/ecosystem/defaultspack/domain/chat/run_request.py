@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import base64
 import importlib
+import json
 from functools import lru_cache
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -30,8 +32,22 @@ from domain.chat.ir_legacy_adapter import (
     stored_messages_to_ir,
 )
 from domain.chat.modality_detector import detect_modalities
+from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
 from domain.chat.public_metadata import compact_tool_filter_entries
 from domain.chat.store import ChatStore
+from domain.chat.tool_selection_schema import (
+    TOOL_SELECTION_MODES,
+    TOOL_SELECTION_SCOPES,
+    TOOL_SELECTION_STRATEGIES,
+    normalize_tool_target,
+    normalize_tool_targets,
+)
+from domain.chat.tool_selection_service import ToolSelectionService
+from domain.chat.tool_selection_preview import (
+    ToolSelectionPreviewAccessError,
+    ToolSelectionPreviewStore,
+    preview_payload_bindings,
+)
 from domain.human_operator.constants import HUMAN_OPERATOR_TOOL_NAME, is_human_operator_model
 from domain.vision.image_bridge import (
     apply_vision_bridge_to_messages,
@@ -86,21 +102,42 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_TOOL_MENTION_RE = re.compile(r"@([A-Za-z0-9_.:-]+)")
+_COMPUTER_USE_TOOL_IDS = {"computer_use", "browser_computer", "browser_use"}
+_CODING_PR_REQUEST_RE = re.compile(
+    r"pull\s*request|draft\s*pr|github\.com|git\s*hub|プルリク|"
+    r"(?<![A-Za-z])pr(?![A-Za-z]).{0,24}(出して|作って|作成|開いて|open|create)|"
+    r"(出して|作って|作成|開いて|open|create).{0,24}(?<![A-Za-z])pr(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_CODING_PR_TOOL_IDS = [
+    "coding_file_list",
+    "coding_file_search",
+    "coding_file_read",
+    "coding_file_write",
+    "coding_terminal_exec",
+    "coding_git_status",
+    "coding_git_diff",
+    "coding_git_commit",
+    "coding_git_push",
+]
 _AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
     {"model.invoke", "api_key.use", "network.egress"}
 )
 _TOOL_SELECTION_MODES = {"auto", "manual", "none"}
 _TOOL_SELECTION_SCOPES = {"turn"}
-
+_TOOL_DISCOVERY_FALLBACK_IDS = {"tool_names", "tool_search"}
 
 @dataclass
 class NormalizedToolSelection:
     mode: str = "auto"
+    strategy: str | None = None
     include: list[Any] = field(default_factory=list)
-    exclude: list[str] = field(default_factory=list)
+    exclude: list[Any] = field(default_factory=list)
     scope: str = "turn"
     must_use: bool = False
     review: bool = False
+    preview_id: str | None = None
     source: str = "default"
 
 
@@ -251,8 +288,16 @@ def prepare_chat_run(
 
     params = dict(prepared_input.get("params") or {})
     tool_selection = _normalize_tool_selection(prepared_input)
-    params.pop("tool_selection", None)
     requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
+    tool_selection = _apply_tool_selection_preview_snapshot(
+        tool_selection,
+        context if isinstance(context, dict) else {},
+        conversation_id=conversation_id,
+        input_data=prepared_input,
+        user_text=user_text,
+        model=requested_model or model,
+    )
+    params.pop("tool_selection", None)
     if requested_model:
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
@@ -286,7 +331,9 @@ def prepare_chat_run(
         params["deepthink_enabled"] = bool(model_settings.get("deepthink_enabled", False))
 
     request_context = _merge_active_startup_profile_context(context or {}, active_startup_profile)
-    if effective_inferred_tool_ids:
+    requested_tool_ids_for_policy = _requested_tool_ids_from_selection(tool_selection)
+    _apply_requested_tool_policy(request_context, requested_tool_ids_for_policy)
+    if _has_computer_use_tool(effective_inferred_tool_ids):
         request_context["user_requested_computer_use"] = True
         request_context = _apply_computer_use_context_preferences(request_context, user_text)
     request_context["conversation_id"] = conversation_id
@@ -313,6 +360,8 @@ def prepare_chat_run(
     conversation_metadata = (
         conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
     )
+    if isinstance(conversation_metadata.get("tool_preferences"), dict):
+        request_context["conversation_tool_preferences"] = conversation_metadata["tool_preferences"]
     resolved_profile_id = str(
         request_context.get("profile_id")
         or metadata.get("profile_id")
@@ -333,6 +382,21 @@ def prepare_chat_run(
         request_context["agent_id"] = resolved_agent_id
     _propagate_conversation_workspace(request_context, metadata, conversation_metadata)
     request_context.update(_approval_followup_tool_context(metadata))
+    raw_tool_policy = params.get("tool_policy")
+    if isinstance(raw_tool_policy, dict):
+        sanitized_tool_policy, ignored_tool_policy_keys = _sanitize_untrusted_chat_tool_policy(
+            raw_tool_policy
+        )
+        if ignored_tool_policy_keys:
+            params["tool_policy"] = sanitized_tool_policy
+            request_context["ignored_client_tool_policy_keys"] = sorted(
+                set(ignored_tool_policy_keys)
+            )
+            if isinstance(metadata, dict):
+                metadata["ignored_client_tool_policy_keys"] = sorted(
+                    set(ignored_tool_policy_keys)
+                )
+                store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     template_tool_policy_resolution = _resolve_template_tool_policy(
         params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {},
         metadata=metadata,
@@ -418,6 +482,9 @@ def prepare_chat_run(
     raw_tools, provider_tools, tool_context = _available_tools(
         request_context, tool_resolution_input, user_text=user_text
     )
+    tool_hint_prompt = _tool_selection_hints_prompt(tool_context)
+    if tool_hint_prompt:
+        _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
     routing_decision = route_model_request(
@@ -488,6 +555,12 @@ def prepare_chat_run(
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     provider_tools = adapt_tool_definitions(raw_tools)
     filter_entries = list(eligibility_result.get("entries") or [])
+    if isinstance(tool_context.get("unselected_requested_tools"), list):
+        filter_entries.extend(
+            entry
+            for entry in tool_context["unselected_requested_tools"]
+            if isinstance(entry, dict)
+        )
     compact_filter_entries = compact_tool_filter_entries(filter_entries)
     tool_context["tool_filter_result"] = filter_entries
     tool_context["runtime_capability_snapshot"] = runtime_snapshot.as_dict()
@@ -530,6 +603,9 @@ def prepare_chat_run(
         )
         request_context["requested_tools_without_provider_attachment"] = unavailable_tools
         provider_tools = []
+    tool_discovery_prompt = _tool_discovery_fallback_prompt(raw_tools) if provider_tools else ""
+    if tool_discovery_prompt:
+        _append_system_context_message(standard_messages, tool_discovery_prompt)
     if routing_decision.bridge_required:
         bridge_result = describe_images(
             messages=standard_messages,
@@ -562,6 +638,18 @@ def prepare_chat_run(
         tool_context.get("runtime_profile") if isinstance(tool_context, dict) else None,
         agent_id=tool_context.get("agent_id") if isinstance(tool_context, dict) else None,
     )
+    provider_compat_tool_ids = {
+        str(item).strip()
+        for item in (
+            tool_context.get("caller_provider_tool_ids")
+            if isinstance(tool_context, dict)
+            and isinstance(tool_context.get("caller_provider_tool_ids"), list)
+            else []
+        )
+        if str(item or "").strip()
+    }
+    if provider_compat_tool_ids:
+        connected_names = {name for name in connected_names if name not in provider_compat_tool_ids}
     tool_context["chat_references"] = chat_references
     tool_context["history_json_path"] = chat_references["history_json_path"]
     skill_eval = RuntimeSkillTriggerService().evaluate(
@@ -634,6 +722,11 @@ def prepare_chat_run(
     params = planned_request.params
     provider_chat_ir = planned_request.ir
     standard_messages = ir_to_legacy_standard_messages(provider_chat_ir)
+    if provider_tools:
+        provider_tools = with_assistant_progress_tool(list(provider_tools))
+        _append_system_context_message(standard_messages, assistant_progress_system_instruction())
+        provider_chat_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
+        tool_context["assistant_progress_enabled"] = True
     request_context["chat_params"] = params
     request_context["provider_capabilities"] = provider_capabilities
     request_context["provider_planning"] = provider_planning
@@ -785,6 +878,60 @@ def _append_system_context_message(messages: list[dict[str, Any]], content: str)
         messages[0]["content"] = "{}\n\n{}".format(existing, text) if existing else text
         return
     messages.insert(0, {"role": "system", "content": text})
+
+
+def _tool_selection_hints_prompt(context: dict[str, Any]) -> str:
+    metadata = context.get("tool_selection") if isinstance(context, dict) else {}
+    if not isinstance(metadata, dict) or metadata.get("strategy") != "all_with_hints":
+        return ""
+    metrics = metadata.get("metrics") if isinstance(metadata.get("metrics"), dict) else {}
+    recommendations = metrics.get("recommended_tools")
+    if not isinstance(recommendations, list):
+        recommendations = metadata.get("recommendations") if isinstance(metadata.get("recommendations"), list) else []
+    lines = []
+    for item in recommendations[:16]:
+        if not isinstance(item, dict):
+            continue
+        tool_id = str(item.get("tool_id") or item.get("id") or "").strip()
+        if not tool_id:
+            continue
+        reason = str(item.get("reason") or "").strip()
+        confidence = item.get("confidence")
+        suffix = " reason={}".format(reason) if reason else ""
+        if confidence not in (None, ""):
+            suffix += " confidence={}".format(confidence)
+        lines.append("- {}{}".format(tool_id, suffix))
+    if not lines:
+        order = metrics.get("recommendation_order") if isinstance(metrics.get("recommendation_order"), list) else []
+        lines = ["- {}".format(str(item)) for item in order[:16] if str(item or "").strip()]
+    if not lines:
+        return ""
+    return (
+        "Tool selection hints for all_with_hints strategy.\n"
+        "All eligible tool schemas are attached, but prefer this order when it fits the user request:\n"
+        + "\n".join(lines)
+    )
+
+
+def _tool_discovery_fallback_prompt(tools: list[dict[str, Any]]) -> str:
+    tool_names = {
+        tool_name_from_definition(tool)
+        for tool in tools
+        if tool_name_from_definition(tool)
+    }
+    if not (_TOOL_DISCOVERY_FALLBACK_IDS & tool_names):
+        return ""
+    lines = ["Tool discovery fallback:"]
+    if "tool_names" in tool_names:
+        lines.append("- To inspect the currently attached/registered tool names, call tool_names with {}.")
+    if "tool_search" in tool_names:
+        lines.append(
+            '- To find tools related to a word or task, call tool_search with {"query":"coding","phase":"overview"}; use phase="schema" or include_schema=true only after choosing a concrete tool.'
+        )
+    lines.append(
+        "Use these discovery tools when semantic/vector tool selection seems incomplete before deciding that no suitable tool exists."
+    )
+    return "\n".join(lines)
 
 
 def _active_profile_selected(active_profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -1089,6 +1236,39 @@ def _runtime_user_content_override(metadata: dict[str, Any] | None) -> str:
 _WORKSPACE_ID_KEYS = ("workspace_id", "workspaceId")
 _WORKSPACE_ROOT_KEYS = ("workspace_root", "workspaceRoot", "rootPath")
 _MERGED_PROFILE_DICT_FIELDS = ("policy", "permissions", "metadata", "surfaces", "node_settings")
+_CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS = {
+    "allow_browser",
+    "allow_client_supplied_approved",
+    "allow_direct_tool",
+    "allow_file_write",
+    "allow_git",
+    "allow_network",
+    "allow_shell",
+    "allow_terminal",
+    "direct_tool_execution",
+    "full_access",
+    "yolo_mode",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
+    "approval_token",
+    "approval_bypass",
+    "approval_granted",
+    "approved",
+    "bypass_approval",
+    "grant_approval",
+    "is_approved",
+    "server_approved",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS = {
+    "delete_actions_require_approval",
+    "destructive_actions_require_approval",
+    "git_push_requires_approval",
+    "terminal_actions_require_approval",
+    "write_actions_require_approval",
+}
+_CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS = {
+    "tool_permission_policy",
+}
 
 
 def _merge_profile_snapshot_sources(
@@ -1110,6 +1290,53 @@ def _merge_profile_snapshot_sources(
     if merged:
         merged.setdefault("profile_id", profile_id)
     return merged
+
+
+def _client_policy_value_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"", "0", "false", "no", "off", "none", "null"}
+
+
+def _client_policy_value_false(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value is False
+    if isinstance(value, (int, float)):
+        return value == 0
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"0", "false", "no", "off"}
+
+
+def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    sanitized: dict[str, Any] = {}
+    ignored: list[str] = []
+    for key, value in policy.items():
+        key_text = str(key or "").strip()
+        lower_key = key_text.lower()
+        if not key_text:
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS:
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value):
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value):
+            ignored.append(key_text)
+            continue
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value):
+            ignored.append(key_text)
+            continue
+        if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full":
+            ignored.append(key_text)
+            continue
+        sanitized[key] = value
+    return sanitized, ignored
 
 
 @lru_cache(maxsize=64)
@@ -1170,6 +1397,174 @@ def _hydrate_profile_policy_from_profile_id(
         **policy,
         **existing,
     }
+
+
+def _profile_policy_tool_ids(policy: dict[str, Any] | None) -> list[str]:
+    if not isinstance(policy, dict):
+        return []
+    for key in ("tool_allowlist", "enabled_tools", "allowed_tools"):
+        if key not in policy:
+            continue
+        value = policy.get(key)
+        if isinstance(value, str):
+            value = [item.strip() for item in value.split(",")]
+        if not isinstance(value, list):
+            return []
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            tool_id = str(item or "").strip()
+            if not tool_id or tool_id in seen:
+                continue
+            seen.add(tool_id)
+            result.append(tool_id)
+        return result
+    return []
+
+
+def _profile_node_allowed_actions(profile: dict[str, Any] | None) -> list[str]:
+    if not isinstance(profile, dict):
+        return []
+    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    tool_settings = (
+        node_settings.get("defaultspack.tool")
+        if isinstance(node_settings.get("defaultspack.tool"), dict)
+        else {}
+    )
+    actions = tool_settings.get("allowed_actions")
+    if not isinstance(actions, list):
+        return []
+    result: list[str] = []
+    seen: set[str] = set()
+    for item in actions:
+        tool_id = str(item or "").strip()
+        if not tool_id or tool_id in seen:
+            continue
+        seen.add(tool_id)
+        result.append(tool_id)
+    return result
+
+
+def _profile_client_agent_id(profile: dict[str, Any] | None, fallback: Any = None) -> str:
+    fallback_id = str(fallback or "").strip()
+    if not isinstance(profile, dict):
+        return fallback_id
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    node_settings = profile.get("node_settings") if isinstance(profile.get("node_settings"), dict) else {}
+    agent_settings = (
+        node_settings.get("defaultspack.agent")
+        if isinstance(node_settings.get("defaultspack.agent"), dict)
+        else {}
+    )
+    for value in (
+        fallback_id,
+        metadata.get("client_manager_agent_id"),
+        agent_settings.get("client_facing_role"),
+    ):
+        candidate = str(value or "").strip()
+        if candidate:
+            return candidate
+    return "agent"
+
+
+def _runtime_profile_agent_tool_refs(
+    runtime_profile: dict[str, Any] | None,
+    agent_id: Any = None,
+) -> list[str]:
+    if not isinstance(runtime_profile, dict):
+        return []
+    defaultspack = runtime_profile.get("defaultspack")
+    if not isinstance(defaultspack, dict):
+        return []
+    agents = defaultspack.get("agents")
+    if not isinstance(agents, dict):
+        return []
+    selected = agents.get(str(agent_id or "").strip()) if str(agent_id or "").strip() else None
+    if not isinstance(selected, dict) and len(agents) == 1:
+        selected = next(iter(agents.values()))
+    if not isinstance(selected, dict):
+        return []
+    tools = selected.get("tools")
+    if not isinstance(tools, list):
+        return []
+    return [str(tool).strip() for tool in tools if str(tool or "").strip()]
+
+
+def _merge_profile_tool_ids(*sources: Any) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for source in sources:
+        if not isinstance(source, list):
+            continue
+        for item in source:
+            tool_id = str(item or "").strip()
+            if not tool_id or tool_id in seen:
+                continue
+            seen.add(tool_id)
+            merged.append(tool_id)
+    return merged
+
+
+def _runtime_profile_with_policy_connected_tools(
+    runtime_profile: dict[str, Any] | None,
+    *,
+    profile_id: Any = None,
+    agent_id: Any = None,
+) -> tuple[dict[str, Any] | None, str]:
+    base_profile = dict(runtime_profile) if isinstance(runtime_profile, dict) else {}
+    snapshot_profile_id = str(
+        profile_id
+        or base_profile.get("profile_id")
+        or (
+            base_profile.get("profile", {}).get("profile_id")
+            if isinstance(base_profile.get("profile"), dict)
+            else ""
+        )
+        or ""
+    ).strip()
+    if not base_profile and snapshot_profile_id:
+        base_profile = _profile_snapshot(snapshot_profile_id)
+    if not isinstance(base_profile, dict) or not base_profile:
+        return runtime_profile, str(agent_id or "").strip()
+
+    policy = base_profile.get("policy") if isinstance(base_profile.get("policy"), dict) else {}
+    policy_tool_ids = _profile_policy_tool_ids(policy) or _profile_node_allowed_actions(base_profile)
+    resolved_agent_id = _profile_client_agent_id(base_profile, fallback=agent_id)
+    current_tool_ids = _runtime_profile_agent_tool_refs(base_profile, resolved_agent_id)
+    tool_ids = _merge_profile_tool_ids(
+        current_tool_ids,
+        policy_tool_ids,
+    )
+    if current_tool_ids and tool_ids == current_tool_ids:
+        return base_profile, resolved_agent_id
+    if not tool_ids:
+        return base_profile, resolved_agent_id
+
+    patched = dict(base_profile)
+    defaultspack = (
+        dict(patched.get("defaultspack"))
+        if isinstance(patched.get("defaultspack"), dict)
+        else {}
+    )
+    agents = (
+        dict(defaultspack.get("agents"))
+        if isinstance(defaultspack.get("agents"), dict)
+        else {}
+    )
+    selected_agent = (
+        dict(agents.get(resolved_agent_id))
+        if isinstance(agents.get(resolved_agent_id), dict)
+        else {}
+    )
+    selected_agent.setdefault("node_instance_id", resolved_agent_id)
+    selected_agent.setdefault("node_id", "defaultspack.agent")
+    selected_agent["tools"] = list(tool_ids)
+    agents[resolved_agent_id] = selected_agent
+    defaultspack["agents"] = agents
+    patched["defaultspack"] = defaultspack
+    if snapshot_profile_id:
+        patched.setdefault("profile_id", snapshot_profile_id)
+    return patched, resolved_agent_id
 
 
 def _propagate_conversation_workspace(
@@ -1812,30 +2207,34 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
     if isinstance(raw_selection, dict):
         include = _coerce_tool_items(raw_selection.get("include"))
         top_level_tools = _coerce_tool_items(input_data.get("tools"))
-        exclude = _coerce_tool_id_list(raw_selection.get("exclude"))
+        exclude = _coerce_tool_items(raw_selection.get("exclude"))
         raw_mode = str(raw_selection.get("mode") or "").strip().lower()
-        if raw_mode not in _TOOL_SELECTION_MODES:
+        if raw_mode not in TOOL_SELECTION_MODES:
             raw_mode = "manual" if include else "auto"
         if raw_mode == "auto" and top_level_tools:
             include = _merge_tool_items(include, top_level_tools)
+            raw_mode = "manual"
         if raw_mode == "manual" and not include:
             raw_mode = "none"
         scope = str(raw_selection.get("scope") or "turn").strip().lower() or "turn"
         return NormalizedToolSelection(
             mode=raw_mode,
+            strategy=_normalize_tool_selection_strategy(raw_selection.get("strategy")),
             include=include,
             exclude=exclude,
             scope=scope,
             must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=False),
-            review=False,
+            review=raw_mode == "review" or _coerce_optional_bool(raw_selection.get("review"), default=False),
+            preview_id=str(raw_selection.get("preview_id") or "").strip() or None,
             source="tool_selection",
         )
 
     raw_tools = input_data.get("tools")
     if isinstance(raw_tools, list):
+        include = _coerce_tool_items(raw_tools)
         return NormalizedToolSelection(
             mode="manual" if raw_tools else "none",
-            include=list(raw_tools),
+            include=include,
             source="tools",
         )
 
@@ -1861,6 +2260,58 @@ def _normalize_tool_selection(input_data: dict[str, Any]) -> NormalizedToolSelec
     return NormalizedToolSelection()
 
 
+def _apply_tool_selection_preview_snapshot(
+    selection: NormalizedToolSelection,
+    context: dict[str, Any],
+    *,
+    conversation_id: str,
+    input_data: dict[str, Any] | None = None,
+    user_text: str = "",
+    model: str = "",
+) -> NormalizedToolSelection:
+    preview_id = str(selection.preview_id or "").strip()
+    if not preview_id:
+        return selection
+    lookup_context = dict(context or {})
+    if conversation_id:
+        lookup_context["conversation_id"] = conversation_id
+    try:
+        snapshot = ToolSelectionPreviewStore().consume_authorized(
+            preview_id,
+            lookup_context,
+            expected_bindings=preview_payload_bindings(
+                input_data or {},
+                lookup_context,
+                user_text=user_text,
+                model=model,
+                catalog_tools=ToolRegistry().list_tools(),
+            ),
+        )
+    except ToolSelectionPreviewAccessError as exc:
+        raise ValueError(f"params.tool_selection.preview_id is invalid: {exc.code}") from exc
+    raw_selection = snapshot.get("selection") if isinstance(snapshot.get("selection"), dict) else {}
+    mode = str(raw_selection.get("mode") or selection.mode or "review").strip().lower()
+    if mode not in TOOL_SELECTION_MODES:
+        mode = "review"
+    scope = str(raw_selection.get("scope") or selection.scope or "turn").strip().lower()
+    if scope not in TOOL_SELECTION_SCOPES:
+        scope = "turn"
+    return NormalizedToolSelection(
+        mode=mode,
+        strategy=_normalize_tool_selection_strategy(raw_selection.get("strategy") or selection.strategy),
+        include=_coerce_tool_items(raw_selection.get("include")),
+        exclude=_coerce_tool_items(raw_selection.get("exclude")),
+        scope=scope,
+        must_use=_coerce_optional_bool(raw_selection.get("must_use"), default=selection.must_use),
+        review=_coerce_optional_bool(
+            raw_selection.get("review"),
+            default=(mode == "review" or selection.review),
+        ),
+        preview_id=preview_id,
+        source="tool_selection_preview",
+    )
+
+
 def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
     params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
     if "tool_selection" not in params:
@@ -1871,17 +2322,18 @@ def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
     if not isinstance(raw_selection, dict):
         return "params.tool_selection must be an object"
     raw_mode = str(raw_selection.get("mode") or "auto").strip().lower()
-    if raw_mode not in _TOOL_SELECTION_MODES:
-        if raw_mode == "review":
-            return "params.tool_selection.mode=review is not implemented yet"
-        return "params.tool_selection.mode must be one of auto, manual, none"
+    if raw_mode not in TOOL_SELECTION_MODES:
+        return "params.tool_selection.mode must be one of auto, review, manual, none"
     raw_scope = str(raw_selection.get("scope") or "turn").strip().lower()
-    if raw_scope not in _TOOL_SELECTION_SCOPES:
-        if raw_scope == "conversation":
-            return "params.tool_selection.scope=conversation is not implemented yet"
-        return "params.tool_selection.scope must be turn"
-    if _coerce_optional_bool(raw_selection.get("review"), default=False):
-        return "params.tool_selection.review is not implemented yet"
+    if raw_scope not in TOOL_SELECTION_SCOPES:
+        return "params.tool_selection.scope must be one of turn, conversation"
+    raw_strategy = str(raw_selection.get("strategy") or "").strip().lower()
+    if raw_strategy and raw_strategy not in TOOL_SELECTION_STRATEGIES:
+        return "params.tool_selection.strategy must be one of hybrid, semantic, catalog_ai, all_with_hints, all_schemas, lexical"
+    for field_name in ("include", "exclude"):
+        invalid_reason = _invalid_tool_selection_items_reason(raw_selection.get(field_name))
+        if invalid_reason:
+            return f"params.tool_selection.{field_name} {invalid_reason}"
     must_use = _coerce_optional_bool(raw_selection.get("must_use"), default=False)
     include = _coerce_tool_items(raw_selection.get("include"))
     if raw_mode == "none" and must_use:
@@ -1900,7 +2352,9 @@ def _coerce_tool_items(value: Any) -> list[Any]:
     result: list[Any] = []
     for item in value:
         if isinstance(item, dict):
-            result.append(item)
+            target = normalize_tool_target(item)
+            if target is not None:
+                result.append(target.to_dict())
             continue
         if isinstance(item, str):
             stripped = item.strip()
@@ -1909,12 +2363,60 @@ def _coerce_tool_items(value: Any) -> list[Any]:
     return result
 
 
+def _caller_provider_tool_definitions(input_data: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_tools = input_data.get("tools") if isinstance(input_data, dict) else None
+    if not isinstance(raw_tools, list):
+        return []
+    provider_tools: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    target_only_keys = {"kind", "id", "tool_id", "service_id"}
+    for item in raw_tools:
+        if not isinstance(item, dict):
+            continue
+        if normalize_tool_target(item) is not None and set(item).issubset(target_only_keys):
+            continue
+        name = tool_name_from_definition(item)
+        if not name:
+            continue
+        key = _tool_definition_id(item) or name
+        if key in seen:
+            continue
+        seen.add(key)
+        provider_tools.append(dict(item))
+    return provider_tools
+
+
+def _invalid_tool_selection_items_reason(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, list):
+        return "must be an array"
+    for item in value:
+        if isinstance(item, str):
+            if item.strip():
+                continue
+            return "must contain non-empty target IDs"
+        if isinstance(item, dict):
+            target = normalize_tool_target(item)
+            allowed_keys = {"kind", "id", "tool_id", "service_id"}
+            if target is not None and set(item).issubset(allowed_keys):
+                continue
+            return "must contain only string IDs or {kind, id} targets"
+        return "must contain only string IDs or {kind, id} targets"
+    return None
+
+
 def _coerce_tool_id_list(value: Any) -> list[str]:
     return [
         str(item).strip()
         for item in _coerce_tool_items(value)
         if not isinstance(item, dict) and str(item).strip()
     ]
+
+
+def _normalize_tool_selection_strategy(value: Any) -> str | None:
+    strategy = str(value or "").strip().lower()
+    return strategy if strategy in TOOL_SELECTION_STRATEGIES else None
 
 
 def _merge_tool_items(*groups: list[Any]) -> list[Any]:
@@ -1932,7 +2434,7 @@ def _merge_tool_items(*groups: list[Any]) -> list[Any]:
 
 def _tool_item_key(item: Any) -> str:
     if isinstance(item, dict):
-        return str(item.get("tool_id") or item.get("name") or id(item))
+        return f"{item.get('kind') or 'tool'}:{item.get('id') or item.get('tool_id') or item.get('service_id') or id(item)}"
     return str(item)
 
 
@@ -1951,19 +2453,17 @@ def _coerce_optional_bool(value: Any, *, default: bool) -> bool:
 
 
 def _tool_selection_metadata(selection: NormalizedToolSelection) -> dict[str, Any]:
-    include: list[str] = []
-    for item in selection.include:
-        value = item.get("tool_id") or item.get("name") if isinstance(item, dict) else item
-        text = str(value or "").strip()
-        if text:
-            include.append(text)
+    include = [target.to_dict() for target in normalize_tool_targets(selection.include)]
+    exclude = [target.to_dict() for target in normalize_tool_targets(selection.exclude)]
     return {
         "mode": selection.mode,
+        "strategy": selection.strategy,
         "include": include,
-        "exclude": list(selection.exclude),
+        "exclude": exclude,
         "scope": selection.scope,
         "must_use": selection.must_use,
         "review": selection.review,
+        "preview_id": selection.preview_id,
         "source": selection.source,
     }
 
@@ -2050,9 +2550,90 @@ def _profile_prefers_vector_tool_assist(context: dict[str, Any] | None) -> bool:
 
 
 def _infer_requested_tools_from_message(user_text: str) -> list[str]:
-    if not isinstance(user_text, str) or not _COMPUTER_USE_REQUEST_RE.search(user_text):
+    inferred: list[str] = []
+    seen: set[str] = set()
+
+    def add(tool_id: str) -> None:
+        value = str(tool_id or "").strip()
+        if not value or value in seen:
+            return
+        seen.add(value)
+        inferred.append(value)
+
+    if isinstance(user_text, str) and _COMPUTER_USE_REQUEST_RE.search(user_text):
+        add("computer_use")
+        add("browser_computer")
+
+    if isinstance(user_text, str) and _CODING_PR_REQUEST_RE.search(user_text):
+        for tool_id in _CODING_PR_TOOL_IDS:
+            add(tool_id)
+
+    for tool_id in _tool_mention_ids_from_text(user_text):
+        add(tool_id)
+
+    return inferred
+
+
+def _tool_mention_ids_from_text(user_text: str) -> list[str]:
+    if not isinstance(user_text, str) or "@" not in user_text:
         return []
-    return ["computer_use", "browser_computer"]
+    try:
+        registry = ToolRegistry()
+    except Exception:
+        return []
+    tool_ids: list[str] = []
+    seen: set[str] = set()
+    for match in _TOOL_MENTION_RE.finditer(user_text):
+        tool_id = str(match.group(1) or "").strip()
+        if not tool_id or tool_id in seen:
+            continue
+        try:
+            tool_def = registry.get(tool_id)
+        except Exception:
+            tool_def = None
+        if tool_def is None:
+            continue
+        seen.add(tool_id)
+        tool_ids.append(tool_id)
+    return tool_ids
+
+
+def _has_computer_use_tool(tool_ids: list[str]) -> bool:
+    return any(str(tool_id or "").strip() in _COMPUTER_USE_TOOL_IDS for tool_id in tool_ids)
+
+
+def _apply_requested_tool_policy(context: dict[str, Any], requested_tool_ids: list[str]) -> None:
+    if not isinstance(context, dict) or not requested_tool_ids:
+        return
+    profile_policy = context.get("profile_policy")
+    if isinstance(profile_policy, dict) and profile_policy.get("allow_shell") is False:
+        return
+    if not _requested_tool_ids_include_shell(requested_tool_ids):
+        return
+    context["user_requested_shell_tool"] = True
+
+
+def _requested_tool_ids_include_shell(tool_ids: list[str]) -> bool:
+    try:
+        registry = ToolRegistry()
+    except Exception:
+        return False
+    for tool_id in tool_ids:
+        candidate = str(tool_id or "").strip()
+        if not candidate:
+            continue
+        try:
+            tool_def = registry.get(candidate)
+        except Exception:
+            tool_def = None
+        if not isinstance(tool_def, dict):
+            continue
+        metadata = tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {}
+        category = str(tool_def.get("category") or metadata.get("category") or "").strip()
+        action_type = str(tool_def.get("action_type") or metadata.get("action_type") or "").strip()
+        if category == "shell" or action_type == "shell":
+            return True
+    return False
 
 
 def _with_inferred_tools(
@@ -2134,6 +2715,69 @@ def _append_special_model_tools(
     return [*tools, *helper_tools]
 
 
+def _requested_tool_ids_from_selection(selection: NormalizedToolSelection) -> list[str]:
+    ids: list[str] = []
+    seen: set[str] = set()
+    for target in normalize_tool_targets(selection.include):
+        if target.kind != "tool":
+            continue
+        if target.id in seen:
+            continue
+        seen.add(target.id)
+        ids.append(target.id)
+    return ids
+
+
+def _tool_name_set(tools: list[dict[str, Any]]) -> set[str]:
+    return {
+        name
+        for name in (tool_name_from_definition(tool) for tool in tools)
+        if name
+    }
+
+
+def _unselected_requested_tool_entries(
+    requested_tool_ids: list[str],
+    selected_tool_ids: list[str],
+    registry_tools: list[dict[str, Any]],
+    profile_filtered_tools: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected = {str(tool_id).strip() for tool_id in selected_tool_ids if str(tool_id or "").strip()}
+    registry_names = _tool_name_set(registry_tools)
+    profile_names = _tool_name_set(profile_filtered_tools)
+    entries: list[dict[str, Any]] = []
+    for tool_id in requested_tool_ids:
+        if tool_id in selected:
+            continue
+        if tool_id not in registry_names:
+            reason_code = "unknown_selected_tool"
+            reason = "selected tool is not registered in the tool catalog"
+            suggestions = ["Remove the stale tool selection or install the missing tool."]
+        elif tool_id not in profile_names:
+            reason_code = "not_connected_to_profile"
+            reason = "selected tool is not connected to the active runtime profile"
+            suggestions = ["Connect the tool in the active runtime profile or choose a team workspace profile that includes it."]
+        else:
+            reason_code = "not_attached_to_turn"
+            reason = "selected tool was eligible in the catalog but was not attached for this turn"
+            suggestions = ["Check tool selection settings and this turn's disabled tools."]
+        entries.append(
+            {
+                "tool_name": tool_id,
+                "status": "blocked",
+                "reason_code": reason_code,
+                "reason": reason,
+                "required": {"selected_tools": [tool_id]},
+                "actual": {
+                    "selected_tool_ids": sorted(selected),
+                    "runtime_profile_connected_tools": sorted(profile_names),
+                },
+                "repair_suggestions": suggestions,
+            }
+        )
+    return entries
+
+
 def _available_tools(
     context: dict[str, Any],
     input_data: dict[str, Any],
@@ -2141,44 +2785,335 @@ def _available_tools(
     user_text: str = "",
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
     selection = _normalize_tool_selection(input_data)
-    if selection.mode == "none":
-        raw_tools: Any = []
-    elif selection.mode == "manual":
-        raw_tools = selection.include
-    else:
-        raw_tools = None
-    try:
-        tools, unknown_tools = _resolve_selected_tools(
-            raw_tools, user_text=user_text, context=context
-        )
-    except Exception:
-        tools, unknown_tools = [], []
-    if selection.mode in {"auto", "review"} and selection.include:
-        try:
-            included_tools, include_unknown = _resolve_selected_tools(
-                selection.include, user_text=user_text, context=context
-            )
-        except Exception:
-            included_tools, include_unknown = [], []
-        tools = _merge_tool_definitions(tools, included_tools)
-        unknown_tools = [*unknown_tools, *include_unknown]
-    if selection.exclude:
-        excluded = set(selection.exclude)
-        tools = [tool for tool in tools if _tool_definition_id(tool) not in excluded]
+    caller_provider_tools = _caller_provider_tool_definitions(input_data)
     resolved_context = resolve_runtime_profile_context(context or {})
     resolved_context["tool_selection"] = _tool_selection_metadata(selection)
-    if unknown_tools:
-        resolved_context["unknown_selected_tools"] = unknown_tools
-    runtime_profile = resolved_context.get("runtime_profile")
-    agent_id = input_data.get("agent_id")
-    filtered = filter_tool_definitions_for_runtime_profile(
-        tools,
-        runtime_profile,
+    caller_provider_tool_ids = [
+        tool_name_from_definition(tool)
+        for tool in caller_provider_tools
+        if tool_name_from_definition(tool)
+    ]
+    if caller_provider_tool_ids:
+        resolved_context["caller_provider_tool_ids"] = caller_provider_tool_ids
+    agent_id = input_data.get("agent_id") or resolved_context.get("agent_id")
+    requested_tool_ids = _requested_tool_ids_from_selection(selection)
+    runtime_profile, agent_id = _runtime_profile_with_policy_connected_tools(
+        resolved_context.get("runtime_profile"),
+        profile_id=resolved_context.get("profile_id"),
         agent_id=agent_id,
-        policy_context=resolved_context,
     )
+    if isinstance(runtime_profile, dict):
+        resolved_context["runtime_profile"] = runtime_profile
+    if agent_id:
+        resolved_context["agent_id"] = agent_id
+    settings: dict[str, Any] = {}
+    profile_filtered: list[dict[str, Any]] = []
+    try:
+        settings = _read_frontend_settings()
+        registry_tools = ToolRegistry().list_tools()
+        profile_filtered = filter_tool_definitions_for_runtime_profile(
+            registry_tools,
+            runtime_profile,
+            agent_id=agent_id,
+            policy_context=resolved_context,
+        )
+        service = ToolSelectionService(
+            call_handler=resolved_context.get("call_handler"),
+            settings=settings,
+        )
+        decision = service.select(
+            user_text,
+            profile_filtered,
+            selection=selection,
+            context=resolved_context,
+        )
+        filtered = list(decision.selected_tools)
+        selection_trace = decision.to_trace_dict()
+        selected_tool_ids = [
+            tool_name_from_definition(tool)
+            for tool in filtered
+            if tool_name_from_definition(tool)
+        ]
+        if requested_tool_ids:
+            unselected_requested_tools = _unselected_requested_tool_entries(
+                requested_tool_ids,
+                selected_tool_ids,
+                registry_tools,
+                profile_filtered,
+            )
+            resolved_context["requested_tool_ids"] = requested_tool_ids
+            if unselected_requested_tools:
+                resolved_context["unselected_requested_tools"] = unselected_requested_tools
+        resolved_context["tool_selection"] = {
+            **resolved_context["tool_selection"],
+            **selection_trace,
+        }
+        _persist_tool_selection_trace(
+            resolved_context,
+            settings,
+            decision,
+            user_text=user_text,
+            trace=selection_trace,
+        )
+        if decision.unknown_targets:
+            resolved_context["unknown_selected_tools"] = list(decision.unknown_targets)
+    except Exception as exc:
+        filtered = []
+        resolved_context["tool_selection"] = {
+            **resolved_context["tool_selection"],
+            "selection_id": gen_id(),
+            "stage": "selection_failed",
+            "fallbacks": [{"stage": "tool_selection_service", "reason": str(exc)}],
+            "selected_tool_ids": [],
+            "eligible_count": 0,
+            "candidate_count": 0,
+            "duration_ms": 0,
+        }
+        if selection.mode == "manual":
+            try:
+                filtered, unknown_tools = _resolve_selected_tools(selection.include, user_text=user_text, context=resolved_context)
+                if unknown_tools:
+                    resolved_context["unknown_selected_tools"] = unknown_tools
+            except Exception:
+                filtered = []
+        elif selection.mode != "none" and profile_filtered:
+            try:
+                fallback_settings = dict(settings)
+                fallback_tools_settings = (
+                    dict(fallback_settings.get("tools"))
+                    if isinstance(fallback_settings.get("tools"), dict)
+                    else {}
+                )
+                fallback_tools_settings["selection_strategy"] = "lexical"
+                fallback_settings["tools"] = fallback_tools_settings
+                fallback_selection = NormalizedToolSelection(
+                    mode=selection.mode if selection.mode in {"auto", "review"} else "auto",
+                    strategy="lexical",
+                    include=selection.include,
+                    exclude=selection.exclude,
+                    scope=selection.scope,
+                    must_use=selection.must_use,
+                    review=selection.review,
+                    preview_id=selection.preview_id,
+                    source=selection.source,
+                )
+                fallback_decision = ToolSelectionService(
+                    call_handler=resolved_context.get("call_handler"),
+                    settings=fallback_settings,
+                ).select(
+                    user_text,
+                    profile_filtered,
+                    selection=fallback_selection,
+                    context=resolved_context,
+                )
+                filtered = list(fallback_decision.selected_tools)
+                fallback_trace = fallback_decision.to_trace_dict()
+                resolved_context["tool_selection"] = {
+                    **resolved_context["tool_selection"],
+                    **fallback_trace,
+                    "stage": "selection_failed_lexical_fallback",
+                    "fallbacks": [
+                        {"stage": "tool_selection_service", "reason": str(exc)},
+                        *list(fallback_trace.get("fallbacks") or []),
+                    ],
+                }
+            except Exception:
+                filtered = []
+    filtered = _merge_tool_definitions(filtered, caller_provider_tools)
+    if caller_provider_tool_ids:
+        selection_metadata = resolved_context.get("tool_selection")
+        if isinstance(selection_metadata, dict):
+            selection_metadata["provider_compat_tool_ids"] = caller_provider_tool_ids
     filtered = _append_special_model_tools(filtered, resolved_context, agent_id=agent_id)
     return filtered, adapt_tool_definitions(filtered), resolved_context
+
+
+def _persist_tool_selection_trace(
+    resolved_context: dict[str, Any],
+    settings: dict[str, Any],
+    decision: Any,
+    *,
+    user_text: str,
+    trace: dict[str, Any],
+) -> None:
+    tool_settings = settings.get("tools") if isinstance(settings.get("tools"), dict) else {}
+    trace_mode = str(tool_settings.get("selector_trace") or "summary").strip().lower()
+    if trace_mode not in {"none", "summary", "full"}:
+        trace_mode = "summary"
+    selection_metadata = resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {}
+    selection_metadata["trace_mode"] = trace_mode
+    _attach_tool_selection_trace_authority(selection_metadata, resolved_context)
+    if trace_mode == "none":
+        selection_metadata.pop("selection_id", None)
+        return
+    if trace_mode == "summary":
+        selection_metadata.pop("trace_conversation_id", None)
+        return
+    child_id = _create_hidden_tool_selection_conversation(
+        resolved_context,
+        decision,
+        user_text=user_text,
+        trace=trace,
+    )
+    if child_id:
+        selection_metadata["trace_conversation_id"] = child_id
+
+
+def _create_hidden_tool_selection_conversation(
+    resolved_context: dict[str, Any],
+    decision: Any,
+    *,
+    user_text: str,
+    trace: dict[str, Any],
+) -> str:
+    conversation_id = str(resolved_context.get("conversation_id") or "").strip()
+    if not conversation_id:
+        return ""
+    try:
+        store = ChatStore()
+        selector_model = _tool_selection_selector_model(resolved_context, decision, trace)
+        trace_model = selector_model or str(resolved_context.get("model") or "").strip()
+        trace_metadata = _tool_selection_trace_metadata(resolved_context, trace, trace_mode="full")
+        child = store.create_conversation(
+            model=trace_model,
+            parent_conversation_id=conversation_id,
+            conversation_kind="tool_selection_trace",
+            metadata={
+                "hidden": True,
+                "tool_selection_trace": True,
+                "selection_id": trace.get("selection_id"),
+                "trace_mode": "full",
+                **trace_metadata,
+                **({"selector_model": selector_model} if selector_model else {}),
+            },
+        )
+        child_id = str(child.get("id") or "") if isinstance(child, dict) else ""
+        if not child_id:
+            return ""
+        child_metadata = child.get("metadata") if isinstance(child.get("metadata"), dict) else {}
+        store.update_conversation(
+            child_id,
+            {
+                "title": "Tool補助の記録 {}".format(str(trace.get("selection_id") or "")[:8]),
+                "is_archived": True,
+                "metadata": {
+                    **child_metadata,
+                    "hidden": True,
+                    "tool_selection_trace": True,
+                    "selection_id": trace.get("selection_id"),
+                    "trace_mode": "full",
+                    **trace_metadata,
+                    **({"selector_model": selector_model} if selector_model else {}),
+                },
+            },
+        )
+        payload = {
+            "user_text": user_text,
+            "trace": trace,
+            "decision": decision.to_trace_dict() if hasattr(decision, "to_trace_dict") else trace,
+        }
+        raw_text = json.dumps(payload, ensure_ascii=False, indent=2)
+        store.add_message(
+            child_id,
+            {
+                "id": gen_id(),
+                "role": "system",
+                "content": [{"type": "text", "text": raw_text}],
+                "raw_text": raw_text,
+                "metadata": {"hidden": True, "tool_selection_trace": True},
+            },
+        )
+        return child_id
+    except Exception:
+        return ""
+
+
+def _attach_tool_selection_trace_authority(
+    selection_metadata: dict[str, Any],
+    resolved_context: dict[str, Any],
+) -> None:
+    metadata = _tool_selection_trace_metadata(
+        resolved_context,
+        selection_metadata,
+        trace_mode=str(selection_metadata.get("trace_mode") or "summary"),
+    )
+    for key, value in metadata.items():
+        if value not in ("", None):
+            selection_metadata[key] = value
+
+
+def _tool_selection_trace_metadata(
+    resolved_context: dict[str, Any],
+    trace: dict[str, Any],
+    *,
+    trace_mode: str,
+) -> dict[str, Any]:
+    now = time.time()
+    source_message_id = str(
+        resolved_context.get("source_message_id")
+        or resolved_context.get("message_id")
+        or resolved_context.get("request_id")
+        or ""
+    ).strip()
+    return {
+        "owner_profile_id": _tool_selection_trace_profile_id(resolved_context),
+        "conversation_id": str(resolved_context.get("conversation_id") or "").strip(),
+        "source_message_id": source_message_id,
+        "trace_mode": trace_mode,
+        "created_at_epoch": trace.get("created_at_epoch") or now,
+        "expires_at_epoch": trace.get("expires_at_epoch") or now + 7 * 24 * 60 * 60,
+        "ephemeral": True,
+        "purpose": "tool_selection_trace",
+    }
+
+
+def _tool_selection_trace_profile_id(resolved_context: dict[str, Any]) -> str:
+    principal = resolved_context.get("_authenticated_principal") if isinstance(resolved_context, dict) else None
+    if isinstance(principal, dict):
+        candidate = str(principal.get("profile_id") or "").strip()
+        if candidate:
+            return candidate
+    subject = resolved_context.get("_authority_subject") if isinstance(resolved_context, dict) else None
+    if isinstance(subject, dict):
+        candidate = str(subject.get("profile_id") or "").strip()
+        if candidate:
+            return candidate
+    for key in ("profile_id", "input_profile_id", "active_profile_id"):
+        candidate = str(resolved_context.get(key) or "").strip()
+        if candidate:
+            return candidate
+    return ""
+
+
+def _tool_selection_selector_model(
+    resolved_context: dict[str, Any],
+    decision: Any,
+    trace: dict[str, Any],
+) -> str:
+    for source in (
+        trace,
+        decision.to_trace_dict() if hasattr(decision, "to_trace_dict") else {},
+        resolved_context.get("tool_selection") if isinstance(resolved_context.get("tool_selection"), dict) else {},
+    ):
+        metrics = source.get("metrics") if isinstance(source, dict) and isinstance(source.get("metrics"), dict) else {}
+        selector_model = (
+            str(metrics.get("selector_model") or source.get("selector_model") or "").strip()
+            if isinstance(source, dict)
+            else ""
+        )
+        if selector_model:
+            return selector_model
+    return ""
+
+
+def _read_frontend_settings() -> dict[str, Any]:
+    env_path = os.environ.get("RUMI_DEFAULTSPACK_FRONTEND_SETTINGS_PATH")
+    path = Path(env_path).expanduser() if env_path else Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _ensure_must_use_has_eligible_tools(

@@ -34,6 +34,7 @@ class SandboxContractError(Exception):
     def to_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "ok": False,
+            "success": False,
             "code": self.code,
             "error": self.message,
             "status_code": self.status_code,

@@ -34,23 +34,23 @@ export function ToolManagerWidget({
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-2 xl:grid-cols-5 rumi-stagger-tight">
-        {countCard("ON", summary.onCount, "text-emerald-300")}
-        {countCard("OFF by user", summary.offByUserCount, "text-zinc-300")}
-        {countCard("Blocked", summary.blockedCount, "text-amber-300")}
-        {countCard("Needs approval", summary.needsApprovalCount, "text-sky-300")}
-        {countCard("Missing setup", summary.missingSetupCount, "text-rose-300")}
+        {countCard("今回", summary.onCount, "text-emerald-300")}
+        {countCard("権限ブロック", summary.offByUserCount, "text-zinc-300")}
+        {countCard("利用不可", summary.blockedCount, "text-amber-300")}
+        {countCard("確認あり", summary.needsApprovalCount, "text-sky-300")}
+        {countCard("設定が必要", summary.missingSetupCount, "text-rose-300")}
       </div>
       {summary.hiddenCount > 0 && (
         <div className="flex items-center gap-2 rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-2 text-xs text-zinc-400">
           <EyeOff size={13} />
-          <span>Hidden {summary.hiddenCount}</span>
+          <span>一覧から隠す {summary.hiddenCount}</span>
         </div>
       )}
       {blockedEntries.length > 0 && (
         <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
           <div className="mb-2 flex items-center gap-2 text-xs font-medium text-amber-200">
             <AlertTriangle size={13} />
-            <span>Blocked this turn</span>
+            <span>このターンで利用不可</span>
           </div>
           <div className="space-y-2">
             {blockedEntries.slice(0, 4).map((entry) => (
@@ -76,7 +76,7 @@ export function ToolFilterLogWidget({ entries }: { entries: ToolFilterEntry[] })
   if (entries.length === 0) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/45 px-3 py-3 text-xs text-zinc-500">
-        このターンの tool eligibility log はまだありません。
+        このターンの機能選定ログはまだありません。
       </div>
     );
   }

@@ -4,7 +4,7 @@ from typing import Any
 
 from domain.ai_client.model_call import call_model
 from domain.chat.tool_recommender import recommend_tool_ids
-from domain.chat.tool_selection_schema import COMPUTER_TOOL_IDS, ToolRecommendation, ToolSelectionResult
+from domain.chat.tool_selection_schema import ToolRecommendation, ToolSelectionResult
 from domain.tool.loading import split_tools_by_loading
 
 
@@ -20,11 +20,16 @@ class ToolSelectionOrchestrator:
         limit: int = 8,
         selected_model_capabilities: dict[str, Any] | None = None,
         settings: dict[str, Any] | None = None,
+        prefilter: bool = True,
     ) -> dict[str, Any]:
-        allowed_tools = [tool for tool in tools if _tool_id(tool) not in COMPUTER_TOOL_IDS]
+        allowed_tools = [tool for tool in tools if _tool_id(tool)]
         always_tools, vector_tools = split_tools_by_loading(allowed_tools)
-        candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
-        candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
+        if prefilter:
+            candidate_ids = recommend_tool_ids(user_text, vector_tools, limit=min(20, max(limit, 1)))
+            candidates = [tool for tool in vector_tools if _tool_id(tool) in set(candidate_ids)]
+        else:
+            candidates = list(vector_tools)
+            candidate_ids = [_tool_id(tool) for tool in candidates if _tool_id(tool)]
         if not candidates and not always_tools:
             return ToolSelectionResult(candidate_count=0).to_dict()
         always_recommendations = [
@@ -42,12 +47,18 @@ class ToolSelectionOrchestrator:
                 candidate_count=len(always_tools),
                 stage="tool_loading",
             ).to_dict()
+        model_hint = _tool_selector_model_hint(settings)
         model_call = call_model(
             {
-                "model_hint": (settings or {}).get("utility_models", {}).get("tool_selector") if isinstance((settings or {}).get("utility_models"), dict) else "",
+                "model_hint": model_hint,
                 "question": (
-                    "Select the most relevant tools for the user message. "
-                    "Return JSON with recommended_tools as an array of {{tool_id, confidence, reason}}.\n\n"
+                    "Select the minimum sufficient set of tools for the user message.\n"
+                    "- Prefer read/search before write/execute.\n"
+                    "- Never return a tool outside the supplied candidate list.\n"
+                    "- Do not select a tool only because of word overlap.\n"
+                    "- Do not select computer/browser-control tools without explicit user intent.\n"
+                    "- Respect the maximum tool count.\n"
+                    "Return JSON only with selected_tools as an array of {{tool_id, confidence, reason}}.\n\n"
                     "User message:\n{}\n\nCandidate tools:\n{}"
                 ).format(
                     user_text,
@@ -55,7 +66,7 @@ class ToolSelectionOrchestrator:
                 ),
                 "output_schema": "tool_recommendation",
                 "max_tokens": 800,
-                "required_capabilities": ["model.fast"],
+                "required_capabilities": _tool_selector_required_capabilities(model_hint),
             },
             {"_model_call_depth": 0},
             call_handler=self._call_handler,
@@ -72,7 +83,8 @@ class ToolSelectionOrchestrator:
             not_selected=[],
             requires_tool_calling_model=bool(recommendations and supports_tools),
             candidate_count=len(always_tools) + len(candidates),
-            stage="utility_model" if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
+            stage=("catalog_ai_direct" if not prefilter else "utility_model") if isinstance(model_call, dict) and model_call.get("status") == "ok" else "keyword",
+            selector_model=_selector_model_from_model_call(model_call),
         ).to_dict()
 
 
@@ -93,10 +105,37 @@ def _compact_tool(tool: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _tool_selector_model_hint(settings: dict[str, Any] | None) -> str:
+    if not isinstance(settings, dict):
+        return ""
+    models = settings.get("models") if isinstance(settings.get("models"), dict) else {}
+    utility_models = models.get("utility_models") if isinstance(models.get("utility_models"), dict) else None
+    if not isinstance(utility_models, dict):
+        utility_models = settings.get("utility_models") if isinstance(settings.get("utility_models"), dict) else {}
+    tools = settings.get("tools") if isinstance(settings.get("tools"), dict) else {}
+    return str(utility_models.get("tool_selector") or tools.get("selector_model") or "").strip()
+
+
+def _tool_selector_required_capabilities(model_hint: str) -> list[str]:
+    return [] if str(model_hint or "").strip() else ["model.fast"]
+
+
+def _selector_model_from_model_call(model_call: Any) -> str:
+    if not isinstance(model_call, dict):
+        return ""
+    direct = str(model_call.get("model") or "").strip()
+    if direct:
+        return direct
+    routing = model_call.get("routing") if isinstance(model_call.get("routing"), dict) else {}
+    return str(routing.get("selected_model") or "").strip()
+
+
 def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
     if not isinstance(output, dict):
         return fallback
-    values = output.get("recommended_tools")
+    values = output.get("selected_tools")
+    if not isinstance(values, list):
+        values = output.get("recommended_tools")
     if not isinstance(values, list):
         return fallback
     ids = []
@@ -111,7 +150,8 @@ def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
 
 
 def _confidence(output: Any, tool_id: str) -> float:
-    for item in output.get("recommended_tools", []) if isinstance(output, dict) and isinstance(output.get("recommended_tools"), list) else []:
+    items = _output_items(output)
+    for item in items:
         if isinstance(item, dict) and str(item.get("tool_id") or "") == tool_id:
             try:
                 return float(item.get("confidence", 0.6))
@@ -121,7 +161,18 @@ def _confidence(output: Any, tool_id: str) -> float:
 
 
 def _reason(output: Any, tool_id: str) -> str:
-    for item in output.get("recommended_tools", []) if isinstance(output, dict) and isinstance(output.get("recommended_tools"), list) else []:
+    items = _output_items(output)
+    for item in items:
         if isinstance(item, dict) and str(item.get("tool_id") or "") == tool_id:
             return str(item.get("reason") or "selected by tool selector")
     return "selected by keyword prefilter"
+
+
+def _output_items(output: Any) -> list[Any]:
+    if not isinstance(output, dict):
+        return []
+    selected = output.get("selected_tools")
+    if isinstance(selected, list):
+        return selected
+    recommended = output.get("recommended_tools")
+    return recommended if isinstance(recommended, list) else []

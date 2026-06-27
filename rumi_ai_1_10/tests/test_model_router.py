@@ -120,3 +120,58 @@ def test_router_still_routes_from_default_anchor_for_tools():
 
     assert decision.selected_model == "google/gemini-2.5-pro"
     assert "routed_within_group" in decision.reason_codes
+
+
+def test_router_excludes_embedding_profiles_from_chat_group_candidates():
+    from domain.ai_client.model_search import models_for_group
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {
+            "profile_id": "openai/text-embedding-3-small",
+            "qualified_model_id": "openai/text-embedding-3-small",
+            "provider_id": "openai",
+            "model_id": "text-embedding-3-small",
+            "type": "embedding",
+            "configured": True,
+        },
+        {
+            "profile_id": "reasoning/deep-only",
+            "qualified_model_id": "reasoning/deep-only",
+            "provider_id": "reasoning",
+            "model_id": "deep-only",
+            "type": "reasoning",
+            "configured": True,
+            "defaults": {"reasoning": True},
+            "capabilities": {"reasoning": True},
+        },
+        {
+            "profile_id": "openai/gpt-4o",
+            "qualified_model_id": "openai/gpt-4o",
+            "provider_id": "openai",
+            "model_id": "gpt-4o",
+            "type": "chat",
+            "configured": True,
+            "supports_tool_calling": True,
+            "supports_thinking": True,
+        },
+    ]
+
+    candidates = models_for_group(
+        "default",
+        {"model_groups": {"default": {"allowed_models": []}}},
+        profiles=profiles,
+    )
+    decision = route_model_request(
+        ModelRoutingRequest(
+            requires_tool_calling=True,
+            preferred_model="missing/model",
+            preferred_group="default",
+            auto_route_within_group=True,
+            settings={"model_groups": {"default": {"allowed_models": []}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert [item["profile_id"] for item in candidates] == ["openai/gpt-4o"]
+    assert decision.selected_model == "openai/gpt-4o"

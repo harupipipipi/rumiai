@@ -17,25 +17,34 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
+import logging
 import os
 import re
+import shutil
 import shlex
 import subprocess
 import sys
 import tempfile
-import time
 import threading
-import shutil
-import uuid
-import logging
+import time
 import types
-from urllib.parse import urlsplit, urlunsplit
-from .flow_context_security import sanitize_user_flow_context
+import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
+
+from .execution_boundary import (
+    ExecutionBoundary,
+    SANDBOX_RUNTIME_UNAVAILABLE,
+    profile_runtime_name,
+)
+from .flow_context_security import sanitize_user_flow_context
+from .pack_function_policy import permission_id_for_entry
+from .rate_limit_store import PersistentRateLimitStore
 
 # function.call: core_pack 判定用
 try:
@@ -81,15 +90,6 @@ sys.modules["core_runtime.crypto_utils"] = _crypto_utils
 sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 # def compute_file_sha256 is provided by crypto_utils and re-exported here.
 compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _imported_compute_file_sha256)
-from .pack_function_policy import permission_id_for_entry
-from .rate_limit_store import PersistentRateLimitStore
-from .execution_boundary import (
-    ExecutionBoundary,
-    SANDBOX_RUNTIME_UNAVAILABLE,
-    profile_runtime_name,
-)
-
-from typing import Any, Dict, List, Optional
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
@@ -942,6 +942,38 @@ class CapabilityExecutor:
                     return True
         return False
 
+    def _entry_path_looks_like_ecosystem_pack(self, entry, pack_id: str) -> bool:
+        entry_paths = [
+            getattr(entry, "function_dir", None),
+            getattr(entry, "main_py_path", None),
+        ]
+        ecosystem_root = None
+        if _ECOSYSTEM_DIR:
+            try:
+                ecosystem_root = Path(_ECOSYSTEM_DIR).resolve()
+            except (OSError, TypeError):
+                ecosystem_root = Path(_ECOSYSTEM_DIR)
+        for raw_path in entry_paths:
+            if raw_path is None:
+                continue
+            try:
+                candidate = Path(raw_path).resolve()
+            except (OSError, TypeError):
+                continue
+            if ecosystem_root is not None:
+                try:
+                    relative = candidate.relative_to(ecosystem_root)
+                except ValueError:
+                    pass
+                else:
+                    if relative.parts and relative.parts[0] == pack_id:
+                        return True
+            parts = candidate.parts
+            for index, part in enumerate(parts[:-1]):
+                if part == "ecosystem" and parts[index + 1] == pack_id:
+                    return True
+        return False
+
     def _is_core_builtin_trust_bypass_entry(self, entry) -> bool:
         """Preserve legacy core handler compatibility without trusting ecosystem metadata."""
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
@@ -1406,7 +1438,11 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
                                           pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
@@ -1422,6 +1458,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "python_docker":
             return self._execute_user_function(
@@ -1447,6 +1484,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "command":
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
@@ -1460,6 +1498,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         return CapabilityResponse(success=False, error=f"Unknown calling_convention: {calling_convention}",
                                   error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
@@ -1487,7 +1526,11 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False),
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
                                           pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
@@ -1948,18 +1991,108 @@ class CapabilityExecutor:
         request_id: str,
         grant_config: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        context = dict(request_context or {}) if isinstance(request_context, dict) else {}
+        source = request_context if isinstance(request_context, dict) else {}
+        context = {
+            key: self._sandbox_public_value(source[key])
+            for key in (
+                "conversation_id",
+                "chat_id",
+                "message_id",
+                "source_message_id",
+                "workspace_id",
+                "locale",
+                "timezone",
+                "language",
+                "run_source",
+                "source",
+            )
+            if key in source and not self._sandbox_context_key_is_sensitive(key)
+        }
         context.update(
             {
-                "principal_id": principal_id,
+                "principal_id": str(principal_id or ""),
+                "profile_id": self._principal_profile_id(principal_id, request_context),
                 "pack_id": str(getattr(entry, "pack_id", "") or ""),
                 "function_id": str(getattr(entry, "function_id", "") or ""),
                 "request_id": request_id,
                 "ts": self._now_ts(),
-                "grant_config": dict(grant_config or {}),
+                "grant_config": self._sandbox_public_grant_config(grant_config),
             }
         )
         return context
+
+    @classmethod
+    def _sandbox_public_grant_config(cls, grant_config: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(grant_config, dict):
+            return {}
+        public_keys = {
+            "allowed_kinds",
+            "allowed_models",
+            "allowed_packs",
+            "allowed_path_globs",
+            "allowed_providers",
+            "allowed_target_packs",
+            "expires_at_epoch",
+            "max_daily_sends_per_scope",
+            "max_output_bytes",
+            "max_payload_bytes",
+            "max_sends_per_scope",
+            "model_ids",
+            "provider_ids",
+            "send_scope_level",
+            "timeout",
+        }
+        return {
+            key: cls._sandbox_public_value(value)
+            for key, value in grant_config.items()
+            if isinstance(key, str)
+            and key in public_keys
+            and not cls._sandbox_context_key_is_sensitive(key)
+        }
+
+    @classmethod
+    def _sandbox_public_value(cls, value: Any, *, depth: int = 0) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if depth >= 4:
+            return None
+        if isinstance(value, (list, tuple)):
+            return [cls._sandbox_public_value(item, depth=depth + 1) for item in list(value)[:64]]
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, item in list(value.items())[:64]:
+                if not isinstance(key, str) or cls._sandbox_context_key_is_sensitive(key):
+                    continue
+                sanitized = cls._sandbox_public_value(item, depth=depth + 1)
+                if sanitized is not None:
+                    result[key] = sanitized
+            return result
+        return str(value)
+
+    @staticmethod
+    def _sandbox_context_key_is_sensitive(key: str) -> bool:
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            return True
+        if normalized.startswith("_"):
+            return True
+        return any(
+            marker in normalized
+            for marker in (
+                "api_key",
+                "approval",
+                "auth",
+                "bearer",
+                "credential",
+                "csrf",
+                "keychain",
+                "local_auth",
+                "password",
+                "secret",
+                "session",
+                "token",
+            )
+        )
 
     def _managed_sandbox_response_if_required(
         self,
@@ -2040,8 +2173,10 @@ class CapabilityExecutor:
             )
         if isinstance(result, CapabilityResponse):
             return result
-        if isinstance(result, dict):
-            success = bool(result.get("success", result.get("ok", False)))
+        if isinstance(result, dict) and result and (
+            isinstance(result.get("success"), bool) or isinstance(result.get("ok"), bool)
+        ):
+            success = result.get("success") if isinstance(result.get("success"), bool) else result.get("ok")
             return CapabilityResponse(
                 success=success,
                 output=result.get("output", result),
@@ -2049,7 +2184,21 @@ class CapabilityExecutor:
                 error_type=None if success else str(result.get("error_type") or "managed_sandbox_error"),
                 latency_ms=(time.time() - start_time) * 1000,
             )
-        return CapabilityResponse(success=True, output=result, latency_ms=(time.time() - start_time) * 1000)
+        return CapabilityResponse(
+            success=False,
+            output={
+                "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                "required": True,
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                "calling_convention": str(calling_convention or ""),
+                "request_id": request_id,
+            },
+            error="Managed sandbox returned an invalid response",
+            error_type="managed_sandbox_error",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
 
     def _entry_requires_managed_sandbox(
         self,
@@ -2057,10 +2206,10 @@ class CapabilityExecutor:
         principal_id: str,
         request_context: dict[str, Any] | None = None,
     ) -> bool:
-        del principal_id, request_context
+        del principal_id
         pack_id = str(getattr(entry, "pack_id", "") or "").strip()
         pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
-        if self._is_bundled_core_pack_entry(entry):
+        if self._is_core_builtin_trust_bypass_entry(entry):
             return False
         if self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint):
             return False
@@ -2069,20 +2218,14 @@ class CapabilityExecutor:
     def _handler_def_requires_managed_sandbox(self, handler_def, principal_id: str) -> bool:
         del principal_id
         pack_id = str(getattr(handler_def, "pack_id", "") or "").strip()
-        if bool(getattr(handler_def, "is_builtin", False)) and pack_id.startswith(_CORE_PACK_ID_PREFIX):
-            return False
-        if not pack_id and bool(getattr(handler_def, "is_builtin", False)):
-            return False
-        if not pack_id:
-            return False
         entry = types.SimpleNamespace(
             pack_id=pack_id,
             function_dir=getattr(handler_def, "handler_dir", None),
             main_py_path=getattr(handler_def, "handler_py_path", None),
         )
-        if self._is_bundled_core_pack_entry(entry):
+        if self._is_core_builtin_trust_bypass_entry(entry):
             return False
-        if self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
+        if pack_id and self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
             return False
         return True
 
@@ -2526,7 +2669,8 @@ class CapabilityExecutor:
         return self._response_from_completed_process(proc, start_time, failure_prefix)
 
     def _get_function_timeout(self, entry):
-        grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
+        manifest = getattr(entry, "manifest", None)
+        grant_config = manifest.get("grant_config", {}) if isinstance(manifest, dict) else {}
         t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
         try:
             t = float(t)
@@ -2565,31 +2709,16 @@ class CapabilityExecutor:
         timeout_seconds=None,
     ):
         runtime = getattr(entry, 'runtime', 'python')
-        calling_convention = str(getattr(entry, "calling_convention", "") or "")
-        if force_docker or calling_convention == "python_docker":
-            sandbox_resp = self._managed_sandbox_response_if_required(
-                entry=entry,
-                principal_id=principal_id,
-                args=args,
-                request_id=request_id,
-                start_time=start_time,
-                request_context=request_context,
-                calling_convention="python_docker",
-                timeout_seconds=timeout_seconds,
-                grant_config=grant_config,
-            )
-            if sandbox_resp is not None:
-                return sandbox_resp
         if runtime == "binary":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
                 return guard_resp
-            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
+            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context, timeout_seconds=timeout_seconds)
         elif runtime == "command":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
                 return guard_resp
-            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
+            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context, timeout_seconds=timeout_seconds)
         if getattr(entry, "host_execution", False) and runtime != "python":
             return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
                                       error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
@@ -2602,6 +2731,23 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
+        sandbox_resp = self._managed_sandbox_response_if_required(
+            entry=entry,
+            principal_id=principal_id,
+            args=args,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            calling_convention=(
+                "python_docker"
+                if force_docker
+                else str(getattr(entry, "calling_convention", None) or runtime)
+            ),
+            timeout_seconds=timeout_seconds,
+            grant_config=grant_config,
+        )
+        if sandbox_resp is not None:
+            return sandbox_resp
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
@@ -2636,8 +2782,11 @@ class CapabilityExecutor:
             builder.volume(f"{function_dir.resolve()}:/function:ro")
             builder.volume(f"{input_file}:/input.json:ro")
             builder.volume(f"{runner_path}:/tmp/function_runner.py:ro")
-            builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
-            builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_FUNCTION_ID", function_id)
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.type", "function")
+            builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
             builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
@@ -2674,14 +2823,14 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
@@ -2821,7 +2970,7 @@ class CapabilityExecutor:
                                       error_type=self._core_function_error_type(result), latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         guard_resp = self._host_runtime_guard(entry, "binary", start_time)
         if guard_resp is not None:
             return guard_resp
@@ -2831,7 +2980,7 @@ class CapabilityExecutor:
         func_dir = Path(entry.function_dir).resolve()
         if not Path(binary_path).resolve().is_relative_to(func_dir):
             return CapabilityResponse(success=False, error="Binary path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
@@ -2841,7 +2990,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -2852,7 +3002,7 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         guard_resp = self._host_runtime_guard(entry, "command", start_time)
         if guard_resp is not None:
             return guard_resp
@@ -2884,7 +3034,7 @@ class CapabilityExecutor:
                 return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         elif not Path(command[0]).is_absolute():
             return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
@@ -2895,7 +3045,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -2915,7 +3066,8 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
             return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
-        if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
+        if not hasattr(_flow_call_stack_local, "stack"):
+            _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
         if flow_id in call_stack:
             return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
@@ -2985,7 +3137,6 @@ class CapabilityExecutor:
                 main_py_path=getattr(handler_def, "handler_py_path", None),
                 is_builtin=bool(getattr(handler_def, "is_builtin", False)),
                 calling_convention="subprocess",
-                entrypoint=str(getattr(handler_def, "entrypoint", "") or "main.py:run"),
             )
             sandbox_resp = self._managed_sandbox_response_if_required(
                 entry=entry,
@@ -3050,12 +3201,19 @@ class CapabilityExecutor:
             audit = get_audit_logger()
             details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
                         "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}
-            if trusted is not None: details["trusted"] = trusted
-            if grant_allowed is not None: details["grant_allowed"] = grant_allowed
-            if grant_reason is not None: details["grant_reason"] = grant_reason
-            if detail_reason is not None: details["detail_reason"] = detail_reason
-            if extra_details: details.update(extra_details)
-            if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            if trusted is not None:
+                details["trusted"] = trusted
+            if grant_allowed is not None:
+                details["grant_allowed"] = grant_allowed
+            if grant_reason is not None:
+                details["grant_reason"] = grant_reason
+            if detail_reason is not None:
+                details["detail_reason"] = detail_reason
+            if extra_details:
+                details.update(extra_details)
+            if response.error:
+                details["error"] = response.error
+                details["error_type"] = response.error_type
             rejection_reason = str(detail_reason or grant_reason or response.error or "")
             audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
                                         success=response.success, details=details,

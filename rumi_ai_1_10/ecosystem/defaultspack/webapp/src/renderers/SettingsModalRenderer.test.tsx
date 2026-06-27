@@ -530,7 +530,64 @@ test("SettingsModalRenderer renders continuity handoff controls", () => {
   assert.doesNotMatch(html, /COMPLETED/);
 });
 
-test("Settings > Tools contains detailed tool settings", () => {
+test("Settings > Tools contains tool experience settings tabs", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: {
+          filters: [],
+          items: [
+            {
+              id: "vision_tool",
+              label: "Vision Tool",
+              category: "tool",
+              description: "Inspect images",
+              tool_info: {
+                requires_approval: true,
+                requires_model_capabilities: ["model.image_input"],
+                attachment_policy: "images_only",
+              },
+            },
+          ],
+        },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "tools",
+          label: "機能と接続",
+          fields: [
+            { id: "default_mode", label: "既定の使い方", type: "select", default: "auto", options: [{ value: "auto", label: "自動で選ぶ" }] },
+          ],
+        },
+      ],
+      settingsValues: {
+        tools: {
+          disabled_tool_ids: [],
+          hidden_tool_ids: [],
+          tool_permission_overrides: {},
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /接続/);
+  assert.match(html, /高度な設定/);
+  assert.match(html, /既定の使い方/);
+  assert.match(html, /自動で選ぶ/);
+});
+
+test("Settings > Tools defaults to the tool experience overview", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
       isOpen: true,
@@ -579,9 +636,11 @@ test("Settings > Tools contains detailed tool settings", () => {
     }),
   );
 
-  assert.match(html, /Tool details/);
-  assert.match(html, /Vision Tool/);
-  assert.match(html, /model.image_input/);
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /1件/);
+  assert.match(html, /選んだ機能を回答内に表示/);
+  assert.doesNotMatch(html, /Tool details/);
 });
 
 test("settings surface pinned placements render in the modal", () => {

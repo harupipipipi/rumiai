@@ -53,6 +53,7 @@ def principal_scope_candidates(
 
     if principal_id.startswith("profile:"):
         add(principal_id.split("__", 1)[0])
+        return candidates
 
     conversation_id = str(conversation_id or "").strip()
     if conversation_id:

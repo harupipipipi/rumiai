@@ -8,7 +8,9 @@
     "properties": {
       "query": {"type": "string"},
       "limit": {"type": "integer"},
-      "allow_network": {"type": "boolean"}
+      "allow_network": {"type": "boolean"},
+      "max_chars": {"type": "integer", "minimum": 1},
+      "max_tokens": {"type": "integer", "minimum": 1}
     },
     "required": ["query"]
   }
