@@ -27,6 +27,7 @@ const _assistantProgressStatuses = <String>{
   'completed',
   'blocked',
 };
+const _taskBoardDefaultColumns = <String>['Backlog', 'Doing', 'Review', 'Done'];
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -124,6 +125,99 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'todo',
+      description:
+          'Run the defaultspack todo tool on this phone. Use it to keep a small task list during an agent turn.',
+      tags: ['tool', 'planning', mobileCompatibleTag],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {
+            'type': 'string',
+            'enum': [
+              'add',
+              'create',
+              'complete',
+              'done',
+              'update',
+              'edit',
+              'remove',
+              'delete',
+              'clear',
+              'list',
+              'show',
+            ],
+            'default': 'list',
+          },
+          'title': {'type': 'string'},
+          'task': {'type': 'string'},
+          'todo_id': {'type': 'string'},
+          'id': {'type': 'string'},
+          'status': {'type': 'string'},
+          'priority': {'type': 'string'},
+          'notes': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tool_task_board',
+      description:
+          'Run the defaultspack task board tool on this phone. Use it for agent planning with Kanban-style cards.',
+      tags: ['tool', 'planning', 'task_board', mobileCompatibleTag],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {
+            'type': 'string',
+            'enum': [
+              'configure',
+              'configure_columns',
+              'create',
+              'add',
+              'update',
+              'edit',
+              'move',
+              'block',
+              'unblock',
+              'subtask_add',
+              'add_subtask',
+              'subtask_update',
+              'subtask_complete',
+              'subtask_remove',
+              'remove_subtask',
+              'delete',
+              'remove',
+              'clear',
+              'list',
+              'show',
+            ],
+            'default': 'list',
+          },
+          'title': {'type': 'string'},
+          'task': {'type': 'string'},
+          'card_id': {'type': 'string'},
+          'id': {'type': 'string'},
+          'column': {'type': 'string'},
+          'column_id': {'type': 'string'},
+          'status': {'type': 'string'},
+          'columns': {
+            'type': 'array',
+            'items': {'type': 'string'},
+          },
+          'position': {'type': 'integer'},
+          'notes': {'type': 'string'},
+          'priority': {'type': 'string'},
+          'assignee': {'type': 'string'},
+          'subtask_id': {'type': 'string'},
+          'done': {'type': 'boolean'},
+          'blocker_reason': {'type': 'string'},
+          'reason': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -188,6 +282,47 @@ class MobileToolRuntime {
   ];
 
   static const unavailableDefaultspackTools = <MobileToolDefinition>[
+    MobileToolDefinition(
+      name: 'web_search',
+      description: 'Run the defaultspack web research tool.',
+      tags: ['tool', 'research', 'web'],
+      unavailableReason:
+          'このtoolはPC側defaultspackのresearch providerに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
+      parameters: {'type': 'object', 'additionalProperties': true},
+    ),
+    MobileToolDefinition(
+      name: 'reddit_search',
+      description: 'Run the defaultspack reddit research tool.',
+      tags: ['tool', 'research', 'reddit'],
+      unavailableReason:
+          'このtoolはPC側defaultspackのresearch providerに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
+      parameters: {'type': 'object', 'additionalProperties': true},
+    ),
+    MobileToolDefinition(
+      name: 'file_reader',
+      description: 'Read files from the host workspace.',
+      tags: ['tool', 'file', 'workspace', 'host'],
+      unavailableReason:
+          'このtoolはPCのworkspace/file systemに依存するため、このスマホ単体では実行できません。',
+      parameters: {'type': 'object', 'additionalProperties': true},
+    ),
+    MobileToolDefinition(
+      name: 'subagent',
+      description: 'Run the default delegation/subagent tool.',
+      tags: ['tool', 'agent', 'host'],
+      unavailableReason:
+          'このtoolはPC側のagent runtimeと会話/workspace状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
+      parameters: {'type': 'object', 'additionalProperties': true},
+    ),
+    MobileToolDefinition(
+      name: 'tool_task_board_agent_session',
+      description:
+          'Link task board cards to defaultspack coding agent sessions.',
+      tags: ['tool', 'planning', 'task_board', 'agent', 'coding', 'host'],
+      unavailableReason:
+          'このtoolはPC側のcoding agent sessionに依存するため、このスマホ単体では実行できません。',
+      parameters: {'type': 'object', 'additionalProperties': true},
+    ),
     MobileToolDefinition(
       name: 'terminal',
       description: 'Run terminal commands on the host runtime.',
@@ -275,6 +410,11 @@ class MobileToolRuntime {
         return _calculator(call.arguments);
       case 'current_time':
         return _currentTime(call.arguments);
+      case 'todo':
+        return _todo(call.arguments);
+      case 'tool_task_board':
+      case 'task_board':
+        return _taskBoard(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case assistantProgressToolName:
@@ -332,6 +472,226 @@ class MobileToolRuntime {
     final text =
         '${now.toIso8601String()} (${now.timeZoneName}, UTC$sign$hh:$mm)';
     return MobileToolResult(ok: true, summary: text, output: text);
+  }
+
+  MobileToolResult _todo(Map<String, dynamic> args) {
+    final action = '${args['action'] ?? 'list'}'.trim().toLowerCase();
+    try {
+      Map<String, dynamic>? changed;
+      if (action == 'add' || action == 'create') {
+        final title = '${args['title'] ?? args['task'] ?? ''}'.trim();
+        if (title.isEmpty) throw const FormatException('title is required');
+        changed = {
+          'id': _nextToolId('todo'),
+          'title': title,
+          'status': '${args['status'] ?? 'todo'}',
+          'priority': '${args['priority'] ?? 'normal'}',
+          'notes': '${args['notes'] ?? ''}',
+          'created_at': DateTime.now().millisecondsSinceEpoch,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        };
+        _mobileTodos.add(changed);
+      } else if (action == 'complete' || action == 'done') {
+        final todo = _findById(_mobileTodos, _argId(args, 'todo_id'));
+        if (todo == null) throw const FormatException('todo_id not found');
+        todo['status'] = 'done';
+        todo['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(todo);
+      } else if (action == 'update' || action == 'edit') {
+        final todo = _findById(_mobileTodos, _argId(args, 'todo_id'));
+        if (todo == null) throw const FormatException('todo_id not found');
+        for (final key in ['title', 'status', 'priority', 'notes']) {
+          if (args.containsKey(key) && args[key] != null) {
+            todo[key] = '${args[key]}';
+          }
+        }
+        todo['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(todo);
+      } else if (action == 'remove' || action == 'delete') {
+        final id = _argId(args, 'todo_id');
+        final before = _mobileTodos.length;
+        _mobileTodos.removeWhere((todo) => todo['id'] == id);
+        if (_mobileTodos.length == before) {
+          throw const FormatException('todo_id not found');
+        }
+        changed = {'id': id};
+      } else if (action == 'clear') {
+        changed = {'cleared': _mobileTodos.length};
+        _mobileTodos.clear();
+      } else if (action != 'list' && action != 'show') {
+        throw FormatException('Unsupported todo action: $action');
+      }
+      final openCount =
+          _mobileTodos.where((todo) => todo['status'] != 'done').length;
+      final summary = changed != null && '${changed['title'] ?? ''}'.isNotEmpty
+          ? '$action: ${changed['title']}; ${_mobileTodos.length} todos ($openCount open)'
+          : '${_mobileTodos.length} todos ($openCount open)';
+      return MobileToolResult(
+        ok: true,
+        summary: summary,
+        output: jsonEncode({
+          'action': action,
+          'summary': summary,
+          'todos': _mobileTodos,
+          'changed': changed,
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'todo failed',
+        output: '$error',
+      );
+    }
+  }
+
+  MobileToolResult _taskBoard(Map<String, dynamic> args) {
+    final action = '${args['action'] ?? 'list'}'.trim().toLowerCase();
+    try {
+      Map<String, dynamic>? changed;
+      if (action == 'configure' ||
+          action == 'configure_columns' ||
+          action == 'set_columns' ||
+          action == 'columns') {
+        _mobileTaskBoard['columns'] = _normalizeColumns(args['columns']);
+        changed = {'columns': _mobileTaskBoard['columns']};
+      } else if (action == 'create' || action == 'add') {
+        final title = '${args['title'] ?? args['task'] ?? ''}'.trim();
+        if (title.isEmpty) throw const FormatException('title is required');
+        final card = {
+          'id': _nextToolId('card'),
+          'title': title,
+          'column': _resolveColumn(args),
+          'status': '${args['status'] ?? 'todo'}',
+          'priority': '${args['priority'] ?? 'normal'}',
+          'notes': '${args['notes'] ?? ''}',
+          'assignee': '${args['assignee'] ?? ''}',
+          'subtasks': <Map<String, dynamic>>[],
+          'blocked_by': <String>[],
+          'blocker_reason': '',
+          'created_at': DateTime.now().millisecondsSinceEpoch,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        };
+        _mobileTaskCards.add(card);
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'update' || action == 'edit') {
+        final card = _findById(_mobileTaskCards, _argId(args, 'card_id'));
+        if (card == null) throw const FormatException('card_id not found');
+        for (final key in [
+          'title',
+          'status',
+          'priority',
+          'notes',
+          'assignee'
+        ]) {
+          if (args.containsKey(key) && args[key] != null) {
+            card[key] = '${args[key]}';
+          }
+        }
+        if (args['column'] != null || args['column_id'] != null) {
+          card['column'] = _resolveColumn(args);
+        }
+        card['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'move') {
+        final card = _findById(_mobileTaskCards, _argId(args, 'card_id'));
+        if (card == null) throw const FormatException('card_id not found');
+        card['column'] = _resolveColumn(args);
+        card['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'block' || action == 'unblock') {
+        final card = _findById(_mobileTaskCards, _argId(args, 'card_id'));
+        if (card == null) throw const FormatException('card_id not found');
+        if (action == 'block') {
+          card['blocker_reason'] =
+              '${args['blocker_reason'] ?? args['reason'] ?? ''}';
+          final blocker =
+              '${args['blocked_by'] ?? args['depends_on'] ?? ''}'.trim();
+          card['blocked_by'] = blocker.isEmpty ? <String>[] : [blocker];
+        } else {
+          card['blocker_reason'] = '';
+          card['blocked_by'] = <String>[];
+        }
+        card['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'subtask_add' || action == 'add_subtask') {
+        final card = _findById(_mobileTaskCards, _argId(args, 'card_id'));
+        if (card == null) throw const FormatException('card_id not found');
+        final title = '${args['title'] ?? args['task'] ?? ''}'.trim();
+        if (title.isEmpty) throw const FormatException('title is required');
+        final subtask = {
+          'id': _nextToolId('subtask'),
+          'title': title,
+          'done': false,
+          'status': 'todo',
+          'assignee': '${args['assignee'] ?? ''}',
+          'created_at': DateTime.now().millisecondsSinceEpoch,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        };
+        _subtasks(card).add(subtask);
+        card['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'subtask_update' ||
+          action == 'subtask_complete' ||
+          action == 'subtask_remove' ||
+          action == 'remove_subtask') {
+        final card = _findById(_mobileTaskCards, _argId(args, 'card_id'));
+        if (card == null) throw const FormatException('card_id not found');
+        final subtasks = _subtasks(card);
+        final subtask = _findById(subtasks, _argId(args, 'subtask_id'));
+        if (subtask == null) {
+          throw const FormatException('subtask_id not found');
+        }
+        if (action == 'subtask_remove' || action == 'remove_subtask') {
+          subtasks.removeWhere((item) => item['id'] == subtask['id']);
+        } else {
+          for (final key in ['title', 'status', 'notes', 'assignee']) {
+            if (args.containsKey(key) && args[key] != null) {
+              subtask[key] = '${args[key]}';
+            }
+          }
+          if (action == 'subtask_complete') {
+            subtask['done'] = true;
+            subtask['status'] = 'done';
+          } else if (args.containsKey('done')) {
+            subtask['done'] = args['done'] == true;
+          }
+          subtask['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        }
+        card['updated_at'] = DateTime.now().millisecondsSinceEpoch;
+        changed = Map<String, dynamic>.from(card);
+      } else if (action == 'delete' || action == 'remove') {
+        final id = _argId(args, 'card_id');
+        final before = _mobileTaskCards.length;
+        _mobileTaskCards.removeWhere((card) => card['id'] == id);
+        if (_mobileTaskCards.length == before) {
+          throw const FormatException('card_id not found');
+        }
+        changed = {'id': id};
+      } else if (action == 'clear') {
+        changed = {'cleared': _mobileTaskCards.length};
+        _mobileTaskCards.clear();
+      } else if (action != 'list' && action != 'show') {
+        throw FormatException('Unsupported task_board action: $action');
+      }
+      final summary = _taskBoardSummary(action);
+      return MobileToolResult(
+        ok: true,
+        summary: summary,
+        output: jsonEncode({
+          'action': action,
+          'summary': summary,
+          'board': _taskBoardSnapshot(),
+          'changed': changed,
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'task_board failed',
+        output: '$error',
+      );
+    }
   }
 
   MobileToolResult _toolSearch(Map<String, dynamic> args) {
@@ -424,6 +784,100 @@ String _clampText(Object? value, int limit) {
   if (text.isEmpty || text == 'null') return '';
   if (text.length <= limit) return text;
   return text.substring(0, limit);
+}
+
+final List<Map<String, dynamic>> _mobileTodos = [];
+final Map<String, dynamic> _mobileTaskBoard = {
+  'board_id': 'mobile-default',
+  'title': 'Mobile Task Board',
+  'columns': _taskBoardDefaultColumns,
+};
+final List<Map<String, dynamic>> _mobileTaskCards = [];
+int _mobileToolIdSequence = 0;
+
+String _nextToolId(String prefix) {
+  _mobileToolIdSequence += 1;
+  return '${prefix}_${DateTime.now().microsecondsSinceEpoch}_$_mobileToolIdSequence';
+}
+
+String _argId(Map<String, dynamic> args, String primaryKey) {
+  return '${args[primaryKey] ?? args['id'] ?? ''}'.trim();
+}
+
+Map<String, dynamic>? _findById(
+  List<Map<String, dynamic>> records,
+  String id,
+) {
+  if (id.isEmpty) return null;
+  for (final record in records) {
+    if (record['id'] == id) return record;
+  }
+  return null;
+}
+
+List<String> _normalizeColumns(Object? raw) {
+  if (raw is List) {
+    final columns = raw
+        .map((item) => '$item'.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    if (columns.isNotEmpty) return columns;
+  }
+  if (raw is String && raw.trim().isNotEmpty) {
+    final columns = raw
+        .split(RegExp(r'[,|\n]'))
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+    if (columns.isNotEmpty) return columns;
+  }
+  return List<String>.from(_taskBoardDefaultColumns);
+}
+
+String _resolveColumn(Map<String, dynamic> args) {
+  final requested = '${args['column'] ?? args['column_id'] ?? ''}'.trim();
+  final columns = List<String>.from(_mobileTaskBoard['columns'] as List);
+  if (requested.isEmpty) return columns.first;
+  for (final column in columns) {
+    if (column.toLowerCase() == requested.toLowerCase()) return column;
+  }
+  return requested;
+}
+
+List<Map<String, dynamic>> _subtasks(Map<String, dynamic> card) {
+  final raw = card['subtasks'];
+  if (raw is List<Map<String, dynamic>>) return raw;
+  if (raw is List) {
+    final subtasks = raw
+        .whereType<Map>()
+        .map((item) => item.map((key, value) => MapEntry('$key', value)))
+        .toList();
+    card['subtasks'] = subtasks;
+    return subtasks;
+  }
+  final subtasks = <Map<String, dynamic>>[];
+  card['subtasks'] = subtasks;
+  return subtasks;
+}
+
+Map<String, dynamic> _taskBoardSnapshot() {
+  return {
+    'board_id': _mobileTaskBoard['board_id'],
+    'title': _mobileTaskBoard['title'],
+    'columns': _mobileTaskBoard['columns'],
+    'cards': _mobileTaskCards,
+  };
+}
+
+String _taskBoardSummary(String action) {
+  final columns = List<String>.from(_mobileTaskBoard['columns'] as List);
+  final counts = {
+    for (final column in columns)
+      column: _mobileTaskCards.where((card) => card['column'] == column).length,
+  };
+  final countsText =
+      counts.entries.map((entry) => '${entry.key}:${entry.value}').join(', ');
+  return '$action: ${_mobileTaskCards.length} cards ($countsText)';
 }
 
 String _formatNumber(double value) {
