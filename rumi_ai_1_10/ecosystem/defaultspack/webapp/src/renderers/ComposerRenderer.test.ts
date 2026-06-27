@@ -654,6 +654,22 @@ test("composer asks for an API key when an unconfigured Gemini model is selected
   }), true);
 
   assert.equal(profileNeedsApiKey({
+    profile_id: "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+    display_name: "MiMo V2.5 Pro",
+    provider_id: "xiaomi-token-plan-sgp",
+    model_id: "mimo-v2.5-pro",
+    availability: { configured: false, status: "catalog" },
+  }), true);
+
+  assert.equal(profileNeedsApiKey({
+    profile_id: "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+    display_name: "MiMo V2.5 Pro",
+    provider_id: "xiaomi-token-plan-sgp",
+    model_id: "mimo-v2.5-pro",
+    availability: { configured: true, status: "configured" },
+  }), false);
+
+  assert.equal(profileNeedsApiKey({
     profile_id: "stub/default",
     display_name: "Stub Default",
     provider_id: "stub",

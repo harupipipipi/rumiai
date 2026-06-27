@@ -27,6 +27,31 @@ export const BUILTIN_API_PROVIDER_IDS: string[] = [
   "xiaomi-token-plan-sgp",
 ];
 
+export const CHAT_API_KEY_PROVIDER_IDS = new Set([
+  "anthropic",
+  "cerebras",
+  "deepseek",
+  "gitlawb-opengateway",
+  "glm",
+  "google",
+  "groq",
+  "longcat",
+  "mistral",
+  "moonshotai",
+  "nvidia",
+  "opencode-go",
+  "opencode-zen",
+  "openai",
+  "openai_compatible",
+  "openrouter",
+  "perplexity",
+  "together",
+  "xai",
+  "xiaomi-token-plan-ams",
+  "xiaomi-token-plan-cn",
+  "xiaomi-token-plan-sgp",
+]);
+
 export const BUILTIN_EXTERNAL_PROVIDER_IDS: string[] = [
   "discord",
   "generic",

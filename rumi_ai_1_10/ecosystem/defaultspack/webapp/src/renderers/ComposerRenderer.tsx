@@ -38,6 +38,7 @@ import { CodingWorkspaceBadge } from "../components/coding/CodingWorkspaceBadge"
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
+import { CHAT_API_KEY_PROVIDER_IDS } from "../features/apiKeys/apiKeySetup";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
@@ -459,23 +460,6 @@ function ComposerChromeWidget({
 }
 
 const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
-const API_KEY_PROVIDER_IDS = new Set([
-  "anthropic",
-  "deepseek",
-  "glm",
-  "google",
-  "groq",
-  "longcat",
-  "mistral",
-  "opencode-go",
-  "opencode-zen",
-  "openai",
-  "openai_compatible",
-  "openrouter",
-  "perplexity",
-  "together",
-  "xai",
-]);
 
 function profileProviderId(profile: ModelProfile | null | undefined): string {
   return String(profile?.provider_id ?? "").trim();
@@ -515,7 +499,7 @@ export function profileNeedsApiKey(profile: ModelProfile | null | undefined): bo
   if (!providerId || providerId === "rumi" || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return false;
   const availability = profile?.availability ?? {};
   if (profile?.local || availability.local || availability.offline || profileIsConfigured(profile)) return false;
-  return API_KEY_PROVIDER_IDS.has(providerId);
+  return CHAT_API_KEY_PROVIDER_IDS.has(providerId);
 }
 
 function thinkingCommandMatch(input: string): { query: string } | null {

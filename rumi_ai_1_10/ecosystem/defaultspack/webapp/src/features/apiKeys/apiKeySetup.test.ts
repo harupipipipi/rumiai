@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   buildApiKeySavePayload,
+  CHAT_API_KEY_PROVIDER_IDS,
   collectApiProviderOptions,
   collectExternalProviderOptions,
   customProviderRegistrationPayload,
@@ -39,6 +40,12 @@ test("collectApiProviderOptions includes builtins, custom providers, and OAuth m
   assert.equal(acme?.oauth_client_configured, true);
   assert.equal(searchapi?.kind, "custom");
   assert.equal(searchapi?.builtin, false);
+});
+
+test("Xiaomi token plan providers are chat api key providers", () => {
+  assert.equal(CHAT_API_KEY_PROVIDER_IDS.has("xiaomi-token-plan-sgp"), true);
+  assert.equal(CHAT_API_KEY_PROVIDER_IDS.has("xiaomi-token-plan-cn"), true);
+  assert.equal(CHAT_API_KEY_PROVIDER_IDS.has("xiaomi-token-plan-ams"), true);
 });
 
 test("collectExternalProviderOptions keeps external providers custom", () => {

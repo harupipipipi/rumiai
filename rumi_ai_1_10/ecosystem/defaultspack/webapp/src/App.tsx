@@ -56,6 +56,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { CHAT_API_KEY_PROVIDER_IDS } from "./features/apiKeys/apiKeySetup";
 import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
@@ -1695,23 +1696,6 @@ function findProfile(profiles: ModelProfile[], modelId: string): ModelProfile | 
 }
 
 const LOCAL_MODEL_PROVIDER_IDS = new Set(["stub", "ollama", "lmstudio", "vllm", "llamacpp", "llama_cpp"]);
-const API_KEY_PROVIDER_IDS = new Set([
-  "anthropic",
-  "deepseek",
-  "glm",
-  "google",
-  "groq",
-  "longcat",
-  "mistral",
-  "opencode-go",
-  "opencode-zen",
-  "openai",
-  "openai_compatible",
-  "openrouter",
-  "perplexity",
-  "together",
-  "xai",
-]);
 
 function isConfiguredProfile(profile: ModelProfile): boolean {
   const availability = profile.availability ?? {};
@@ -1729,7 +1713,7 @@ export function profileNeedsApiKey(profile: ModelProfile | null | undefined): bo
   if (!providerId || providerId === "rumi" || LOCAL_MODEL_PROVIDER_IDS.has(providerId)) return false;
   const availability = profile.availability ?? {};
   if (profile.local || availability.local || availability.offline || isConfiguredProfile(profile)) return false;
-  return API_KEY_PROVIDER_IDS.has(providerId);
+  return CHAT_API_KEY_PROVIDER_IDS.has(providerId);
 }
 
 function isUserFacingModelProfile(profile: ModelProfile, preferredModel: string): boolean {
