@@ -220,6 +220,28 @@ void main() {
       expect(delegate.lastCall, isNull);
     });
 
+    test('schemas explain PC delegation when it is available', () {
+      final runtime = MobileToolRuntime(pcDelegate: _FakePcToolDelegate());
+
+      final schema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_pc_delegate_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'python_exec'},
+        ),
+      );
+
+      expect(schema.ok, isTrue);
+      final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['mobile_compatible'], isFalse);
+      expect(data['pc_delegation_available'], isTrue);
+      expect(data['unavailable_reason'], contains('tool_invoke'));
+      final delegation = data['pc_delegation'] as Map<String, dynamic>;
+      expect(delegation['available'], isTrue);
+      expect(delegation['route'], '/api/mobile/v1/tools/invoke');
+    });
+
     test('runs defaultspack task_board-compatible actions on phone', () {
       final created = runtime.execute(
         const MobileToolCall(

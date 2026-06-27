@@ -95,6 +95,79 @@ def test_mobile_tools_endpoint_tags_compatible_tools():
         assert "mobile-compatible" in compatible[0]["tags"]
 
 
+def test_mobile_tools_invoke_dispatches_defaultspack_tool_function(monkeypatch):
+    import blocks.mobile.tools as mobile_tools
+
+    calls = {}
+
+    def fake_invoke(function_id, args, context, principal_id="defaultspack"):
+        calls["function_id"] = function_id
+        calls["args"] = args
+        calls["context"] = context
+        calls["principal_id"] = principal_id
+        return {"status": "ok", "data": {"answer": 42}}
+
+    monkeypatch.setattr(
+        mobile_tools,
+        "invoke_defaultspack_function",
+        fake_invoke,
+    )
+
+    result = mobile_tools.run(
+        {
+            "action": "invoke",
+            "tool_name": "tool_calculator",
+            "arguments": {"expression": "6 * 7"},
+        },
+        {"conversation_id": "c1"},
+    )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["tool_name"] == "tool_calculator"
+    assert data["function_id"] == "tool_calculator"
+    assert data["result"] == {"answer": 42}
+    assert data["execution_location"] == "pc"
+    assert calls["function_id"] == "tool_calculator"
+    assert calls["args"] == {"expression": "6 * 7"}
+    assert calls["context"]["_mobile_tool_delegate"] is True
+    assert calls["principal_id"] == "defaultspack"
+
+
+def test_mobile_tools_invoke_dispatches_tool_registry_id(monkeypatch):
+    import blocks.mobile.tools as mobile_tools
+
+    calls = {}
+
+    def fake_invoke_tool(payload, context):
+        calls["payload"] = payload
+        calls["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "tool_name": "python_exec",
+                "result": "1",
+                "is_error": False,
+            },
+        }
+
+    monkeypatch.setattr(mobile_tools, "invoke_tool", fake_invoke_tool)
+
+    result = mobile_tools.run(
+        {
+            "action": "invoke",
+            "tool_name": "python_exec",
+            "arguments": {"code": "print(1)"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert calls["payload"]["tool_name"] == "python_exec"
+    assert calls["payload"]["arguments"] == {"code": "print(1)"}
+    assert calls["context"]["_mobile_tool_delegate"] is True
+
+
 def test_mobile_capabilities_provider_filter_narrows_models():
     from blocks.mobile.capabilities import run
 
@@ -254,6 +327,7 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         == "chat.write"
     )
     assert required_device_scope("GET", "/api/mobile/v1/tools") == "tools.observe"
+    assert required_device_scope("POST", "/api/mobile/v1/tools/invoke") == "chat.write"
     assert required_device_scope("GET", "/api/packs") == ""
     assert required_device_scope("GET", "/api/mobile/v1/approvals") == ""
     assert required_device_scope("POST", "/api/mobile/v1/approvals/auth_1/approve") == ""

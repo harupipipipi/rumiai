@@ -539,7 +539,7 @@ class MobileToolRuntime {
       _defaultspackToolAgentManifestCatalog.length;
 
   int get knownUnavailableDefaultspackToolCount =>
-      _catalogRecords(includeUnavailable: true)
+      _runtimeCatalogRecords(includeUnavailable: true)
           .where((record) => record['mobile_compatible'] != true)
           .length;
 
@@ -574,7 +574,7 @@ class MobileToolRuntime {
       }
     }
 
-    for (final record in _catalogRecords(includeUnavailable: true)) {
+    for (final record in _runtimeCatalogRecords(includeUnavailable: true)) {
       if (!_shouldExportCatalogRecordAsNativeTool(record)) continue;
       addTool(
         name: '${record['function_id'] ?? ''}',
@@ -993,7 +993,7 @@ class MobileToolRuntime {
         ? math.max(1, math.min(12, (args['limit'] as num).toInt()))
         : 6;
     final records = <Map<String, dynamic>>[];
-    for (final record in _catalogRecords(includeUnavailable: true)) {
+    for (final record in _runtimeCatalogRecords(includeUnavailable: true)) {
       final haystack = [
         record['function_id'],
         record['tool_id'],
@@ -1025,7 +1025,7 @@ class MobileToolRuntime {
     final includeUnavailable = args['include_unavailable'] != false;
     final names = <String>[];
     for (final record
-        in _catalogRecords(includeUnavailable: includeUnavailable)) {
+        in _runtimeCatalogRecords(includeUnavailable: includeUnavailable)) {
       for (final key in ['function_id', 'tool_id', 'requested_name']) {
         final value = '${record[key] ?? ''}'.trim();
         if (value.isNotEmpty && _isOpenAiFunctionName(value)) names.add(value);
@@ -1056,7 +1056,8 @@ class MobileToolRuntime {
     final limit = (args['limit'] is num)
         ? math.max(1, math.min(400, (args['limit'] as num).toInt()))
         : 240;
-    final allRecords = _catalogRecords(includeUnavailable: includeUnavailable);
+    final allRecords =
+        _runtimeCatalogRecords(includeUnavailable: includeUnavailable);
     final records = allRecords.take(limit).toList();
     return MobileToolResult(
       ok: true,
@@ -1089,10 +1090,13 @@ class MobileToolRuntime {
         _findDefaultspackCatalogEntry(canonical);
     final tool = _findToolDefinition(canonical);
     final record = entry != null
-        ? _catalogEntryRecord(entry, requestedName: requested)
+        ? _decorateCatalogRecord(
+            _catalogEntryRecord(entry, requestedName: requested),
+          )
         : tool == null
-            ? _unsupportedToolRecord(canonical)
-            : _toolRecord(tool, requestedName: requested);
+            ? _decorateCatalogRecord(_unsupportedToolRecord(canonical))
+            : _decorateCatalogRecord(
+                _toolRecord(tool, requestedName: requested));
     return MobileToolResult(
       ok: true,
       summary: '${record['tool_id']} schema',
@@ -1165,8 +1169,10 @@ class MobileToolRuntime {
     final entry = _findDefaultspackCatalogEntry(requested) ??
         _findDefaultspackCatalogEntry(canonical);
     final record = entry == null
-        ? _unsupportedToolRecord(canonical)
-        : _catalogEntryRecord(entry, requestedName: requested);
+        ? _decorateCatalogRecord(_unsupportedToolRecord(canonical))
+        : _decorateCatalogRecord(
+            _catalogEntryRecord(entry, requestedName: requested),
+          );
     final reason = '${record['unavailable_reason'] ?? ''}'.trim();
     return MobileToolResult(
       ok: false,
@@ -1182,6 +1188,32 @@ class MobileToolRuntime {
         },
       }),
     );
+  }
+
+  List<Map<String, dynamic>> _runtimeCatalogRecords({
+    required bool includeUnavailable,
+  }) {
+    return _catalogRecords(includeUnavailable: includeUnavailable)
+        .map(_decorateCatalogRecord)
+        .toList();
+  }
+
+  Map<String, dynamic> _decorateCatalogRecord(Map<String, dynamic> record) {
+    final decorated = Map<String, dynamic>.from(record);
+    decorated['pc_delegation_available'] = pcDelegationAvailable;
+    if (decorated['mobile_compatible'] != true) {
+      decorated['pc_delegation'] = {
+        'available': pcDelegationAvailable,
+        'route': '/api/mobile/v1/tools/invoke',
+        'required_setting': 'PC環境のtoolを使う',
+        'execution_location': 'pc',
+      };
+      if (pcDelegationAvailable) {
+        decorated['unavailable_reason'] =
+            '${decorated['unavailable_reason'] ?? ''} PC接続と「PC環境のtoolを使う」が有効なので、tool_invoke経由で接続中PCのdefaultspack runtimeへ委譲できます。';
+      }
+    }
+    return decorated;
   }
 
   MobileToolResult _agentPlan(Map<String, dynamic> args) {
