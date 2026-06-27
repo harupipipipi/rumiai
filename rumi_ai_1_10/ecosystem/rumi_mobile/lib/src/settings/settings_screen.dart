@@ -1014,6 +1014,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _setPcToolDelegation(bool enabled) async {
+    final next = _notificationSettings.copyWith(
+      delegatePhoneToolsToPcWhenAvailable: enabled,
+    );
+    setState(() => _notificationSettings = next);
+    await widget.configStore.saveNotificationSettings(next);
+  }
+
   Future<void> _pickModelFromCatalog() async {
     final catalog = _pcCatalog;
     if (catalog == null) {
@@ -1171,6 +1179,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 value: _notificationSettings.pcTaskFinishedEnabled,
                 onChanged: (value) {
                   unawaited(_setPcTaskFinishedNotifications(value));
+                },
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(Icons.construction_outlined),
+                title: const Text('PC環境のtoolを使う'),
+                subtitle: const Text('このスマホでチャット中でも、接続中のPCで実行できるtoolへ委譲します。'),
+                value:
+                    _notificationSettings.delegatePhoneToolsToPcWhenAvailable,
+                onChanged: (value) {
+                  unawaited(_setPcToolDelegation(value));
                 },
               ),
               const SizedBox(height: 12),

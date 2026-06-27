@@ -5,6 +5,27 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rumi_remote_app/src/data/local/defaultspack_tool_agent_manifest.g.dart';
 import 'package:rumi_remote_app/src/data/local/mobile_tool_runtime.dart';
 
+class _FakePcToolDelegate implements MobileToolDelegate {
+  MobileToolCall? lastCall;
+
+  @override
+  Future<MobileToolResult> invoke(MobileToolCall call) async {
+    lastCall = call;
+    return MobileToolResult(
+      ok: true,
+      summary: 'PC ${call.name}',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'execution_location': 'pc',
+          'tool_name': call.name,
+          'result': 'ran on pc',
+        },
+      }),
+    );
+  }
+}
+
 void main() {
   group('MobileToolRuntime', () {
     const runtime = MobileToolRuntime();
@@ -156,6 +177,47 @@ void main() {
       expect(error['message'], contains('PC側'));
       expect(details['tool_id'], 'python_exec');
       expect(details['tags'], contains('tool_registry'));
+    });
+
+    test('executeAsync delegates host-bound tool_invoke to PC when enabled',
+        () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'invoke_pc_1',
+          name: 'tool_invoke',
+          arguments: {
+            'tool_name': 'python_exec',
+            'arguments': {'code': 'print(1)'},
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.output, contains('execution_location'));
+      expect(delegate.lastCall?.name, 'tool_invoke');
+    });
+
+    test('executeAsync keeps phone-compatible tools on phone', () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'invoke_phone_1',
+          name: 'tool_invoke',
+          arguments: {
+            'tool_name': 'tool_calculator',
+            'arguments': {'expression': '7 * 6'},
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.output, contains('execution_location":"phone'));
+      expect(delegate.lastCall, isNull);
     });
 
     test('runs defaultspack task_board-compatible actions on phone', () {

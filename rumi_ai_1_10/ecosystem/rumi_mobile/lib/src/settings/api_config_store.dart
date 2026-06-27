@@ -349,23 +349,31 @@ class PcConnection {
 class MobileNotificationSettings {
   const MobileNotificationSettings({
     this.pcTaskFinishedEnabled = true,
+    this.delegatePhoneToolsToPcWhenAvailable = false,
   });
 
   static const defaults = MobileNotificationSettings();
 
   final bool pcTaskFinishedEnabled;
+  final bool delegatePhoneToolsToPcWhenAvailable;
 
   MobileNotificationSettings copyWith({
     bool? pcTaskFinishedEnabled,
+    bool? delegatePhoneToolsToPcWhenAvailable,
   }) {
     return MobileNotificationSettings(
       pcTaskFinishedEnabled:
           pcTaskFinishedEnabled ?? this.pcTaskFinishedEnabled,
+      delegatePhoneToolsToPcWhenAvailable:
+          delegatePhoneToolsToPcWhenAvailable ??
+              this.delegatePhoneToolsToPcWhenAvailable,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'pcTaskFinishedEnabled': pcTaskFinishedEnabled,
+        'delegatePhoneToolsToPcWhenAvailable':
+            delegatePhoneToolsToPcWhenAvailable,
       };
 
   factory MobileNotificationSettings.fromJson(Map<String, dynamic> json) {
@@ -373,6 +381,10 @@ class MobileNotificationSettings {
       pcTaskFinishedEnabled: json['pcTaskFinishedEnabled'] as bool? ??
           json['notifyPcTaskFinished'] as bool? ??
           true,
+      delegatePhoneToolsToPcWhenAvailable:
+          json['delegatePhoneToolsToPcWhenAvailable'] as bool? ??
+              json['usePcToolsWhenAvailable'] as bool? ??
+              false,
     );
   }
 }

@@ -211,7 +211,7 @@ class OpenAiClient {
         if (!isProgress) {
           yield OpenAiToolCallUpdate(call: call, status: 'running');
         }
-        final result = toolRuntime.execute(call);
+        final result = await toolRuntime.executeAsync(call);
         yield OpenAiToolCallUpdate(
           call: call,
           status: result.ok ? 'completed' : 'failed',
@@ -429,7 +429,7 @@ class OpenAiClient {
         if (!isProgress) {
           yield OpenAiToolCallUpdate(call: call, status: 'running');
         }
-        final result = toolRuntime.execute(call);
+        final result = await toolRuntime.executeAsync(call);
         yield OpenAiToolCallUpdate(
           call: call,
           status: result.ok ? 'completed' : 'failed',
@@ -491,7 +491,9 @@ class OpenAiClient {
       'Available phone-executable tools:',
       jsonEncode(available),
       'Generated defaultspack catalog: $catalogCount tool/agent manifests are known to the phone runtime. $hostBoundCount are not phone-executable and require PC/defaultspack runtime.',
-      'For unknown/defaultspack tools, call tool_search or tool_schema first. If a tool result says unavailable, explain that reason and suggest switching to the PC space.',
+      toolRuntime.pcDelegationAvailable
+          ? 'PC tool delegation is enabled. For host-bound defaultspack tools, call tool_search or tool_schema first, then invoke the tool through tool_invoke so it can run on the connected PC runtime.'
+          : 'For unknown/defaultspack tools, call tool_search or tool_schema first. If a tool result says unavailable, explain that reason and suggest switching to the PC space.',
     ].join('\n');
   }
 
@@ -746,7 +748,7 @@ class OpenAiClient {
         if (!isProgress) {
           yield OpenAiToolCallUpdate(call: call, status: 'running');
         }
-        final result = toolRuntime.execute(call);
+        final result = await toolRuntime.executeAsync(call);
         yield OpenAiToolCallUpdate(
           call: call,
           status: result.ok ? 'completed' : 'failed',

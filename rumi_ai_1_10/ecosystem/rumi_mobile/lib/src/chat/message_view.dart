@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -43,8 +45,36 @@ class MessageView extends StatelessWidget {
             isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (isUser) _CopyMessageButton(message: message),
           Flexible(child: bubble),
+          if (!isUser) _CopyMessageButton(message: message),
         ],
+      ),
+    );
+  }
+}
+
+class _CopyMessageButton extends StatelessWidget {
+  const _CopyMessageButton({required this.message});
+
+  final ChatMessage message;
+
+  @override
+  Widget build(BuildContext context) {
+    final disabled = message.content.trim().isEmpty;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: IconButton(
+        tooltip: 'コピー',
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints.tightFor(width: 34, height: 34),
+        padding: EdgeInsets.zero,
+        iconSize: 17,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        icon: const Icon(Icons.copy_outlined),
+        onPressed: disabled
+            ? null
+            : () => unawaited(copyMessageContent(context, message)),
       ),
     );
   }

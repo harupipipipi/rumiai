@@ -333,6 +333,35 @@ void main() {
       expect(result.selectedModel?.effectiveProfileId, 'openai/gpt-5.4');
     });
 
+    test('invokeTool posts to mobile tool invoke bridge', () async {
+      String? requestedPath;
+      Map<String, dynamic>? body;
+      final client = MockClient((request) async {
+        requestedPath = request.url.path;
+        body = jsonDecode(request.body) as Map<String, dynamic>;
+        return _ok({
+          'tool_name': 'python_exec',
+          'result': '1',
+          'is_error': false,
+          'permission': {'allowed': true},
+        });
+      });
+
+      final pcClient = PcCatalogClient(client: client);
+      final result = await pcClient.invokeTool(
+        _pc,
+        toolName: 'python_exec',
+        arguments: {'code': 'print(1)'},
+      );
+      pcClient.close();
+
+      expect(requestedPath, '/api/mobile/v1/tools/invoke');
+      expect(body?['tool_name'], 'python_exec');
+      expect((body?['arguments'] as Map)['code'], 'print(1)');
+      expect(result['tool_name'], 'python_exec');
+      expect(result['result'], '1');
+    });
+
     test('throws on non-ok status', () async {
       final client = MockClient((request) async {
         return http.Response(

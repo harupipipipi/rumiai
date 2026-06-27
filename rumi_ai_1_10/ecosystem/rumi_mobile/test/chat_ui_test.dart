@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:rumi_remote_app/src/app_theme.dart';
@@ -351,8 +352,67 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('できました'), findsOneWidget);
-    expect(find.text('todo'), findsOneWidget);
+    expect(find.text('todo'), findsNothing);
+    expect(find.textContaining('Write UI activity test'), findsNothing);
     expect(find.text('考えています'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('user and assistant messages can be copied', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(393, 852));
+    String? clipboardText;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      switch (call.method) {
+        case 'Clipboard.setData':
+          final data = call.arguments as Map;
+          clipboardText = data['text'] as String?;
+          return null;
+        case 'Clipboard.getData':
+          return {'text': clipboardText};
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null);
+    });
+    await tester.pumpWidget(wrap(Scaffold(
+      body: ListView(
+        children: [
+          MessageView(
+            message: ChatMessage(
+              id: 'u-copy',
+              role: ChatRole.user,
+              content: 'ユーザーの本文',
+              createdAt: DateTime.now(),
+            ),
+          ),
+          MessageView(
+            message: ChatMessage(
+              id: 'a-copy',
+              role: ChatRole.assistant,
+              content: 'AIの本文',
+              createdAt: DateTime.now(),
+            ),
+          ),
+        ],
+      ),
+    )));
+    await tester.pumpAndSettle();
+
+    final copyButtons = find.byTooltip('コピー');
+    expect(copyButtons, findsNWidgets(2));
+
+    await tester.tap(copyButtons.first);
+    await tester.pump();
+    var copied = await Clipboard.getData(Clipboard.kTextPlain);
+    expect(copied?.text, 'ユーザーの本文');
+
+    await tester.tap(copyButtons.last);
+    await tester.pump();
+    copied = await Clipboard.getData(Clipboard.kTextPlain);
+    expect(copied?.text, 'AIの本文');
     expect(tester.takeException(), isNull);
   });
 

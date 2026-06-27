@@ -537,14 +537,14 @@ class _ChatScreenState extends State<ChatScreen> {
             _scrollToBottom(animate: false);
             break;
           case ChatErrorEvent():
-            _clearTransientStatusForRun(event);
+            _clearTransientActivityForRun(event);
             break;
           case ChatMessageCommitted():
-            _clearTransientStatusForRun(event);
+            _clearTransientActivityForRun(event);
             break;
           case ChatRunCompleted():
           case ChatRunStopped():
-            _clearTransientStatusForRun(event);
+            _clearTransientActivityForRun(event);
             break;
         }
       }
@@ -728,7 +728,7 @@ class _ChatScreenState extends State<ChatScreen> {
           pending: false,
           error: event.error,
         );
-        _clearTransientStatusForRun(event);
+        _clearTransientActivityForRun(event);
         break;
       case ChatErrorEvent():
         final assistantId = event.assistantMessageId;
@@ -740,14 +740,14 @@ class _ChatScreenState extends State<ChatScreen> {
             error: true,
           );
         }
-        _clearTransientStatusForRun(event);
+        _clearTransientActivityForRun(event);
         break;
       case ChatStatusEvent():
         _recordActivityEvent(event);
         break;
       case ChatRunCompleted():
       case ChatRunStopped():
-        _clearTransientStatusForRun(event);
+        _clearTransientActivityForRun(event);
         break;
       case ToolCallEvent():
         _recordActivityEvent(event);
@@ -814,14 +814,29 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  void _clearTransientStatusForRun(ChatEvent event) {
+  void _clearTransientActivityForRun(ChatEvent event) {
     final runId = event.runId ?? '';
     final assistantId = _assistantMessageByRunId[runId];
     if (assistantId == null || assistantId.isEmpty) return;
     final list = _activityByAssistantMessageId[assistantId];
-    if (list == null || list.whereType<ChatStatusEvent>().isEmpty) return;
+    if (list == null) return;
+    final hasTransient = list.any(
+      (item) =>
+          item is ChatStatusEvent ||
+          item is ToolCallEvent ||
+          (item is ApprovalEvent && !item.pending),
+    );
+    if (!hasTransient) return;
     setState(() {
-      list.removeWhere((item) => item is ChatStatusEvent);
+      list.removeWhere(
+        (item) =>
+            item is ChatStatusEvent ||
+            item is ToolCallEvent ||
+            (item is ApprovalEvent && !item.pending),
+      );
+      if (list.isEmpty) {
+        _activityByAssistantMessageId.remove(assistantId);
+      }
     });
   }
 

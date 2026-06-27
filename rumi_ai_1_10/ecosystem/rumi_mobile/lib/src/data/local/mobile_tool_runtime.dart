@@ -100,8 +100,17 @@ class MobileToolResult {
       });
 }
 
+abstract interface class MobileToolDelegate {
+  Future<MobileToolResult> invoke(MobileToolCall call);
+}
+
 class MobileToolRuntime {
-  const MobileToolRuntime();
+  const MobileToolRuntime({MobileToolDelegate? pcDelegate})
+      : _pcDelegate = pcDelegate;
+
+  final MobileToolDelegate? _pcDelegate;
+
+  bool get pcDelegationAvailable => _pcDelegate != null;
 
   static const supportedTools = <MobileToolDefinition>[
     MobileToolDefinition(
@@ -559,7 +568,7 @@ class MobileToolRuntime {
       for (final name in tool.openAiNames) {
         addTool(
           name: name,
-          description: tool.description,
+          description: _openAiToolDescription(tool),
           parameters: tool.parameters,
         );
       }
@@ -656,6 +665,60 @@ class MobileToolRuntime {
           output: _unsupportedReason(name),
         );
     }
+  }
+
+  Future<MobileToolResult> executeAsync(MobileToolCall call) async {
+    final result = execute(call);
+    if (_pcDelegate == null ||
+        result.ok ||
+        !_shouldDelegateToPc(call, result)) {
+      return result;
+    }
+    return _pcDelegate.invoke(call);
+  }
+
+  String _openAiToolDescription(MobileToolDefinition tool) {
+    if (tool.name == 'tool_invoke' && pcDelegationAvailable) {
+      return '${tool.description} When PC tool delegation is enabled, host-bound defaultspack tools are executed on the connected PC runtime instead of failing on the phone.';
+    }
+    return tool.description;
+  }
+
+  bool _shouldDelegateToPc(MobileToolCall call, MobileToolResult result) {
+    final name = _canonicalToolName(call.name);
+    if (MobileToolRuntime.isAssistantProgressToolName(name)) return false;
+    if (const {
+      'tool_search',
+      'tool_names',
+      'tool_list',
+      'tool_schema',
+      'agent_plan',
+      'agent_progress',
+      'agent_status',
+      'todo',
+      'tool_task_board',
+      'task_board',
+      'calculator',
+      'current_time',
+    }.contains(name)) {
+      return false;
+    }
+    if (name == 'tool_invoke') {
+      final requested =
+          '${call.arguments['tool_name'] ?? call.arguments['tool_id'] ?? call.arguments['name'] ?? ''}'
+              .trim();
+      final requestedCanonical = _canonicalToolName(requested);
+      final requestedTool = _findToolDefinition(requestedCanonical);
+      if (requestedTool != null && requestedTool.available) return false;
+      return true;
+    }
+    final output = result.output.toLowerCase();
+    return result.summary == 'unsupported tool' ||
+        result.summary.contains('unavailable on phone') ||
+        output.contains('tool_unavailable_on_phone') ||
+        output.contains('pc側') ||
+        output.contains('pc runtime') ||
+        output.contains('pc接続時');
   }
 
   MobileToolResult _calculator(Map<String, dynamic> args) {

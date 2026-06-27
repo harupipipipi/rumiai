@@ -7,6 +7,7 @@ import '../../domain/chat_event.dart';
 import '../../domain/conversation_backend.dart';
 import '../../domain/conversation_locator.dart';
 import '../../settings/api_config_store.dart';
+import '../pc/pc_tool_delegate.dart';
 import 'mobile_tool_runtime.dart';
 
 class LocalConversationBackend implements ConversationBackend {
@@ -145,14 +146,18 @@ class LocalConversationBackend implements ConversationBackend {
 
     _client?.close();
     _client = _newClient();
+    final toolRuntime = await _buildToolRuntime();
 
     final history = List<ChatMessage>.from(convo.messages)
       ..removeWhere((m) => m.id == assistantId);
     final buffer = StringBuffer();
 
     try {
-      await for (final event
-          in _client!.streamAgentChat(config: config, history: history)) {
+      await for (final event in _client!.streamAgentChat(
+        config: config,
+        history: history,
+        toolRuntime: toolRuntime,
+      )) {
         switch (event) {
           case OpenAiContentDelta():
             buffer.write(event.delta);
@@ -250,6 +255,20 @@ class LocalConversationBackend implements ConversationBackend {
 
   void dispose() {
     _client?.close();
+  }
+
+  Future<MobileToolRuntime> _buildToolRuntime() async {
+    final settings = await _configStore.loadNotificationSettings();
+    if (!settings.delegatePhoneToolsToPcWhenAvailable) {
+      return const MobileToolRuntime();
+    }
+    final pc = await _configStore.loadPc();
+    if (pc == null || !pc.isConfigured) {
+      return const MobileToolRuntime();
+    }
+    return MobileToolRuntime(
+      pcDelegate: PcToolExecutionDelegate(connection: pc),
+    );
   }
 
   String _friendlyError(Object error) {

@@ -66,6 +66,15 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
     ),
     MobileRouteContract(
         "POST",
+        "/api/mobile/v1/tools/invoke",
+        block_module="blocks.mobile.tools",
+        defaults={"action": "invoke"},
+        device_scope="chat.write",
+        feature="tools",
+        pc_equivalent="POST /api/tools/invoke",
+    ),
+    MobileRouteContract(
+        "POST",
         "/api/mobile/v1/commands/execute",
         block_module="blocks.mobile.commands",
         device_scope="chat.write",

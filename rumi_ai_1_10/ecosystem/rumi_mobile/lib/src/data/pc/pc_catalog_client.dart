@@ -88,6 +88,20 @@ class PcCatalogClient {
     return PcCommandExecuteResult.fromJson(data);
   }
 
+  Future<Map<String, dynamic>> invokeTool(
+    PcConnection pc, {
+    required String toolName,
+    Map<String, dynamic> arguments = const {},
+    Map<String, dynamic>? context,
+  }) async {
+    final resp = await _post(pc, '/api/mobile/v1/tools/invoke', {
+      'tool_name': toolName,
+      'arguments': arguments,
+      if (context != null && context.isNotEmpty) 'context': context,
+    });
+    return _decodeData(resp.body);
+  }
+
   Future<http.Response> _get(
     PcConnection pc,
     String path, [

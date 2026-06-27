@@ -32,6 +32,7 @@ void main() {
     final settings = await store.loadNotificationSettings();
 
     expect(settings.pcTaskFinishedEnabled, isTrue);
+    expect(settings.delegatePhoneToolsToPcWhenAvailable, isFalse);
   });
 
   test('mobile notification settings persist PC task finish preference',
@@ -45,6 +46,21 @@ void main() {
 
     final settings = await store.loadNotificationSettings();
     expect(settings.pcTaskFinishedEnabled, isFalse);
+  });
+
+  test('mobile settings persist PC tool delegation preference', () async {
+    final storage = _FakeSecureStorage();
+    final store = ApiConfigStore(storage: storage);
+
+    await store.saveNotificationSettings(
+      const MobileNotificationSettings(
+        delegatePhoneToolsToPcWhenAvailable: true,
+      ),
+    );
+
+    final settings = await store.loadNotificationSettings();
+    expect(settings.pcTaskFinishedEnabled, isTrue);
+    expect(settings.delegatePhoneToolsToPcWhenAvailable, isTrue);
   });
 
   test('provider configs persist and replace by provider id', () async {
