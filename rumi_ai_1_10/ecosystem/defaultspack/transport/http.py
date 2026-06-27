@@ -1359,7 +1359,18 @@ _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
+    "/api/runtime/ensure": {"POST"},
+    "/api/runtime/update": {"POST"},
+    "/api/runtime/uninstall": {"POST"},
+    "/api/desktops": {"POST"},
 }
+_LOCAL_UI_APPROVAL_METHOD_PATTERNS = (
+    (re.compile(r"^/api/runtime/operations/[^/]+/cancel$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+$"), {"DELETE"}),
+    (re.compile(r"^/api/desktops/[^/]+/(?:start|restart|stop|input|ai-input|rules)$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/access-requests/[^/]+/grant$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/control/(?:acquire|renew|release)$"), {"POST"}),
+)
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -1518,8 +1529,13 @@ def _browser_qa_token_from_payload(payload):
 
 
 def _local_ui_approval_route_authorized(method, path, headers, request_data=None):
-    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(str(path or ""), set())
-    if str(method or "").upper() not in allowed_methods:
+    normalized_method = str(method or "").upper()
+    normalized_path = str(path or "")
+    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(normalized_path, set())
+    if normalized_method not in allowed_methods and not any(
+        normalized_method in pattern_methods and pattern.match(normalized_path)
+        for pattern, pattern_methods in _LOCAL_UI_APPROVAL_METHOD_PATTERNS
+    ):
         return False
     return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
 

@@ -432,6 +432,61 @@ def test_ambient_monitor_start_requires_local_auth_and_marks_local_ui_context(mo
     assert captured["context"]["source"] == "defaultspack_local_ui"
 
 
+def test_runtime_and_desktop_mutations_can_use_local_ui_approval_context(monkeypatch):
+    from domain.function_runtime import bridge
+    from transport.http import (
+        DefaultsHttpServer,
+        _LOCAL_UI_APPROVAL_CONTEXT_FLAG,
+        _local_ui_approval_route_authorized,
+    )
+
+    monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
+    headers = {
+        "Origin": "http://localhost:8766",
+        "Authorization": "Bearer local-secret",
+        "X-Rumi-CSRF": "1",
+    }
+
+    for method, path in (
+        ("POST", "/api/runtime/ensure"),
+        ("POST", "/api/runtime/update"),
+        ("POST", "/api/runtime/operations/op-1/cancel"),
+        ("POST", "/api/desktops"),
+        ("POST", "/api/desktops/seat-1/start"),
+        ("POST", "/api/desktops/seat-1/input"),
+        ("POST", "/api/desktops/seat-1/control/acquire"),
+        ("POST", "/api/desktops/seat-1/access-requests/request-1/grant"),
+        ("DELETE", "/api/desktops/seat-1"),
+    ):
+        assert _local_ui_approval_route_authorized(method, path, headers) is True
+
+    assert _local_ui_approval_route_authorized("GET", "/api/desktops", headers) is False
+    assert _local_ui_approval_route_authorized("POST", "/api/runtime/ensure", {"X-Rumi-CSRF": "1"}) is False
+
+    captured = {}
+
+    def fake_invoke_function(function_name, args, context, **kwargs):
+        captured["function_name"] = function_name
+        captured["args"] = dict(args)
+        captured["context"] = dict(context)
+        return {"status": "ok", "data": {"ok": True}}
+
+    monkeypatch.setattr(bridge, "invoke_function", fake_invoke_function)
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._invoke_function_route(
+        "managed_runtime_ensure",
+        {_LOCAL_UI_APPROVAL_CONTEXT_FLAG: True, "provider_id": "windows_wsl"},
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["function_name"] == "managed_runtime_ensure"
+    assert captured["args"] == {"provider_id": "windows_wsl"}
+    assert captured["context"]["_tool_server_approved"] is True
+    assert captured["context"]["source"] == "defaultspack_local_ui"
+
+
 def test_provider_key_save_requires_local_auth_and_marks_local_ui_context(monkeypatch):
     from domain.function_runtime import bridge
     from transport.http import (
