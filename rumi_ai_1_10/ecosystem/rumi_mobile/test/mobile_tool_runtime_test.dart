@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rumi_remote_app/src/data/local/defaultspack_tool_agent_manifest.g.dart';
 import 'package:rumi_remote_app/src/data/local/mobile_tool_runtime.dart';
+import 'package:rumi_remote_app/src/platform/platform_services.dart';
 
 class _FakePcToolDelegate implements MobileToolDelegate {
   MobileToolCall? lastCall;
@@ -23,6 +24,18 @@ class _FakePcToolDelegate implements MobileToolDelegate {
         },
       }),
     );
+  }
+}
+
+class _FakeUrlLauncher extends PlatformUrlLauncher {
+  _FakeUrlLauncher(this.opened);
+
+  final List<Uri> opened;
+
+  @override
+  Future<bool> open(Uri uri) async {
+    opened.add(uri);
+    return true;
   }
 }
 
@@ -83,12 +96,66 @@ void main() {
           'tool_list',
           'tool_schema',
           'tool_invoke',
+          'mobile_platform_info',
+          'mobile_json',
+          'mobile_base64',
+          'mobile_uuid',
+          'browser_open_url',
           'agent_plan',
           'agent_progress',
           'agent_status',
         ]),
       );
       expect(openAiNames, isNot(contains('defaultspack.tool.todo')));
+    });
+
+    test('runs phone-local platform utility tools', () {
+      final platform = runtime.execute(
+        const MobileToolCall(
+          id: 'platform_1',
+          name: 'mobile_platform_info',
+          arguments: {},
+        ),
+      );
+      expect(platform.ok, isTrue);
+      final platformPayload =
+          jsonDecode(platform.output) as Map<String, dynamic>;
+      final platformData = platformPayload['data'] as Map<String, dynamic>;
+      expect(
+          platformData['supported_platforms'], containsAll(['ios', 'android']));
+      expect(platformData['runtime_layers'], contains('flutter'));
+
+      final jsonResult = runtime.execute(
+        const MobileToolCall(
+          id: 'json_1',
+          name: 'mobile_json',
+          arguments: {'action': 'minify', 'text': '{ "a": 1 }'},
+        ),
+      );
+      expect(jsonResult.ok, isTrue);
+      expect(jsonResult.output, '{"a":1}');
+
+      final base64Result = runtime.execute(
+        const MobileToolCall(
+          id: 'base64_1',
+          name: 'mobile_base64',
+          arguments: {'action': 'decode', 'text': 'aGVsbG8='},
+        ),
+      );
+      expect(base64Result.ok, isTrue);
+      expect(base64Result.output, 'hello');
+
+      final uuidResult = runtime.execute(
+        const MobileToolCall(
+          id: 'uuid_1',
+          name: 'mobile_uuid',
+          arguments: {'count': 2},
+        ),
+      );
+      expect(uuidResult.ok, isTrue);
+      final uuidPayload = jsonDecode(uuidResult.output) as Map<String, dynamic>;
+      final uuidData = uuidPayload['data'] as Map<String, dynamic>;
+      expect(uuidData['uuids'], hasLength(2));
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -155,6 +222,46 @@ void main() {
       expect(data['tool_name'], 'calculator');
       expect(data['execution_location'], 'phone');
       expect(data['result'], contains('8 * 8 = 64'));
+    });
+
+    test('runs browser_open_url as a phone native URL tool', () async {
+      final opened = <Uri>[];
+      final runtime = MobileToolRuntime(urlLauncher: _FakeUrlLauncher(opened));
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'url_1',
+          name: 'tool_invoke',
+          arguments: {
+            'tool_name': 'browser_open_url',
+            'arguments': {'url': 'https://example.com/mobile'},
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(opened.single.host, 'example.com');
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['tool_name'], 'mobile_url_open');
+      expect(data['execution_location'], 'phone');
+
+      final schema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_url_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'browser_open_url'},
+        ),
+      );
+      final schemaPayload = jsonDecode(schema.output) as Map<String, dynamic>;
+      final schemaData = schemaPayload['data'] as Map<String, dynamic>;
+      final mobile = schemaData['mobile'] as Map<String, dynamic>;
+      expect(schemaData['mobile_compatible'], isTrue);
+      expect(schemaData['tool_id'], 'mobile_url_open');
+      expect(mobile['runtime_layers'],
+          containsAll(['ios-swift', 'android-kotlin']));
+      expect(schemaData['tags'], contains(mobileSwiftNativeTag));
+      expect(schemaData['tags'], contains(mobileKotlinNativeTag));
     });
 
     test('tool_invoke returns specific reasons for host-bound tools', () {
@@ -240,6 +347,84 @@ void main() {
       final delegation = data['pc_delegation'] as Map<String, dynamic>;
       expect(delegation['available'], isTrue);
       expect(delegation['route'], '/api/mobile/v1/tools/invoke');
+    });
+
+    test('classifies mobile platform layers separately from PC-only tools', () {
+      final urlSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_platform_url_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'browser_open_url'},
+        ),
+      );
+      final urlPayload = jsonDecode(urlSchema.output) as Map<String, dynamic>;
+      final urlData = urlPayload['data'] as Map<String, dynamic>;
+      expect(urlData['mobile_compatible'], isTrue);
+      expect(urlData['execution_platforms'], containsAll(['ios', 'android']));
+      expect(urlData['mobile_runtime_layers'], contains('flutter'));
+      expect(urlData['mobile_runtime_layers'], contains('ios-swift'));
+
+      final clipboardSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_clipboard_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_clipboard_read'},
+        ),
+      );
+      final clipboardPayload =
+          jsonDecode(clipboardSchema.output) as Map<String, dynamic>;
+      final clipboardData = clipboardPayload['data'] as Map<String, dynamic>;
+      final clipboardMobile = clipboardData['mobile'] as Map<String, dynamic>;
+      expect(clipboardData['mobile_compatible'], isFalse);
+      expect(clipboardMobile['implementation_status'],
+          'feasible_needs_mobile_approval_ui');
+      expect(clipboardMobile['requires_mobile_approval'], isTrue);
+      expect(clipboardMobile['platforms'], containsAll(['ios', 'android']));
+      expect(clipboardData['unavailable_reason'], contains('モバイル承認UI'));
+
+      final computerSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_computer_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'computer_click'},
+        ),
+      );
+      final computerPayload =
+          jsonDecode(computerSchema.output) as Map<String, dynamic>;
+      final computerData = computerPayload['data'] as Map<String, dynamic>;
+      final computerMobile = computerData['mobile'] as Map<String, dynamic>;
+      expect(computerData['mobile_compatible'], isFalse);
+      expect(computerMobile['implementation_status'], 'pc_only');
+      expect(computerMobile['platforms'], isEmpty);
+    });
+
+    test('filters catalog by mobile platform layer', () {
+      final swiftTools = runtime.execute(
+        const MobileToolCall(
+          id: 'list_swift_1',
+          name: 'tool_list',
+          arguments: {'platform': 'swift'},
+        ),
+      );
+      final swiftPayload =
+          jsonDecode(swiftTools.output) as Map<String, dynamic>;
+      final swiftData = swiftPayload['data'] as Map<String, dynamic>;
+      final swiftIds = (swiftData['tools'] as List)
+          .map((entry) => '${entry['function_id'] ?? entry['tool_id']}')
+          .toSet();
+      expect(swiftIds, contains('browser_open_url'));
+
+      final pcTools = runtime.execute(
+        const MobileToolCall(
+          id: 'list_pc_1',
+          name: 'tool_list',
+          arguments: {'platform': 'pc', 'limit': 20},
+        ),
+      );
+      final pcPayload = jsonDecode(pcTools.output) as Map<String, dynamic>;
+      final pcData = pcPayload['data'] as Map<String, dynamic>;
+      expect(pcData['platform_filter'], 'pc');
+      expect(pcData['tools'], isNotEmpty);
     });
 
     test('runs defaultspack task_board-compatible actions on phone', () {

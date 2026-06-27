@@ -7,6 +7,12 @@ from domain.tool.service_catalog import ToolServiceCatalog
 
 
 MOBILE_COMPATIBLE_TAG = "mobile-compatible"
+MOBILE_FLUTTER_TAG = "mobile-flutter"
+MOBILE_IOS_TAG = "mobile-ios"
+MOBILE_ANDROID_TAG = "mobile-android"
+MOBILE_SWIFT_NATIVE_TAG = "mobile-swift-native"
+MOBILE_KOTLIN_NATIVE_TAG = "mobile-kotlin-native"
+MOBILE_PC_DELEGATED_TAG = "pc-delegated"
 MOBILE_AGENT_TEMPLATE = {
     "template_id": "rumi.composer.default",
     "ai_input_id": "rumi.composer.default:default_ai_input",
@@ -78,6 +84,14 @@ def mobile_tool_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
         "compatible_count": len(compatible),
         "unavailable_count": len(unavailable),
         "compatible_tag": MOBILE_COMPATIBLE_TAG,
+        "platform_tags": {
+            "flutter": MOBILE_FLUTTER_TAG,
+            "ios": MOBILE_IOS_TAG,
+            "android": MOBILE_ANDROID_TAG,
+            "swift": MOBILE_SWIFT_NATIVE_TAG,
+            "kotlin": MOBILE_KOTLIN_NATIVE_TAG,
+            "pc_delegated": MOBILE_PC_DELEGATED_TAG,
+        },
         "agent_template": mobile_agent_template(),
     }
 
@@ -92,12 +106,19 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
     blocked_reason = _blocked_reason(service_id, tags, tool)
     connection_status = str(record.get("connection_status") or "").strip().lower()
     if blocked_reason:
+        plan = _mobile_port_plan(service_id, tags, tool)
         return {
             "compatible": False,
             "available": False,
             "execution_location": "unsupported",
             "unavailable_reason": blocked_reason,
-            "tags": [],
+            "platforms": plan["platforms"],
+            "runtime_layers": plan["runtime_layers"],
+            "native_layers": plan["native_layers"],
+            "requires_pc": True,
+            "requires_mobile_approval": plan["requires_mobile_approval"],
+            "implementation_status": plan["implementation_status"],
+            "tags": _platform_tags(plan, pc_delegated=True),
             "agent_template": mobile_agent_template(),
         }
     unavailable_reason = ""
@@ -110,7 +131,19 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
         "available": not unavailable_reason,
         "execution_location": "pc",
         "unavailable_reason": unavailable_reason,
-        "tags": [MOBILE_COMPATIBLE_TAG],
+        "platforms": ["ios", "android"],
+        "runtime_layers": ["flutter", "pc-defaultspack-runtime"],
+        "native_layers": [],
+        "requires_pc": True,
+        "requires_mobile_approval": False,
+        "implementation_status": "pc_delegated",
+        "tags": [
+            MOBILE_COMPATIBLE_TAG,
+            MOBILE_FLUTTER_TAG,
+            MOBILE_IOS_TAG,
+            MOBILE_ANDROID_TAG,
+            MOBILE_PC_DELEGATED_TAG,
+        ],
         "agent_template": mobile_agent_template(),
     }
 
@@ -127,6 +160,82 @@ def _blocked_reason(service_id: str, tags: set[str], tool: dict[str, Any]) -> st
     if tool.get("enabled") is False:
         return "このtoolはPC側で無効化されています。"
     return ""
+
+
+def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> dict[str, Any]:
+    tool_id = str(tool.get("tool_id") or tool.get("name") or "").strip().lower()
+    if tool_id in {"media_clipboard_read", "media_clipboard_write"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIPasteboard",
+                "android:Kotlin ClipboardManager",
+            ],
+            "requires_mobile_approval": True,
+            "implementation_status": "feasible_needs_mobile_approval_ui",
+        }
+    if "media" in tags or tool_id.startswith(("audio_", "image_", "ocr_")):
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin", "provider"],
+            "native_layers": [
+                "ios:Swift media/photo permission bridge",
+                "android:Kotlin media permission bridge",
+            ],
+            "requires_mobile_approval": True,
+            "implementation_status": "feasible_needs_picker_permission_or_provider",
+        }
+    if service_id == "browser" or "browser" in tags:
+        return {
+            "platforms": [],
+            "runtime_layers": ["pc-browser-session"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "pc_browser_session_only",
+        }
+    if tags & {"desktop", "computer", "computer_use", "workspace", "sandbox", "terminal", "agent_os"}:
+        return {
+            "platforms": [],
+            "runtime_layers": ["pc-defaultspack-runtime"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "pc_only",
+        }
+    if "agent" in tags:
+        return {
+            "platforms": [],
+            "runtime_layers": ["pc-agent-service"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "pc_agent_runtime_only",
+        }
+    return {
+        "platforms": [],
+        "runtime_layers": ["pc-defaultspack-runtime"],
+        "native_layers": [],
+        "requires_mobile_approval": False,
+        "implementation_status": "pc_delegation_required",
+    }
+
+
+def _platform_tags(plan: dict[str, Any], *, pc_delegated: bool) -> list[str]:
+    platforms = {str(item).strip().lower() for item in plan.get("platforms") or []}
+    runtime_layers = {str(item).strip().lower() for item in plan.get("runtime_layers") or []}
+    tags: list[str] = []
+    if "flutter" in runtime_layers or "dart" in runtime_layers:
+        tags.append(MOBILE_FLUTTER_TAG)
+    if "ios" in platforms:
+        tags.append(MOBILE_IOS_TAG)
+    if "android" in platforms:
+        tags.append(MOBILE_ANDROID_TAG)
+    if any("swift" in layer for layer in runtime_layers):
+        tags.append(MOBILE_SWIFT_NATIVE_TAG)
+    if any("kotlin" in layer for layer in runtime_layers):
+        tags.append(MOBILE_KOTLIN_NATIVE_TAG)
+    if pc_delegated:
+        tags.append(MOBILE_PC_DELEGATED_TAG)
+    return tags
 
 
 def _tag_set(value: Any) -> set[str]:

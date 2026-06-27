@@ -1,9 +1,19 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:uuid/uuid.dart';
+
+import '../../platform/platform_services.dart';
 import 'defaultspack_tool_agent_manifest.g.dart';
 
 const mobileCompatibleTag = 'mobile-compatible';
+const mobileFlutterTag = 'mobile-flutter';
+const mobileIosTag = 'mobile-ios';
+const mobileAndroidTag = 'mobile-android';
+const mobileSwiftNativeTag = 'mobile-swift-native';
+const mobileKotlinNativeTag = 'mobile-kotlin-native';
+const mobilePcDelegatedTag = 'pc-delegated';
 const mobileAgentTemplateId = 'rumi.composer.default';
 const mobileAgentAiInputId = 'rumi.composer.default:default_ai_input';
 const mobileAgentToolPolicyId = 'rumi.composer.default:default_tools';
@@ -30,6 +40,13 @@ const _assistantProgressStatuses = <String>{
   'blocked',
 };
 const _taskBoardDefaultColumns = <String>['Backlog', 'Doing', 'Review', 'Done'];
+const _defaultMobilePlatforms = <String>['ios', 'android'];
+const _flutterRuntimeLayers = <String>['flutter', 'dart'];
+const _nativeUrlRuntimeLayers = <String>[
+  'flutter',
+  'ios-swift',
+  'android-kotlin',
+];
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -39,6 +56,10 @@ class MobileToolDefinition {
     required this.tags,
     this.aliases = const [],
     this.unavailableReason = '',
+    this.executionPlatforms = _defaultMobilePlatforms,
+    this.runtimeLayers = _flutterRuntimeLayers,
+    this.nativeLayers = const [],
+    this.requiresMobileApproval = false,
   });
 
   final String name;
@@ -47,6 +68,10 @@ class MobileToolDefinition {
   final List<String> tags;
   final List<String> aliases;
   final String unavailableReason;
+  final List<String> executionPlatforms;
+  final List<String> runtimeLayers;
+  final List<String> nativeLayers;
+  final bool requiresMobileApproval;
 
   bool get available => unavailableReason.trim().isEmpty;
 
@@ -105,10 +130,14 @@ abstract interface class MobileToolDelegate {
 }
 
 class MobileToolRuntime {
-  const MobileToolRuntime({MobileToolDelegate? pcDelegate})
-      : _pcDelegate = pcDelegate;
+  const MobileToolRuntime({
+    MobileToolDelegate? pcDelegate,
+    PlatformUrlLauncher urlLauncher = const PlatformUrlLauncher(),
+  })  : _pcDelegate = pcDelegate,
+        _urlLauncher = urlLauncher;
 
   final MobileToolDelegate? _pcDelegate;
+  final PlatformUrlLauncher _urlLauncher;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -146,6 +175,21 @@ class MobileToolRuntime {
             'default': 'human',
           },
         },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'mobile_platform_info',
+      description:
+          'Return this app runtime and mobile platform information, split by Flutter, iOS, Android, Swift, and Kotlin layers.',
+      tags: ['tool', 'diagnostics', 'mobile', mobileCompatibleTag],
+      aliases: [
+        'platform_info',
+        'mobile.platform.info',
+        'defaultspack.mobile.platform_info',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': false,
       },
     ),
     MobileToolDefinition(
@@ -244,6 +288,93 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'mobile_json',
+      description:
+          'Validate, format, or minify JSON locally on this phone using Flutter/Dart.',
+      tags: ['tool', 'json', 'text', mobileCompatibleTag],
+      aliases: ['json_format', 'json_validate', 'mobile.json'],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {
+            'type': 'string',
+            'enum': ['validate', 'format', 'pretty', 'minify'],
+            'default': 'format',
+          },
+          'text': {'type': 'string'},
+          'json': {},
+          'indent': {'type': 'string', 'default': '  '},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'mobile_base64',
+      description:
+          'Encode or decode Base64 locally on this phone using Flutter/Dart.',
+      tags: ['tool', 'encoding', 'text', mobileCompatibleTag],
+      aliases: ['base64_codec', 'mobile.base64'],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {
+            'type': 'string',
+            'enum': ['encode', 'decode'],
+            'default': 'encode',
+          },
+          'text': {'type': 'string'},
+          'data': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'mobile_uuid',
+      description:
+          'Generate UUID v4 values locally on this phone using Flutter/Dart.',
+      tags: ['tool', 'id', 'uuid', mobileCompatibleTag],
+      aliases: ['uuid_generate', 'mobile.uuid'],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': false,
+        'properties': {
+          'count': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 20,
+            'default': 1,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'mobile_url_open',
+      description:
+          'Open an http/https URL visibly on this phone. Implemented through Flutter with iOS Swift and Android Kotlin native bridges.',
+      tags: ['tool', 'browser', 'url', 'mobile', mobileCompatibleTag],
+      aliases: [
+        'url_open',
+        'browser_open_url',
+        'defaults.browser.open_url',
+        'defaultspack.browser.open_url',
+        'defaults.browser.open.url',
+        'defaultspack.browser.open.url',
+      ],
+      runtimeLayers: _nativeUrlRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIApplication.open',
+        'android:Kotlin Intent.ACTION_VIEW',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': false,
+        'properties': {
+          'url': {'type': 'string'},
+        },
+        'required': ['url'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -261,6 +392,17 @@ class MobileToolRuntime {
             'minimum': 1,
             'maximum': 12,
             'default': 6,
+          },
+          'platform': {
+            'type': 'string',
+            'enum': [
+              'android',
+              'flutter',
+              'ios',
+              'kotlin',
+              'pc',
+              'swift',
+            ],
           },
         },
         'required': ['query'],
@@ -306,6 +448,17 @@ class MobileToolRuntime {
             'minimum': 1,
             'maximum': 400,
             'default': 240,
+          },
+          'platform': {
+            'type': 'string',
+            'enum': [
+              'android',
+              'flutter',
+              'ios',
+              'kotlin',
+              'pc',
+              'swift',
+            ],
           },
         },
       },
@@ -636,11 +789,21 @@ class MobileToolRuntime {
         return _calculator(call.arguments);
       case 'current_time':
         return _currentTime(call.arguments);
+      case 'mobile_platform_info':
+        return _mobilePlatformInfo(call.arguments);
       case 'todo':
         return _todo(call.arguments);
       case 'tool_task_board':
       case 'task_board':
         return _taskBoard(call.arguments);
+      case 'mobile_json':
+        return _mobileJson(call.arguments);
+      case 'mobile_base64':
+        return _mobileBase64(call.arguments);
+      case 'mobile_uuid':
+        return _mobileUuid(call.arguments);
+      case 'mobile_url_open':
+        return _asyncOnlyTool(name);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case 'tool_names':
@@ -668,6 +831,21 @@ class MobileToolRuntime {
   }
 
   Future<MobileToolResult> executeAsync(MobileToolCall call) async {
+    final name = _canonicalToolName(call.name);
+    if (_isAsyncPhoneToolName(name)) {
+      return _executeAsyncPhoneTool(
+        MobileToolCall(id: call.id, name: name, arguments: call.arguments),
+      );
+    }
+    if (name == 'tool_invoke') {
+      final requested =
+          '${call.arguments['tool_name'] ?? call.arguments['tool_id'] ?? call.arguments['name'] ?? ''}'
+              .trim();
+      final requestedCanonical = _canonicalToolName(requested);
+      if (_isAsyncPhoneToolName(requestedCanonical)) {
+        return _toolInvokeAsync(call.arguments);
+      }
+    }
     final result = execute(call);
     if (_pcDelegate == null ||
         result.ok ||
@@ -675,6 +853,47 @@ class MobileToolRuntime {
       return result;
     }
     return _pcDelegate.invoke(call);
+  }
+
+  Future<MobileToolResult> _executeAsyncPhoneTool(MobileToolCall call) {
+    final name = _canonicalToolName(call.name);
+    switch (name) {
+      case 'mobile_url_open':
+        return _mobileUrlOpen(call.arguments);
+      default:
+        return Future.value(execute(call));
+    }
+  }
+
+  Future<MobileToolResult> _toolInvokeAsync(Map<String, dynamic> args) async {
+    final requested =
+        '${args['tool_name'] ?? args['tool_id'] ?? args['name'] ?? ''}'.trim();
+    if (requested.isEmpty) return _toolInvoke(args);
+    final canonical = _canonicalToolName(requested);
+    if (!_isAsyncPhoneToolName(canonical)) return _toolInvoke(args);
+    final tool = _findToolDefinition(canonical);
+    final result = await _executeAsyncPhoneTool(
+      MobileToolCall(
+        id: 'tool_invoke:${DateTime.now().microsecondsSinceEpoch}',
+        name: canonical,
+        arguments: _invokeArguments(args),
+      ),
+    );
+    return MobileToolResult(
+      ok: result.ok,
+      summary: '${tool?.name ?? canonical}: ${result.summary}',
+      output: jsonEncode({
+        'status': result.ok ? 'ok' : 'error',
+        'data': {
+          'tool_name': tool?.name ?? canonical,
+          'requested_tool_name': requested,
+          'result': result.output,
+          'summary': result.summary,
+          'is_error': !result.ok,
+          'execution_location': 'phone',
+        },
+      }),
+    );
   }
 
   String _openAiToolDescription(MobileToolDefinition tool) {
@@ -700,6 +919,11 @@ class MobileToolRuntime {
       'task_board',
       'calculator',
       'current_time',
+      'mobile_platform_info',
+      'mobile_json',
+      'mobile_base64',
+      'mobile_uuid',
+      'mobile_url_open',
     }.contains(name)) {
       return false;
     }
@@ -765,6 +989,43 @@ class MobileToolRuntime {
     final text =
         '${now.toIso8601String()} (${now.timeZoneName}, UTC$sign$hh:$mm)';
     return MobileToolResult(ok: true, summary: text, output: text);
+  }
+
+  MobileToolResult _mobilePlatformInfo(Map<String, dynamic> args) {
+    final platform = _currentMobilePlatform();
+    final data = {
+      'platform': platform,
+      'supported_platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_bridge_layers': const {
+        'ios': 'Swift MethodChannel',
+        'android': 'Kotlin MethodChannel',
+      },
+      'dart': {
+        'version': Platform.version,
+        'locale': Platform.localeName,
+        'processors': Platform.numberOfProcessors,
+      },
+      'os': {
+        'name': Platform.operatingSystem,
+        'version': Platform.operatingSystemVersion,
+      },
+      'tool_runtime': {
+        'mobile_compatible_tag': mobileCompatibleTag,
+        'platform_tags': const [
+          mobileFlutterTag,
+          mobileIosTag,
+          mobileAndroidTag,
+          mobileSwiftNativeTag,
+          mobileKotlinNativeTag,
+        ],
+      },
+    };
+    return MobileToolResult(
+      ok: true,
+      summary: 'mobile platform: $platform',
+      output: jsonEncode({'status': 'ok', 'data': data}),
+    );
   }
 
   MobileToolResult _todo(Map<String, dynamic> args) {
@@ -987,21 +1248,175 @@ class MobileToolRuntime {
     }
   }
 
+  MobileToolResult _mobileJson(Map<String, dynamic> args) {
+    final action = '${args['action'] ?? 'format'}'.trim().toLowerCase();
+    final raw = args.containsKey('json')
+        ? jsonEncode(args['json'])
+        : '${args['text'] ?? args['input'] ?? ''}'.trim();
+    if (raw.isEmpty) {
+      return _jsonToolError('MISSING_INPUT', 'text or json is required');
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      final output = switch (action) {
+        'minify' => jsonEncode(decoded),
+        'validate' => jsonEncode({
+            'status': 'ok',
+            'valid': true,
+            'type': decoded.runtimeType.toString(),
+          }),
+        _ =>
+          JsonEncoder.withIndent('${args['indent'] ?? '  '}').convert(decoded),
+      };
+      return MobileToolResult(
+        ok: true,
+        summary: action == 'validate' ? 'valid JSON' : 'JSON $action',
+        output: output,
+      );
+    } catch (error) {
+      return _jsonToolError('INVALID_JSON', '$error');
+    }
+  }
+
+  MobileToolResult _jsonToolError(String code, String message) {
+    return MobileToolResult(
+      ok: false,
+      summary: 'JSON failed',
+      output: jsonEncode({
+        'status': 'error',
+        'error': {'code': code, 'message': message},
+      }),
+    );
+  }
+
+  MobileToolResult _mobileBase64(Map<String, dynamic> args) {
+    final action = '${args['action'] ?? 'encode'}'.trim().toLowerCase();
+    final text = '${args['text'] ?? args['data'] ?? args['input'] ?? ''}';
+    try {
+      if (action == 'decode') {
+        final bytes = base64.decode(text.trim());
+        final decoded = utf8.decode(bytes);
+        return MobileToolResult(
+          ok: true,
+          summary: 'base64 decoded',
+          output: decoded,
+        );
+      }
+      final encoded = base64.encode(utf8.encode(text));
+      return MobileToolResult(
+        ok: true,
+        summary: 'base64 encoded',
+        output: encoded,
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'base64 failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {'code': 'INVALID_BASE64', 'message': '$error'},
+        }),
+      );
+    }
+  }
+
+  MobileToolResult _mobileUuid(Map<String, dynamic> args) {
+    final count = (args['count'] is num)
+        ? math.max(1, math.min(20, (args['count'] as num).toInt()))
+        : 1;
+    final values = List.generate(count, (_) => const Uuid().v4());
+    return MobileToolResult(
+      ok: true,
+      summary: count == 1 ? values.single : '$count UUIDs',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'uuids': values,
+          if (count == 1) 'uuid': values.single,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _mobileUrlOpen(Map<String, dynamic> args) async {
+    final raw = '${args['url'] ?? args['href'] ?? args['input'] ?? ''}'.trim();
+    if (raw.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'url is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {'code': 'MISSING_URL', 'message': 'url is required'},
+        }),
+      );
+    }
+    final uri = Uri.tryParse(raw);
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'invalid URL',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {'code': 'INVALID_URL', 'message': 'invalid URL: $raw'},
+        }),
+      );
+    }
+    if (uri.scheme != 'http' && uri.scheme != 'https') {
+      return MobileToolResult(
+        ok: false,
+        summary: 'unsupported URL scheme',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_URL_SCHEME',
+            'message': 'Only http and https URLs can be opened by this tool.',
+          },
+        }),
+      );
+    }
+    final ok = await _urlLauncher.open(uri);
+    return MobileToolResult(
+      ok: ok,
+      summary: ok ? 'opened ${uri.host}' : 'URL open failed',
+      output: jsonEncode({
+        'status': ok ? 'ok' : 'error',
+        'data': {
+          'url': uri.toString(),
+          'opened': ok,
+          'execution_location': 'phone',
+          'runtime_layers': _nativeUrlRuntimeLayers,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _asyncOnlyTool(String name) {
+    return MobileToolResult(
+      ok: false,
+      summary: '$name requires async runtime',
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': 'ASYNC_TOOL_REQUIRES_EXECUTE_ASYNC',
+          'message':
+              '$name uses a Flutter platform channel and must be run through executeAsync.',
+        },
+      }),
+    );
+  }
+
   MobileToolResult _toolSearch(Map<String, dynamic> args) {
     final query = '${args['query'] ?? ''}'.trim().toLowerCase();
+    final platformFilter = _normalizePlatformFilter(
+      args['platform'] ?? args['execution_platform'] ?? args['mobile_platform'],
+    );
     final limit = (args['limit'] is num)
         ? math.max(1, math.min(12, (args['limit'] as num).toInt()))
         : 6;
     final records = <Map<String, dynamic>>[];
     for (final record in _runtimeCatalogRecords(includeUnavailable: true)) {
-      final haystack = [
-        record['function_id'],
-        record['tool_id'],
-        record['requested_name'],
-        record['summary'],
-        ...(record['tags'] as List? ?? const []),
-        ...(record['aliases'] as List? ?? const []),
-      ].join(' ').toLowerCase();
+      if (!_recordMatchesPlatform(record, platformFilter)) continue;
+      final haystack = _recordSearchText(record);
       if (query.isEmpty || haystack.contains(query)) {
         records.add(record);
       }
@@ -1015,6 +1430,7 @@ class MobileToolRuntime {
       summary: '${records.length} tools',
       output: jsonEncode({
         'agent_template': _agentTemplateRecord(),
+        'platform_filter': platformFilter,
         'tools': records,
       }),
     );
@@ -1023,9 +1439,13 @@ class MobileToolRuntime {
   MobileToolResult _toolNames(Map<String, dynamic> args) {
     final includeAliases = args['include_aliases'] != false;
     final includeUnavailable = args['include_unavailable'] != false;
+    final platformFilter = _normalizePlatformFilter(
+      args['platform'] ?? args['execution_platform'] ?? args['mobile_platform'],
+    );
     final names = <String>[];
     for (final record
         in _runtimeCatalogRecords(includeUnavailable: includeUnavailable)) {
+      if (!_recordMatchesPlatform(record, platformFilter)) continue;
       for (final key in ['function_id', 'tool_id', 'requested_name']) {
         final value = '${record[key] ?? ''}'.trim();
         if (value.isNotEmpty && _isOpenAiFunctionName(value)) names.add(value);
@@ -1046,6 +1466,7 @@ class MobileToolRuntime {
         'data': {
           'names': names.toSet().toList()..sort(),
           'mobile_compatible_tag': mobileCompatibleTag,
+          'platform_filter': platformFilter,
         },
       }),
     );
@@ -1053,11 +1474,16 @@ class MobileToolRuntime {
 
   MobileToolResult _toolList(Map<String, dynamic> args) {
     final includeUnavailable = args['include_unavailable'] != false;
+    final platformFilter = _normalizePlatformFilter(
+      args['platform'] ?? args['execution_platform'] ?? args['mobile_platform'],
+    );
     final limit = (args['limit'] is num)
         ? math.max(1, math.min(400, (args['limit'] as num).toInt()))
         : 240;
     final allRecords =
-        _runtimeCatalogRecords(includeUnavailable: includeUnavailable);
+        _runtimeCatalogRecords(includeUnavailable: includeUnavailable)
+            .where((record) => _recordMatchesPlatform(record, platformFilter))
+            .toList();
     final records = allRecords.take(limit).toList();
     return MobileToolResult(
       ok: true,
@@ -1066,6 +1492,8 @@ class MobileToolRuntime {
         'status': 'ok',
         'data': {
           'agent_template': _agentTemplateRecord(),
+          'platform_filter': platformFilter,
+          'platform_summary': _platformSummary(allRecords),
           'tools': records,
           'manifest_tool_agent_count':
               _defaultspackToolAgentManifestCatalog.length,
@@ -1316,6 +1744,10 @@ class MobileToolRuntime {
         return tool.unavailableReason;
       }
     }
+    if (normalized == 'media_clipboard_read' ||
+        normalized == 'media_clipboard_write') {
+      return 'このdefaultspack toolはiOS Swift/Android Kotlinのclipboard bridgeでスマホ実装可能ですが、clipboard読み書き用のモバイル承認UIがまだないため、このスマホ単体では実行しません。PC接続時はPC側runtimeへ委譲できます。';
+    }
     final catalogEntry = _findDefaultspackCatalogEntry(normalized);
     if (catalogEntry != null) {
       return _unsupportedReasonForTags(normalized, catalogEntry.tags);
@@ -1370,6 +1802,10 @@ String _canonicalToolName(String name) {
     }
   }
   return normalized;
+}
+
+bool _isAsyncPhoneToolName(String name) {
+  return const {'mobile_url_open'}.contains(name.trim().toLowerCase());
 }
 
 bool _isOpenAiFunctionName(String name) {
@@ -1464,10 +1900,10 @@ Map<String, dynamic> _catalogEntryRecord(
     if (!tool.available) {
       record['parameters'] = entry.inputSchema;
     }
-    record['tags'] = {
+    record['tags'] = _orderedStrings([
       ...entry.tags,
       ...(record['tags'] as List? ?? const []),
-    }.toList();
+    ]);
     return record;
   }
   final record = _unsupportedToolRecord(entry.id);
@@ -1479,7 +1915,10 @@ Map<String, dynamic> _catalogEntryRecord(
   record['summary'] =
       entry.description.isEmpty ? record['summary'] : entry.description;
   record['manifest_tags'] = entry.tags;
-  record['tags'] = entry.tags;
+  record['tags'] = _orderedStrings([
+    ...entry.tags,
+    ...(record['tags'] as List? ?? const []),
+  ]);
   record['parameters'] = entry.inputSchema;
   return record;
 }
@@ -1489,27 +1928,203 @@ Map<String, dynamic> _toolRecord(
   String functionId = '',
   String requestedName = '',
 }) {
+  final mobile = _mobileRuntimeRecordForTool(tool);
   return {
     'function_id': functionId.trim().isEmpty ? tool.name : functionId.trim(),
     'tool_id': tool.name,
     if (requestedName.trim().isNotEmpty) 'requested_name': requestedName,
     'aliases': tool.aliases,
-    'tags': tool.tags,
+    'tags': _orderedStrings([
+      ...tool.tags,
+      ...(mobile['tags'] as List? ?? const []),
+    ]),
     'mobile_compatible': tool.available,
-    'execution_location': tool.available ? 'phone' : 'pc',
+    'mobile': mobile,
+    'execution_location': mobile['execution_location'],
+    'execution_platforms': mobile['platforms'],
+    'mobile_runtime_layers': mobile['runtime_layers'],
+    'native_layers': mobile['native_layers'],
+    'requires_mobile_approval': tool.requiresMobileApproval,
     'unavailable_reason': tool.unavailableReason,
     'summary': tool.description,
     'parameters': tool.parameters,
   };
 }
 
+Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
+  if (!tool.available) {
+    return _mobileRuntimeRecordForUnavailable(
+      tool.name,
+      tool.tags,
+      tool.unavailableReason,
+    );
+  }
+  return {
+    'compatible': true,
+    'available': true,
+    'execution_location': 'phone',
+    'platforms': tool.executionPlatforms,
+    'runtime_layers': tool.runtimeLayers,
+    'native_layers': tool.nativeLayers,
+    'requires_pc': false,
+    'requires_mobile_approval': tool.requiresMobileApproval,
+    'implementation_status': 'implemented',
+    'tags': _mobilePlatformTags(
+      platforms: tool.executionPlatforms,
+      runtimeLayers: tool.runtimeLayers,
+      pcDelegated: false,
+    ),
+  };
+}
+
+Map<String, dynamic> _mobileRuntimeRecordForUnavailable(
+  String name,
+  List<String> tags,
+  String reason,
+) {
+  final plan = _mobilePortPlan(name, tags);
+  return {
+    'compatible': false,
+    'available': false,
+    'execution_location': 'pc',
+    'platforms': plan['platforms'],
+    'runtime_layers': plan['runtime_layers'],
+    'native_layers': plan['native_layers'],
+    'requires_pc': true,
+    'requires_mobile_approval': plan['requires_mobile_approval'],
+    'implementation_status': plan['implementation_status'],
+    'unavailable_reason': reason,
+    'tags': _mobilePlatformTags(
+      platforms: (plan['platforms'] as List? ?? const []).map((e) => '$e'),
+      runtimeLayers:
+          (plan['runtime_layers'] as List? ?? const []).map((e) => '$e'),
+      pcDelegated: true,
+    ),
+  };
+}
+
+Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
+  final normalized = name.trim().toLowerCase();
+  final tagSet = tags.map((tag) => tag.trim().toLowerCase()).toSet();
+  final isClipboard = normalized == 'media_clipboard_read' ||
+      normalized == 'media_clipboard_write';
+  if (isClipboard) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': ['flutter', 'ios-swift', 'android-kotlin'],
+      'native_layers': [
+        'ios:Swift UIPasteboard',
+        'android:Kotlin ClipboardManager',
+      ],
+      'requires_mobile_approval': true,
+      'implementation_status': 'feasible_needs_mobile_approval_ui',
+    };
+  }
+  if (tagSet.contains('media') ||
+      normalized.startsWith('audio_') ||
+      normalized.startsWith('image_') ||
+      normalized.startsWith('ocr_')) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': ['flutter', 'ios-swift', 'android-kotlin', 'provider'],
+      'native_layers': [
+        'ios:Swift media/photo permission bridge',
+        'android:Kotlin media permission bridge',
+      ],
+      'requires_mobile_approval': true,
+      'implementation_status': 'feasible_needs_picker_permission_or_provider',
+    };
+  }
+  if (tagSet.contains('browser') && normalized != 'browser_open_url') {
+    return const {
+      'platforms': [],
+      'runtime_layers': ['pc-browser-session'],
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'pc_browser_session_only',
+    };
+  }
+  if (tagSet.any({
+    'desktop',
+    'computer',
+    'computer_use',
+    'workspace',
+    'sandbox',
+    'terminal',
+    'agent_os',
+  }.contains)) {
+    return const {
+      'platforms': [],
+      'runtime_layers': ['pc-defaultspack-runtime'],
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'pc_only',
+    };
+  }
+  if (tagSet.contains('agent')) {
+    return const {
+      'platforms': [],
+      'runtime_layers': ['pc-agent-service'],
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'pc_agent_runtime_only',
+    };
+  }
+  if (tagSet.any({'connector', 'integration', 'external'}.contains)) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': ['flutter', 'oauth-or-provider'],
+      'native_layers': [],
+      'requires_mobile_approval': true,
+      'implementation_status': 'feasible_needs_mobile_oauth_or_connector',
+    };
+  }
+  return const {
+    'platforms': [],
+    'runtime_layers': ['pc-defaultspack-runtime'],
+    'native_layers': [],
+    'requires_mobile_approval': false,
+    'implementation_status': 'pc_delegation_required',
+  };
+}
+
+List<String> _mobilePlatformTags({
+  required Iterable<String> platforms,
+  required Iterable<String> runtimeLayers,
+  required bool pcDelegated,
+}) {
+  final normalizedPlatforms =
+      platforms.map((value) => value.trim().toLowerCase()).toSet();
+  final normalizedLayers =
+      runtimeLayers.map((value) => value.trim().toLowerCase()).toSet();
+  final tags = <String>[
+    if (normalizedLayers.contains('flutter') ||
+        normalizedLayers.contains('dart'))
+      mobileFlutterTag,
+    if (normalizedPlatforms.contains('ios')) mobileIosTag,
+    if (normalizedPlatforms.contains('android')) mobileAndroidTag,
+    if (normalizedLayers.any((layer) => layer.contains('swift')))
+      mobileSwiftNativeTag,
+    if (normalizedLayers.any((layer) => layer.contains('kotlin')))
+      mobileKotlinNativeTag,
+    if (pcDelegated) mobilePcDelegatedTag,
+  ];
+  return _orderedStrings(tags);
+}
+
 String _openAiCatalogDescription(Map<String, dynamic> record) {
   final summary = '${record['summary'] ?? ''}'.trim();
   final location = '${record['execution_location'] ?? ''}'.trim();
+  final platforms =
+      (record['execution_platforms'] as List? ?? const []).join(', ');
+  final runtimeLayers =
+      (record['mobile_runtime_layers'] as List? ?? const []).join(', ');
   if (record['mobile_compatible'] == true) {
     return [
       if (summary.isNotEmpty) summary,
       'Execution: phone-local defaultspack-compatible runtime.',
+      if (platforms.isNotEmpty) 'Mobile platforms: $platforms.',
+      if (runtimeLayers.isNotEmpty) 'Runtime layers: $runtimeLayers.',
     ].join(' ');
   }
   final reason = '${record['unavailable_reason'] ?? ''}'.trim();
@@ -1517,6 +2132,8 @@ String _openAiCatalogDescription(Map<String, dynamic> record) {
     if (summary.isNotEmpty) summary,
     'Execution: not phone-executable; calling this function returns the unavailable reason.',
     if (location.isNotEmpty) 'Required runtime: $location.',
+    if (platforms.isNotEmpty) 'Potential mobile platforms: $platforms.',
+    if (runtimeLayers.isNotEmpty) 'Runtime layers: $runtimeLayers.',
     if (reason.isNotEmpty) 'Reason: $reason',
   ].join(' ');
 }
@@ -1531,11 +2148,114 @@ bool _shouldExportCatalogRecordAsNativeTool(Map<String, dynamic> record) {
   return tags.contains('tool') && !tags.contains('tool_registry');
 }
 
+String? _normalizePlatformFilter(Object? value) {
+  final text = '${value ?? ''}'.trim().toLowerCase();
+  if (text.isEmpty || text == 'all') return null;
+  return switch (text) {
+    'ios' || 'iphone' || 'ipad' || 'swift' || 'swift-native' => 'ios',
+    'android' || 'kotlin' || 'kotlin-native' => 'android',
+    'flutter' || 'dart' => 'flutter',
+    'pc' || 'desktop' || 'host' || 'defaultspack' => 'pc',
+    _ => text,
+  };
+}
+
+bool _recordMatchesPlatform(Map<String, dynamic> record, String? platform) {
+  if (platform == null) return true;
+  final mobile = record['mobile'] is Map ? record['mobile'] as Map : const {};
+  final values = {
+    '${record['execution_location'] ?? ''}',
+    ...(record['execution_platforms'] as List? ?? const []).map((e) => '$e'),
+    ...(record['mobile_runtime_layers'] as List? ?? const []).map((e) => '$e'),
+    ...(record['native_layers'] as List? ?? const []).map((e) => '$e'),
+    ...(record['tags'] as List? ?? const []).map((e) => '$e'),
+    ...(mobile['platforms'] as List? ?? const []).map((e) => '$e'),
+    ...(mobile['runtime_layers'] as List? ?? const []).map((e) => '$e'),
+    ...(mobile['native_layers'] as List? ?? const []).map((e) => '$e'),
+    ...(mobile['tags'] as List? ?? const []).map((e) => '$e'),
+  }.map((value) => value.trim().toLowerCase()).toSet();
+  if (platform == 'pc') {
+    return values.contains('pc') ||
+        values.contains('pc-delegated') ||
+        values.contains(mobilePcDelegatedTag);
+  }
+  if (platform == 'flutter') {
+    return values.contains('flutter') ||
+        values.contains('dart') ||
+        values.contains(mobileFlutterTag);
+  }
+  if (platform == 'ios') {
+    return values.contains('ios') ||
+        values.any((value) => value.contains('swift')) ||
+        values.contains(mobileIosTag);
+  }
+  if (platform == 'android') {
+    return values.contains('android') ||
+        values.any((value) => value.contains('kotlin')) ||
+        values.contains(mobileAndroidTag);
+  }
+  return values.contains(platform);
+}
+
+String _recordSearchText(Map<String, dynamic> record) {
+  final mobile = record['mobile'] is Map ? record['mobile'] as Map : const {};
+  return [
+    record['function_id'],
+    record['tool_id'],
+    record['requested_name'],
+    record['summary'],
+    record['execution_location'],
+    ...(record['execution_platforms'] as List? ?? const []),
+    ...(record['mobile_runtime_layers'] as List? ?? const []),
+    ...(record['native_layers'] as List? ?? const []),
+    ...(record['tags'] as List? ?? const []),
+    ...(record['aliases'] as List? ?? const []),
+    mobile['implementation_status'],
+    ...(mobile['platforms'] as List? ?? const []),
+    ...(mobile['runtime_layers'] as List? ?? const []),
+    ...(mobile['native_layers'] as List? ?? const []),
+  ].join(' ').toLowerCase();
+}
+
+Map<String, dynamic> _platformSummary(List<Map<String, dynamic>> records) {
+  int count(String platform) => records
+      .where((record) => _recordMatchesPlatform(record, platform))
+      .length;
+  return {
+    'flutter': count('flutter'),
+    'ios': count('ios'),
+    'android': count('android'),
+    'pc': count('pc'),
+  };
+}
+
+List<String> _orderedStrings(Iterable<Object?> values) {
+  final output = <String>[];
+  final seen = <String>{};
+  for (final value in values) {
+    final text = '$value'.trim();
+    if (text.isEmpty || seen.contains(text)) continue;
+    seen.add(text);
+    output.add(text);
+  }
+  return output;
+}
+
+String _currentMobilePlatform() {
+  if (Platform.isIOS) return 'ios';
+  if (Platform.isAndroid) return 'android';
+  return Platform.operatingSystem;
+}
+
 String _unsupportedReasonForTags(String name, List<String> tags) {
   final normalized = name.trim().toLowerCase();
   final tagSet = tags.map((tag) => tag.trim().toLowerCase()).toSet();
   bool hasAny(Iterable<String> values) => values.any(tagSet.contains);
 
+  if (normalized == 'media_clipboard_read' ||
+      normalized == 'media_clipboard_write') {
+    return 'このdefaultspack toolはiOS Swift/Android Kotlinのclipboard bridgeでスマホ実装可能ですが、clipboard読み書き用のモバイル承認UIがまだないため、このスマホ単体では実行しません。PC接続時はPC側runtimeへ委譲できます。';
+  }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
   }
@@ -1606,16 +2326,25 @@ Map<String, dynamic> _invokeArguments(Map<String, dynamic> args) {
 
 Map<String, dynamic> _unsupportedToolRecord(String name) {
   final normalized = name.trim();
+  final tags = _inferredDefaultspackTags(normalized);
+  final reason = const MobileToolRuntime()._unsupportedReason(normalized);
+  final mobile = _mobileRuntimeRecordForUnavailable(normalized, tags, reason);
   return {
     'function_id': normalized,
     'tool_id': normalized,
     'aliases': const <String>[],
-    'tags': _inferredDefaultspackTags(normalized),
+    'tags': _orderedStrings([
+      ...tags,
+      ...(mobile['tags'] as List? ?? const []),
+    ]),
     'mobile_compatible': false,
-    'execution_location': 'pc',
-    'unavailable_reason': const MobileToolRuntime()._unsupportedReason(
-      normalized,
-    ),
+    'mobile': mobile,
+    'execution_location': mobile['execution_location'],
+    'execution_platforms': mobile['platforms'],
+    'mobile_runtime_layers': mobile['runtime_layers'],
+    'native_layers': mobile['native_layers'],
+    'requires_mobile_approval': mobile['requires_mobile_approval'],
+    'unavailable_reason': reason,
     'summary':
         'Defaultspack function is not executable in the phone-local runtime.',
     'parameters': {'type': 'object', 'additionalProperties': true},
@@ -1628,6 +2357,10 @@ List<String> _inferredDefaultspackTags(String name) {
   if (name.startsWith('tool_')) tags.add('tool');
   if (name.startsWith('browser_')) tags.addAll(['tool', 'browser']);
   if (name.startsWith('computer_')) tags.addAll(['tool', 'computer']);
+  if (name.startsWith('media_')) tags.addAll(['tool', 'media']);
+  if (name.startsWith('audio_')) tags.addAll(['tool', 'media', 'audio']);
+  if (name.startsWith('image_')) tags.addAll(['tool', 'media', 'image']);
+  if (name.startsWith('ocr_')) tags.addAll(['tool', 'media', 'ocr']);
   if (name.startsWith('coding_') || name.startsWith('sandbox_')) {
     tags.addAll(['tool', 'workspace']);
   }
