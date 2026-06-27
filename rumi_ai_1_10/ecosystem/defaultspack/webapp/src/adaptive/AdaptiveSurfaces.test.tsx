@@ -15,8 +15,23 @@ import {
   updateOnboardingUseCase,
 } from "./OnboardingShell";
 import { OperatingProfilePage } from "./OperatingProfilePage";
-import { compileAdaptiveOnboardingAnswers, updateAdaptiveAutomation } from "../lib/adaptiveApi";
-import { demoActivityState, demoAutomationState, demoOnboardingState, demoOperatingProfile } from "./demoData";
+import {
+  compileAdaptiveOnboardingAnswers,
+  toActivityState,
+  toAutomationState,
+  toEvidenceBundle,
+  toOnboardingState,
+  toOperatingProfile,
+  toRepositoryMap,
+  updateAdaptiveAutomation,
+} from "../lib/adaptiveApi";
+import {
+  demoActivityState,
+  demoAutomationState,
+  demoBackendFixture,
+  demoOnboardingState,
+  demoOperatingProfile,
+} from "./demoData";
 
 test("OnboardingShell renders the adaptive setup steps", () => {
   const html = renderToStaticMarkup(createElement(OnboardingShell, { initialState: demoOnboardingState }));
@@ -49,6 +64,29 @@ test("onboarding draft helpers preserve controlled checkbox and radio changes", 
   assert.equal(withUseCase.use_cases.uc_learning, true);
   assert.equal(withPreset.preset_id, "max_local_autonomy");
   assert.equal(withTerminal.actions.terminal, "allow");
+});
+
+test("adaptive demo data is mapped from the shared backend fixture", () => {
+  const onboarding = toOnboardingState(demoBackendFixture.onboarding_status);
+  const profile = toOperatingProfile(demoBackendFixture.onboarding_status);
+  const activity = toActivityState(demoBackendFixture.activity_center);
+  const automations = toAutomationState(demoBackendFixture.activity_center);
+  const evidence = toEvidenceBundle(demoBackendFixture.context_evidence);
+  const repositoryMap = toRepositoryMap(demoBackendFixture.repository_map);
+
+  assert.deepEqual(onboarding, demoOnboardingState);
+  assert.deepEqual(profile, demoOperatingProfile);
+  assert.deepEqual(activity, demoActivityState);
+  assert.deepEqual(automations, demoAutomationState);
+  assert.equal(onboarding.useCases.find((item) => item.id === "uc_learning")?.enabled, false);
+  assert.equal(onboarding.permissions.find((item) => item.id === "local_write")?.mode, "ask");
+  assert.equal(activity.counters.running, 1);
+  assert.equal(activity.counters.needsReview, 1);
+  assert.equal(activity.counters.blocked, 1);
+  assert.equal(activity.counters.completedToday, 1);
+  assert.equal(automations.automations[0]?.id, "automation_daily_context");
+  assert.equal(evidence.items[1]?.summary, "2 bounded lines");
+  assert.equal(repositoryMap.sections[0]?.paths.length, 4);
 });
 
 test("onboarding compile posts current draft answers to the API", async (t) => {

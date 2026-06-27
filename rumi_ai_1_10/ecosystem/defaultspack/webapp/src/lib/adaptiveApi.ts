@@ -598,7 +598,7 @@ function toneFrom(value: unknown): AdaptiveTone | undefined {
   return undefined;
 }
 
-function toOnboardingState(payload: Record<string, unknown>): AdaptiveOnboardingState {
+export function toOnboardingState(payload: Record<string, unknown>): AdaptiveOnboardingState {
   const profile = recordValue(payload.operating_profile ?? payload.profile);
   const sideEffect = recordValue(profile.side_effect_policy ?? profile.policy);
   const answers = recordValue(profile.answers);
@@ -661,7 +661,7 @@ function toOnboardingState(payload: Record<string, unknown>): AdaptiveOnboarding
   };
 }
 
-function toOperatingProfile(payload: Record<string, unknown>): AdaptiveOperatingProfile {
+export function toOperatingProfile(payload: Record<string, unknown>): AdaptiveOperatingProfile {
   const profile = recordValue(payload.operating_profile);
   const sideEffect = recordValue(profile.side_effect_policy ?? profile.policy);
   const presetLabel = String(recordValue(profile.source).preset_id ?? profile.preset_id ?? "guided");
@@ -682,7 +682,7 @@ function toOperatingProfile(payload: Record<string, unknown>): AdaptiveOperating
   };
 }
 
-function toActivityState(payload: Record<string, unknown>): AdaptiveActivityState {
+export function toActivityState(payload: Record<string, unknown>): AdaptiveActivityState {
   const prepared = Array.isArray(payload.prepared_actions) ? payload.prepared_actions : [];
   const conflicts = Array.isArray(payload.memory_conflicts) ? payload.memory_conflicts : [];
   const events = Array.isArray(payload.events) ? payload.events : [];
@@ -708,7 +708,7 @@ function toActivityState(payload: Record<string, unknown>): AdaptiveActivityStat
         id: String(record.id ?? `event-${index}`),
         title: String(record.type ?? "Adaptive event"),
         kind: "task",
-        status: "done",
+        status: activityStatusFromEvent(record),
         summary: "Durable adaptive event",
         actor: "Runtime",
         startedAt: String(record.created_at ?? ""),
@@ -731,7 +731,19 @@ function toActivityState(payload: Record<string, unknown>): AdaptiveActivityStat
   };
 }
 
-function toAutomationState(payload: Record<string, unknown>): AdaptiveAutomationState {
+function activityStatusFromEvent(record: Record<string, unknown>): AdaptiveActivityStatus {
+  const payload = recordValue(record.payload);
+  const raw = String(payload.status ?? record.status ?? record.delivery_status ?? "").trim().toLowerCase();
+  if (raw === "running" || raw === "queued" || raw === "needs_review" || raw === "blocked" || raw === "done") {
+    return raw;
+  }
+  if (/review|approval/.test(raw)) return "needs_review";
+  if (/block|fail|error|dead_letter/.test(raw)) return "blocked";
+  if (/success|succeed|passed|verified|complete|done|acked|delivered/.test(raw)) return "done";
+  return "done";
+}
+
+export function toAutomationState(payload: Record<string, unknown>): AdaptiveAutomationState {
   const automations = Array.isArray(payload.automations) ? payload.automations : [];
   const templates = Array.isArray(payload.automation_templates ?? payload.templates)
     ? (payload.automation_templates ?? payload.templates) as unknown[]
@@ -780,7 +792,7 @@ function toAutomation(record: Record<string, unknown>, fallbackId: string): Adap
   };
 }
 
-function toEvidenceBundle(payload: Record<string, unknown>): AdaptiveEvidenceBundle {
+export function toEvidenceBundle(payload: Record<string, unknown>): AdaptiveEvidenceBundle {
   const items = Array.isArray(payload.items) ? payload.items : [];
   return {
     selectedId: null,
@@ -800,7 +812,7 @@ function toEvidenceBundle(payload: Record<string, unknown>): AdaptiveEvidenceBun
   };
 }
 
-function toRepositoryMap(payload: Record<string, unknown>): AdaptiveRepositoryMap {
+export function toRepositoryMap(payload: Record<string, unknown>): AdaptiveRepositoryMap {
   const files = Array.isArray(payload.files) ? payload.files.map(String) : [];
   return {
     rootLabel: String(payload.root ?? "workspace"),

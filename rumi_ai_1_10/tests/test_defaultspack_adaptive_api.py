@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -329,6 +330,57 @@ def test_adaptive_function_route_defaults_ignore_client_operation_override(
     assert result["status"] == "ok"
     assert result["data"]["compiled"] is True
     assert "activity" not in result["data"]
+
+
+def test_adaptive_frontend_fixture_tracks_backend_route_contracts(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from domain.adaptive.service import dispatch
+
+    fixture_path = DEFAULTSPACK_ROOT / "webapp" / "src" / "adaptive" / "adaptiveBackend.fixture.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    status_keys = {
+        "profile_id",
+        "configured",
+        "current",
+        "operating_profile",
+        "last_history_entry",
+        "freeze",
+        "prepared_actions",
+        "memory_conflicts",
+        "events",
+        "event_outbox",
+        "event_subscriptions",
+    }
+    activity_keys = {
+        "profile_id",
+        "created_at",
+        "onboarding_configured",
+        "freeze",
+        "prepared_actions",
+        "events",
+        "event_delivery_summary",
+        "event_outbox",
+        "event_subscriptions",
+        "memory_conflicts",
+        "memory_conflict_summary",
+        "leases",
+        "automations",
+        "automation_templates",
+        "automation_simulation",
+    }
+
+    assert status_keys <= set(fixture["onboarding_status"])
+    assert activity_keys <= set(fixture["activity_center"])
+
+    live_status = dispatch("onboarding_status", {"profile_id": "fixture-contract"}, {})
+    assert live_status["status"] == "ok"
+    assert status_keys <= set(live_status["data"])
+
+    live_activity = dispatch("activity_snapshot", {"profile_id": "fixture-contract"}, {})
+    assert live_activity["status"] == "ok"
+    assert activity_keys <= set(live_activity["data"])
 
 
 def test_context_file_read_search_and_evidence_are_bounded(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

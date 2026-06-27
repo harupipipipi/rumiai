@@ -13,8 +13,9 @@ approval flags.
   marketplace state.
 - Bounded file reads, contextual code search, repository maps, and evidence
   bundles.
-- Durable event delivery, approval continuations, prepared actions, automation
-  drafts, and emergency freeze.
+- Durable-event foundation: JSONL event log, outbox markers,
+  subscription/ack/retry/DLQ state, state-only continuations, prepared actions,
+  automation drafts, and emergency freeze.
 - Failure-to-success Skill candidates, replay/canary metadata, rollback, memory
   conflict review, multi-agent leases, budgets, and Activity Center visibility.
 
@@ -29,11 +30,23 @@ approval flags.
 - `Maximum Local Autonomy` means high autonomy inside managed local boundaries.
   It never implies external messages, production deploys, git push or merge,
   purchase, secret use, or network write.
-- High-risk actions use prepared plans with exact-plan binding before commit.
+- High-risk actions use prepared plans with exact-plan binding before commit;
+  non-automation prepared commits queue follow-up work rather than bypassing
+  host/file/terminal/git/browser approval paths.
 - Webhook and automation secrets are stored as references; raw secret values are
   never returned to model-facing or UI-facing normal responses.
 - Freeze mode blocks new mutating activity and outbound delivery while preserving
   read-only inspection and recovery data.
+
+## Foundation Boundaries
+
+This PR is an adaptive runtime foundation, not a complete durable workflow
+engine. Events, outbox items, subscriptions, retry/DLQ state, and continuations
+are persisted local state with explicit resume markers. They do not provide
+distributed exactly-once execution, cross-process work stealing, or automatic
+post-approval host action replay. Those guarantees require a later continuation
+runner that is wired through the same approval, workspace jail, local guard,
+capability trust, and audit paths.
 
 ## API Surface
 
@@ -71,7 +84,14 @@ provider-specific webhook verifier explicitly handles the request first.
 | `POST` | `/api/prepared-actions/{id}/revoke` | `adaptive_prepared_action_revoke` |
 | `POST` | `/api/events` | `adaptive_event_append` |
 | `GET` | `/api/events` | `adaptive_event_list` |
+| `POST` | `/api/events/{id}/ack` | `adaptive_event_ack` |
+| `POST` | `/api/events/{id}/retry` | `adaptive_event_retry` |
+| `POST` | `/api/events/{id}/dlq` | `adaptive_event_dlq` |
+| `GET` | `/api/events/outbox` | `adaptive_event_outbox` |
 | `POST` | `/api/events/replay` | `adaptive_event_replay` |
+| `POST` | `/api/events/subscriptions` | `adaptive_event_subscribe` |
+| `GET` | `/api/events/subscriptions` | `adaptive_event_subscription_list` |
+| `POST` | `/api/continuations/resume` | `adaptive_continuation_resume` |
 | `GET` | `/api/skills/candidates` | `adaptive_skill_candidates_list` |
 | `POST` | `/api/skills/candidates/{id}/promote` | `adaptive_skill_candidate_promote` |
 | `POST` | `/api/skills/candidates/{id}/rollback` | `adaptive_skill_candidate_rollback` |
