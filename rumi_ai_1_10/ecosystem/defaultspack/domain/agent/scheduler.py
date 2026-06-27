@@ -452,6 +452,37 @@ class Scheduler:
         entries, total = load_history(schedule_id, limit=limit, offset=offset)
         return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
+    def _task_timeout_seconds(self, value):
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError):
+            return None
+        if timeout <= 0:
+            return None
+        return timeout
+
+    def _request_chat_cancel(self, conversation_id):
+        if not conversation_id:
+            return
+        try:
+            from domain.chat.cancellation import get_chat_cancellation_registry
+
+            get_chat_cancellation_registry().request_cancel(str(conversation_id))
+        except Exception:
+            pass
+
+    def _run_with_timeout_cancel(self, func, timeout_seconds, *, conversation_id=None):
+        timer = None
+        if timeout_seconds is not None and conversation_id:
+            timer = threading.Timer(timeout_seconds, self._request_chat_cancel, args=[conversation_id])
+            timer.daemon = True
+            timer.start()
+        try:
+            return func()
+        finally:
+            if timer is not None:
+                timer.cancel()
+
     # ---- internal ----
 
     def _compute_next_execution(self, sched):
@@ -576,7 +607,7 @@ class Scheduler:
         task_cfg = sched.get("task", {})
         message = task_cfg.get("message", "")
         model = task_cfg.get("model", "default")
-        timeout = task_cfg.get("timeout", 300)
+        timeout = self._task_timeout_seconds(task_cfg.get("timeout", 300))
         conversation_id = task_cfg.get("conversation_id")
 
         exec_id = "sexec_" + gen_id()
@@ -604,27 +635,35 @@ class Scheduler:
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
+                if timeout is not None:
+                    params.setdefault("request_timeout", timeout)
+                    params.setdefault("timeout", timeout)
                 metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
-                result = chat_send_run(
-                    {
-                        "conversation_id": conversation_id,
-                        "message": {
-                            "role": "user",
-                            "content": message,
-                            "metadata": {
-                                **metadata,
-                                "source": "scheduler",
-                                "schedule_id": schedule_id,
-                                "schedule_execution_id": exec_id,
-                                "trigger": "manual" if manual else "scheduled",
-                                "profile_id": task_cfg.get("profile_id"),
-                                "agent_id": task_cfg.get("agent_id"),
-                            },
+                input_payload = {
+                    "conversation_id": conversation_id,
+                    "message": {
+                        "role": "user",
+                        "content": message,
+                        "metadata": {
+                            **metadata,
+                            "source": "scheduler",
+                            "schedule_id": schedule_id,
+                            "schedule_execution_id": exec_id,
+                            "trigger": "manual" if manual else "scheduled",
+                            "profile_id": task_cfg.get("profile_id"),
+                            "agent_id": task_cfg.get("agent_id"),
                         },
-                        "params": params,
-                        "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
                     },
-                    {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                    "params": params,
+                    "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
+                }
+                context_payload = {
+                    "profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+                }
+                result = self._run_with_timeout_cancel(
+                    lambda: chat_send_run(input_payload, context_payload),
+                    timeout,
+                    conversation_id=conversation_id,
                 )
             else:
                 from blocks.ai.complete import run as ai_complete_run
@@ -638,7 +677,10 @@ class Scheduler:
                 messages.append({"role": "user", "content": message})
 
                 empty_context = {}
-                result = ai_complete_run({"messages": messages, "model": model}, empty_context)
+                payload = {"messages": messages, "model": model}
+                if timeout is not None:
+                    payload["params"] = {"request_timeout": timeout, "timeout": timeout}
+                result = self._run_with_timeout_cancel(lambda: ai_complete_run(payload, empty_context), timeout)
 
             if result.get("status") == "ok":
                 data = result.get("data", {})

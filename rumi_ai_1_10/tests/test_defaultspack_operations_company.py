@@ -564,6 +564,50 @@ def test_operations_heartbeat_trigger_persists_into_single_client_conversation(t
     _reset_defaultspack_singletons()
 
 
+def test_scheduler_trigger_applies_task_timeout_to_chat_params_and_cancel_timer(tmp_path, monkeypatch):
+    import time
+
+    from blocks.chat import send as chat_send
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.cancellation import get_chat_cancellation_registry
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    seen = {}
+
+    def cancellable_chat_send(input_data, _context):
+        seen["params"] = input_data.get("params")
+        deadline = time.time() + 1.0
+        while time.time() < deadline:
+            if get_chat_cancellation_registry().is_cancelled("conv-timeout"):
+                return {"status": "error", "error": {"message": "cancelled by schedule timeout"}}
+            time.sleep(0.01)
+        return {"status": "ok", "data": {"content": "late"}}
+
+    monkeypatch.setattr(chat_send, "run", cancellable_chat_send)
+
+    schedule = Scheduler().create_schedule(
+        "once",
+        {
+            "message": "slow scheduled chat",
+            "conversation_id": "conv-timeout",
+            "timeout": 0.05,
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    result = Scheduler().trigger_now(schedule["id"])
+
+    assert result["status"] == "error"
+    assert result["error"] == "cancelled by schedule timeout"
+    assert seen["params"]["request_timeout"] == 0.05
+    assert seen["params"]["timeout"] == 0.05
+    assert get_chat_cancellation_registry().is_cancelled("conv-timeout") is True
+
+    Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_rumi_api_tool_lists_routes_and_requires_mutation_approval():
     from ecosystem.rumi_default_tools_pack.domain.tool.rumi_api import run
 
