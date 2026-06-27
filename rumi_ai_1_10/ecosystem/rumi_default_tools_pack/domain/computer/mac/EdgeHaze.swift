@@ -152,14 +152,14 @@ final class EdgeHazeController {
 
     func targetWindowDrawRect(for lease: HazeLease, displayBounds: CGRect, viewBounds: NSRect) -> NSRect? {
         guard let target = lease.target_window else {
-            return nil
+            return fallbackDrawRect(viewBounds)
         }
         guard let targetRect = visibleTargetWindowRect(for: target, displayBounds: displayBounds, viewBounds: viewBounds) else {
-            return nil
+            return fallbackDrawRect(viewBounds)
         }
         let clipped = targetRect.intersection(viewBounds)
         if clipped.isNull || clipped.isEmpty || clipped.width < 80 || clipped.height < 60 {
-            return nil
+            return fallbackDrawRect(viewBounds)
         }
         return clipped
     }
@@ -167,9 +167,6 @@ final class EdgeHazeController {
     private func visibleTargetWindowRect(for target: TargetWindowLease, displayBounds: CGRect, viewBounds: NSRect) -> NSRect? {
         var candidates: [(score: Int, area: CGFloat, rect: NSRect)] = []
         for snapshot in windows {
-            if frontmostPID > 0 && snapshot.ownerPID != frontmostPID {
-                continue
-            }
             guard windowInfoMatches(snapshot.info, target: target) else {
                 continue
             }
@@ -188,6 +185,19 @@ final class EdgeHazeController {
             }
             return lhs.score > rhs.score
         }.first?.rect
+    }
+
+    private func fallbackDrawRect(_ viewBounds: NSRect) -> NSRect? {
+        if viewBounds.isNull || viewBounds.isEmpty || viewBounds.width <= 0 || viewBounds.height <= 0 {
+            return nil
+        }
+        return viewBounds
+    }
+
+    func installSelfTestState(lease: HazeLease?, windows: [WindowSnapshot], frontmostPID: Int) {
+        self.lease = lease
+        self.windows = windows
+        self.frontmostPID = frontmostPID
     }
 
     private func currentWindowSnapshot() -> [WindowSnapshot] {
@@ -598,6 +608,32 @@ func runSelfTests() {
         let rect = appKitRect(from: ["X": display.origin.x + 10, "Y": display.origin.y + 20, "Width": 200, "Height": 100], displayBounds: display)
         precondition(rect == NSRect(x: 10, y: display.height - 120, width: 200, height: 100), "display-local rect conversion failed")
     }
+
+    let controller = EdgeHazeController()
+    let displayBounds = CGRect(x: 0, y: 0, width: 1440, height: 900)
+    let viewBounds = NSRect(x: 0, y: 0, width: 1440, height: 900)
+    let backgroundWindow = WindowSnapshot(
+        info: baseWindow,
+        windowNumber: 101,
+        ownerPID: 222,
+        ownerName: "Vivaldi",
+        title: "Google - Vivaldi",
+        layer: 0,
+        bounds: baseWindow[kCGWindowBounds as String]
+    )
+    let targetedLease = HazeLease(schema: "rumi.edge_haze_lease.v1", pid: nil, sequence_id: "self-test", deadline_epoch: Date().timeIntervalSince1970 + 60, action: "computer.type", active: true, status_text: nil, virtual_pointer: nil, target_window: target)
+    controller.installSelfTestState(lease: targetedLease, windows: [backgroundWindow], frontmostPID: 999)
+    let targetedRect = controller.targetWindowDrawRect(for: targetedLease, displayBounds: displayBounds, viewBounds: viewBounds)
+    precondition(targetedRect == NSRect(x: 10, y: 280, width: 800, height: 600), "visible non-frontmost target should draw target rect")
+
+    let untargetedLease = HazeLease(schema: "rumi.edge_haze_lease.v1", pid: nil, sequence_id: "self-test", deadline_epoch: Date().timeIntervalSince1970 + 60, action: "browser.open_url", active: true, status_text: nil, virtual_pointer: nil, target_window: nil)
+    let fallbackRect = controller.targetWindowDrawRect(for: untargetedLease, displayBounds: displayBounds, viewBounds: viewBounds)
+    precondition(fallbackRect == viewBounds, "untargeted lease should draw full-screen fallback")
+
+    let missingTarget = TargetWindowLease(app: "Safari", pid: 333, window_id: 999, window_title: "Missing", x: nil, y: nil, width: nil, height: nil, frame_window_ids: nil)
+    let missingLease = HazeLease(schema: "rumi.edge_haze_lease.v1", pid: nil, sequence_id: "self-test", deadline_epoch: Date().timeIntervalSince1970 + 60, action: "computer.type", active: true, status_text: nil, virtual_pointer: nil, target_window: missingTarget)
+    let missingFallbackRect = controller.targetWindowDrawRect(for: missingLease, displayBounds: displayBounds, viewBounds: viewBounds)
+    precondition(missingFallbackRect == viewBounds, "missing target should draw full-screen fallback")
 }
 
 if CommandLine.arguments.contains("--self-test") {

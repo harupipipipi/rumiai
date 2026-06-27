@@ -38,6 +38,7 @@ class MacCGEventPidDriver(ComputerDriver):
             can_background_click=True,
             can_background_type=True,
             can_background_key=True,
+            can_background_scroll=True,
             can_pid_event=True,
             can_foreground_action=False,
             can_parallel_user_work=True,
@@ -212,6 +213,8 @@ class MacCGEventPidDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
+        from ..mac.cgevent import post_scroll_to_pid
+
         if target.pid is None:
             return ActionResult(
                 action="scroll",
@@ -220,14 +223,24 @@ class MacCGEventPidDriver(ComputerDriver):
                 notes=["CGEventPostToPid requires a PID"],
             )
 
-        # TODO: Implement CGEvent scroll posting
-        return ActionResult(
-            action="scroll",
-            driver=self.name,
-            executed=False,
-            confidence="experimental",
-            notes=["⚠️ EXPERIMENTAL: CGEvent scroll not yet implemented"],
-        )
+        try:
+            success = post_scroll_to_pid(pid=target.pid, x=x, y=y, direction=direction, clicks=clicks)
+            return ActionResult(
+                action="scroll",
+                driver=self.name,
+                executed=success,
+                confidence="experimental",
+                can_parallel_user_work=True,
+                uses_physical_input=False,
+                notes=["⚠️ EXPERIMENTAL: CGEventPostToPid scroll"],
+            )
+        except Exception as e:
+            return ActionResult(
+                action="scroll",
+                driver=self.name,
+                executed=False,
+                notes=[f"CGEvent scroll failed: {e}"],
+            )
 
     def semantic_action(
         self,

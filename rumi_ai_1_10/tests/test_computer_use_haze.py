@@ -404,8 +404,29 @@ def test_browser_computer_haze_payload_includes_target_window(tmp_path, monkeypa
     monkeypatch.setattr(
         controller,
         "_list_windows",
-        lambda: [
-            {
+        lambda: (_ for _ in ()).throw(AssertionError("haze payload must not enumerate windows before action")),
+    )
+    monkeypatch.setattr(
+        controller,
+        "_window_at_point",
+        lambda *args: (_ for _ in ()).throw(AssertionError("haze payload must not inspect point windows before action")),
+    )
+
+    payload = controller._edge_haze_payload("computer.key", {"app": "Vivaldi", "key_combo": "return"})
+
+    assert payload["edge_haze_target_window"] == {"app": "Vivaldi"}
+
+
+def test_browser_computer_haze_payload_preserves_explicit_target_window(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+    controller = BrowserComputerController(artifact_root=tmp_path)
+
+    payload = controller._edge_haze_payload(
+        "computer.key",
+        {
+            "key_combo": "return",
+            "edge_haze_target_window": {
                 "app": "Vivaldi",
                 "title": "Google - Vivaldi",
                 "x": 0,
@@ -415,11 +436,9 @@ def test_browser_computer_haze_payload_includes_target_window(tmp_path, monkeypa
                 "window_id": 7112,
                 "pid": 23721,
                 "frame_window_ids": [7112, 7113],
-            }
-        ],
+            },
+        },
     )
-
-    payload = controller._edge_haze_payload("computer.key", {"app": "Vivaldi", "key_combo": "return"})
 
     assert payload["edge_haze_target_window"] == {
         "app": "Vivaldi",
@@ -455,11 +474,9 @@ def test_browser_computer_virtual_pointer_payload_includes_target_window(tmp_pat
 
     monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(edge_haze.ComputerUseEdgeHazeManager, "from_pack_root", FakeManager.from_pack_root)
-    monkeypatch.setattr(
-        controller,
-        "_list_windows",
-        lambda: [
-            {
+    controller._write_computer_state(
+        {
+            "target_window": {
                 "app": "Vivaldi",
                 "title": "Google - Vivaldi",
                 "x": 0,
@@ -469,7 +486,7 @@ def test_browser_computer_virtual_pointer_payload_includes_target_window(tmp_pat
                 "window_id": 7112,
                 "pid": 23721,
             }
-        ],
+        }
     )
 
     result = controller._publish_virtual_pointer(
@@ -631,12 +648,15 @@ def test_edge_haze_swift_helper_watches_lease():
     assert "EdgeHazeController" in text
     assert "windowInfoMatches" in text
     assert "targetWindowDrawRect" in text
+    assert "fallbackDrawRect" in text
     assert "frontmostApplication" in text
     assert "appKitRect(from:" in text
     assert "displayBounds(for:" in text
     assert "drawVirtualPointer" in text
     assert "考え中" in text
     assert "app.terminate(nil)" in text
+    assert "snapshot.ownerPID != frontmostPID" not in text
+    assert "visible non-frontmost target should draw target rect" in text
 
 
 def test_edge_haze_draw_path_uses_cached_state():

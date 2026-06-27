@@ -108,6 +108,48 @@ class BackgroundKeyDriver(MockDriver):
         )
 
 
+class PidEventDriver(MockDriver):
+    def __init__(self, name_: str, *, unsafe_foreground: bool = False):
+        super().__init__(name_, succeed=True)
+        self.unsafe_foreground = unsafe_foreground
+        self.calls: list[tuple[str, dict[str, object]]] = []
+
+    def capabilities(self) -> ComputerCapabilities:
+        return ComputerCapabilities(
+            can_background_click=True,
+            can_background_type=True,
+            can_background_key=True,
+            can_background_scroll=True,
+            can_pid_event=True,
+            can_foreground_action=self.unsafe_foreground,
+            can_parallel_user_work=not self.unsafe_foreground,
+        )
+
+    def _result(self, action: str, **data: object) -> ActionResult:
+        self.calls.append((action, data))
+        return ActionResult(
+            action=action,
+            driver=self._name,
+            executed=True,
+            can_parallel_user_work=not self.unsafe_foreground,
+            requires_foreground=self.unsafe_foreground,
+            uses_physical_input=self.unsafe_foreground,
+            data=data,
+        )
+
+    def click(self, target, x=0, y=0, button="left"):
+        return self._result("click", x=x, y=y, button=button, pid=target.pid)
+
+    def type_text(self, target, text=""):
+        return self._result("type_text", text=text, pid=target.pid)
+
+    def key(self, target, key_combo=""):
+        return self._result("key", key_combo=key_combo, pid=target.pid)
+
+    def scroll(self, target, x=0, y=0, direction="down", clicks=3):
+        return self._result("scroll", x=x, y=y, direction=direction, clicks=clicks, pid=target.pid)
+
+
 def _make_service(drivers):
     reg = DriverRegistry()
     for d in drivers:
@@ -184,6 +226,43 @@ def test_post_only_transports_are_explicit_background_only(driver_name):
 
     assert verified["executed"] is False
     assert driver.called is False
+
+
+@pytest.mark.parametrize("driver_name", ["mac_cgevent_pid", "windows_postmessage"])
+@pytest.mark.parametrize(
+    ("action", "payload", "expected"),
+    [
+        ("click", {"x": 10, "y": 20, "button": "left"}, {"x": 10, "y": 20, "button": "left", "pid": 123}),
+        ("type_text", {"text": "hello"}, {"text": "hello", "pid": 123}),
+        ("key", {"key_combo": "return"}, {"key_combo": "return", "pid": 123}),
+        ("scroll", {"x": 7, "y": 8, "direction": "down", "clicks": 2}, {"x": 7, "y": 8, "direction": "down", "clicks": 2, "pid": 123}),
+    ],
+)
+def test_pid_event_uses_only_pid_safe_transports(driver_name, action, payload, expected):
+    unsafe = PidEventDriver("mac_swift_host", unsafe_foreground=True)
+    safe = PidEventDriver(driver_name)
+    svc = _make_service([unsafe, safe])
+
+    result = svc.pid_event(action, {"app": "Vivaldi", "pid": 123}, payload)
+
+    assert result["executed"] is True
+    assert result["driver"] == driver_name
+    assert result["uses_physical_input"] is False
+    assert result["requires_foreground"] is False
+    assert result["can_parallel_user_work"] is True
+    assert unsafe.calls == []
+    assert safe.calls == [(action, expected)]
+
+
+def test_pid_event_rejects_driver_without_can_pid_event():
+    driver = BackgroundKeyDriver("mac_cgevent_pid")
+    svc = _make_service([driver])
+
+    result = svc.pid_event("key", {"app": "Vivaldi", "pid": 123}, {"key_combo": "return"})
+
+    assert result["executed"] is False
+    assert driver.called is False
+    assert "No PID/PostMessage driver accepted" in result["notes"][-1]
 
 
 def test_mac_accessibility_skips_ax_set_value_for_vivaldi():

@@ -48,6 +48,10 @@ def _normalize_key_name(key: Any) -> str:
     return aliases.get(value.lower(), value)
 
 
+def _running_under_pytest() -> bool:
+    return "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+
+
 def _key_combo_from_payload(payload: dict[str, Any]) -> str:
     explicit = str(payload.get("key_combo") or "").strip()
     if explicit:
@@ -280,36 +284,17 @@ class BrowserComputerController:
             target = self._edge_haze_target_from_mapping(window_payload, fallback=payload)
             if target:
                 return target
-        has_explicit_target = self._has_explicit_window_filter(payload)
-        if has_explicit_target:
-            target = self._matching_window(payload)
-            if target:
-                return self._edge_haze_target_from_mapping(target, fallback=payload)
-        if action in {"computer.move", "computer.click", "computer.drag"}:
-            point = self._edge_haze_action_point(payload)
-            if point is not None:
-                target = self._window_at_point(*point)
-                if target:
-                    return self._edge_haze_target_from_mapping(target, fallback=payload)
-        if has_explicit_target:
-            return None
+        target = self._edge_haze_target_from_mapping(payload)
+        if target:
+            return target
         state = self._computer_state()
+        if not self._state_matches_artifact_root(state):
+            state = {}
         selected = state.get("target_window") if isinstance(state.get("target_window"), dict) else None
         if selected:
             target = self._edge_haze_target_from_mapping(selected, fallback=payload)
             if target:
                 return target
-        return self._edge_haze_target_from_mapping(payload)
-
-    @staticmethod
-    def _edge_haze_action_point(payload: dict[str, Any]) -> tuple[int, int] | None:
-        for x_key, y_key in (("x", "y"), ("x2", "y2"), ("to_x", "to_y")):
-            try:
-                if payload.get(x_key) is None or payload.get(y_key) is None:
-                    continue
-                return int(float(payload.get(x_key))), int(float(payload.get(y_key)))
-            except Exception:
-                continue
         return None
 
     @classmethod
@@ -1504,6 +1489,8 @@ class BrowserComputerController:
         has_explicit_target = self._has_explicit_window_filter(payload)
         window = self._matching_window(payload) if has_explicit_target else None
         state = self._computer_state()
+        if not self._state_matches_artifact_root(state):
+            state = {}
         if window is None and not has_explicit_target:
             selected = state.get("target_window")
             window = self._normalize_window_record(selected) if isinstance(selected, dict) else None
@@ -1652,24 +1639,62 @@ class BrowserComputerController:
             return self._approval_required("computer.pid_event", self._safe_payload(payload))
         try:
             svc = self._get_computer_seat()
-            target = {"app": None, "pid": payload.get("pid"), "window_id": None, "window_title": None}
-            action = payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click"
+            target = self._pid_event_target(payload)
+            action = self._pid_event_sub_action(payload)
             with self._edge_haze("computer.pid_event", payload):
-                if action == "click":
-                    result = svc.click(target, x=payload.get("x", 0), y=payload.get("y", 0), button=payload.get("button", "left"))
-                elif action == "type_text":
-                    result = svc.type_text(target, text=payload.get("text", ""))
-                elif action == "key":
-                    result = svc.key(target, key_combo=payload.get("key_combo", ""))
-                elif action == "scroll":
-                    result = svc.scroll(target, x=payload.get("x", 0), y=payload.get("y", 0), direction=payload.get("direction", "down"), clicks=payload.get("clicks", 3))
-                else:
-                    return {"action": "computer.pid_event", "error": f"Unknown sub-action: {action}"}
+                result = svc.pid_event(action, target, self._pid_event_payload(action, payload))
             result["action"] = "computer.pid_event"
+            result["sub_action"] = action
             result["_experimental"] = True
             return result
         except Exception as e:
             return {"action": "computer.pid_event", "error": str(e), "_experimental": True}
+
+    @staticmethod
+    def _pid_event_sub_action(payload: dict[str, Any]) -> str:
+        raw = str(payload.get("sub_action") or payload.get("action_type") or payload.get("action") or "click").strip()
+        raw = raw.removeprefix("computer.")
+        aliases = {
+            "type": "type_text",
+            "type_text": "type_text",
+            "text": "type_text",
+            "click": "click",
+            "key": "key",
+            "scroll": "scroll",
+        }
+        if raw not in aliases:
+            raise ValueError(f"Unknown pid_event sub-action: {raw}")
+        return aliases[raw]
+
+    @staticmethod
+    def _pid_event_target(payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "kind": payload.get("target_kind") or payload.get("kind") or "desktop",
+            "app": payload.get("app") or payload.get("application"),
+            "pid": payload.get("pid"),
+            "window_id": payload.get("window_id"),
+            "window_title": payload.get("title") or payload.get("window_title"),
+            "hwnd": payload.get("hwnd"),
+            "bundle_id": payload.get("bundle_id"),
+            "coordinate_space": payload.get("coordinate_space") or payload.get("space") or "window",
+        }
+
+    @staticmethod
+    def _pid_event_payload(action: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if action == "click":
+            return {"x": payload.get("x", 0), "y": payload.get("y", 0), "button": payload.get("button", "left")}
+        if action == "type_text":
+            return {"text": payload.get("text", "")}
+        if action == "key":
+            return {"key_combo": payload.get("key_combo") or _key_combo_from_payload(payload)}
+        if action == "scroll":
+            return {
+                "x": payload.get("x", 0),
+                "y": payload.get("y", 0),
+                "direction": payload.get("direction", "down"),
+                "clicks": payload.get("clicks", payload.get("amount", 3)),
+            }
+        raise ValueError(f"Unknown pid_event sub-action: {action}")
 
     def _computer_seat_doctor(self) -> dict[str, Any]:
         """Delegate to ComputerSeatService.doctor."""
@@ -1712,7 +1737,7 @@ class BrowserComputerController:
             action in {"computer.move", "computer.click", "computer.drag"}
             and action_payload.get("physical") is True
             and platform.system() == "Darwin"
-            and "PYTEST_CURRENT_TEST" not in os.environ
+            and not _running_under_pytest()
         ):
             return None
         try:
@@ -3048,6 +3073,8 @@ class BrowserComputerController:
         remember_cursor: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
         state = self._computer_state()
+        if not self._state_matches_artifact_root(state):
+            state = {}
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
         x, y = self._point_from_payload(payload, cursor)
         target = self._capture_target(payload)
@@ -3232,6 +3259,8 @@ class BrowserComputerController:
         remember_cursor: bool = True,
     ) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
         state = self._computer_state()
+        if not self._state_matches_artifact_root(state):
+            state = {}
         cursor = state.get("ai_cursor") if isinstance(state.get("ai_cursor"), dict) else {}
         start_x = self._coordinate_from_payload(payload, ("x1", "from_x", "start_x"), cursor.get("x", 0))
         start_y = self._coordinate_from_payload(payload, ("y1", "from_y", "start_y"), cursor.get("y", 0))

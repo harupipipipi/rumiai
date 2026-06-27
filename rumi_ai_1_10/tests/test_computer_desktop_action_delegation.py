@@ -17,6 +17,11 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer
 @pytest.fixture
 def controller(tmp_path):
     ctrl = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    shared = tmp_path / "user_data" / "shared"
+    ctrl._session_path = shared / "browser_sessions.json"
+    ctrl._approval_path = shared / "browser_computer_approvals.json"
+    ctrl._browser_root = shared / "browser"
+    ctrl._profile_root = ctrl._browser_root / "profiles"
     return ctrl
 
 
@@ -307,6 +312,7 @@ def test_background_safe_only_requires_background_api(controller):
 
 
 def test_implicit_background_rejects_experimental_and_uses_foreground(controller, monkeypatch):
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
     svc = MagicMock()
     def background_action(action, target, payload, *, verified_only=False):
         if verified_only:
