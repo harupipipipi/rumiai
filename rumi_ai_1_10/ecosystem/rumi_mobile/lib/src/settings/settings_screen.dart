@@ -161,8 +161,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _scanApi() async {
-    final result = await Navigator.of(context).push<(QrPayload, bool)>(
+  Future<void> _scanApi({BuildContext? navigationContext}) async {
+    final result = await Navigator.of(
+      navigationContext ?? context,
+    ).push<(QrPayload, bool)>(
       MaterialPageRoute(
         builder: (_) => const QrScannerScreen(
           purpose: QrScanPurpose.apiImport,
@@ -776,13 +778,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _toast('${provider.effectiveLabel} をこのスマホのAPIにしました');
   }
 
-  Future<void> _editMobileProvider(MobileProviderConfig provider) async {
+  Future<void> _editMobileProvider(
+    MobileProviderConfig provider, {
+    BuildContext? sheetContext,
+  }) async {
     final label = TextEditingController(text: provider.label);
     final apiKey = TextEditingController(text: provider.apiKey);
     final baseUrl = TextEditingController(text: provider.baseUrl);
     final model = TextEditingController(text: provider.model);
     final saved = await showModalBottomSheet<MobileProviderConfig>(
-      context: context,
+      context: sheetContext ?? context,
       isScrollControlled: true,
       showDragHandle: true,
       useSafeArea: true,
@@ -943,6 +948,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
         pc.token == device.deviceToken;
   }
 
+  Future<void> _openMobileApiSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (routeContext) => StatefulBuilder(
+          builder: (context, setRouteState) {
+            Future<void> refresh(Future<void> Function() action) async {
+              await action();
+              if (routeContext.mounted) {
+                setRouteState(() {});
+              }
+            }
+
+            return _MobileApiSettingsPage(
+              providerConfigs: _providerConfigs,
+              config: _config,
+              fetchingCatalog: _fetchingCatalog,
+              catalogError: _catalogError,
+              saving: _saving,
+              baseUrl: _baseUrl,
+              apiKey: _apiKey,
+              model: _model,
+              label: _label,
+              systemPrompt: _systemPrompt,
+              isActiveProvider: _isActiveMobileProvider,
+              providerRunsOnMobile: _providerRunsOnMobile,
+              onScanApi: () => refresh(
+                () => _scanApi(navigationContext: context),
+              ),
+              onFetchPcCatalog: () => refresh(_fetchPcCatalog),
+              onSaveDirectConfig: () => refresh(_save),
+              onUseProvider: (provider) => refresh(
+                () => _activateMobileProvider(provider),
+              ),
+              onEditProvider: (provider) => refresh(
+                () => _editMobileProvider(provider, sheetContext: context),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -957,125 +1008,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _SectionTitle(
               icon: Icons.psychology_outlined,
               title: 'このスマホのAI API',
-              subtitle: 'PCから取得したproviderごとにAPI Keyを保存できます。',
+              subtitle: 'API Keyとプロバイダーは別ページで管理します。',
             ),
             const SizedBox(height: 12),
-            if (_providerConfigs.isNotEmpty) ...[
-              for (final provider in _providerConfigs) ...[
-                _MobileProviderCard(
-                  provider: provider,
-                  active: _isActiveMobileProvider(provider),
-                  supported: _providerRunsOnMobile(provider),
-                  onUse: () => unawaited(_activateMobileProvider(provider)),
-                  onEdit: () => unawaited(_editMobileProvider(provider)),
-                ),
-                const SizedBox(height: 10),
-              ],
-              const SizedBox(height: 6),
-            ] else ...[
-              const _ProviderHintCard(),
-              const SizedBox(height: 12),
-            ],
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('QRで取り込む'),
-                    onPressed: _scanApi,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.tonalIcon(
-                    icon: _fetchingCatalog
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.cloud_download_outlined),
-                    label: const Text('PCから取得'),
-                    onPressed: _fetchingCatalog ? null : _fetchPcCatalog,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Theme(
-              data:
-                  Theme.of(context).copyWith(dividerColor: Colors.transparent),
-              child: ExpansionTile(
-                tilePadding: EdgeInsets.zero,
-                childrenPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.tune_outlined),
-                title: const Text('高度な設定'),
-                subtitle: const Text(
-                    'OpenAI互換APIをURLから直接設定します。通常は上のproviderを使ってください。'),
-                children: [
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _baseUrl,
-                    keyboardType: TextInputType.url,
-                    decoration: const InputDecoration(
-                      labelText: 'API Base URL',
-                      hintText: 'https://api.openai.com/v1',
-                      prefixIcon: Icon(Icons.cloud_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _apiKey,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'API Key',
-                      prefixIcon: Icon(Icons.key_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _model,
-                    decoration: const InputDecoration(
-                      labelText: 'モデル',
-                      hintText: 'gpt-4o-mini',
-                      prefixIcon: Icon(Icons.model_training_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _label,
-                    decoration: const InputDecoration(
-                      labelText: 'ラベル (任意)',
-                      prefixIcon: Icon(Icons.label_outline),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _systemPrompt,
-                    minLines: 2,
-                    maxLines: 5,
-                    decoration: const InputDecoration(
-                      labelText: 'システムプロンプト (任意)',
-                      prefixIcon: Icon(Icons.terminal_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: FilledButton.icon(
-                      icon: _saving
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.save_outlined),
-                      label: const Text('直接設定を保存'),
-                      onPressed: _saving ? null : _save,
-                    ),
-                  ),
-                ],
-              ),
+            _SettingsNavCard(
+              icon: Icons.key_outlined,
+              title: 'API / プロバイダー設定',
+              subtitle:
+                  '${_configuredProviderCount(_providerConfigs)} / ${_providerConfigs.length} 件のKey保存済み · 現在 ${_mobileApiLabel(_config, _providerConfigs)}',
+              onTap: () => unawaited(_openMobileApiSettings()),
             ),
             const SizedBox(height: 28),
             _SectionTitle(
@@ -1287,6 +1228,347 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
     await const PlatformUrlLauncher().open(uri);
+  }
+}
+
+int _configuredProviderCount(Iterable<MobileProviderConfig> providers) {
+  return providers.where((provider) => provider.isConfigured).length;
+}
+
+String _mobileApiLabel(
+  ApiConfig config,
+  Iterable<MobileProviderConfig> providers,
+) {
+  final providerId = config.providerId.trim();
+  if (providerId.isNotEmpty && providerId != 'openai-compatible') {
+    for (final provider in providers) {
+      if (provider.providerId == providerId) {
+        return provider.effectiveLabel;
+      }
+    }
+    return providerId;
+  }
+  final label = config.label.trim();
+  if (label.isNotEmpty) return label;
+  final model = config.model.trim();
+  if (model.isNotEmpty) return model;
+  return '未設定';
+}
+
+class _SettingsNavCard extends StatelessWidget {
+  const _SettingsNavCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardTheme.color,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: scheme.primary),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: Theme.of(context).textTheme.titleSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: Theme.of(context).textTheme.bodySmall,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.chevron_right),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MobileApiSettingsPage extends StatefulWidget {
+  const _MobileApiSettingsPage({
+    required this.providerConfigs,
+    required this.config,
+    required this.fetchingCatalog,
+    required this.catalogError,
+    required this.saving,
+    required this.baseUrl,
+    required this.apiKey,
+    required this.model,
+    required this.label,
+    required this.systemPrompt,
+    required this.isActiveProvider,
+    required this.providerRunsOnMobile,
+    required this.onScanApi,
+    required this.onFetchPcCatalog,
+    required this.onSaveDirectConfig,
+    required this.onUseProvider,
+    required this.onEditProvider,
+  });
+
+  final List<MobileProviderConfig> providerConfigs;
+  final ApiConfig config;
+  final bool fetchingCatalog;
+  final String? catalogError;
+  final bool saving;
+  final TextEditingController baseUrl;
+  final TextEditingController apiKey;
+  final TextEditingController model;
+  final TextEditingController label;
+  final TextEditingController systemPrompt;
+  final bool Function(MobileProviderConfig provider) isActiveProvider;
+  final bool Function(MobileProviderConfig provider) providerRunsOnMobile;
+  final Future<void> Function() onScanApi;
+  final Future<void> Function() onFetchPcCatalog;
+  final Future<void> Function() onSaveDirectConfig;
+  final Future<void> Function(MobileProviderConfig provider) onUseProvider;
+  final Future<void> Function(MobileProviderConfig provider) onEditProvider;
+
+  @override
+  State<_MobileApiSettingsPage> createState() => _MobileApiSettingsPageState();
+}
+
+class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final providers = widget.providerConfigs.toList()
+      ..sort(
+        (a, b) => a.effectiveLabel
+            .toLowerCase()
+            .compareTo(b.effectiveLabel.toLowerCase()),
+      );
+    final filtered = providers.where(_matchesQuery).toList();
+    final configuredCount = _configuredProviderCount(widget.providerConfigs);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('API設定')),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Theme.of(context).cardTheme.color,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: Theme.of(context).dividerTheme.color ??
+                      Colors.transparent,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.psychology_outlined),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _mobileApiLabel(
+                            widget.config,
+                            widget.providerConfigs,
+                          ),
+                          style: Theme.of(context).textTheme.titleSmall,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '$configuredCount / ${widget.providerConfigs.length} 件のKey保存済み',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('QRで取り込む'),
+                    onPressed: () => unawaited(widget.onScanApi()),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: FilledButton.tonalIcon(
+                    icon: widget.fetchingCatalog
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.cloud_download_outlined),
+                    label: const Text('PCから取得'),
+                    onPressed: widget.fetchingCatalog
+                        ? null
+                        : () => unawaited(widget.onFetchPcCatalog()),
+                  ),
+                ),
+              ],
+            ),
+            if (widget.catalogError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                widget.catalogError!,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Theme(
+              data:
+                  Theme.of(context).copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                tilePadding: EdgeInsets.zero,
+                childrenPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.tune_outlined),
+                title: const Text('高度な設定'),
+                subtitle: const Text('OpenAI互換APIをURLから直接設定します。'),
+                children: [
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: widget.baseUrl,
+                    keyboardType: TextInputType.url,
+                    decoration: const InputDecoration(
+                      labelText: 'API Base URL',
+                      hintText: 'https://api.openai.com/v1',
+                      prefixIcon: Icon(Icons.cloud_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: widget.apiKey,
+                    obscureText: true,
+                    decoration: const InputDecoration(
+                      labelText: 'API Key',
+                      prefixIcon: Icon(Icons.key_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: widget.model,
+                    decoration: const InputDecoration(
+                      labelText: 'モデル',
+                      hintText: 'gpt-4o-mini',
+                      prefixIcon: Icon(Icons.model_training_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: widget.label,
+                    decoration: const InputDecoration(
+                      labelText: 'ラベル (任意)',
+                      prefixIcon: Icon(Icons.label_outline),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: widget.systemPrompt,
+                    minLines: 2,
+                    maxLines: 5,
+                    decoration: const InputDecoration(
+                      labelText: 'システムプロンプト (任意)',
+                      prefixIcon: Icon(Icons.terminal_outlined),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: FilledButton.icon(
+                      icon: widget.saving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                      label: const Text('直接設定を保存'),
+                      onPressed: widget.saving
+                          ? null
+                          : () => unawaited(widget.onSaveDirectConfig()),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'プロバイダーを検索',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+            const SizedBox(height: 12),
+            if (widget.providerConfigs.isEmpty) ...[
+              const _ProviderHintCard(),
+            ] else if (filtered.isEmpty) ...[
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Text('一致するプロバイダーがありません'),
+                ),
+              ),
+            ] else ...[
+              for (final provider in filtered) ...[
+                _MobileProviderCard(
+                  provider: provider,
+                  active: widget.isActiveProvider(provider),
+                  supported: widget.providerRunsOnMobile(provider),
+                  onUse: () => unawaited(widget.onUseProvider(provider)),
+                  onEdit: () => unawaited(widget.onEditProvider(provider)),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  bool _matchesQuery(MobileProviderConfig provider) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    return provider.effectiveLabel.toLowerCase().contains(query) ||
+        provider.displayName.toLowerCase().contains(query) ||
+        provider.providerId.toLowerCase().contains(query) ||
+        provider.model.toLowerCase().contains(query);
   }
 }
 
@@ -1618,6 +1900,7 @@ class _PcInfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final caps = bootstrap.capabilities;
     final configured = catalog?.configuredProviders ?? const [];
+    final visibleConfigured = configured.take(4).toList();
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1669,6 +1952,7 @@ class _PcInfoCard extends StatelessWidget {
                 spacing: 6,
                 runSpacing: 6,
                 children: configured
+                    .take(4)
                     .map(
                       (p) => Chip(
                         label: Text(p.displayName),
@@ -1676,7 +1960,19 @@ class _PcInfoCard extends StatelessWidget {
                         visualDensity: VisualDensity.compact,
                       ),
                     )
-                    .toList(),
+                    .toList()
+                  ..addAll(
+                    configured.length > visibleConfigured.length
+                        ? [
+                            Chip(
+                              label: Text(
+                                '+${configured.length - visibleConfigured.length}',
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ]
+                        : const [],
+                  ),
               ),
             ],
           ],

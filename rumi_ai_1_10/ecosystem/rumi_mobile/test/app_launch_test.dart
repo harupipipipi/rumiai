@@ -90,14 +90,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('このスマホのAI API'), findsOneWidget);
+    expect(find.text('API / プロバイダー設定'), findsOneWidget);
+    expect(find.text('Anthropic'), findsNothing);
+    await tester.tap(find.text('API / プロバイダー設定'));
+    await tester.pumpAndSettle();
+    expect(find.text('API設定'), findsOneWidget);
     expect(find.text('Anthropic'), findsWidgets);
-    await tester.dragUntilVisible(
-      find.text('OpenAI'),
-      find.byType(ListView).last,
-      const Offset(0, -350),
-      maxIteration: 12,
+    expect(find.text('Cerebras'), findsWidgets);
+    expect(
+      tester.getTopLeft(find.text('Anthropic').first).dy,
+      lessThan(tester.getTopLeft(find.text('Cerebras').first).dy),
     );
-    expect(find.text('OpenAI'), findsWidgets);
+    await tester.enterText(find.byType(TextField).first, 'cerebras');
+    await tester.pumpAndSettle();
+    expect(find.text('Cerebras'), findsWidgets);
+    expect(find.text('Anthropic'), findsNothing);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.dragUntilVisible(
       find.text('PC接続'),
       find.byType(ListView).last,
