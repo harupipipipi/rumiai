@@ -35,6 +35,7 @@ class MobileToolDefinition {
     required this.description,
     required this.parameters,
     required this.tags,
+    this.aliases = const [],
     this.unavailableReason = '',
   });
 
@@ -42,6 +43,7 @@ class MobileToolDefinition {
   final String description;
   final Map<String, dynamic> parameters;
   final List<String> tags;
+  final List<String> aliases;
   final String unavailableReason;
 
   bool get available => unavailableReason.trim().isEmpty;
@@ -95,6 +97,7 @@ class MobileToolRuntime {
       description:
           'Run the defaultspack-compatible calculator tool on this phone. Use it for arithmetic only.',
       tags: ['tool', 'math', mobileCompatibleTag],
+      aliases: ['tool_calculator', 'defaultspack.tool.calculator'],
       parameters: {
         'type': 'object',
         'additionalProperties': false,
@@ -129,6 +132,7 @@ class MobileToolRuntime {
       description:
           'Run the defaultspack todo tool on this phone. Use it to keep a small task list during an agent turn.',
       tags: ['tool', 'planning', mobileCompatibleTag],
+      aliases: ['tool_todo', 'defaultspack.tool.todo'],
       parameters: {
         'type': 'object',
         'additionalProperties': true,
@@ -165,6 +169,7 @@ class MobileToolRuntime {
       description:
           'Run the defaultspack task board tool on this phone. Use it for agent planning with Kanban-style cards.',
       tags: ['tool', 'planning', 'task_board', mobileCompatibleTag],
+      aliases: ['task_board', 'defaultspack.tool.task_board'],
       parameters: {
         'type': 'object',
         'additionalProperties': true,
@@ -286,6 +291,7 @@ class MobileToolRuntime {
       name: 'web_search',
       description: 'Run the defaultspack web research tool.',
       tags: ['tool', 'research', 'web'],
+      aliases: ['tool_web_search', 'defaultspack.tool.web_search'],
       unavailableReason:
           'このtoolはPC側defaultspackのresearch providerに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
       parameters: {'type': 'object', 'additionalProperties': true},
@@ -294,6 +300,7 @@ class MobileToolRuntime {
       name: 'reddit_search',
       description: 'Run the defaultspack reddit research tool.',
       tags: ['tool', 'research', 'reddit'],
+      aliases: ['tool_reddit_search', 'defaultspack.tool.reddit_search'],
       unavailableReason:
           'このtoolはPC側defaultspackのresearch providerに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
       parameters: {'type': 'object', 'additionalProperties': true},
@@ -302,6 +309,7 @@ class MobileToolRuntime {
       name: 'file_reader',
       description: 'Read files from the host workspace.',
       tags: ['tool', 'file', 'workspace', 'host'],
+      aliases: ['tool_file_reader', 'defaultspack.tool.file_reader'],
       unavailableReason:
           'このtoolはPCのworkspace/file systemに依存するため、このスマホ単体では実行できません。',
       parameters: {'type': 'object', 'additionalProperties': true},
@@ -310,6 +318,7 @@ class MobileToolRuntime {
       name: 'subagent',
       description: 'Run the default delegation/subagent tool.',
       tags: ['tool', 'agent', 'host'],
+      aliases: ['tool_subagent', 'defaultspack.tool.subagent'],
       unavailableReason:
           'このtoolはPC側のagent runtimeと会話/workspace状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。',
       parameters: {'type': 'object', 'additionalProperties': true},
@@ -405,7 +414,8 @@ class MobileToolRuntime {
   }
 
   MobileToolResult execute(MobileToolCall call) {
-    switch (call.name) {
+    final name = _canonicalToolName(call.name);
+    switch (name) {
       case 'calculator':
         return _calculator(call.arguments);
       case 'current_time':
@@ -423,7 +433,7 @@ class MobileToolRuntime {
         return MobileToolResult(
           ok: false,
           summary: 'unsupported tool',
-          output: _unsupportedReason(call.name),
+          output: _unsupportedReason(name),
         );
     }
   }
@@ -705,10 +715,12 @@ class MobileToolRuntime {
         tool.name,
         tool.description,
         ...tool.tags,
+        ...tool.aliases,
       ].join(' ').toLowerCase();
       if (query.isEmpty || haystack.contains(query)) {
         records.add({
           'tool_id': tool.name,
+          'aliases': tool.aliases,
           'tags': tool.tags,
           'mobile_compatible': tool.available,
           'execution_location': tool.available ? 'phone' : 'pc',
@@ -758,7 +770,9 @@ class MobileToolRuntime {
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
-      if (normalized == tool.name || tool.tags.contains(normalized)) {
+      if (normalized == tool.name ||
+          tool.tags.contains(normalized) ||
+          tool.aliases.contains(normalized)) {
         return tool.unavailableReason;
       }
     }
@@ -799,6 +813,19 @@ class MobileToolRuntime {
     }
     return 'このtoolはこのスマホのmobile-compatible runtimeに未登録です。PC接続時はPC側のtool catalogを確認してください。';
   }
+}
+
+String _canonicalToolName(String name) {
+  final normalized = name.trim().toLowerCase();
+  for (final tool in [
+    ...MobileToolRuntime.supportedTools,
+    ...MobileToolRuntime.unavailableDefaultspackTools,
+  ]) {
+    if (normalized == tool.name || tool.aliases.contains(normalized)) {
+      return tool.name;
+    }
+  }
+  return normalized;
 }
 
 Map<String, dynamic> _decodeObject(String raw) {

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rumi_remote_app/src/data/local/mobile_tool_runtime.dart';
@@ -44,7 +45,7 @@ void main() {
       final added = runtime.execute(
         const MobileToolCall(
           id: 'todo_1',
-          name: 'todo',
+          name: 'tool_todo',
           arguments: {
             'action': 'add',
             'title': 'Write mobile agent tests',
@@ -70,6 +71,19 @@ void main() {
 
       expect(completed.ok, isTrue);
       expect(completed.output, contains('"status":"done"'));
+    });
+
+    test('runs defaultspack calculator function alias on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'calc_1',
+          name: 'tool_calculator',
+          arguments: {'expression': '6 * 7'},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.output, contains('6 * 7 = 42'));
     });
 
     test('runs defaultspack task_board-compatible actions on phone', () {
@@ -110,7 +124,7 @@ void main() {
         const MobileToolCall(
           id: 'search_1',
           name: 'tool_search',
-          arguments: {'query': 'web_search'},
+          arguments: {'query': 'tool_web_search'},
         ),
       );
 
@@ -118,8 +132,26 @@ void main() {
       final payload = jsonDecode(result.output) as Map<String, dynamic>;
       final tools = payload['tools'] as List;
       expect(tools.single['tool_id'], 'web_search');
+      expect(tools.single['aliases'], contains('tool_web_search'));
       expect(tools.single['mobile_compatible'], isFalse);
       expect(tools.single['unavailable_reason'], contains('PC側defaultspack'));
+    });
+
+    test('tool_search maps defaultspack function aliases to phone tools', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'search_2',
+          name: 'tool_search',
+          arguments: {'query': 'tool_todo'},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final tools = payload['tools'] as List;
+      expect(tools.single['tool_id'], 'todo');
+      expect(tools.single['aliases'], contains('tool_todo'));
+      expect(tools.single['mobile_compatible'], isTrue);
     });
 
     test('explains defaultspack function ids even when not in local catalog',
@@ -135,6 +167,38 @@ void main() {
       expect(result.ok, isFalse);
       expect(result.output, contains('defaultspack tool'));
       expect(result.output, contains('PC側'));
+    });
+
+    test('classifies every defaultspack tool or agent function id', () {
+      final functionsRoot = Directory('../defaultspack/functions');
+      expect(functionsRoot.existsSync(), isTrue);
+      final manifests = functionsRoot
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('/manifest.json'));
+      final ids = <String>[];
+      for (final file in manifests) {
+        final manifest = jsonDecode(file.readAsStringSync());
+        if (manifest is! Map<String, dynamic>) continue;
+        final tags = (manifest['tags'] as List? ?? const [])
+            .map((tag) => '$tag')
+            .toSet();
+        if (!tags.contains('tool') && !tags.contains('agent')) continue;
+        final functionId = '${manifest['function_id'] ?? ''}'.trim();
+        if (functionId.isNotEmpty) ids.add(functionId);
+      }
+      expect(ids, isNotEmpty);
+
+      for (final id in ids) {
+        final result = runtime.execute(
+          MobileToolCall(id: 'classify_$id', name: id, arguments: const {}),
+        );
+        expect(
+          result.output,
+          isNot(contains('mobile-compatible runtimeに未登録')),
+          reason: '$id must be executable on phone or classified with a reason',
+        );
+      }
     });
   });
 }
