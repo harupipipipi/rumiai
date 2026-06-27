@@ -85,6 +85,53 @@ def test_adaptive_apply_requires_plan_and_undo_restores_active_profile(
     assert restored.preset_id == "discussion_only"
 
 
+def test_onboarding_undo_requires_approval_when_it_would_widen_policy(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
+    from core_runtime.operating_profile import OperatingProfilePlanStore
+    from domain.adaptive.service import dispatch
+
+    approved_ctx = {"_tool_server_approved": True}
+
+    discussion = dispatch(
+        "onboarding_compile",
+        {"profile_id": "coding", "answers": {"profile_id": "coding", "preset": "discussion_only"}},
+        {},
+    )
+    assert discussion["status"] == "ok"
+    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": discussion["data"]["plan"]}, approved_ctx)["status"] == "ok"
+
+    max_local = dispatch(
+        "onboarding_compile",
+        {"profile_id": "coding", "answers": {"profile_id": "coding", "preset": "max_local_autonomy"}},
+        {},
+    )
+    assert max_local["status"] == "ok"
+    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": max_local["data"]["plan"]}, approved_ctx)["status"] == "ok"
+
+    narrow = dispatch(
+        "onboarding_compile",
+        {"profile_id": "coding", "answers": {"profile_id": "coding", "preset": "discussion_only"}},
+        {},
+    )
+    assert narrow["status"] == "ok"
+    assert dispatch("onboarding_apply", {"profile_id": "coding", "plan": narrow["data"]["plan"]}, approved_ctx)["status"] == "ok"
+
+    rejected = dispatch("onboarding_undo", {"profile_id": "coding"}, {})
+    assert rejected["status"] == "error"
+    assert rejected["code"] == "APPROVAL_REQUIRED"
+    active = OperatingProfilePlanStore().load_active_profile("coding")
+    assert active is not None
+    assert active.preset_id == "discussion_only"
+
+    undone = dispatch("onboarding_undo", {"profile_id": "coding"}, approved_ctx)
+    assert undone["status"] == "ok"
+    restored = OperatingProfilePlanStore().load_active_profile("coding")
+    assert restored is not None
+    assert restored.preset_id == "max_local_autonomy"
+
+
 def test_operating_profile_preview_forwards_route_id_and_answers(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

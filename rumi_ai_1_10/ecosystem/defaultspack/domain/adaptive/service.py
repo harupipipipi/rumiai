@@ -276,7 +276,7 @@ class AdaptiveService:
         }
 
     def onboarding_undo(self, args: dict[str, Any], ctx: dict[str, Any]) -> dict[str, Any]:
-        del args, ctx
+        del args
         history_state = self.store.read_json("onboarding/history.json", {"version": 1, "entries": []})
         entries = history_state.get("entries") if isinstance(history_state.get("entries"), list) else []
         target: dict[str, Any] | None = None
@@ -288,6 +288,15 @@ class AdaptiveService:
             raise AdaptiveError("NOT_FOUND", "no onboarding apply history to undo")
         undo_result: dict[str, Any] | None = None
         plan_id = str((target.get("payload") or {}).get("plan_id") or "").strip()
+        previous = copy.deepcopy(target.get("payload", {}).get("previous"))
+        restored_profile = previous if isinstance(previous, dict) else None
+        if _undo_would_widen_current_policy(self._load_active_operating_profile_dict(), restored_profile):
+            if not _onboarding_apply_approved(ctx):
+                raise AdaptiveError(
+                    "APPROVAL_REQUIRED",
+                    "onboarding.undo requires a trusted local approval context when it would widen the active Operating Profile",
+                    details={"plan_id": plan_id},
+                )
         if plan_id:
             try:
                 from core_runtime.operating_profile import OperatingProfilePlanStore
@@ -296,8 +305,7 @@ class AdaptiveService:
             except Exception as exc:
                 raise AdaptiveError("UNDO_FAILED", str(exc)) from exc
         state = self._onboarding_state()
-        previous = copy.deepcopy(target.get("payload", {}).get("previous"))
-        state["current"] = previous if isinstance(previous, dict) else None
+        state["current"] = restored_profile
         state["updated_at"] = now_iso()
         self.store.write_json("onboarding/state.json", state)
         undo = self._append_history("undo", {"undid": target.get("history_id"), "restored": state["current"]})
@@ -2194,6 +2202,24 @@ def _inside_root(root: Path, path: Path) -> bool:
 
 def _onboarding_apply_approved(ctx: dict[str, Any] | None) -> bool:
     return isinstance(ctx, dict) and ctx.get("_tool_server_approved") is True
+
+
+def _undo_would_widen_current_policy(
+    current_profile: dict[str, Any] | None,
+    restored_profile: dict[str, Any] | None,
+) -> bool:
+    if not isinstance(restored_profile, dict) or not restored_profile:
+        return False
+    if not isinstance(current_profile, dict) or not current_profile:
+        return True
+    try:
+        from core_runtime.operating_profile import OperatingProfile, policy_within
+
+        current = OperatingProfile.from_dict(current_profile)
+        restored = OperatingProfile.from_dict(restored_profile)
+        return not policy_within(restored.policy, current.policy)
+    except Exception:
+        return True
 
 
 def _event_payload(event: dict[str, Any]) -> dict[str, Any]:

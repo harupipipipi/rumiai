@@ -106,7 +106,7 @@ BUILTIN_PRESET_POLICIES: dict[str, dict[str, str]] = {
         "git_write": "allow",
         "git_commit": "allow",
         "git_push": "ask",
-        "git_merge": "allow",
+        "git_merge": "ask",
         "browser_control": "allow",
         "computer_control": "allow",
         "external_send": "deny",

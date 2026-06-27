@@ -73,6 +73,13 @@ def test_explicit_answers_override_preset_defaults_but_not_ceilings():
     assert profile.policy.level_for("terminal").value == "ask"
 
 
+def test_max_local_autonomy_does_not_allow_git_merge_by_default():
+    profile = compile_operating_profile({"profile_id": "p2m", "preset": "max_local_autonomy"})
+
+    assert profile.policy.level_for("git_push").value == "ask"
+    assert profile.policy.level_for("git_merge").value == "ask"
+
+
 def test_operating_profile_persists_multidimensional_model_and_split_git_policy():
     profile = compile_operating_profile(
         {
