@@ -441,11 +441,13 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     assert observability["schedule_history"]["signals"][0]["signal"] == "subagent_timeout"
     assert observability["subagents"]["unanswered_count"] == 1
+    assert observability["desktop_monitoring"]["status"] in {"empty", "ok", "error"}
     assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
-    assert total == 2
+    assert total == 3
     assert {message["metadata"]["sync_source"] for message in messages} == {
         "mimo_schedule_history",
         "mimo_subagent_monitor",
+        "mimo_desktop_monitor",
     }
 
     runtime.status()

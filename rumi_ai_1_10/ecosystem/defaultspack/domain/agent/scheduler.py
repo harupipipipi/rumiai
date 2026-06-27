@@ -16,6 +16,7 @@ import threading
 import time
 import calendar
 import re
+from typing import Any
 from datetime import datetime, timezone, timedelta
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -29,6 +30,225 @@ from domain.agent.schedule_store import (
     append_history,
     load_history,
 )
+
+
+_APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_required"}
+_MIMO_CODING_COMPANY_PROFILE_ID = "defaultspack.mimo_coding_company"
+_MIMO_CODING_COMPANY_ID = "mimo-coding-company"
+
+
+def _chat_result_data(result: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(result, dict) or result.get("status") != "ok":
+        return {}
+    data = result.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _chat_result_finish_reason(result: dict[str, Any] | None) -> str:
+    data = _chat_result_data(result)
+    return str(data.get("finish_reason") or "").strip()
+
+
+def _chat_result_content(result: dict[str, Any] | None) -> str:
+    data = _chat_result_data(result)
+    if not data:
+        return ""
+    content = data.get("content", data.get("text", ""))
+    if isinstance(content, list):
+        return "\n".join(
+            str(item.get("text", ""))
+            for item in content
+            if isinstance(item, dict) and item.get("text")
+        )
+    if isinstance(content, str):
+        return content
+    return str(content)
+
+
+def _pending_approval_from_chat_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
+    data = _chat_result_data(result)
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    pending = metadata.get("pending_approval")
+    if isinstance(pending, dict):
+        return pending
+    events = data.get("events") if isinstance(data.get("events"), list) else []
+    for event in reversed(events):
+        if isinstance(event, dict) and event.get("type") == "approval_requested":
+            return event
+    return None
+
+
+def _scheduler_trigger_name(manual: bool) -> str:
+    return "manual" if manual else "scheduled"
+
+
+def _scheduler_chat_payload(
+    *,
+    conversation_id: str,
+    content: str,
+    task_cfg: dict[str, Any],
+    schedule_id: str,
+    exec_id: str,
+    trigger: str,
+    params: dict[str, Any],
+    tools: list[Any] | None,
+    metadata_extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+    message_metadata = {
+        **metadata,
+        "source": "scheduler",
+        "schedule_id": schedule_id,
+        "schedule_execution_id": exec_id,
+        "trigger": trigger,
+        "profile_id": task_cfg.get("profile_id"),
+        "agent_id": task_cfg.get("agent_id"),
+    }
+    if isinstance(metadata_extra, dict):
+        message_metadata.update(metadata_extra)
+    return {
+        "conversation_id": conversation_id,
+        "message": {
+            "role": "user",
+            "content": content,
+            "metadata": message_metadata,
+        },
+        "params": dict(params),
+        "tools": tools,
+    }
+
+
+def _mimo_schedule_auto_approval_enabled(task_cfg: dict[str, Any]) -> bool:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+    profile_id = str(task_cfg.get("profile_id") or policy.get("profile_id") or metadata.get("profile_id") or "").strip()
+    company_id = str(metadata.get("company_id") or "").strip()
+    return (
+        bool(policy.get("schedule_auto_approve_tool_requests"))
+        and profile_id == _MIMO_CODING_COMPANY_PROFILE_ID
+        and company_id == _MIMO_CODING_COMPANY_ID
+    )
+
+
+def _schedule_auto_approval_allowlist(task_cfg: dict[str, Any]) -> set[str]:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    raw = policy.get("schedule_auto_approve_tool_allowlist")
+    if not isinstance(raw, list):
+        raw = []
+    return {str(item).strip() for item in raw if str(item).strip()}
+
+
+def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    try:
+        value = int(policy.get("schedule_auto_approve_max_followups") or 3)
+    except Exception:
+        value = 3
+    return max(0, min(value, 8))
+
+
+def _approve_schedule_pending_approval(
+    task_cfg: dict[str, Any],
+    pending: dict[str, Any],
+    *,
+    conversation_id: str,
+) -> dict[str, Any] | None:
+    if not _mimo_schedule_auto_approval_enabled(task_cfg):
+        return None
+    request_id = str(pending.get("approval_request_id") or pending.get("request_id") or "").strip()
+    tool_name = str(pending.get("tool_name") or "").strip()
+    operation = str(pending.get("operation") or pending.get("action") or "").strip()
+    if not request_id or not tool_name:
+        return None
+
+    try:
+        from domain.safety import approval
+    except Exception:
+        return None
+
+    request = approval.get_approval_request(request_id)
+    if not isinstance(request, dict) or str(request.get("status") or "") != "pending":
+        return None
+    details = request.get("details") if isinstance(request.get("details"), dict) else {}
+    stored_conversation_id = str(details.get("conversation_id") or "").strip()
+    if stored_conversation_id and stored_conversation_id != str(conversation_id or "").strip():
+        return None
+    stored_tool_name = str(details.get("tool_name") or "").strip()
+    if stored_tool_name and stored_tool_name != tool_name:
+        return None
+
+    stored_operation = str(request.get("operation") or operation or "").strip()
+    allowlist = _schedule_auto_approval_allowlist(task_cfg)
+    if allowlist and tool_name not in allowlist and stored_operation not in allowlist:
+        return None
+
+    decision = approval.approve(request_id)
+    if not isinstance(decision, dict) or not decision.get("approved") or not decision.get("token"):
+        return None
+    token = str(decision.get("token") or "").strip()
+    return {
+        "summary": {
+            "request_id": request_id,
+            "tool_name": tool_name,
+            "operation": stored_operation,
+            "status": "approved",
+        },
+        "followup": {
+            "request_id": request_id,
+            "approval_request_id": request_id,
+            "approval_token": token,
+            "tool_name": tool_name,
+            "tool_call_id": pending.get("tool_call_id"),
+            "action": pending.get("action") or stored_operation,
+            "operation": stored_operation,
+        },
+    }
+
+
+def _resume_scheduled_chat_approvals(
+    *,
+    result: dict[str, Any],
+    send_chat,
+    conversation_id: str,
+    task_cfg: dict[str, Any],
+    schedule_id: str,
+    exec_id: str,
+    trigger: str,
+    params: dict[str, Any],
+    tools: list[Any] | None,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    auto_approvals: list[dict[str, Any]] = []
+    for _idx in range(_schedule_auto_approval_limit(task_cfg)):
+        if _chat_result_finish_reason(result) not in _APPROVAL_REQUIRED_FINISH_REASONS:
+            break
+        pending = _pending_approval_from_chat_result(result)
+        if not isinstance(pending, dict):
+            break
+        approved = _approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
+        if not approved:
+            break
+        auto_approvals.append(approved["summary"])
+        result = send_chat(
+            _scheduler_chat_payload(
+                conversation_id=conversation_id,
+                content=(
+                    "Continue the approved scheduled tool request. "
+                    "Use the approved result to continue the assigned scheduled task and summarize what happened."
+                ),
+                task_cfg=task_cfg,
+                schedule_id=schedule_id,
+                exec_id=exec_id,
+                trigger=trigger,
+                params=params,
+                tools=tools,
+                metadata_extra={
+                    "source": "scheduler_approval_followup",
+                    "approval_followup": approved["followup"],
+                },
+            ),
+            {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+        )
+    return result, auto_approvals
 
 
 # ---------------------------------------------------------------------------
@@ -592,6 +812,7 @@ class Scheduler:
             "result": None,
             "error": None,
         }
+        auto_approvals = []
 
         try:
             if conversation_id:
@@ -604,27 +825,31 @@ class Scheduler:
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
-                metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+                tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
+                trigger = _scheduler_trigger_name(manual)
                 result = chat_send_run(
-                    {
-                        "conversation_id": conversation_id,
-                        "message": {
-                            "role": "user",
-                            "content": message,
-                            "metadata": {
-                                **metadata,
-                                "source": "scheduler",
-                                "schedule_id": schedule_id,
-                                "schedule_execution_id": exec_id,
-                                "trigger": "manual" if manual else "scheduled",
-                                "profile_id": task_cfg.get("profile_id"),
-                                "agent_id": task_cfg.get("agent_id"),
-                            },
-                        },
-                        "params": params,
-                        "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
-                    },
+                    _scheduler_chat_payload(
+                        conversation_id=conversation_id,
+                        content=message,
+                        task_cfg=task_cfg,
+                        schedule_id=schedule_id,
+                        exec_id=exec_id,
+                        trigger=trigger,
+                        params=params,
+                        tools=tools,
+                    ),
                     {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                )
+                result, auto_approvals = _resume_scheduled_chat_approvals(
+                    result=result,
+                    send_chat=chat_send_run,
+                    conversation_id=conversation_id,
+                    task_cfg=task_cfg,
+                    schedule_id=schedule_id,
+                    exec_id=exec_id,
+                    trigger=trigger,
+                    params=params,
+                    tools=tools,
                 )
             else:
                 from blocks.ai.complete import run as ai_complete_run
@@ -642,21 +867,25 @@ class Scheduler:
 
             if result.get("status") == "ok":
                 data = result.get("data", {})
-                content = ""
                 if isinstance(data, dict):
-                    content = data.get("content", data.get("text", str(data)))
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            str(item.get("text", ""))
-                            for item in content
-                            if isinstance(item, dict) and item.get("text")
-                        )
+                    content = _chat_result_content(result)
+                    finish_reason = _chat_result_finish_reason(result)
                 elif isinstance(data, str):
                     content = data
+                    finish_reason = ""
                 else:
                     content = str(data)
-                history_entry["status"] = "completed"
+                    finish_reason = ""
+                if finish_reason in _APPROVAL_REQUIRED_FINISH_REASONS:
+                    content = (finish_reason + "\n" + content).strip()
+                    history_entry["status"] = finish_reason
+                else:
+                    history_entry["status"] = "completed"
                 history_entry["result"] = content
+                if finish_reason:
+                    history_entry["finish_reason"] = finish_reason
+                if auto_approvals:
+                    history_entry["auto_approvals"] = auto_approvals
             else:
                 err = result.get("error", {})
                 if isinstance(err, dict):

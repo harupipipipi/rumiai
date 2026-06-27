@@ -1349,7 +1349,7 @@ class MimoCodingCompanyRuntime:
             "desktop_monitoring": {
                 "surface": "desktops",
                 "expected_api": "GET /api/desktops",
-                "status": "external_probe_required",
+                "status": "unknown",
             },
         }
         try:
@@ -1411,6 +1411,28 @@ class MimoCodingCompanyRuntime:
                 )
                 known_sync_keys.add(sync_key)
                 synced += 1
+
+            desktop_monitoring = self._desktop_monitoring_observation()
+            summary["desktop_monitoring"] = desktop_monitoring
+            desktop_signal = str(desktop_monitoring.get("signal") or "").strip()
+            if desktop_signal:
+                sync_key = "desktop_monitor:" + desktop_signal + ":" + str(desktop_monitoring.get("desktop_count") or 0)
+                if sync_key not in known_sync_keys:
+                    runtime_store.add_message(
+                        COMPANY_ID,
+                        channel_id="ops-company",
+                        sender_id="scheduler",
+                        content=self._desktop_monitoring_message(desktop_monitoring),
+                        metadata={
+                            "sync_source": "mimo_desktop_monitor",
+                            "sync_key": sync_key,
+                            "signal": desktop_signal,
+                            "surface": "desktops",
+                            "desktop_count": desktop_monitoring.get("desktop_count"),
+                        },
+                    )
+                    known_sync_keys.add(sync_key)
+                    synced += 1
 
             stats = runtime_store.stats(COMPANY_ID)
             summary["team_workspace"] = {
@@ -1538,6 +1560,59 @@ class MimoCodingCompanyRuntime:
             return {"checked_ids": [], "unanswered": []}
 
     @staticmethod
+    def _desktop_monitoring_observation() -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "unknown",
+            "desktop_count": 0,
+            "desktops": [],
+        }
+        try:
+            from blocks.sandbox.api import run as sandbox_api_run
+
+            result = sandbox_api_run({"_handler": "desktops_list"}, {"source": "mimo_observability"})
+            if not isinstance(result, dict):
+                summary["status"] = "error"
+                summary["error"] = "desktop API returned a non-dict result"
+                summary["signal"] = "desktops_probe_error"
+                return summary
+            if result.get("status") != "ok":
+                err = result.get("error") if isinstance(result.get("error"), dict) else {}
+                summary["status"] = "error"
+                summary["error"] = str(err.get("message") or result.get("error") or "desktop API failed")[:300]
+                summary["signal"] = "desktops_probe_error"
+                return summary
+            data = result.get("data") if isinstance(result.get("data"), dict) else {}
+            desktops = data.get("desktops") if isinstance(data.get("desktops"), list) else []
+            compact: list[dict[str, Any]] = []
+            for desktop in desktops[:10]:
+                if not isinstance(desktop, dict):
+                    continue
+                compact.append(
+                    {
+                        "seat_id": desktop.get("seat_id") or desktop.get("id"),
+                        "name": desktop.get("name"),
+                        "status": desktop.get("status"),
+                        "template_id": desktop.get("template_id"),
+                        "assigned_agent_id": desktop.get("assigned_agent_id"),
+                    }
+                )
+            summary["desktop_count"] = len(desktops)
+            summary["desktops"] = compact
+            if not desktops:
+                summary["status"] = "empty"
+                summary["signal"] = "desktops_empty"
+            else:
+                summary["status"] = "ok"
+            return summary
+        except Exception as exc:
+            summary["status"] = "error"
+            summary["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+            summary["signal"] = "desktops_probe_error"
+            return summary
+
+    @staticmethod
     def _message_text(message: dict[str, Any]) -> str:
         raw = str(message.get("raw_text") or "").strip()
         if raw:
@@ -1568,6 +1643,27 @@ class MimoCodingCompanyRuntime:
             lines.extend(["", "Latest user prompt:", "```text", prompt[:600], "```"])
         return "\n".join(lines)
 
+    @staticmethod
+    def _desktop_monitoring_message(observation: dict[str, Any]) -> str:
+        status = str(observation.get("status") or "unknown")
+        count = int(observation.get("desktop_count") or 0)
+        lines = [
+            "**MiMo desktop monitor: Desktops workspace signal**",
+            "- API: `GET /api/desktops`",
+            f"- Status: `{status}`",
+            f"- Desktop count: `{count}`",
+        ]
+        if status == "empty":
+            lines.extend(
+                [
+                    "",
+                    "No desktop seats are currently visible. Browser/computer QA may still be running through chat tools, but the Desktops workspace has no seat to inspect.",
+                ]
+            )
+        elif observation.get("error"):
+            lines.extend(["", "Error:", "```text", str(observation.get("error"))[:600], "```"])
+        return "\n".join(lines)
+
     def _schedule_policy(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         state = state if isinstance(state, dict) else {}
         policy = {
@@ -1583,6 +1679,14 @@ class MimoCodingCompanyRuntime:
             "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
             "tool_allowlist": TOOL_ALLOWLIST,
             "model_allowlist": current_model_allowlist(),
+            "schedule_auto_approve_tool_requests": True,
+            "schedule_auto_approve_tool_allowlist": [
+                "browser_use",
+                "browser_computer",
+                "browser_companion",
+                "computer_use",
+            ],
+            "schedule_auto_approve_max_followups": 5,
         }
         if state.get("workspace_id"):
             policy["workspace_id"] = state["workspace_id"]
