@@ -665,6 +665,86 @@ void main() {
           'PC側runtimeが必要です');
     });
 
+    test('sendMessage executes defaultspack tool_invoke broker on phone',
+        () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          final args = jsonEncode({
+            'tool_name': 'tool_calculator',
+            'arguments': {'expression': '7 * 6'},
+          });
+          final toolChunk = jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'tool_calls': [
+                    {
+                      'index': 0,
+                      'id': 'invoke_1',
+                      'type': 'function',
+                      'function': {
+                        'name': 'tool_invoke',
+                        'arguments': args,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode('data: $toolChunk\n\n'),
+              utf8.encode('data: [DONE]\n\n'),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode('data: {"choices":[{"delta":{"content":"42です"}}]}\n\n'),
+            utf8.encode('data: [DONE]\n\n'),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: configStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: 'tool_invokeで計算して',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 2);
+      final toolNames = (bodies.first['tools'] as List)
+          .map((tool) => tool['function']['name'] as String)
+          .toSet();
+      expect(toolNames, contains('tool_invoke'));
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.map((event) => event.status),
+          containsAll(['running', 'completed']));
+      expect(toolEvents.last.toolName, 'tool_invoke');
+      expect(toolEvents.last.output, contains('7 * 6 = 42'));
+      expect(events.whereType<ChatMessageCommitted>().single.content, '42です');
+    });
+
     test('sendMessage surfaces unconfigured api as error event', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);

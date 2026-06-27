@@ -61,6 +61,7 @@ void main() {
           'tool_names',
           'tool_list',
           'tool_schema',
+          'tool_invoke',
           'agent_plan',
           'agent_progress',
           'agent_status',
@@ -112,6 +113,49 @@ void main() {
 
       expect(result.ok, isTrue);
       expect(result.output, contains('6 * 7 = 42'));
+    });
+
+    test('runs mobile-compatible tools through defaultspack tool_invoke', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'invoke_1',
+          name: 'tool_invoke',
+          arguments: {
+            'tool_name': 'tool_calculator',
+            'arguments': {'expression': '8 * 8'},
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(result.summary, contains('calculator'));
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['tool_name'], 'calculator');
+      expect(data['execution_location'], 'phone');
+      expect(data['result'], contains('8 * 8 = 64'));
+    });
+
+    test('tool_invoke returns specific reasons for host-bound tools', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'invoke_host_1',
+          name: 'defaultspack.tool.invoke',
+          arguments: {
+            'tool_name': 'python_exec',
+            'arguments': {'code': 'print(1)'},
+          },
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      final details = error['details'] as Map<String, dynamic>;
+      expect(error['code'], 'TOOL_UNAVAILABLE_ON_PHONE');
+      expect(error['message'], contains('PC側'));
+      expect(details['tool_id'], 'python_exec');
+      expect(details['tags'], contains('tool_registry'));
     });
 
     test('runs defaultspack task_board-compatible actions on phone', () {

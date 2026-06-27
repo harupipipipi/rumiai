@@ -323,6 +323,31 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'tool_invoke',
+      description:
+          'Invoke a mobile-compatible defaultspack tool through the defaultspack tool_invoke convention. Host-bound tools return a clear unavailable reason.',
+      tags: ['tool', 'broker', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_invoke',
+        'defaultspack_tool_invoke',
+        'defaults.tool.invoke',
+        'defaultspack.tool.invoke',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'tool_name': {'type': 'string'},
+          'tool_id': {'type': 'string'},
+          'name': {'type': 'string'},
+          'arguments': {'type': 'object'},
+          'args': {'type': 'object'},
+          'input': {'type': 'object'},
+        },
+        'required': ['tool_name'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'agent_plan',
       description:
           'Create a lightweight phone-local agent plan using the defaultspack agent_plan convention.',
@@ -615,6 +640,8 @@ class MobileToolRuntime {
         return _toolList(call.arguments);
       case 'tool_schema':
         return _toolSchema(call.arguments);
+      case 'tool_invoke':
+        return _toolInvoke(call.arguments);
       case 'agent_plan':
         return _agentPlan(call.arguments);
       case 'agent_progress':
@@ -1013,6 +1040,87 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _toolInvoke(Map<String, dynamic> args) {
+    final requested =
+        '${args['tool_name'] ?? args['tool_id'] ?? args['name'] ?? ''}'.trim();
+    if (requested.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'tool_name is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'MISSING_PARAM',
+            'message': 'tool_name is required',
+          },
+        }),
+      );
+    }
+
+    final canonical = _canonicalToolName(requested);
+    if (canonical == 'tool_invoke') {
+      return MobileToolResult(
+        ok: false,
+        summary: 'recursive tool_invoke is not allowed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'RECURSIVE_TOOL_INVOKE',
+            'message': 'tool_invoke cannot invoke itself',
+          },
+        }),
+      );
+    }
+
+    final tool = _findToolDefinition(canonical);
+    final invokeArgs = _invokeArguments(args);
+    if (tool != null && tool.available) {
+      final result = execute(
+        MobileToolCall(
+          id: 'tool_invoke:${DateTime.now().microsecondsSinceEpoch}',
+          name: canonical,
+          arguments: invokeArgs,
+        ),
+      );
+      return MobileToolResult(
+        ok: result.ok,
+        summary: '${tool.name}: ${result.summary}',
+        output: jsonEncode({
+          'status': result.ok ? 'ok' : 'error',
+          'data': {
+            'tool_name': tool.name,
+            'requested_tool_name': requested,
+            'result': result.output,
+            'summary': result.summary,
+            'is_error': !result.ok,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    final entry = _findDefaultspackCatalogEntry(requested) ??
+        _findDefaultspackCatalogEntry(canonical);
+    final record = entry == null
+        ? _unsupportedToolRecord(canonical)
+        : _catalogEntryRecord(entry, requestedName: requested);
+    final reason = '${record['unavailable_reason'] ?? ''}'.trim();
+    return MobileToolResult(
+      ok: false,
+      summary: '${record['tool_id'] ?? requested}: unavailable on phone',
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': 'TOOL_UNAVAILABLE_ON_PHONE',
+          'message': reason.isEmpty
+              ? 'This tool is not executable in the phone-local runtime.'
+              : reason,
+          'details': record,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _agentPlan(Map<String, dynamic> args) {
     final action = '${args['action'] ?? 'create'}'.trim().toLowerCase();
     if (action == 'clear') {
@@ -1375,6 +1483,30 @@ Map<String, dynamic> _asObjectSchema(Object? value) {
   if (value is Map<String, dynamic>) return value;
   if (value is Map) return value.map((key, value) => MapEntry('$key', value));
   return const {'type': 'object', 'additionalProperties': true};
+}
+
+Map<String, dynamic> _invokeArguments(Map<String, dynamic> args) {
+  for (final key in ['arguments', 'args', 'input']) {
+    final value = args[key];
+    if (value is Map<String, dynamic>) return value;
+    if (value is Map) return value.map((key, value) => MapEntry('$key', value));
+    if (value is String && value.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(value);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) {
+          return decoded.map((key, value) => MapEntry('$key', value));
+        }
+      } catch (_) {
+        return {'input': value.trim()};
+      }
+    }
+  }
+  return {
+    for (final entry in args.entries)
+      if (!{'tool_name', 'tool_id', 'name', 'context'}.contains(entry.key))
+        entry.key: entry.value,
+  };
 }
 
 Map<String, dynamic> _unsupportedToolRecord(String name) {
