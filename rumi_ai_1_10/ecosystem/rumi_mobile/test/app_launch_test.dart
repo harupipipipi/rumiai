@@ -105,6 +105,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Cerebras'), findsWidgets);
     expect(find.text('Anthropic'), findsNothing);
+    final focusedNode = FocusManager.instance.primaryFocus;
+    expect(focusedNode, isNotNull);
+    await tester.tap(find.text('API設定'));
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus, isNot(focusedNode));
     await tester.pageBack();
     await tester.pumpAndSettle();
     await tester.dragUntilVisible(
