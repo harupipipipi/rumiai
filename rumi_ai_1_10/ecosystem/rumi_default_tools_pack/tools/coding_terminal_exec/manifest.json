@@ -18,8 +18,7 @@
       "settings_fields": [
         {"id": "approval_policy", "label": "Approval Policy", "type": "select", "default": "prompt", "options": [{"value": "prompt", "label": "Prompt"}, {"value": "always_require", "label": "Always Require"}]},
         {"id": "default_cwd", "label": "Default CWD", "type": "text", "default": "", "help": "Durable working directory default; individual calls still provide their own command."},
-        {"id": "default_timeout_seconds", "label": "Default Timeout Seconds", "type": "number", "default": 30, "min": 1, "max": 120},
-        {"id": "max_output_chars", "label": "Max Output Chars", "type": "number", "default": 20000, "min": 1000, "max": 200000}
+        {"id": "default_timeout_seconds", "label": "Default Timeout Seconds", "type": "number", "default": 30, "min": 1, "max": 120}
       ]
     },
     "tool_category": "shell",

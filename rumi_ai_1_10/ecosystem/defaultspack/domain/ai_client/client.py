@@ -528,7 +528,7 @@ class AIClient:
         consume_approval_token=True,
     ):
         provider_id = str(provider_id or "").strip()
-        if provider_id in {"", "stub", "rumi"}:
+        if not provider_id:
             return
 
         context = self._authority_context_from_params(params)

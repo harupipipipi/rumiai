@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import io
+import hashlib
 import json
 import os
+import platform
 import shutil
+import shlex
+import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import uuid
-import stat
 from pathlib import Path
 from typing import Any
 
@@ -15,16 +20,23 @@ from ..errors import (
     SANDBOX_RESOURCE_CONTROLLER_UNAVAILABLE,
     SANDBOX_RUNTIME_UNAVAILABLE,
 )
+from ..policy import validate_workspace_relative_path
 from .bubblewrap_builder import build_bubblewrap_argv
 from .cgroup import build_systemd_run_argv, probe_systemd_user_scope
 from .spec import BubblewrapSandboxSpec, CgroupLimits, WorkspaceMount
 
 
 MAX_SANDBOX_OUTPUT_BYTES = 1024 * 1024
+MAX_SANDBOX_TERMINAL_OUTPUT_BYTES = 256 * 1024
 MAX_STAGE_FILES = 1024
 MAX_STAGE_TOTAL_BYTES = 16 * 1024 * 1024
 MAX_STAGE_FILE_BYTES = 2 * 1024 * 1024
+MAX_CODING_WORKSPACE_EXPORT_BYTES = 128 * 1024 * 1024
+MAX_CODING_WORKSPACE_EXPORT_FILES = 8000
+MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES = 4 * 1024 * 1024
 SANDBOX_ROOT_MARKER = ".rumi-sandbox-root"
+LIMA_NETWORK_ATTEST_ENV = "RUMI_SANDBOX_LIMA_NETWORK_ISOLATED"
+LIMA_CONFIG_HASH_ENV = "RUMI_SANDBOX_LIMA_CONFIG_HASH"
 
 
 class ManagedSandboxSupervisor:
@@ -131,6 +143,203 @@ class ManagedSandboxSupervisor:
                 }
 
             return self._response_from_process(proc, stage_audit=stage_audit)
+
+    def execute_coding_terminal(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Run a coding command inside an isolated staged workspace."""
+        system = platform.system().lower()
+        if system == "darwin":
+            return self._execute_coding_terminal_lima(request)
+        return self._execute_coding_terminal_bwrap(request)
+
+    def _execute_coding_terminal_bwrap(self, request: dict[str, Any]) -> dict[str, Any]:
+        diagnostics = diagnose_sandbox_environment(request)
+        if not diagnostics["ready"]:
+            failed = _first_failed_sandbox_check(diagnostics)
+            return self._unavailable(
+                request,
+                str(failed.get("message") or "Managed sandbox runtime is unavailable"),
+                error_type=str(failed.get("code") or SANDBOX_RUNTIME_UNAVAILABLE),
+                diagnostics=diagnostics,
+            )
+        timeout = _bounded_timeout(request.get("timeout_seconds"))
+        sandbox_id = _sandbox_id(request)
+        workspace = _required_dir(request.get("workspace_root"), "workspace_root")
+        cwd = validate_workspace_relative_path(request.get("cwd", "."), field="cwd")
+        command_argv = _coding_command_argv(request)
+        try:
+            immutable_root = _immutable_root(request)
+            spec = BubblewrapSandboxSpec(
+                sandbox_id=sandbox_id,
+                profile_id=str(request.get("profile_runtime") or request.get("principal_id") or "coding"),
+                immutable_root=immutable_root,
+                workspace=WorkspaceMount(source=workspace, read_only=False),
+                argv=tuple(command_argv),
+                env=_coding_sandbox_env(sandbox_id),
+                network_enabled=bool(request.get("network_enabled") is True),
+            )
+            bwrap_argv = build_bubblewrap_argv(spec)
+            if cwd != ".":
+                marker = bwrap_argv.index("--chdir")
+                bwrap_argv[marker + 1] = "/workspace/" + cwd
+            with tempfile.TemporaryDirectory(prefix=f"{sandbox_id}-term-") as tmp:
+                temp_root = Path(tmp)
+                sandbox_command, stdout_path, stderr_path, returncode_path = _sandbox_wrapper_command(
+                    temp_root=temp_root,
+                    bwrap_argv=bwrap_argv,
+                    seccomp_profile=None,
+                )
+                command = build_systemd_run_argv(
+                    f"rumi-sandbox-terminal-{sandbox_id}",
+                    CgroupLimits(runtime_max_sec=int(timeout)),
+                    sandbox_command,
+                )
+                systemd_proc = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 2,
+                    close_fds=True,
+                )
+                proc = _completed_from_wrapper_files(
+                    command=command,
+                    systemd_proc=systemd_proc,
+                    stdout_path=stdout_path,
+                    stderr_path=stderr_path,
+                    returncode_path=returncode_path,
+                )
+        except subprocess.TimeoutExpired:
+            return _coding_terminal_response(
+                sandbox_id=sandbox_id,
+                command=request.get("command") or request.get("argv"),
+                returncode=None,
+                stdout="",
+                stderr="Managed sandbox terminal timed out",
+                timed_out=True,
+            )
+        except Exception as exc:
+            return self._unavailable(
+                request,
+                str(exc),
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        return _coding_terminal_response(
+            sandbox_id=sandbox_id,
+            command=request.get("command") or request.get("argv"),
+            returncode=proc.returncode,
+            stdout=proc.stdout or "",
+            stderr=proc.stderr or "",
+            timed_out=False,
+        )
+
+    def _execute_coding_terminal_lima(self, request: dict[str, Any]) -> dict[str, Any]:
+        limactl = shutil.which("limactl")
+        instance = str(os.environ.get("RUMI_SANDBOX_LIMA_INSTANCE") or "").strip()
+        if limactl is None:
+            return self._unavailable(
+                request,
+                "Lima sandbox runtime is not installed",
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        if not instance:
+            return self._unavailable(
+                request,
+                "Lima sandbox instance is not configured; set RUMI_SANDBOX_LIMA_INSTANCE",
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        if str(os.environ.get(LIMA_NETWORK_ATTEST_ENV) or "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return self._unavailable(
+                request,
+                "Lima sandbox network isolation is not attested; set RUMI_SANDBOX_LIMA_NETWORK_ISOLATED=true for a networkless VM",
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        attestation_error = _verify_lima_instance_attestation(limactl, instance)
+        if attestation_error:
+            return self._unavailable(
+                request,
+                attestation_error,
+                error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            )
+        sandbox_id = _sandbox_id(request)
+        timeout = _bounded_timeout(request.get("timeout_seconds"))
+        workspace = _required_dir(request.get("workspace_root"), "workspace_root")
+        cwd = validate_workspace_relative_path(request.get("cwd", "."), field="cwd")
+        remote_root = f"/tmp/rumi-sandbox-coding/{sandbox_id}"
+        try:
+            archive = _tar_directory(workspace)
+            import_script = f"rm -rf {shlex.quote(remote_root)} && mkdir -p {shlex.quote(remote_root)} && tar -xf - -C {shlex.quote(remote_root)}"
+            import_proc = subprocess.run(
+                [limactl, "shell", instance, "--", "sh", "-lc", import_script],
+                input=archive,
+                capture_output=True,
+                timeout=timeout + 2,
+                close_fds=True,
+            )
+            if import_proc.returncode != 0:
+                return _coding_terminal_response(
+                    sandbox_id=sandbox_id,
+                    command=request.get("command") or request.get("argv"),
+                    returncode=import_proc.returncode,
+                    stdout="",
+                    stderr=_decode_bytes(import_proc.stderr),
+                    timed_out=False,
+                    success=False,
+                )
+            remote_cwd = remote_root if cwd == "." else remote_root.rstrip("/") + "/" + cwd
+            exec_script = (
+                f"cd {shlex.quote(remote_cwd)} && "
+                f"HOME=/tmp PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin "
+                f"RUMI_SANDBOX_ID={shlex.quote(sandbox_id)} "
+                + _remote_shell_command(request)
+            )
+            proc = subprocess.run(
+                [limactl, "shell", instance, "--", "sh", "-lc", exec_script],
+                capture_output=True,
+                timeout=timeout + 2,
+                close_fds=True,
+            )
+            with tempfile.TemporaryDirectory(prefix=f"{sandbox_id}-lima-export-") as export_tmp:
+                export_path = Path(export_tmp) / "workspace.tar"
+                with export_path.open("wb") as export_handle:
+                    export_proc = subprocess.run(
+                        [limactl, "shell", instance, "--", "tar", "-cf", "-", "-C", remote_root, "."],
+                        stdout=export_handle,
+                        stderr=subprocess.PIPE,
+                        timeout=timeout + 2,
+                        close_fds=True,
+                    )
+                if export_proc.returncode == 0:
+                    if export_path.stat().st_size > MAX_CODING_WORKSPACE_EXPORT_BYTES:
+                        return _coding_terminal_response(
+                            sandbox_id=sandbox_id,
+                            command=request.get("command") or request.get("argv"),
+                            returncode=1,
+                            stdout=_decode_bytes(proc.stdout),
+                            stderr="Lima sandbox export exceeded workspace size quota",
+                            timed_out=False,
+                            success=False,
+                            provider_id="lima_ubuntu",
+                        )
+                    _replace_directory_from_tar(workspace, export_path)
+        except subprocess.TimeoutExpired:
+            return _coding_terminal_response(
+                sandbox_id=sandbox_id,
+                command=request.get("command") or request.get("argv"),
+                returncode=None,
+                stdout="",
+                stderr="Lima sandbox terminal timed out",
+                timed_out=True,
+            )
+        except Exception as exc:
+            return self._unavailable(request, str(exc), error_type=SANDBOX_RUNTIME_UNAVAILABLE)
+        return _coding_terminal_response(
+            sandbox_id=sandbox_id,
+            command=request.get("command") or request.get("argv"),
+            returncode=proc.returncode,
+            stdout=_decode_bytes(proc.stdout),
+            stderr=_decode_bytes(proc.stderr),
+            timed_out=False,
+            provider_id="lima_ubuntu",
+        )
 
     def _stage_function(self, *, request: dict[str, Any], function_target: Path) -> tuple[Path, str, dict[str, int]]:
         function_dir = _required_dir(request.get("function_dir"), "function_dir")
@@ -421,11 +630,204 @@ def _completed_from_wrapper_files(
     return subprocess.CompletedProcess(command, returncode, stdout=stdout, stderr=stderr)
 
 
-def _read_text_if_present(path: Path, *, fallback: str | None = "") -> str:
+def _read_text_if_present(path: Path, *, fallback: str | None = "", max_bytes: int = MAX_SANDBOX_TERMINAL_OUTPUT_BYTES + 1) -> str:
     try:
-        return path.read_text(encoding="utf-8", errors="replace")
+        with path.open("rb") as handle:
+            raw = handle.read(max(1, int(max_bytes)) + 1)
+        return raw.decode("utf-8", errors="replace")
     except OSError:
         return fallback or ""
+
+
+def _coding_command_argv(request: dict[str, Any]) -> list[str]:
+    argv = request.get("argv")
+    if isinstance(argv, list) and argv:
+        return [str(item) for item in argv]
+    command = str(request.get("command") or "").strip()
+    if not command:
+        raise ValueError("command or argv is required")
+    return ["/bin/sh", "-lc", command]
+
+
+def _remote_shell_command(request: dict[str, Any]) -> str:
+    argv = request.get("argv")
+    if isinstance(argv, list) and argv:
+        return shlex.join(str(item) for item in argv)
+    command = str(request.get("command") or "").strip()
+    if not command:
+        raise ValueError("command or argv is required")
+    return "/bin/sh -lc " + shlex.quote(command)
+
+
+def _coding_sandbox_env(sandbox_id: str) -> dict[str, str]:
+    return {
+        "HOME": "/home",
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "RUMI_SANDBOX_ID": sandbox_id,
+    }
+
+
+def _coding_terminal_response(
+    *,
+    sandbox_id: str,
+    command: Any,
+    returncode: int | None,
+    stdout: str,
+    stderr: str,
+    timed_out: bool,
+    success: bool | None = None,
+    provider_id: str = "bwrap_host",
+) -> dict[str, Any]:
+    clipped_stdout, stdout_truncated = _clip_output(stdout)
+    clipped_stderr, stderr_truncated = _clip_output(stderr)
+    ok = returncode == 0 and not timed_out if success is None else bool(success)
+    return {
+        "success": ok,
+        "ok": ok,
+        "sandbox_id": sandbox_id,
+        "execution_boundary": "managed_sandbox",
+        "provider_id": provider_id,
+        "command": command,
+        "exit_code": returncode,
+        "returncode": returncode,
+        "stdout": clipped_stdout,
+        "stderr": clipped_stderr,
+        "stdout_truncated": stdout_truncated,
+        "stderr_truncated": stderr_truncated,
+        "timed_out": timed_out,
+        "process_failed": returncode not in (0, None),
+    }
+
+
+def _clip_output(text: Any) -> tuple[str, bool]:
+    value = str(text or "")
+    raw = value.encode("utf-8", errors="replace")
+    if len(raw) <= MAX_SANDBOX_TERMINAL_OUTPUT_BYTES:
+        return value, False
+    clipped = raw[:MAX_SANDBOX_TERMINAL_OUTPUT_BYTES].decode("utf-8", errors="replace")
+    return clipped + "\n[output truncated]\n", True
+
+
+def _decode_bytes(value: bytes | str | None) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value or "")
+
+
+def _verify_lima_instance_attestation(limactl: str, instance: str) -> str | None:
+    expected_hash = str(os.environ.get(LIMA_CONFIG_HASH_ENV) or "").strip().lower()
+    if not expected_hash:
+        return "Lima sandbox config is not attested; set RUMI_SANDBOX_LIMA_CONFIG_HASH for the approved instance config"
+    try:
+        current_hash = _lima_instance_config_hash(limactl, instance)
+    except Exception as exc:
+        return "Lima sandbox config attestation failed: " + str(exc)
+    if current_hash != expected_hash:
+        return "Lima sandbox config changed; refusing to run untrusted coding tools"
+    return None
+
+
+def _lima_instance_config_hash(limactl: str, instance: str) -> str:
+    proc = subprocess.run(
+        [limactl, "list", instance, "--format", "json"],
+        capture_output=True,
+        timeout=5,
+        close_fds=True,
+    )
+    if proc.returncode != 0:
+        raise ValueError(_decode_bytes(proc.stderr) or "limactl list failed")
+    try:
+        payload = json.loads(_decode_bytes(proc.stdout))
+    except json.JSONDecodeError as exc:
+        raise ValueError("limactl returned invalid JSON") from exc
+    return _stable_lima_config_hash(instance, payload)
+
+
+def _stable_lima_config_hash(instance: str, payload: Any) -> str:
+    relevant = _stable_lima_config_payload(instance, payload)
+    encoded = json.dumps(relevant, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8", errors="replace")).hexdigest()
+
+
+def _stable_lima_config_payload(instance: str, payload: Any) -> dict[str, Any]:
+    item: dict[str, Any]
+    if isinstance(payload, list):
+        item = next(
+            (
+                entry
+                for entry in payload
+                if isinstance(entry, dict)
+                and str(entry.get("name") or entry.get("instance") or entry.get("inst") or "").strip() == instance
+            ),
+            payload[0] if payload and isinstance(payload[0], dict) else {},
+        )
+    elif isinstance(payload, dict):
+        item = payload
+    else:
+        item = {}
+    return {
+        "instance": instance,
+        "config": item.get("config") if isinstance(item.get("config"), dict) else {},
+        "mounts": item.get("mounts") if isinstance(item.get("mounts"), list) else [],
+        "networks": item.get("networks") if isinstance(item.get("networks"), list) else [],
+        "network": item.get("network") if isinstance(item.get("network"), dict) else {},
+        "mountType": item.get("mountType"),
+        "vmType": item.get("vmType"),
+        "arch": item.get("arch"),
+    }
+
+
+def _tar_directory(root: Path) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        for current, dirs, files in os.walk(root, followlinks=False):
+            current_path = Path(current)
+            dirs[:] = [name for name in dirs if not (current_path / name).is_symlink()]
+            for file_name in files:
+                path = current_path / file_name
+                if not path.is_file() or path.is_symlink():
+                    continue
+                archive.add(path, arcname=path.relative_to(root).as_posix(), recursive=False)
+    return buffer.getvalue()
+
+
+def _replace_directory_from_tar(root: Path, archive: bytes | Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="rumi-sandbox-export-") as tmp:
+        target = Path(tmp) / "work"
+        target.mkdir(mode=0o700)
+        target_root = target.resolve()
+        if isinstance(archive, Path):
+            tar_context = tarfile.open(archive, mode="r:*")
+        else:
+            tar_context = tarfile.open(fileobj=io.BytesIO(archive), mode="r:*")
+        with tar_context as tar:
+            file_count = 0
+            total_bytes = 0
+            for member in tar:
+                member_path = (target / member.name).resolve()
+                try:
+                    member_path.relative_to(target_root)
+                except ValueError as exc:
+                    raise ValueError("sandbox export attempted path traversal") from exc
+                if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+                    continue
+                if member.isfile():
+                    file_count += 1
+                    total_bytes += int(member.size)
+                    if file_count > MAX_CODING_WORKSPACE_EXPORT_FILES:
+                        raise ValueError("sandbox export has too many files")
+                    if member.size > MAX_CODING_WORKSPACE_EXPORT_FILE_BYTES:
+                        raise ValueError("sandbox export contains an oversized file")
+                    if total_bytes > MAX_CODING_WORKSPACE_EXPORT_BYTES:
+                        raise ValueError("sandbox export is too large")
+                tar.extract(member, target, filter="data")
+        for item in root.iterdir():
+            if item.is_dir():
+                shutil.rmtree(item)
+            else:
+                item.unlink()
+        for item in target.iterdir():
+            shutil.move(str(item), str(root / item.name))
 
 
 def _sandbox_id(request: dict[str, Any]) -> str:

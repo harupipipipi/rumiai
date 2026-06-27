@@ -20,6 +20,30 @@
   ],
   "input_schema": {
     "type": "object",
+    "properties": {
+      "query": {"type": "string"},
+      "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+      "allow_network": {"type": "boolean"},
+      "domains": {
+        "oneOf": [
+          {"type": "array", "items": {"type": "string"}},
+          {"type": "string"}
+        ]
+      },
+      "official_only": {"type": "boolean"},
+      "fetch_pages": {"type": "boolean"},
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional character budget for source excerpts."
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional approximate token budget for source excerpts."
+      }
+    },
+    "required": ["query"],
     "additionalProperties": true
   },
   "output_schema": {

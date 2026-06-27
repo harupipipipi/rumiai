@@ -10,6 +10,7 @@ from .security import (
     is_trusted_pack_id,
     normalize_risk,
     source_pack_id_from_manifest,
+    untrusted_tool_security_rejection,
     unsupported_execution_reason,
 )
 from .loading import normalize_tool_loading_mode
@@ -437,6 +438,9 @@ class ToolRegistry:
         if risk_was_unknown:
             provisional["metadata"]["risk_defaulted"] = True
         rejection_reason = unsupported_execution_reason(provisional)
+        untrusted_rejection = untrusted_tool_security_rejection(provisional)
+        if rejection_reason is None and untrusted_rejection is not None:
+            rejection_reason = untrusted_rejection
         if rejection_reason is not None and legacy_compat and str(execution.get("type") or "local").lower() in {
             "local",
             "handler",

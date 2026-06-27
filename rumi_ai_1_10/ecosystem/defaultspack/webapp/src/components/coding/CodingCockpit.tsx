@@ -1,4 +1,4 @@
-import { Bot, FolderGit2, Globe2, PlugZap, RefreshCw, Users } from "lucide-react";
+import { Bot, FolderGit2, FolderPlus, Globe2, PlugZap, RefreshCw, ShieldCheck, Users } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
@@ -47,6 +47,8 @@ export function CodingCockpit({
   workspaces,
   selectedWorkspaceId,
   onWorkspaceSelect,
+  onWorkspaceCreate,
+  onWorkspaceTrust,
   onWorkspacesRefresh,
   consoleScopeKey,
   variant = "sidecar",
@@ -54,6 +56,8 @@ export function CodingCockpit({
   workspaces: CodingWorkspaceRecord[];
   selectedWorkspaceId?: string | null;
   onWorkspaceSelect?: (workspaceId: string) => void;
+  onWorkspaceCreate?: () => void;
+  onWorkspaceTrust?: (workspaceId: string) => void;
   onWorkspacesRefresh?: () => void;
   consoleScopeKey?: string;
   variant?: "sidecar" | "sidebar";
@@ -207,6 +211,27 @@ export function CodingCockpit({
           ))}
           {workspaces.length === 0 && <option value="">no workspace</option>}
         </select>
+        <div className="mt-2 grid grid-cols-2 gap-1.5">
+          <button
+            type="button"
+            onClick={onWorkspaceCreate}
+            className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-400 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100"
+            title="Add workspace"
+          >
+            <FolderPlus size={12} className="shrink-0" />
+            <span className="truncate">Add</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => activeWorkspaceId && onWorkspaceTrust?.(activeWorkspaceId)}
+            disabled={!activeWorkspaceId || selectedWorkspace?.trusted === true}
+            className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-zinc-800 px-2 text-[11px] text-zinc-400 transition hover:border-zinc-700 hover:bg-zinc-900 hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-45"
+            title="Trust workspace"
+          >
+            <ShieldCheck size={12} className="shrink-0" />
+            <span className="truncate">{selectedWorkspace?.trusted ? "Trusted" : "Trust"}</span>
+          </button>
+        </div>
         {status && <p className="mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">{status}</p>}
       </div>
 

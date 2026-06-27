@@ -129,6 +129,27 @@ const googleProfile = {
   availability: { configured: true },
 };
 
+const embeddingProfile = {
+  profile_id: "google/text-embedding-004",
+  qualified_model_id: "google/text-embedding-004",
+  provider_id: "google",
+  provider_display_name: "Google",
+  model_id: "text-embedding-004",
+  display_name: "Text Embedding 004",
+  type: "embedding",
+  max_context: 2048,
+  max_context_tokens: 2048,
+  supports_thinking: false,
+  supports_tool_calling: false,
+  supports_vision: false,
+  local: false,
+  configured: true,
+  requires_api_key: false,
+  capability_tags: ["embedding"],
+  recommended_roles: ["tool_embedding"],
+  availability: { configured: true },
+};
+
 const opencodeProfile = {
   profile_id: "opencode-go/qwen3.5-plus",
   qualified_model_id: "opencode-go/qwen3.5-plus",
@@ -183,6 +204,29 @@ const sidebarItems = [
       kind: "tool",
       title: "Web Search",
       notes: ["Mocked for Playwright smoke coverage."],
+    },
+  },
+  {
+    id: "github_issue_search",
+    label: "GitHub Issues",
+    category: "tool",
+    description: "Search GitHub issues and pull requests.",
+    tags: ["github", "issues"],
+    risk: "medium",
+    ui: {
+      group_id: "github",
+      group_label: "GitHub",
+      item_icon: "git",
+      service_id: "github",
+      widget_kind: "tool_toggle",
+      drop_capabilities: ["composer.toggle_chip"],
+      composer_label: "GitHub Issues",
+      composer_description: "Search GitHub issues.",
+    },
+    panel: {
+      kind: "tool",
+      title: "GitHub Issues",
+      notes: ["Mocked for service-level selection coverage."],
     },
   },
   {
@@ -259,9 +303,114 @@ const settingsValues = {
     starred_item_ids: [],
     custom_tool_tags: {},
   },
-  tools: {},
+  tools: {
+    default_mode: "auto",
+    selection_strategy: "hybrid",
+    semantic_candidate_limit: 24,
+    final_tool_limit: 8,
+    catalog_ai_direct_limit: 80,
+    selector_trace: "summary",
+    standard_permissions: {
+      read: "auto",
+      search: "auto",
+      create: "confirm",
+      update: "confirm",
+      send: "confirm",
+      execute: "confirm",
+      computer: "confirm",
+      delete: "confirm",
+    },
+    service_permission_overrides: {},
+    embedding_model: "",
+  },
   commands: {},
 };
+
+const settingsSections = [
+  {
+    id: "tools",
+    label: "機能と接続",
+    description: "機能の選定、接続、実行時権限を管理します。",
+    fields: [],
+  },
+  {
+    id: "calendar",
+    label: "カレンダー",
+    description: "Calendar behavior.",
+    fields: Array.from({ length: 14 }, (_, index) => ({
+      id: `calendar_field_${index + 1}`,
+      label: `Calendar Field ${index + 1}`,
+      type: "text",
+      default: "",
+    })),
+  },
+];
+
+const toolCatalogServices = [
+  {
+    service_id: "web",
+    label: "Web検索",
+    summary: "Web、検索、オンライン情報を扱います",
+    connection_status: "connected",
+    tool_count: 1,
+    action_classes: ["search"],
+  },
+  {
+    service_id: "github",
+    label: "GitHub",
+    summary: "リポジトリ、Issue、Pull Requestを扱います",
+    connection_status: "connected",
+    tool_count: 1,
+    action_classes: ["search"],
+  },
+  {
+    service_id: "calendar",
+    label: "Calendar",
+    summary: "予定やカレンダーを扱います",
+    connection_status: "connected",
+    tool_count: 1,
+    action_classes: ["read"],
+  },
+];
+
+const toolCatalogTools = [
+  {
+    tool_id: "web_search",
+    service_id: "web",
+    service_label: "Web検索",
+    name: "Web Search",
+    summary: "Search the web.",
+    action_class: "search",
+    risk: "medium",
+    connection_status: "connected",
+    minimum_permission: "auto",
+    tags: ["research"],
+  },
+  {
+    tool_id: "github_issue_search",
+    service_id: "github",
+    service_label: "GitHub",
+    name: "GitHub Issues",
+    summary: "Search GitHub issues and pull requests.",
+    action_class: "search",
+    risk: "medium",
+    connection_status: "connected",
+    minimum_permission: "auto",
+    tags: ["github"],
+  },
+  {
+    tool_id: "scheduler",
+    service_id: "calendar",
+    service_label: "Calendar",
+    name: "Scheduler",
+    summary: "Schedule and trigger controls.",
+    action_class: "read",
+    risk: "low",
+    connection_status: "connected",
+    minimum_permission: "auto",
+    tags: ["calendar"],
+  },
+];
 
 async function fulfill(route: Route, data: unknown) {
   await route.fulfill({
@@ -298,6 +447,8 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
     sessionStorage.clear();
   });
 
+  let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
+  let conversationToolPreferences: Record<string, unknown> = {};
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
@@ -325,15 +476,21 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
           ],
           items: sidebarItems,
         },
-        settings: { sections: [], values: settingsValues },
+        settings: { sections: settingsSections, values: currentSettingsValues },
         chat_rendering: { renderers: [] },
         skills: catalogSkills,
         extension_points: [],
       });
     }
 
+    if (path === "/api/ui/settings" && method === "PUT") {
+      const payload = request.postDataJSON() as { values?: typeof settingsValues };
+      currentSettingsValues = JSON.parse(JSON.stringify(payload.values ?? currentSettingsValues));
+      return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
+    }
+
     if (path === "/api/ui/settings") {
-      return fulfill(route, { sections: [], values: settingsValues });
+      return fulfill(route, { sections: settingsSections, values: currentSettingsValues });
     }
 
     if (path === "/api/ui/commands") {
@@ -364,6 +521,42 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/ai/profiles") {
       return fulfill(route, { profiles: [smokeProfile, googleProfile, opencodeProfile, opencodeZenProfile], count: 4 });
+    }
+
+    if (path === "/api/ai/models/search" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      const types = Array.isArray(payload.type)
+        ? payload.type.map((item) => String(item).trim())
+        : [String(payload.type ?? "").trim()];
+      const models = types.includes("embedding")
+        ? [embeddingProfile]
+        : [smokeProfile, googleProfile, opencodeProfile, opencodeZenProfile];
+      return fulfill(route, { models, count: models.length });
+    }
+
+    if (path === "/api/tools/catalog") {
+      return fulfill(route, {
+        services: toolCatalogServices,
+        tools: toolCatalogTools,
+        count: toolCatalogTools.length,
+      });
+    }
+
+    if (path === "/api/tools/selection/preview" && method === "POST") {
+      return fulfill(route, {
+        preview_id: "preview-tool-selection",
+        expires_at: "2026-05-20T00:05:00Z",
+        decision: {
+          selected_tools: ["web_search", "github_issue_search"],
+          selected_services: toolCatalogServices.slice(0, 2),
+          recommendations: [
+            { tool_id: "web_search", confidence: 0.8, reason: "web search requested" },
+            { tool_id: "github_issue_search", confidence: 0.7, reason: "GitHub context requested" },
+          ],
+          permission_summary: { auto: 2, confirm: 0, block: 0 },
+          metadata: {},
+        },
+      });
     }
 
     if (path === "/api/chat/conversations" && method === "GET") {
@@ -403,6 +596,18 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/chat/conversations/c-smoke") {
       return fulfill(route, conversation);
+    }
+
+    if ((path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") && method === "PUT") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      conversationToolPreferences = (payload.preferences && typeof payload.preferences === "object" && !Array.isArray(payload.preferences))
+        ? payload.preferences as Record<string, unknown>
+        : {};
+      return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
+    }
+
+    if (path === "/api/conversations/c-smoke/tool-preferences" || path === "/api/chat/conversations/c-smoke/tool-preferences") {
+      return fulfill(route, { conversation_id: "c-smoke", preferences: conversationToolPreferences });
     }
 
     if (path === "/api/ui/conversations/c-smoke/preview") {
@@ -491,15 +696,25 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/rumi-log") {
       return fulfill(route, {
+        rumi_dir: "/repo/.rumi",
+        events_path: "/repo/.rumi/events.jsonl",
         events: [],
         summary: {
+          total: 0,
+          by_kind: {},
+          by_status: {},
+          agent_ids: [],
           commit_count: 0,
           push_count: 0,
+          plan_count: 0,
           task_count: 0,
           conversation_count: 0,
           mention_count: 0,
-          agent_ids: [],
+          last_event_at: null,
+          last_commit_hash: null,
         },
+        workspace_id: "ws-main",
+        workspace_root: "/repo",
         created: false,
       });
     }
@@ -567,21 +782,95 @@ async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOpti
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
-test("tool manager search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
+async function openCodingWidget(page: Page) {
+  await openDefaultspack(page, "/chat");
+  await page.locator("textarea.rumi-composer-textarea").fill("/coding");
+  await page.keyboard.press("Enter");
+  await expect(page).toHaveURL(/\/coding(?:\?|$)/);
+  const codingWidgetButton = page.getByRole("button", { name: "Coding widget" });
+  await expect(codingWidgetButton).toBeVisible();
+  await codingWidgetButton.click();
+  await expect(page.locator(".coding-cockpit")).toBeVisible();
+}
+
+test("tool hub search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
   await openDefaultspack(page);
 
-  await page.locator('button[title="Tool manager"]').click();
-  const search = page.getByPlaceholder("Tool managerで検索");
+  await page.locator('button[title="機能"]').click();
+  const search = page.getByPlaceholder("機能を検索");
   await search.fill("web");
   await expect(page.getByTestId("tool-manager-candidates")).toBeVisible();
   await expect(page.getByTestId("tool-manager-candidates")).toContainText("Web Search");
 
-  await page.getByRole("heading", { name: "Tool manager" }).click();
+  await page.getByRole("heading", { name: "機能" }).click();
   await expect(page.getByTestId("tool-manager-candidates")).toBeHidden();
   await expect(search).toHaveValue("web");
 
-  await page.getByRole("button", { name: "表示中をON" }).click();
-  await expect(page.getByText("On", { exact: true }).locator("..")).toContainText("1");
+  await page.getByRole("button", { name: "表示中を今回使う" }).click();
+  await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
+});
+
+test("composer approval menu opens action permissions while selection modes live in settings", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.getByRole("button", { name: "アクションの承認方法" }).click();
+  const approvalMenu = page.getByRole("menu", { name: "アクションの承認方法" });
+  await expect(approvalMenu).toContainText("Codex アクションの承認方法");
+  await expect(approvalMenu).toContainText("承認を求める");
+  await expect(approvalMenu).toContainText("代理で承認");
+  await expect(approvalMenu).toContainText("フルアクセス");
+  await expect(approvalMenu).toContainText("カスタム（設定）");
+  await expect(approvalMenu).not.toContainText("自動で選ぶ");
+
+  await approvalMenu.getByRole("button", { name: "詳細はこちら" }).click();
+  await expect(page.getByRole("heading", { name: "機能と接続" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "基本", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "権限", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "接続", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "高度な設定", exact: true })).toBeVisible();
+  await expect(page.getByText("既定の使い方")).toBeVisible();
+  await expect(page.getByText("自動で選ぶ")).toBeVisible();
+
+  await page.getByRole("button", { name: "権限", exact: true }).click();
+  for (const label of ["読む", "検索する", "作る", "更新する", "送信する", "実行する", "コンピュータ操作", "削除・push・reset"]) {
+    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("自動で許可").first()).toBeVisible();
+  await expect(page.getByText("確認する").first()).toBeVisible();
+  await expect(page.getByText("使わない").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "接続", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
+  await expect(page.getByText("権限を調整").first()).toBeVisible();
+
+  await page.getByRole("button", { name: "高度な設定", exact: true }).click();
+  await expect(page.getByText("自動：ベクトルで絞って別のAIが決める")).toBeVisible();
+  await expect(page.getByText("ベクトルで選ぶ", { exact: true })).toBeVisible();
+  await expect(page.getByText("別のAIがすべての機能から選ぶ")).toBeVisible();
+  await expect(page.getByText("すべて読み込む＋おすすめを付ける")).toBeVisible();
+  await expect(page.getByText("全ツールスキーマをそのまま渡します")).toBeVisible();
+  await expect(page.getByText("軽量キーワードで選ぶ")).toBeVisible();
+  await expect(page.getByText("Tool補助モデル")).toBeVisible();
+  await expect(page.getByText("ベクトルモデル")).toBeVisible();
+  await expect(page.getByText("Text Embedding 004")).toBeVisible();
+});
+
+test("tool hub service selections can be scoped to the conversation and survive reload", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await page.locator('button[title="機能"]').click();
+  await page.getByRole("button", { name: "この会話" }).click();
+  const githubCard = page.locator("div.rounded-md").filter({ hasText: "GitHub" }).first();
+  await expect(githubCard).toBeVisible();
+  await githubCard.getByTitle("サービスを使う").click();
+  await expect(githubCard).toContainText("会話固定");
+
+  await page.reload();
+  await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
+  await page.locator('button[title="機能"]').click();
+  await page.getByRole("button", { name: "この会話" }).click();
+  const reloadedGithubCard = page.locator("div.rounded-md").filter({ hasText: "GitHub" }).first();
+  await expect(reloadedGithubCard).toContainText("会話固定");
 });
 
 test("composer at mention selects tools and skills and sends mention metadata", async ({ page }) => {
@@ -614,6 +903,11 @@ test("composer at mention selects tools and skills and sends mention metadata", 
 
   const request = streamRequests[0];
   expect(request.tools).toEqual(["web_search"]);
+  const params = request.params as Record<string, unknown>;
+  const toolSelection = params.tool_selection as Record<string, unknown>;
+  expect(toolSelection.mode).toBe("manual");
+  expect(toolSelection.scope).toBe("turn");
+  expect(toolSelection.include).toEqual([{ kind: "tool", id: "web_search" }]);
 
   const message = request.message as Record<string, unknown>;
   const metadata = message.metadata as Record<string, unknown>;
@@ -721,9 +1015,9 @@ test("resizable canvas and tool widgets persist width choices", async ({ page })
   const storedCanvasWidth = await page.evaluate(() => Number(localStorage.getItem("rumi-activity-preview-width")));
   expect(storedCanvasWidth).toBeGreaterThanOrEqual(300);
 
-  await page.locator('button[title="Tool manager"]').click();
-  await expect(page.getByRole("heading", { name: "Tool manager" })).toBeVisible();
-  const toolHandle = page.getByLabel("Tool panel幅を変更");
+  await page.locator('button[title="機能"]').click();
+  await expect(page.getByRole("heading", { name: "機能" })).toBeVisible();
+  const toolHandle = page.getByLabel("機能パネル幅を変更");
   await expect(toolHandle).toBeVisible();
   const toolBox = await toolHandle.boundingBox();
   expect(toolBox).not.toBeNull();
@@ -777,8 +1071,8 @@ test("preview pane opens from the chat canvas peek", async ({ page }) => {
 test("calendar action renders a scheduler preview", async ({ page }) => {
   await openDefaultspack(page);
 
-  await page.locator('button[title="Tool manager"]').click();
-  const toolManagerSearch = page.getByPlaceholder("Tool managerで検索");
+  await page.locator('button[title="機能"]').click();
+  const toolManagerSearch = page.getByPlaceholder("機能を検索");
   await toolManagerSearch.fill("scheduler");
   await page.getByTestId("tool-manager-candidates").getByRole("button", { name: /Scheduler/ }).first().click();
   await expect(page.getByText("Calendar and trigger smoke surface.")).toBeVisible();
@@ -951,15 +1245,15 @@ test("coding slash command toggles coding mode off again", async ({ page }) => {
 test("tool timeline shows streamed activity details", async ({ page }) => {
   await openDefaultspack(page);
 
-  await expect(page.locator(".rumi-tool-activity")).toHaveCount(0);
-  const toggle = page.getByRole("button", { name: /toolログを開く: .*作業しました/ });
+  await expect(page.locator(".rumi-tool-activity")).toHaveCount(1);
+  const toggle = page.getByRole("button", { name: /作業状況を開く:/ });
   await expect(toggle).toBeVisible();
-  await expect(toggle).toContainText("開く");
+  await expect(toggle).toContainText("詳細");
 
   await toggle.click();
-  const expandedToggle = page.getByRole("button", { name: /toolログを閉じる: .*作業しました/ });
+  const expandedToggle = page.getByRole("button", { name: /作業状況を閉じる:/ });
   await expect(expandedToggle).toBeVisible();
-  await expect(expandedToggle).not.toContainText("閉じる");
+  await expect(expandedToggle).toContainText("閉じる");
   const timeline = page.locator(".rumi-tool-activity");
   await expect(timeline).toBeVisible();
   await expect(timeline).toContainText("ファイル");
@@ -968,8 +1262,7 @@ test("tool timeline shows streamed activity details", async ({ page }) => {
 });
 
 test("mocked coding cockpit renders MCP server state", async ({ page }) => {
-  await openDefaultspack(page, "/coding");
-  await page.getByRole("button", { name: "Coding widget" }).click();
+  await openCodingWidget(page);
 
   await expect(page.locator(".coding-cockpit")).toBeVisible();
   const mcpServers = page.getByLabel("MCP servers");
@@ -978,8 +1271,7 @@ test("mocked coding cockpit renders MCP server state", async ({ page }) => {
 });
 
 test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
-  await openDefaultspack(page, "/coding");
-  await page.getByRole("button", { name: "Coding widget" }).click();
+  await openCodingWidget(page);
 
   await page.getByLabel("MCP server id").fill("contract_digest");
   await page.getByLabel("MCP command").fill("python");

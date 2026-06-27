@@ -449,6 +449,45 @@ def test_sandbox_doctor_reports_rootfs_and_controller_readiness(tmp_path, monkey
     assert "RUMI_SANDBOX_IMMUTABLE_ROOT" in root_check["message"]
 
 
+def test_setup_doctor_includes_managed_sandbox_readiness(tmp_path, monkeypatch):
+    import ecosystem.defaultspack.backend.sandbox.isolation as isolation_module
+    from rumi_setup.core.recovery import Recovery
+
+    monkeypatch.setattr(
+        isolation_module,
+        "diagnose_sandbox_environment",
+        lambda: {
+            "ready": False,
+            "checks": [
+                {
+                    "name": "immutable_root",
+                    "ok": False,
+                    "path": "",
+                    "marker": ".rumi-sandbox-root",
+                    "code": "SANDBOX_RUNTIME_UNAVAILABLE",
+                    "message": "Immutable sandbox root is not configured",
+                }
+            ],
+        },
+    )
+
+    issues = Recovery(str(tmp_path))._check_managed_sandbox()
+
+    assert issues == [
+        {
+            "id": "managed_sandbox_immutable_root_unavailable",
+            "severity": "warn",
+            "message": "Immutable sandbox root is not configured",
+            "auto_fix": False,
+            "details": {
+                "path": "",
+                "code": "SANDBOX_RUNTIME_UNAVAILABLE",
+                "marker": ".rumi-sandbox-root",
+            },
+        }
+    ]
+
+
 def test_default_di_registers_managed_sandbox_supervisor():
     from core_runtime.di_container import get_container, reset_container
     from ecosystem.defaultspack.backend.sandbox.isolation import ManagedSandboxSupervisor

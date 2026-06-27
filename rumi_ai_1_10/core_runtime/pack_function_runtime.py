@@ -311,6 +311,7 @@ def execute_function_entry(
             handler_dir=function_dir,
             handler_py_path=function_dir / ep_file,
             is_builtin=bool(getattr(entry, "is_builtin", False)),
+            pack_id=str(getattr(entry, "pack_id", "") or ""),
         )
         response = executor._execute_handler_subprocess(
             handler_def=adapter,
@@ -326,8 +327,6 @@ def execute_function_entry(
         return _raise_for_capability_response(response)
 
     if calling_convention == "python_docker":
-        if not executor._is_docker_available():
-            raise RuntimeError("Docker executor is not available for python_docker function")
         response = executor._execute_user_function(
             principal_id=entry.pack_id,
             entry=entry,

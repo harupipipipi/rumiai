@@ -10,6 +10,12 @@ RUNTIME_CAPABILITIES = frozenset(
     {
         "sandbox.exec",
         "sandbox.files",
+        "sandbox.terminal.exec",
+        "sandbox.workspace.read",
+        "sandbox.workspace.write",
+        "sandbox.workspace.diff",
+        "sandbox.network.request",
+        "sandbox.artifact.export",
         "sandbox.overlay_workspace",
         "sandbox.port_forward",
         "sandbox.network_policy",
