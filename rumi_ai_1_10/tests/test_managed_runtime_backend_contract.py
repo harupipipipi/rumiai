@@ -1965,6 +1965,25 @@ def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch)
     assert "command -v Xvfb" in dependency_checks[0][-1]
 
 
+def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_processes() -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import _desktop_start_script
+
+    script = _desktop_start_script(
+        "windows_wsl-seat-1",
+        "/workspace/windows_wsl-seat-1",
+        1440,
+        900,
+        ":98",
+        False,
+        {"starter": "empty"},
+    )
+
+    assert "chmod 1777 /tmp/.X11-unix" in script
+    assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in script
+    assert "Desktop Xvfb failed to stay running." in script
+    assert "Desktop openbox failed to stay running." in script
+
+
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
