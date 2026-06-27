@@ -91,7 +91,14 @@ void main() {
 
     expect(find.text('このスマホのAI API'), findsOneWidget);
     expect(find.text('API / プロバイダー設定'), findsOneWidget);
+    expect(find.text('モデル設定'), findsOneWidget);
     expect(find.text('Anthropic'), findsNothing);
+    await tester.tap(find.text('モデル設定'));
+    await tester.pumpAndSettle();
+    expect(find.text('Star付きモデル'), findsOneWidget);
+    expect(find.text('PCからモデルを取り込む'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
     await tester.tap(find.text('API / プロバイダー設定'));
     await tester.pumpAndSettle();
     expect(find.text('API設定'), findsOneWidget);

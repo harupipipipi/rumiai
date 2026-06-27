@@ -203,7 +203,8 @@ void main() {
       ),
     )));
     await tester.pump();
-    expect(find.byIcon(Icons.auto_awesome), findsOneWidget);
+    expect(find.text('処理中...'), findsOneWidget);
+    expect(find.byIcon(Icons.auto_awesome), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

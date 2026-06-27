@@ -68,6 +68,7 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _pcUltraYoloMode = false;
   MobileNotificationSettings _notificationSettings =
       MobileNotificationSettings.defaults;
+  List<ModelFavoriteConfig> _modelFavorites = [];
 
   @override
   void initState() {
@@ -95,6 +96,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await widget.store.load();
       _apiConfig = await widget.configStore.loadApi();
+      _modelFavorites = await widget.configStore.loadModelFavorites();
       _notificationSettings =
           await widget.configStore.loadNotificationSettings();
       final active = widget.store.active;
@@ -463,6 +465,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
     final refreshed = await widget.configStore.loadApi();
+    final modelFavorites = await widget.configStore.loadModelFavorites();
     final notificationSettings =
         await widget.configStore.loadNotificationSettings();
     await _loadPcConnection();
@@ -470,6 +473,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (mounted) {
       setState(() {
         _apiConfig = refreshed;
+        _modelFavorites = modelFavorites;
         _notificationSettings = notificationSettings;
       });
     }
@@ -566,6 +570,16 @@ class _ChatScreenState extends State<ChatScreen> {
         role: ChatRole.user,
         content: text,
         createdAt: DateTime.now(),
+      ),
+    );
+    final pendingAssistantId = 'pending:$clientMessageId';
+    _appendPcMessage(
+      ChatMessage(
+        id: pendingAssistantId,
+        role: ChatRole.assistant,
+        content: '',
+        createdAt: DateTime.now(),
+        pending: true,
       ),
     );
 
@@ -669,6 +683,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _applyPcEvent(ChatEvent event) {
     switch (event) {
       case ChatRunStarted():
+        _removePendingPcPlaceholders();
         _appendPcMessage(
           ChatMessage(
             id: event.assistantMessageId,
@@ -711,6 +726,21 @@ class _ChatScreenState extends State<ChatScreen> {
       case ApprovalEvent():
         break;
     }
+  }
+
+  void _removePendingPcPlaceholders() {
+    final snapshot = _activePcSnapshot;
+    if (snapshot == null) return;
+    final messages = snapshot.conversation.messages;
+    setState(() {
+      messages.removeWhere(
+        (m) =>
+            m.id.startsWith('pending:') &&
+            m.role == ChatRole.assistant &&
+            m.pending &&
+            m.content.isEmpty,
+      );
+    });
   }
 
   void _stop() {
@@ -932,7 +962,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (_activeSpaceIsPc) {
       final catalog = await _ensurePcCatalog();
       if (!mounted) return;
-      final profiles = catalog?.selectableProfiles ?? const <ProfileEntry>[];
+      final profiles = _pcProfilesForSelection(catalog);
       final selected = await Navigator.of(context).push<ModelSelectionResult>(
         MaterialPageRoute(
           builder: (_) => ModelSelectionScreen.pc(
@@ -949,11 +979,12 @@ class _ChatScreenState extends State<ChatScreen> {
     final providers = (await widget.configStore.loadProviderConfigs())
         .where((provider) => provider.isConfigured)
         .toList();
+    final selectableProviders = _mobileProvidersForSelection(providers);
     if (!mounted) return;
     final selected = await Navigator.of(context).push<ModelSelectionResult>(
       MaterialPageRoute(
         builder: (_) => ModelSelectionScreen.local(
-          providers: providers,
+          providers: selectableProviders,
           activeModelId: _activeModelId(),
           activeProviderId: _apiConfig?.providerId ?? '',
         ),
@@ -972,6 +1003,39 @@ class _ChatScreenState extends State<ChatScreen> {
       case ModelSelectionKind.pcProfile:
         return;
     }
+  }
+
+  List<ProfileEntry> _pcProfilesForSelection(PcCatalog? catalog) {
+    final profiles = catalog?.selectableProfiles ?? const <ProfileEntry>[];
+    if (profiles.isEmpty) return profiles;
+    final favorites = profiles
+        .where(
+          (profile) =>
+              profile.favorite ||
+              _modelFavorites.any(
+                (favorite) => favorite.matchesPcProfile(
+                  effectiveProfileId: profile.effectiveProfileId,
+                  qualifiedModelId: profile.qualifiedModelId,
+                  providerId: profile.providerId,
+                  modelId: profile.modelId,
+                ),
+              ),
+        )
+        .toList();
+    return favorites.isNotEmpty ? favorites : profiles;
+  }
+
+  List<MobileProviderConfig> _mobileProvidersForSelection(
+    List<MobileProviderConfig> providers,
+  ) {
+    final favorites = providers
+        .where(
+          (provider) => _modelFavorites.any(
+            (favorite) => favorite.matchesMobileProvider(provider),
+          ),
+        )
+        .toList();
+    return favorites.isNotEmpty ? favorites : providers;
   }
 
   Future<void> _setLocalModel(String model) async {
@@ -1506,11 +1570,10 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _activeSpaceLabel() {
+  String _activeSpaceHeaderLabel() {
     final space = _activeSpace();
-    if (space == null) return '';
-    if (space.isLocal) return 'このスマホ';
-    return space.isOffline ? '${space.label} — オフライン' : space.label;
+    if (space == null || space.isLocal) return 'このスマホ';
+    return space.isOffline ? 'PC オフライン' : 'PC';
   }
 
   String _activeModelId() {
@@ -1550,31 +1613,18 @@ class _ChatScreenState extends State<ChatScreen> {
         : Icons.desktop_windows;
   }
 
-  Widget _buildHeaderSubtitle(BuildContext context) {
-    return Row(
-      children: [
-        Flexible(child: _buildSpaceSwitcherSubtitle(context)),
-        const SizedBox(width: 8),
-        Flexible(child: _buildModelSwitcherSubtitle(context)),
-      ],
-    );
-  }
-
   Widget _buildSpaceSwitcherSubtitle(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    final space = _activeSpace();
     final child = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(_spaceIcon(space), size: 13, color: scheme.onSurfaceVariant),
-        const SizedBox(width: 4),
         Flexible(
           child: Text(
-            _activeSpaceLabel(),
+            _activeSpaceHeaderLabel(),
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w400,
+              fontWeight: FontWeight.w500,
               color: scheme.onSurfaceVariant,
             ),
             maxLines: 1,
@@ -1631,26 +1681,20 @@ class _ChatScreenState extends State<ChatScreen> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.model_training_outlined,
-              size: 13,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 4),
             Flexible(
               child: Text(
                 _activeModelLabel(),
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w400,
-                  color: scheme.onSurfaceVariant,
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             const SizedBox(width: 2),
-            Icon(Icons.chevron_right, size: 14, color: scheme.onSurfaceVariant),
+            Icon(Icons.expand_more, size: 16, color: scheme.onSurfaceVariant),
           ],
         ),
       ),
@@ -1712,12 +1756,9 @@ class _ChatScreenState extends State<ChatScreen> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _displayConversation()?.title ?? 'Rumi',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                _buildHeaderSubtitle(context),
+                _buildModelSwitcherSubtitle(context),
+                const SizedBox(height: 1),
+                _buildSpaceSwitcherSubtitle(context),
               ],
             ),
             actions: [

@@ -202,6 +202,121 @@ class MobileProviderConfig {
   }
 }
 
+class ModelFavoriteConfig {
+  const ModelFavoriteConfig({
+    required this.source,
+    required this.providerId,
+    required this.modelId,
+    this.profileId = '',
+    this.label = '',
+    this.pcLabel = '',
+  });
+
+  final String source;
+  final String providerId;
+  final String modelId;
+  final String profileId;
+  final String label;
+  final String pcLabel;
+
+  static const sourceMobile = 'mobile';
+  static const sourcePc = 'pc';
+
+  String get key {
+    if (source == sourcePc) {
+      final profile = profileId.trim().isNotEmpty
+          ? profileId.trim()
+          : '$providerId/$modelId';
+      return '$sourcePc:$profile';
+    }
+    return '$sourceMobile:$providerId:$modelId';
+  }
+
+  String get effectiveLabel {
+    final custom = label.trim();
+    if (custom.isNotEmpty) return custom;
+    final model = modelId.trim();
+    if (model.isNotEmpty) return model;
+    final profile = profileId.trim();
+    if (profile.isNotEmpty) return profile;
+    return providerId;
+  }
+
+  bool get isPc => source == sourcePc;
+  bool get isMobile => source == sourceMobile;
+
+  bool matchesMobileProvider(MobileProviderConfig provider) {
+    if (!isMobile) return false;
+    return provider.providerId == providerId && provider.model == modelId;
+  }
+
+  bool matchesPcProfile({
+    required String effectiveProfileId,
+    required String qualifiedModelId,
+    required String providerId,
+    required String modelId,
+  }) {
+    if (!isPc) return false;
+    final profile = profileId.trim();
+    if (profile.isNotEmpty &&
+        (profile == effectiveProfileId || profile == qualifiedModelId)) {
+      return true;
+    }
+    return this.providerId == providerId && this.modelId == modelId;
+  }
+
+  ModelFavoriteConfig copyWith({
+    String? source,
+    String? providerId,
+    String? modelId,
+    String? profileId,
+    String? label,
+    String? pcLabel,
+  }) {
+    return ModelFavoriteConfig(
+      source: source ?? this.source,
+      providerId: providerId ?? this.providerId,
+      modelId: modelId ?? this.modelId,
+      profileId: profileId ?? this.profileId,
+      label: label ?? this.label,
+      pcLabel: pcLabel ?? this.pcLabel,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'source': source,
+        'providerId': providerId,
+        'modelId': modelId,
+        'profileId': profileId,
+        'label': label,
+        'pcLabel': pcLabel,
+      };
+
+  factory ModelFavoriteConfig.fromJson(Map<String, dynamic> json) {
+    return ModelFavoriteConfig(
+      source: json['source'] as String? ?? sourceMobile,
+      providerId:
+          json['providerId'] as String? ?? json['provider_id'] as String? ?? '',
+      modelId: json['modelId'] as String? ?? json['model_id'] as String? ?? '',
+      profileId:
+          json['profileId'] as String? ?? json['profile_id'] as String? ?? '',
+      label: json['label'] as String? ?? '',
+      pcLabel: json['pcLabel'] as String? ?? json['pc_label'] as String? ?? '',
+    );
+  }
+
+  factory ModelFavoriteConfig.fromMobileProvider(
+    MobileProviderConfig provider,
+  ) {
+    return ModelFavoriteConfig(
+      source: sourceMobile,
+      providerId: provider.providerId,
+      modelId: provider.model,
+      label: provider.effectiveLabel,
+    );
+  }
+}
+
 class PcConnection {
   const PcConnection({
     required this.baseUrl,
@@ -328,6 +443,7 @@ class ApiConfigStore {
 
   static const _apiKey = 'rumi.api_config.v1';
   static const _providerConfigsKey = 'rumi.mobile_provider_configs.v1';
+  static const _modelFavoritesKey = 'rumi.mobile_model_favorites.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
   static const _notificationKey = 'rumi.mobile_notifications.v1';
 
@@ -406,6 +522,55 @@ class ApiConfigStore {
     );
   }
 
+  Future<List<ModelFavoriteConfig>> loadModelFavorites() async {
+    try {
+      final raw = await _storage.read(_modelFavoritesKey);
+      if (raw == null || raw.trim().isEmpty) return [];
+      final list = jsonDecode(raw) as List;
+      return _dedupeModelFavorites(
+        list
+            .whereType<Map>()
+            .map((entry) => ModelFavoriteConfig.fromJson(
+                  Map<String, dynamic>.from(entry),
+                ))
+            .where((entry) => entry.key.trim().isNotEmpty)
+            .toList(),
+      );
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> saveModelFavorites(List<ModelFavoriteConfig> favorites) async {
+    try {
+      final deduped = _dedupeModelFavorites(favorites);
+      await _storage.write(
+        _modelFavoritesKey,
+        jsonEncode(deduped.map((favorite) => favorite.toJson()).toList()),
+      );
+    } catch (_) {
+      // ignore secure storage failures
+    }
+  }
+
+  Future<void> upsertModelFavorite(ModelFavoriteConfig favorite) async {
+    final favorites = await loadModelFavorites();
+    await saveModelFavorites([
+      for (final existing in favorites)
+        if (existing.key != favorite.key) existing,
+      favorite,
+    ]);
+  }
+
+  Future<void> deleteModelFavorite(String key) async {
+    final normalized = key.trim();
+    if (normalized.isEmpty) return;
+    final favorites = await loadModelFavorites();
+    await saveModelFavorites(
+      favorites.where((favorite) => favorite.key != normalized).toList(),
+    );
+  }
+
   Future<PcConnection?> loadPc() async {
     try {
       final raw = await _storage.read(_pcKey);
@@ -451,4 +616,24 @@ class ApiConfigStore {
       // ignore secure storage failures
     }
   }
+}
+
+List<ModelFavoriteConfig> _dedupeModelFavorites(
+  Iterable<ModelFavoriteConfig> favorites,
+) {
+  final byKey = <String, ModelFavoriteConfig>{};
+  for (final favorite in favorites) {
+    final key = favorite.key.trim();
+    if (key.isEmpty) continue;
+    byKey[key] = favorite;
+  }
+  final list = byKey.values.toList()
+    ..sort((a, b) {
+      final source = a.source.compareTo(b.source);
+      if (source != 0) return source;
+      return a.effectiveLabel
+          .toLowerCase()
+          .compareTo(b.effectiveLabel.toLowerCase());
+    });
+  return list;
 }

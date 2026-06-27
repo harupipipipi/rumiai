@@ -33,6 +33,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late ApiConfig _config;
   List<MobileProviderConfig> _providerConfigs = [];
+  List<ModelFavoriteConfig> _modelFavorites = [];
   late PcConnection? _pc;
   MobileNotificationSettings _notificationSettings =
       MobileNotificationSettings.defaults;
@@ -84,6 +85,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final api = await widget.configStore.loadApi();
     final savedProviderConfigs = await widget.configStore.loadProviderConfigs();
     final providerConfigs = _mergeDefaultProviderConfigs(savedProviderConfigs);
+    final modelFavorites = await widget.configStore.loadModelFavorites();
     final pc = await widget.configStore.loadPc();
     final notificationSettings =
         await widget.configStore.loadNotificationSettings();
@@ -94,6 +96,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() {
       _config = api;
       _providerConfigs = providerConfigs;
+      _modelFavorites = modelFavorites;
       _pc = pc;
       _notificationSettings = notificationSettings;
       _pairedDevices = pairedDevices;
@@ -602,12 +605,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       final bootstrap = await client.fetchBootstrap(pc);
       final catalog = await client.fetchCapabilities(pc);
       final providerConfigs = _mergeProviderCatalog(catalog);
+      final modelFavorites = _mergeModelFavoritesFromCatalog(
+        catalog,
+        pcLabel: bootstrap.label,
+      );
       await widget.configStore.saveProviderConfigs(providerConfigs);
+      await widget.configStore.saveModelFavorites(modelFavorites);
       if (!mounted) return;
       setState(() {
         _pcBootstrap = bootstrap;
         _pcCatalog = catalog;
         _providerConfigs = providerConfigs;
+        _modelFavorites = modelFavorites;
         _fetchingCatalog = false;
       });
       _toast(
@@ -751,6 +760,69 @@ class _SettingsScreenState extends State<SettingsScreen> {
         (compatibility == 'openai' ||
             compatibility == 'anthropic_messages' ||
             provider.providerId == 'anthropic');
+  }
+
+  List<ModelFavoriteConfig> _mergeModelFavoritesFromCatalog(
+    PcCatalog catalog, {
+    required String pcLabel,
+  }) {
+    final byKey = {
+      for (final favorite in _modelFavorites) favorite.key: favorite,
+    };
+    final favoriteProfiles =
+        catalog.runtime.favoriteProfiles.map((id) => id.trim()).toSet();
+    for (final profile in catalog.selectableProfiles) {
+      final isFavorite = profile.favorite ||
+          favoriteProfiles.any((id) => _pcProfileMatchesId(profile, id));
+      if (!isFavorite) continue;
+      final favorite = _favoriteFromPcProfile(profile, pcLabel: pcLabel);
+      byKey[favorite.key] = favorite;
+    }
+    return _sortModelFavorites(byKey.values);
+  }
+
+  bool _pcProfileMatchesId(ProfileEntry profile, String id) {
+    if (id.isEmpty) return false;
+    return profile.effectiveProfileId == id ||
+        profile.profileId == id ||
+        profile.qualifiedModelId == id ||
+        '${profile.providerId}/${profile.modelId}' == id;
+  }
+
+  ModelFavoriteConfig _favoriteFromPcProfile(
+    ProfileEntry profile, {
+    String pcLabel = '',
+  }) {
+    return ModelFavoriteConfig(
+      source: ModelFavoriteConfig.sourcePc,
+      providerId: profile.providerId,
+      modelId: profile.modelId,
+      profileId: profile.effectiveProfileId,
+      label: profile.displayLabel,
+      pcLabel: pcLabel,
+    );
+  }
+
+  Future<void> _setModelFavorite(
+    ModelFavoriteConfig favorite,
+    bool enabled,
+  ) async {
+    final next = enabled
+        ? _sortModelFavorites([
+            for (final existing in _modelFavorites)
+              if (existing.key != favorite.key) existing,
+            favorite,
+          ])
+        : _modelFavorites
+            .where((existing) => existing.key != favorite.key)
+            .toList();
+    await widget.configStore.saveModelFavorites(next);
+    if (!mounted) return;
+    setState(() => _modelFavorites = next);
+  }
+
+  bool _isModelFavorite(ModelFavoriteConfig favorite) {
+    return _modelFavorites.any((existing) => existing.key == favorite.key);
   }
 
   bool _isActiveMobileProvider(MobileProviderConfig provider) {
@@ -996,6 +1068,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _openModelSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (routeContext) => StatefulBuilder(
+          builder: (context, setRouteState) {
+            Future<void> refresh(Future<void> Function() action) async {
+              await action();
+              if (routeContext.mounted) {
+                setRouteState(() {});
+              }
+            }
+
+            return _ModelSettingsPage(
+              providerConfigs: _providerConfigs,
+              config: _config,
+              modelFavorites: _modelFavorites,
+              pcCatalog: _pcCatalog,
+              fetchingCatalog: _fetchingCatalog,
+              catalogError: _catalogError,
+              isFavorite: _isModelFavorite,
+              providerRunsOnMobile: _providerRunsOnMobile,
+              onFetchPcCatalog: () => refresh(_fetchPcCatalog),
+              onToggleFavorite: (favorite, enabled) => refresh(
+                () => _setModelFavorite(favorite, enabled),
+              ),
+              onUseProvider: (provider) => refresh(
+                () => _activateMobileProvider(provider),
+              ),
+              favoriteFromPcProfile: _favoriteFromPcProfile,
+            );
+          },
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -1020,6 +1129,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle:
                     '${_configuredProviderCount(_providerConfigs)} / ${_providerConfigs.length} 件のKey保存済み · 現在 ${_mobileApiLabel(_config, _providerConfigs)}',
                 onTap: () => unawaited(_openMobileApiSettings()),
+              ),
+              const SizedBox(height: 12),
+              _SettingsNavCard(
+                icon: Icons.star_outline,
+                title: 'モデル設定',
+                subtitle:
+                    'Star付き ${_modelFavorites.length} 件 · PCから取り込み / このスマホで設定',
+                onTap: () => unawaited(_openModelSettings()),
               ),
               const SizedBox(height: 28),
               _SectionTitle(
@@ -1238,6 +1355,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
 int _configuredProviderCount(Iterable<MobileProviderConfig> providers) {
   return providers.where((provider) => provider.isConfigured).length;
+}
+
+List<ModelFavoriteConfig> _sortModelFavorites(
+  Iterable<ModelFavoriteConfig> favorites,
+) {
+  final list = favorites.toList();
+  list.sort((a, b) {
+    final source = a.source.compareTo(b.source);
+    if (source != 0) return source;
+    return a.effectiveLabel
+        .toLowerCase()
+        .compareTo(b.effectiveLabel.toLowerCase());
+  });
+  return list;
 }
 
 class _UnfocusOnTapOutside extends StatelessWidget {
@@ -1602,6 +1733,440 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
         provider.displayName.toLowerCase().contains(query) ||
         provider.providerId.toLowerCase().contains(query) ||
         provider.model.toLowerCase().contains(query);
+  }
+}
+
+class _ModelSettingsPage extends StatefulWidget {
+  const _ModelSettingsPage({
+    required this.providerConfigs,
+    required this.config,
+    required this.modelFavorites,
+    required this.pcCatalog,
+    required this.fetchingCatalog,
+    required this.catalogError,
+    required this.isFavorite,
+    required this.providerRunsOnMobile,
+    required this.onFetchPcCatalog,
+    required this.onToggleFavorite,
+    required this.onUseProvider,
+    required this.favoriteFromPcProfile,
+  });
+
+  final List<MobileProviderConfig> providerConfigs;
+  final ApiConfig config;
+  final List<ModelFavoriteConfig> modelFavorites;
+  final PcCatalog? pcCatalog;
+  final bool fetchingCatalog;
+  final String? catalogError;
+  final bool Function(ModelFavoriteConfig favorite) isFavorite;
+  final bool Function(MobileProviderConfig provider) providerRunsOnMobile;
+  final Future<void> Function() onFetchPcCatalog;
+  final Future<void> Function(ModelFavoriteConfig favorite, bool enabled)
+      onToggleFavorite;
+  final Future<void> Function(MobileProviderConfig provider) onUseProvider;
+  final ModelFavoriteConfig Function(ProfileEntry profile, {String pcLabel})
+      favoriteFromPcProfile;
+
+  @override
+  State<_ModelSettingsPage> createState() => _ModelSettingsPageState();
+}
+
+class _ModelSettingsPageState extends State<_ModelSettingsPage> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final mobileProviders = widget.providerConfigs
+        .where((provider) => provider.model.trim().isNotEmpty)
+        .toList()
+      ..sort(
+        (a, b) => a.effectiveLabel
+            .toLowerCase()
+            .compareTo(b.effectiveLabel.toLowerCase()),
+      );
+    final pcProfiles = widget.pcCatalog?.selectableProfiles ?? [];
+    final filteredMobile =
+        mobileProviders.where(_matchesMobileProvider).toList();
+    final filteredPc = pcProfiles.where(_matchesPcProfile).toList();
+
+    return _UnfocusOnTapOutside(
+      child: Scaffold(
+        appBar: AppBar(title: const Text('モデル設定')),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              _ModelSummaryCard(
+                activeLabel: _mobileApiLabel(
+                  widget.config,
+                  widget.providerConfigs,
+                ),
+                favoriteCount: widget.modelFavorites.length,
+              ),
+              const SizedBox(height: 12),
+              FilledButton.tonalIcon(
+                icon: widget.fetchingCatalog
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cloud_download_outlined),
+                label: const Text('PCからモデルを取り込む'),
+                onPressed: widget.fetchingCatalog
+                    ? null
+                    : () => unawaited(widget.onFetchPcCatalog()),
+              ),
+              if (widget.catalogError != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  widget.catalogError!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              TextField(
+                decoration: const InputDecoration(
+                  labelText: 'モデルを検索',
+                  prefixIcon: Icon(Icons.search),
+                ),
+                onChanged: (value) => setState(() => _query = value),
+              ),
+              const SizedBox(height: 20),
+              _SectionTitle(
+                icon: Icons.star_outline,
+                title: 'Star付きモデル',
+                subtitle: 'チャット画面のモデル選択は、この一覧を優先します。',
+              ),
+              const SizedBox(height: 12),
+              if (widget.modelFavorites.isEmpty)
+                const _ProviderHintCard()
+              else
+                for (final favorite in widget.modelFavorites) ...[
+                  _FavoriteModelCard(
+                    favorite: favorite,
+                    provider: _providerForFavorite(favorite),
+                    onUseProvider: favorite.isMobile
+                        ? () {
+                            final provider = _providerForFavorite(favorite);
+                            if (provider != null) {
+                              unawaited(widget.onUseProvider(provider));
+                            }
+                          }
+                        : null,
+                    onRemove: () => unawaited(
+                      widget.onToggleFavorite(favorite, false),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              const SizedBox(height: 20),
+              _SectionTitle(
+                icon: Icons.phone_android_outlined,
+                title: 'このスマホ',
+                subtitle: 'API Keyを保存したproviderのモデルをstarします。',
+              ),
+              const SizedBox(height: 12),
+              if (filteredMobile.isEmpty)
+                const _EmptyModelSettingsHint(label: '一致するスマホモデルがありません')
+              else
+                for (final provider in filteredMobile) ...[
+                  _ModelCandidateCard(
+                    title: provider.effectiveLabel,
+                    subtitle: [
+                      provider.displayName,
+                      provider.model,
+                    ].where((part) => part.trim().isNotEmpty).join(' · '),
+                    sourceLabel: provider.isConfigured ? 'このスマホ' : 'Key未設定',
+                    active: widget.config.providerId == provider.providerId &&
+                        widget.config.model == provider.model,
+                    supported: provider.isConfigured &&
+                        widget.providerRunsOnMobile(provider),
+                    starred: widget.isFavorite(
+                      ModelFavoriteConfig.fromMobileProvider(provider),
+                    ),
+                    onToggleStar: (starred) => unawaited(
+                      widget.onToggleFavorite(
+                        ModelFavoriteConfig.fromMobileProvider(provider),
+                        starred,
+                      ),
+                    ),
+                    onUse: provider.isConfigured &&
+                            widget.providerRunsOnMobile(provider)
+                        ? () => unawaited(widget.onUseProvider(provider))
+                        : null,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+              const SizedBox(height: 20),
+              _SectionTitle(
+                icon: Icons.desktop_windows_outlined,
+                title: 'PC',
+                subtitle: 'PCのstar付きモデルは「PCからモデルを取り込む」で同期されます。',
+              ),
+              const SizedBox(height: 12),
+              if (widget.pcCatalog == null)
+                const _EmptyModelSettingsHint(label: 'PCからモデルを取り込むと表示されます')
+              else if (filteredPc.isEmpty)
+                const _EmptyModelSettingsHint(label: '一致するPCモデルがありません')
+              else
+                for (final profile in filteredPc) ...[
+                  _ModelCandidateCard(
+                    title: profile.displayLabel,
+                    subtitle: [
+                      profile.providerDisplayName.isNotEmpty
+                          ? profile.providerDisplayName
+                          : profile.providerId,
+                      profile.modelId,
+                    ].where((part) => part.trim().isNotEmpty).join(' · '),
+                    sourceLabel: profile.configured || profile.local
+                        ? 'PC'
+                        : 'PC Key未設定',
+                    active: false,
+                    supported: profile.configured || profile.local,
+                    starred: widget.isFavorite(
+                      widget.favoriteFromPcProfile(profile),
+                    ),
+                    onToggleStar: (starred) => unawaited(
+                      widget.onToggleFavorite(
+                        widget.favoriteFromPcProfile(profile),
+                        starred,
+                      ),
+                    ),
+                    onUse: null,
+                  ),
+                  const SizedBox(height: 10),
+                ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _matchesMobileProvider(MobileProviderConfig provider) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    return provider.effectiveLabel.toLowerCase().contains(query) ||
+        provider.displayName.toLowerCase().contains(query) ||
+        provider.providerId.toLowerCase().contains(query) ||
+        provider.model.toLowerCase().contains(query);
+  }
+
+  bool _matchesPcProfile(ProfileEntry profile) {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    return profile.displayLabel.toLowerCase().contains(query) ||
+        profile.modelId.toLowerCase().contains(query) ||
+        profile.providerId.toLowerCase().contains(query) ||
+        profile.providerDisplayName.toLowerCase().contains(query);
+  }
+
+  MobileProviderConfig? _providerForFavorite(ModelFavoriteConfig favorite) {
+    for (final provider in widget.providerConfigs) {
+      if (favorite.matchesMobileProvider(provider)) return provider;
+    }
+    return null;
+  }
+}
+
+class _ModelSummaryCard extends StatelessWidget {
+  const _ModelSummaryCard({
+    required this.activeLabel,
+    required this.favoriteCount,
+  });
+
+  final String activeLabel;
+  final int favoriteCount;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.model_training_outlined),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  activeLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                Text(
+                  'Star付き $favoriteCount 件',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FavoriteModelCard extends StatelessWidget {
+  const _FavoriteModelCard({
+    required this.favorite,
+    required this.provider,
+    required this.onUseProvider,
+    required this.onRemove,
+  });
+
+  final ModelFavoriteConfig favorite;
+  final MobileProviderConfig? provider;
+  final VoidCallback? onUseProvider;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final subtitle = favorite.isPc
+        ? [
+            'PC',
+            favorite.pcLabel,
+            favorite.providerId,
+            favorite.modelId,
+          ].where((part) => part.trim().isNotEmpty).join(' · ')
+        : [
+            'このスマホ',
+            provider?.displayName ?? favorite.providerId,
+            favorite.modelId,
+          ].where((part) => part.trim().isNotEmpty).join(' · ');
+    return _ModelCandidateCard(
+      title: favorite.effectiveLabel,
+      subtitle: subtitle,
+      sourceLabel: favorite.isPc ? 'PC' : 'このスマホ',
+      active: false,
+      supported: favorite.isPc || provider?.isConfigured == true,
+      starred: true,
+      onToggleStar: (_) => onRemove(),
+      onUse: onUseProvider,
+    );
+  }
+}
+
+class _ModelCandidateCard extends StatelessWidget {
+  const _ModelCandidateCard({
+    required this.title,
+    required this.subtitle,
+    required this.sourceLabel,
+    required this.active,
+    required this.supported,
+    required this.starred,
+    required this.onToggleStar,
+    required this.onUse,
+  });
+
+  final String title;
+  final String subtitle;
+  final String sourceLabel;
+  final bool active;
+  final bool supported;
+  final bool starred;
+  final ValueChanged<bool> onToggleStar;
+  final VoidCallback? onUse;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: active
+              ? scheme.primary.withValues(alpha: 0.45)
+              : Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
+      ),
+      child: Row(
+        children: [
+          IconButton(
+            tooltip: starred ? 'Starを外す' : 'Starする',
+            icon: Icon(starred ? Icons.star : Icons.star_border),
+            color: starred ? scheme.primary : scheme.onSurfaceVariant,
+            onPressed: () => onToggleStar(!starred),
+          ),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.titleSmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (active) const SizedBox(width: 6),
+                    if (active) const _StatusPill(label: '使用中', active: true),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    _StatusPill(label: sourceLabel, active: supported),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: onUse,
+                      child: const Text('使用'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyModelSettingsHint extends StatelessWidget {
+  const _EmptyModelSettingsHint({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardTheme.color,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Theme.of(context).dividerTheme.color ?? Colors.transparent,
+        ),
+      ),
+      child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+    );
   }
 }
 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 ThemeData buildRumiTheme({bool dark = true}) {
-  const seed = Color(0xFF2F7D6B);
+  const seed = Color(0xFF8E8E93);
   final scheme = ColorScheme.fromSeed(
     seedColor: seed,
     brightness: dark ? Brightness.dark : Brightness.light,
@@ -25,31 +25,31 @@ ThemeData buildRumiTheme({bool dark = true}) {
     ),
     cardTheme: CardThemeData(
       elevation: 0,
-      color: dark ? const Color(0xFF161B22) : Colors.white,
+      color: dark ? const Color(0xFF171717) : Colors.white,
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
-            color: dark ? const Color(0xFF232A33) : const Color(0xFFE5E7EB)),
+            color: dark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB)),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-            color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
+            color: dark ? const Color(0xFF333333) : const Color(0xFFD1D5DB)),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(
-            color: dark ? const Color(0xFF2A323D) : const Color(0xFFD1D5DB)),
+            color: dark ? const Color(0xFF333333) : const Color(0xFFD1D5DB)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: scheme.primary, width: 1.5),
       ),
       filled: true,
-      fillColor: dark ? const Color(0xFF12161C) : Colors.white,
+      fillColor: dark ? const Color(0xFF111111) : Colors.white,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     ),
     filledButtonTheme: FilledButtonThemeData(
@@ -64,7 +64,7 @@ ThemeData buildRumiTheme({bool dark = true}) {
       surfaceTintColor: Colors.transparent,
     ),
     dividerTheme: DividerThemeData(
-      color: dark ? const Color(0xFF232A33) : const Color(0xFFE5E7EB),
+      color: dark ? const Color(0xFF2A2A2A) : const Color(0xFFE5E7EB),
       thickness: 1,
       space: 1,
     ),
@@ -96,12 +96,12 @@ class RumiColors extends ThemeExtension<RumiColors> {
   final Color accent;
 
   static const dark = RumiColors(
-    bubbleUser: Color(0xFF1F6FEB),
-    bubbleAssistant: Color(0xFF161B22),
-    bubbleUserText: Colors.white,
-    bubbleAssistantText: Color(0xFFE6EDF3),
-    codeBackground: Color(0xFF0D1117),
-    accent: Color(0xFF2F7D6B),
+    bubbleUser: Color(0xFFE8E8EA),
+    bubbleAssistant: Color(0xFF1C1C1E),
+    bubbleUserText: Color(0xFF111111),
+    bubbleAssistantText: Color(0xFFEDEDED),
+    codeBackground: Color(0xFF0F0F10),
+    accent: Color(0xFFB8B8BB),
   );
 
   @override

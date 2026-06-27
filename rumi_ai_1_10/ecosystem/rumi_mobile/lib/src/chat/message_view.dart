@@ -43,40 +43,8 @@ class MessageView extends StatelessWidget {
             isUser ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (!isUser) ...[
-            _Avatar(isUser: false),
-            const SizedBox(width: 8),
-          ],
           Flexible(child: bubble),
-          if (isUser) ...[
-            const SizedBox(width: 8),
-            _Avatar(isUser: true),
-          ],
         ],
-      ),
-    );
-  }
-}
-
-class _Avatar extends StatelessWidget {
-  const _Avatar({required this.isUser});
-  final bool isUser;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colors = theme.extension<RumiColors>() ?? RumiColors.dark;
-    return Container(
-      width: 28,
-      height: 28,
-      decoration: BoxDecoration(
-        color: isUser ? colors.bubbleUser : colors.accent,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Icon(
-        isUser ? Icons.person : Icons.auto_awesome,
-        size: 16,
-        color: isUser ? colors.bubbleUserText : Colors.white,
       ),
     );
   }
@@ -96,7 +64,17 @@ class _MessageBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     if (message.content.isEmpty && message.pending) {
-      return _TypingIndicator(fg: fg);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '処理中...',
+            style: TextStyle(color: fg, fontSize: 14, height: 1.4),
+          ),
+          const SizedBox(width: 10),
+          _TypingIndicator(fg: fg),
+        ],
+      );
     }
     return MarkdownBody(
       data: message.content,
