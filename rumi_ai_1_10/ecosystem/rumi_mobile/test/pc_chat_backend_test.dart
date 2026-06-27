@@ -307,5 +307,47 @@ void main() {
       expect(approvals.last.approved, isTrue);
       expect(approvals.last.pending, isFalse);
     });
+
+    test('parses canonical defaultspack status and tool events', () async {
+      final sseChunks = [
+        'data: {"type":"status","message":"モデルが考えています","phase":"thinking"}\n\n',
+        'data: {"type":"tool_call_started","tool_call_id":"tc1","tool_name":"calculator","status":"running","summary":"2+2"}\n\n',
+        'data: {"type":"tool_call_completed","tool_call_id":"tc1","tool_name":"calculator","status":"completed","result_summary":"4"}\n\n',
+        'data: {"type":"approval_requested","request_id":"req1","tool_name":"terminal","message":"承認が必要です","arguments":{"command":"pwd"}}\n\n',
+        'data: [DONE]\n\n',
+      ];
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        final bytes = sseChunks.map(utf8.encode).toList();
+        final stream = Stream<List<int>>.fromIterable(bytes);
+        return http.StreamedResponse(stream, 200);
+      });
+
+      final backend = PcConversationBackend(
+        connection: _pc,
+        client: client,
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: ConversationLocator.pc('c1'),
+            text: 'hi',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+      backend.close();
+
+      expect(events.whereType<ChatStatusEvent>().single.message, 'モデルが考えています');
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.length, 2);
+      expect(toolEvents.first.toolId, 'tc1');
+      expect(toolEvents.last.status, 'completed');
+      expect(toolEvents.last.summary, '4');
+      final approval = events.whereType<ApprovalEvent>().single;
+      expect(approval.approvalId, 'req1');
+      expect(approval.prompt, '承認が必要です');
+      expect(approval.arguments['command'], 'pwd');
+    });
   });
 }

@@ -196,6 +196,84 @@ void main() {
       expect(updated.messages.last.pending, isFalse);
     });
 
+    test('sendMessage executes mobile tool calls and continues agent turn',
+        () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          final args = jsonEncode({'expression': '2 + 2'});
+          final toolChunk = jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'tool_calls': [
+                    {
+                      'index': 0,
+                      'id': 'call_1',
+                      'type': 'function',
+                      'function': {
+                        'name': 'calculator',
+                        'arguments': args,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode('data: $toolChunk\n\n'),
+              utf8.encode('data: [DONE]\n\n'),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode(
+                'data: {"choices":[{"delta":{"content":"答えは4です"}}]}\n\n'),
+            utf8.encode('data: [DONE]\n\n'),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: configStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: '2+2を計算して',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 2);
+      expect((bodies.first['tools'] as List).first['function']['name'],
+          'calculator');
+      final secondMessages = bodies.last['messages'] as List;
+      expect(secondMessages.any((m) => m['role'] == 'tool'), isTrue);
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.map((e) => e.status),
+          containsAll(['running', 'completed']));
+      expect(toolEvents.last.output, contains('2 + 2 = 4'));
+      expect(events.whereType<ChatStatusEvent>(), isNotEmpty);
+      expect(events.whereType<ChatMessageCommitted>().single.content, '答えは4です');
+    });
+
     test('sendMessage surfaces unconfigured api as error event', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);

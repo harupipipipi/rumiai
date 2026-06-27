@@ -60,6 +60,18 @@ class ChatErrorEvent extends ChatEvent {
   });
 }
 
+class ChatStatusEvent extends ChatEvent {
+  final String message;
+  final String phase;
+
+  const ChatStatusEvent({
+    required super.locator,
+    required super.runId,
+    required this.message,
+    this.phase = '',
+  });
+}
+
 class ToolCallEvent extends ChatEvent {
   final String toolId;
   final String toolName;

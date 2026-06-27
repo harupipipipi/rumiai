@@ -135,6 +135,12 @@ class LocalConversationBackend implements ConversationBackend {
       runId: runId,
       assistantMessageId: assistantId,
     );
+    yield ChatStatusEvent(
+      locator: locator,
+      runId: runId,
+      message: '考えています',
+      phase: 'thinking',
+    );
 
     _client?.close();
     _client = _newClient();
@@ -144,23 +150,46 @@ class LocalConversationBackend implements ConversationBackend {
     final buffer = StringBuffer();
 
     try {
-      await for (final delta
-          in _client!.streamChat(config: config, history: history)) {
-        buffer.write(delta);
-        final accumulated = buffer.toString();
-        await _store.updateMessage(
-          convo.id,
-          assistantId,
-          accumulated,
-          pending: true,
-        );
-        yield ChatDelta(
-          locator: locator,
-          runId: runId,
-          assistantMessageId: assistantId,
-          delta: delta,
-          accumulatedContent: accumulated,
-        );
+      await for (final event
+          in _client!.streamAgentChat(config: config, history: history)) {
+        switch (event) {
+          case OpenAiContentDelta():
+            buffer.write(event.delta);
+            final accumulated = buffer.toString();
+            await _store.updateMessage(
+              convo.id,
+              assistantId,
+              accumulated,
+              pending: true,
+            );
+            yield ChatDelta(
+              locator: locator,
+              runId: runId,
+              assistantMessageId: assistantId,
+              delta: event.delta,
+              accumulatedContent: accumulated,
+            );
+          case OpenAiStatusUpdate():
+            yield ChatStatusEvent(
+              locator: locator,
+              runId: runId,
+              message: event.message,
+              phase: event.phase,
+            );
+          case OpenAiToolCallUpdate():
+            yield ToolCallEvent(
+              locator: locator,
+              runId: runId,
+              toolId: event.call.id,
+              toolName: event.call.name,
+              status: event.status,
+              arguments: event.call.arguments,
+              summary: event.result?.summary,
+              output: event.result?.output,
+            );
+          default:
+            break;
+        }
       }
       final finalContent = buffer.toString();
       await _store.updateMessage(

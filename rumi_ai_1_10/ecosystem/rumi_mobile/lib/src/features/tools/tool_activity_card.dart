@@ -12,7 +12,8 @@ class ToolActivityCard extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final isRunning = event.status == 'running';
-    final isComplete = event.status == 'complete';
+    final isComplete =
+        event.status == 'complete' || event.status == 'completed';
     final isFailed = event.status == 'failed';
 
     final statusColor = isFailed

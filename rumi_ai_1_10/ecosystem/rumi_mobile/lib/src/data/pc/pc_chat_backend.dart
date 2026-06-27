@@ -261,8 +261,13 @@ class PcConversationBackend implements ConversationBackend {
       switch (type) {
         case 'content_delta':
         case 'delta':
-          final delta = json['delta'] as String? ?? '';
-          final content = json['content'] as String? ?? '';
+          final data = json['data'] as Map<String, dynamic>? ?? const {};
+          final delta = json['delta'] as String? ??
+              data['delta'] as String? ??
+              json['text'] as String? ??
+              '';
+          final content =
+              json['content'] as String? ?? data['content'] as String? ?? '';
           if (content.isNotEmpty) {
             contentBuffer.clear();
             contentBuffer.write(content);
@@ -295,29 +300,77 @@ class PcConversationBackend implements ConversationBackend {
             accumulatedContent: content,
           );
 
+        case 'status':
+        case 'tool_selection_started':
+        case 'tool_selection_completed':
+        case 'thinking_delta':
+          final data = json['data'] as Map<String, dynamic>? ?? const {};
+          final message = json['message'] as String? ??
+              data['message'] as String? ??
+              (type == 'thinking_delta' ? '考えています' : '');
+          if (message.isEmpty) return null;
+          return ChatStatusEvent(
+            locator: locator,
+            runId: runId,
+            message: message,
+            phase: json['phase'] as String? ?? data['phase'] as String? ?? type,
+          );
+
         case 'tool_call':
         case 'tool_call_started':
         case 'tool_call_completed':
+        case 'tool_call_delta':
+          final data = json['data'] as Map<String, dynamic>? ?? const {};
+          final status = json['tool_status'] as String? ??
+              json['status'] as String? ??
+              data['tool_status'] as String? ??
+              data['status'] as String? ??
+              (type == 'tool_call_completed' ? 'completed' : 'running');
           return ToolCallEvent(
             locator: locator,
             runId: runId,
-            toolId: json['tool_id'] as String? ?? '',
-            toolName: json['tool_name'] as String? ?? '',
-            status: json['tool_status'] as String? ?? 'running',
-            arguments: (json['arguments'] as Map<String, dynamic>?) ?? const {},
-            summary: json['summary'] as String?,
-            output: json['output'] as String?,
+            toolId: json['tool_id'] as String? ??
+                json['tool_call_id'] as String? ??
+                data['tool_id'] as String? ??
+                data['tool_call_id'] as String? ??
+                '',
+            toolName: json['tool_name'] as String? ??
+                data['tool_name'] as String? ??
+                '',
+            status: status,
+            arguments: (json['arguments'] as Map<String, dynamic>?) ??
+                (data['arguments'] as Map<String, dynamic>?) ??
+                const {},
+            summary: json['summary'] as String? ??
+                data['summary'] as String? ??
+                json['result_summary'] as String? ??
+                data['result_summary'] as String? ??
+                json['message'] as String?,
+            output: json['output'] as String? ?? data['output'] as String?,
           );
 
         case 'approval':
         case 'approval_requested':
+          final data = json['data'] as Map<String, dynamic>? ?? const {};
           return ApprovalEvent(
             locator: locator,
             runId: runId,
-            approvalId: json['approval_id'] as String? ?? '',
-            toolName: json['tool_name'] as String? ?? '',
-            prompt: json['prompt'] as String? ?? '',
-            arguments: (json['arguments'] as Map<String, dynamic>?) ?? const {},
+            approvalId: json['approval_id'] as String? ??
+                json['request_id'] as String? ??
+                data['approval_id'] as String? ??
+                data['request_id'] as String? ??
+                '',
+            toolName: json['tool_name'] as String? ??
+                data['tool_name'] as String? ??
+                '',
+            prompt: json['prompt'] as String? ??
+                data['prompt'] as String? ??
+                json['message'] as String? ??
+                data['message'] as String? ??
+                '',
+            arguments: (json['arguments'] as Map<String, dynamic>?) ??
+                (data['arguments'] as Map<String, dynamic>?) ??
+                const {},
             approved: json['approved'] as bool? ?? false,
             pending: json['pending'] as bool? ?? true,
           );

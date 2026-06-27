@@ -14,6 +14,8 @@ import '../domain/chat_event.dart';
 import '../domain/conversation_backend.dart';
 import '../domain/conversation_locator.dart';
 import '../domain/space.dart';
+import '../features/tools/approval_card.dart';
+import '../features/tools/tool_activity_card.dart';
 import '../platform/platform_services.dart';
 import '../settings/api_config_store.dart';
 import '../settings/settings_screen.dart';
@@ -66,6 +68,8 @@ class _ChatScreenState extends State<ChatScreen> {
   String _pcMode = 'chat';
   bool _pcYoloMode = false;
   bool _pcUltraYoloMode = false;
+  final Map<String, String> _assistantMessageByRunId = {};
+  final Map<String, List<ChatEvent>> _activityByAssistantMessageId = {};
   MobileNotificationSettings _notificationSettings =
       MobileNotificationSettings.defaults;
   List<ModelFavoriteConfig> _modelFavorites = [];
@@ -514,18 +518,30 @@ class _ChatScreenState extends State<ChatScreen> {
       )) {
         if (!mounted) break;
         switch (event) {
+          case ChatRunStarted():
+            _rememberRunStarted(event);
+            setState(() {});
+            _scrollToBottom(animate: false);
+            break;
           case ChatDelta():
             setState(() {});
             _scrollToBottom(animate: false);
             break;
-          case ChatErrorEvent():
-            break;
-          case ChatRunStarted():
-          case ChatMessageCommitted():
-          case ChatRunCompleted():
-          case ChatRunStopped():
+          case ChatStatusEvent():
           case ToolCallEvent():
           case ApprovalEvent():
+            _recordActivityEvent(event);
+            _scrollToBottom(animate: false);
+            break;
+          case ChatErrorEvent():
+            _clearTransientStatusForRun(event);
+            break;
+          case ChatMessageCommitted():
+            _clearTransientStatusForRun(event);
+            break;
+          case ChatRunCompleted():
+          case ChatRunStopped():
+            _clearTransientStatusForRun(event);
             break;
         }
       }
@@ -683,6 +699,7 @@ class _ChatScreenState extends State<ChatScreen> {
   void _applyPcEvent(ChatEvent event) {
     switch (event) {
       case ChatRunStarted():
+        _rememberRunStarted(event);
         _removePendingPcPlaceholders();
         _appendPcMessage(
           ChatMessage(
@@ -708,6 +725,7 @@ class _ChatScreenState extends State<ChatScreen> {
           pending: false,
           error: event.error,
         );
+        _clearTransientStatusForRun(event);
         break;
       case ChatErrorEvent():
         final assistantId = event.assistantMessageId;
@@ -719,13 +737,89 @@ class _ChatScreenState extends State<ChatScreen> {
             error: true,
           );
         }
+        _clearTransientStatusForRun(event);
+        break;
+      case ChatStatusEvent():
+        _recordActivityEvent(event);
         break;
       case ChatRunCompleted():
       case ChatRunStopped():
+        _clearTransientStatusForRun(event);
+        break;
       case ToolCallEvent():
+        _recordActivityEvent(event);
+        break;
       case ApprovalEvent():
+        _recordActivityEvent(event);
         break;
     }
+  }
+
+  void _rememberRunStarted(ChatRunStarted event) {
+    _assistantMessageByRunId[event.runId ?? ''] = event.assistantMessageId;
+    _activityByAssistantMessageId.putIfAbsent(
+      event.assistantMessageId,
+      () => <ChatEvent>[],
+    );
+  }
+
+  void _recordActivityEvent(ChatEvent event) {
+    final runId = event.runId ?? '';
+    final assistantId = _assistantMessageByRunId[runId];
+    if (assistantId == null || assistantId.isEmpty) return;
+    setState(() {
+      final list = _activityByAssistantMessageId.putIfAbsent(
+        assistantId,
+        () => <ChatEvent>[],
+      );
+      final replaceIndex = _matchingActivityIndex(list, event);
+      if (replaceIndex >= 0) {
+        list[replaceIndex] = event;
+      } else {
+        list.add(event);
+      }
+      if (list.length > 8) {
+        list.removeRange(0, list.length - 8);
+      }
+    });
+  }
+
+  int _matchingActivityIndex(List<ChatEvent> events, ChatEvent next) {
+    for (var i = events.length - 1; i >= 0; i--) {
+      final current = events[i];
+      if (current is ToolCallEvent && next is ToolCallEvent) {
+        if (current.toolId.isNotEmpty && current.toolId == next.toolId) {
+          return i;
+        }
+      }
+      if (current is ApprovalEvent && next is ApprovalEvent) {
+        if (current.approvalId.isNotEmpty &&
+            current.approvalId == next.approvalId) {
+          return i;
+        }
+      }
+      if (current is ChatStatusEvent && next is ChatStatusEvent) {
+        if (current.phase == next.phase) return i;
+      }
+    }
+    return -1;
+  }
+
+  List<ChatEvent> _activityForMessage(String messageId) {
+    return List<ChatEvent>.unmodifiable(
+      _activityByAssistantMessageId[messageId] ?? const <ChatEvent>[],
+    );
+  }
+
+  void _clearTransientStatusForRun(ChatEvent event) {
+    final runId = event.runId ?? '';
+    final assistantId = _assistantMessageByRunId[runId];
+    if (assistantId == null || assistantId.isEmpty) return;
+    final list = _activityByAssistantMessageId[assistantId];
+    if (list == null || list.whereType<ChatStatusEvent>().isEmpty) return;
+    setState(() {
+      list.removeWhere((item) => item is ChatStatusEvent);
+    });
   }
 
   void _removePendingPcPlaceholders() {
@@ -1813,7 +1907,19 @@ class _ChatScreenState extends State<ChatScreen> {
             itemCount: convo.messages.length,
             itemBuilder: (context, index) {
               final message = convo.messages[index];
-              return MessageView(key: ValueKey(message.id), message: message);
+              final activity = _activityForMessage(message.id);
+              return Column(
+                key: ValueKey('message-block:${message.id}'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  MessageView(message: message),
+                  if (activity.isNotEmpty)
+                    _RunActivityList(
+                      events: activity,
+                      onApprovalAction: _openPcApprovals,
+                    ),
+                ],
+              );
             },
           ),
         ),
@@ -1824,6 +1930,85 @@ class _ChatScreenState extends State<ChatScreen> {
           busy: _streaming,
         ),
       ],
+    );
+  }
+}
+
+class _RunActivityList extends StatelessWidget {
+  const _RunActivityList({
+    required this.events,
+    required this.onApprovalAction,
+  });
+
+  final List<ChatEvent> events;
+  final VoidCallback onApprovalAction;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 52, 6),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 520),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final event in events)
+              switch (event) {
+                ChatStatusEvent() => _StatusActivityCard(event: event),
+                ToolCallEvent() => ToolActivityCard(event: event),
+                ApprovalEvent() => ApprovalCard(
+                    event: event,
+                    onApprove: onApprovalAction,
+                    onDeny: onApprovalAction,
+                  ),
+                _ => const SizedBox.shrink(),
+              },
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusActivityCard extends StatelessWidget {
+  const _StatusActivityCard({required this.event});
+
+  final ChatStatusEvent event;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              event.message,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
