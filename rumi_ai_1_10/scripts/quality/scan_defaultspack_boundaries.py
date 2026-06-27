@@ -127,7 +127,7 @@ def main() -> int:
             for target_domain in sorted(_iter_domain_imports(py_path)):
                 if target_domain == source_domain:
                     continue
-                rel_file = str(py_path.relative_to(DEFAULTSPACK_ROOT))
+                rel_file = py_path.relative_to(DEFAULTSPACK_ROOT).as_posix()
                 if (source_domain, target_domain, rel_file) in exception_keys:
                     continue
                 if target_domain not in allowed:
