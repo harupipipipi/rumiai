@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import html
+import json
 import os
+import re
 import threading
 import time
 from typing import Any, Iterator
@@ -81,6 +84,15 @@ class _ChatCancelled(Exception):
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
 _AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
+
+_TEXT_TOOL_CALL_RE = re.compile(
+    r"^\s*<tool_call>\s*<function=([A-Za-z0-9_.:-]+)>\s*(?P<body>.*?)\s*</function>\s*</tool_call>\s*$",
+    re.DOTALL,
+)
+_TEXT_TOOL_PARAMETER_RE = re.compile(
+    r"<parameter=([A-Za-z0-9_.:-]+)>(.*?)</parameter>",
+    re.DOTALL,
+)
 
 
 def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
@@ -284,6 +296,49 @@ def _normalize_tool_call_name_and_arguments(
     if suffix and not action:
         normalized_args["action"] = suffix
     return base, normalized_args
+
+
+def _parse_text_tool_parameter_value(value: str) -> Any:
+    text = html.unescape(str(value or "").strip())
+    if not text:
+        return ""
+    if text[0] in "{[":
+        try:
+            return json.loads(text)
+        except Exception:
+            return text
+    return text
+
+
+def _text_tool_call_blocks(response: dict[str, Any], connected_tool_names: set[str]) -> list[dict[str, Any]]:
+    text = ChatRunEngine._response_text(response).strip()
+    if not text:
+        return []
+    match = _TEXT_TOOL_CALL_RE.match(text)
+    if not match:
+        return []
+    connected = {str(name) for name in connected_tool_names if name}
+    tool_name = html.unescape(str(match.group(1) or "").strip())
+    if not tool_name or tool_name not in connected:
+        return []
+    body = str(match.group("body") or "")
+    arguments: dict[str, Any] = {}
+    for parameter in _TEXT_TOOL_PARAMETER_RE.finditer(body):
+        key = html.unescape(str(parameter.group(1) or "").strip())
+        if key:
+            arguments[key] = _parse_text_tool_parameter_value(str(parameter.group(2) or ""))
+    if not arguments and body.strip():
+        return []
+    if _TEXT_TOOL_PARAMETER_RE.sub("", body).strip():
+        return []
+    tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+    return [{
+        "type": "tool_use",
+        "id": gen_id(),
+        "name": tool_name,
+        "input": arguments,
+        "metadata": {"recovered_from_text_tool_call": True},
+    }]
 
 
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1963,6 +2018,8 @@ class ChatRunEngine:
                 "usage": usage,
                 "metadata": {},
             }
+        if not tool_uses:
+            tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
         return response, tool_uses
 
     def _model_turn_via_complete(
@@ -1973,6 +2030,8 @@ class ChatRunEngine:
     ) -> Iterator[tuple[dict[str, Any], list[dict[str, Any]]]]:
         response = self._complete_turn(prepared, messages)
         tool_uses = _tool_use_blocks(response)
+        if not tool_uses:
+            tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
         if not tool_uses and self._stream_mode:
             text = self._response_text(response)
             if text:
@@ -1998,6 +2057,8 @@ class ChatRunEngine:
             sealed = service.prepare_messages(run_id=self._run_id or prepared.request_id, messages=working_messages)
             response = self._complete_turn(prepared, sealed.messages)
             tool_uses = _tool_use_blocks(response)
+            if not tool_uses:
+                tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
             if tool_uses:
                 return response, tool_uses
             check = service.verify_and_strip(

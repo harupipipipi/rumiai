@@ -1079,6 +1079,114 @@ def test_stream_engine_ir_preserves_tool_call_ids(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
+def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+    from domain.tool.executor import ToolExecutor
+
+    class Gateway:
+        def __init__(self):
+            self.complete_requests = []
+
+        def complete(self, request):
+            self.complete_requests.append(request)
+            if len(self.complete_requests) == 1:
+                return {
+                    "content": [{
+                        "type": "text",
+                        "text": (
+                            "<tool_call>\n"
+                            "<function=rumi_api>\n"
+                            "<parameter=action>list_routes</parameter>\n"
+                            "</function>\n"
+                            "</tool_call>"
+                        ),
+                    }],
+                    "finish_reason": "stop",
+                    "usage": {},
+                }
+            return {
+                "content": [{"type": "text", "text": "routes checked"}],
+                "finish_reason": "stop",
+                "usage": {},
+            }
+
+        def stream(self, request):
+            return iter([])
+
+        def supports_stream(self, model):
+            return False
+
+        def resolve_provider(self, model):
+            class Provider:
+                pass
+
+            return Provider(), model
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
+    calls = []
+
+    def fake_execute(self, name, arguments, context):
+        calls.append((name, dict(arguments)))
+        return {"result": "ok", "is_error": False, "routes": ["/api/health"]}
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    gateway = Gateway()
+    user_message = {
+        "id": "user-1",
+        "role": "user",
+        "content": "check routes",
+        "sequence_number": 1,
+    }
+    provider_tools = [{
+        "type": "function",
+        "function": {
+            "name": "rumi_api",
+            "description": "Rumi API",
+            "parameters": {"type": "object", "properties": {"action": {"type": "string"}}},
+        },
+    }]
+    prepared = PreparedChatRun(
+        conversation_id=conversation["id"],
+        conversation={"id": conversation["id"], "messages": [user_message]},
+        input_data={},
+        request_id="req-text-tool",
+        content=[],
+        metadata={},
+        user_message=user_message,
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={},
+        request_context={},
+        tool_context={},
+        standard_messages=[{"role": "user", "content": "check routes"}],
+        user_text="check routes",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["rumi_api"],
+        connected_tool_names={"rumi_api"},
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+    engine = ChatRunEngine(store=store, gateway=gateway)
+    events = list(engine.stream({}, {}, stream_mode=False))
+    stored = store.get_conversation(conversation["id"])["messages"][-1]
+
+    assert calls == [("rumi_api", {"action": "list_routes"})]
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+    ChatStore._instance = None
+
+
 def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from pathlib import Path
