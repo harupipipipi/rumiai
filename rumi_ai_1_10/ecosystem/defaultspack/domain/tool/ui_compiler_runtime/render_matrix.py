@@ -176,12 +176,55 @@ def _html(*, subject_id: str, candidate_id: str, manifest: dict[str, Any]) -> st
 
 def _write_png(path: Path, *, width: int, height: int, seed: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    base = (sum(ord(char) for char in seed) % 120) + 80
+    accent = ((sum(ord(char) for char in seed) * 17) % 110 + 48, 104, 190)
+    canvas = (248, 249, 251)
+    border = (218, 224, 232)
+    text = (32, 40, 52)
+    muted = (130, 142, 158)
+    surface = (255, 255, 255)
+    pixels = [[canvas for _ in range(width)] for _ in range(height)]
+
+    def rect(x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]) -> None:
+        for yy in range(max(0, y0), min(height, y1)):
+            row = pixels[yy]
+            for xx in range(max(0, x0), min(width, x1)):
+                row[xx] = color
+
+    def outline(x0: int, y0: int, x1: int, y1: int, color: tuple[int, int, int]) -> None:
+        rect(x0, y0, x1, y0 + 1, color)
+        rect(x0, y1 - 1, x1, y1, color)
+        rect(x0, y0, x0 + 1, y1, color)
+        rect(x1 - 1, y0, x1, y1, color)
+
+    gutter = 16 if width < 500 else 24
+    rect(gutter, 18, width - gutter, height - 18, surface)
+    outline(gutter, 18, width - gutter, height - 18, border)
+    rect(gutter + 14, 34, min(width - gutter - 14, gutter + 170), 42, text)
+    rect(gutter + 14, 52, min(width - gutter - 14, gutter + 250), 58, muted)
+    rect(width - gutter - 112, 34, width - gutter - 18, 58, accent)
+    if width >= 600:
+        side = gutter + 190
+        rect(gutter + 14, 76, side, height - 34, (244, 247, 250))
+        outline(gutter + 14, 76, side, height - 34, border)
+        for index in range(4):
+            y = 92 + index * 22
+            rect(gutter + 28, y, side - 22, y + 8, muted if index else accent)
+        rect(side + 18, 76, width - gutter - 18, height - 34, (252, 253, 254))
+        outline(side + 18, 76, width - gutter - 18, height - 34, border)
+        for index in range(5):
+            y = 94 + index * 18
+            rect(side + 34, y, width - gutter - 52, y + 7, text if index == 0 else muted)
+    else:
+        for index in range(4):
+            y = 78 + index * 20
+            rect(gutter + 14, y, width - gutter - 14, y + 8, text if index == 0 else muted)
+        rect(gutter + 14, height - 54, width - gutter - 14, height - 32, accent)
+
     rows = []
-    for y in range(height):
+    for row_pixels in pixels:
         row = bytearray()
-        for x in range(width):
-            row.extend(((base + x // 12) % 255, (base + y // 10) % 255, (base + x // 20 + y // 20) % 255))
+        for pixel in row_pixels:
+            row.extend(pixel)
         rows.append(b"\x00" + bytes(row))
     raw = b"".join(rows)
     png = b"\x89PNG\r\n\x1a\n"
