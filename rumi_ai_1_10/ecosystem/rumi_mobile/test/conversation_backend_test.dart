@@ -274,6 +274,94 @@ void main() {
       expect(events.whereType<ChatMessageCommitted>().single.content, '答えは4です');
     });
 
+    test('sendMessage renders assistant_progress as status only', () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          final args = jsonEncode({
+            'phase': 'inspect',
+            'status': 'active',
+            'summary': '調べています',
+            'next_action': '必要なtoolを選びます',
+          });
+          final progressChunk = jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'tool_calls': [
+                    {
+                      'index': 0,
+                      'id': 'progress_1',
+                      'type': 'function',
+                      'function': {
+                        'name': 'assistant_progress',
+                        'arguments': args,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode('data: $progressChunk\n\n'),
+              utf8.encode('data: [DONE]\n\n'),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode('data: {"choices":[{"delta":{"content":"完了"}}]}\n\n'),
+            utf8.encode('data: [DONE]\n\n'),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: configStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: '進捗を出して',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 2);
+      final tools = bodies.first['tools'] as List;
+      expect(
+        tools.any((tool) => tool['function']['name'] == 'assistant_progress'),
+        isTrue,
+      );
+      final system = (bodies.first['messages'] as List)
+          .where((message) => message['role'] == 'system')
+          .single['content'] as String;
+      expect(system, contains('Internal progress tool'));
+      expect(events.whereType<ToolCallEvent>(), isEmpty);
+      expect(
+        events.whereType<ChatStatusEvent>().map((event) => event.message).any(
+            (message) =>
+                message.contains('調べています') && message.contains('必要なtoolを選びます')),
+        isTrue,
+      );
+      expect(events.whereType<ChatMessageCommitted>().single.content, '完了');
+    });
+
     test('sendMessage surfaces unconfigured api as error event', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);

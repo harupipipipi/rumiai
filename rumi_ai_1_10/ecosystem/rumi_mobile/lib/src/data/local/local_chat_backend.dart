@@ -7,6 +7,7 @@ import '../../domain/chat_event.dart';
 import '../../domain/conversation_backend.dart';
 import '../../domain/conversation_locator.dart';
 import '../../settings/api_config_store.dart';
+import 'mobile_tool_runtime.dart';
 
 class LocalConversationBackend implements ConversationBackend {
   LocalConversationBackend({
@@ -177,6 +178,21 @@ class LocalConversationBackend implements ConversationBackend {
               phase: event.phase,
             );
           case OpenAiToolCallUpdate():
+            if (MobileToolRuntime.isAssistantProgressToolName(
+              event.call.name,
+            )) {
+              if (event.status == 'completed' && event.result != null) {
+                final payload =
+                    MobileToolRuntime.assistantProgressPayload(event.result!);
+                yield ChatStatusEvent(
+                  locator: locator,
+                  runId: runId,
+                  message: _assistantProgressMessage(payload),
+                  phase: 'assistant_progress',
+                );
+              }
+              break;
+            }
             yield ToolCallEvent(
               locator: locator,
               runId: runId,
@@ -239,5 +255,13 @@ class LocalConversationBackend implements ConversationBackend {
   String _friendlyError(Object error) {
     if (error is OpenAiException) return error.message;
     return '$error';
+  }
+
+  String _assistantProgressMessage(Map<String, dynamic> payload) {
+    final summary = '${payload['summary'] ?? ''}'.trim();
+    final nextAction = '${payload['next_action'] ?? ''}'.trim();
+    if (summary.isEmpty) return nextAction.isEmpty ? '処理中です' : nextAction;
+    if (nextAction.isEmpty) return summary;
+    return '$summary / $nextAction';
   }
 }

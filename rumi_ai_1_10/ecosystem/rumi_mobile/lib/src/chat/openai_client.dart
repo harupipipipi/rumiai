@@ -178,14 +178,24 @@ class OpenAiClient {
       if (toolCalls.isEmpty) return;
       toolRounds += 1;
       messages.add(_assistantToolCallMessage(turnText.toString(), toolCalls));
-      yield OpenAiStatusUpdate(
-        '${toolCalls.length} 個のtoolを実行しています',
-        phase: 'tool_execution',
-      );
+      final externalToolCount = toolCalls
+          .where((call) =>
+              !MobileToolRuntime.isAssistantProgressToolName(call.name))
+          .length;
+      if (externalToolCount > 0) {
+        yield OpenAiStatusUpdate(
+          '$externalToolCount 個のtoolを実行しています',
+          phase: 'tool_execution',
+        );
+      }
 
       for (final call in toolCalls) {
         if (_cancelled) return;
-        yield OpenAiToolCallUpdate(call: call, status: 'running');
+        final isProgress =
+            MobileToolRuntime.isAssistantProgressToolName(call.name);
+        if (!isProgress) {
+          yield OpenAiToolCallUpdate(call: call, status: 'running');
+        }
         final result = toolRuntime.execute(call);
         yield OpenAiToolCallUpdate(
           call: call,
@@ -221,6 +231,7 @@ class OpenAiClient {
       config.systemPrompt.trim(),
       'You are running inside Rumi Mobile using the defaultspack mobile agent template.',
       'Use available tools when they help. If a requested defaultspack tool is host-bound, explain the unavailable reason and suggest switching to the PC space.',
+      mobileAssistantProgressSystemInstruction,
     ].where((part) => part.isNotEmpty).join('\n\n');
     if (system.trim().isNotEmpty) {
       messages.add({'role': 'system', 'content': system.trim()});

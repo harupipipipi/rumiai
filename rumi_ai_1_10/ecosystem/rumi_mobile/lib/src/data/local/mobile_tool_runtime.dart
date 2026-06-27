@@ -5,6 +5,28 @@ const mobileCompatibleTag = 'mobile-compatible';
 const mobileAgentTemplateId = 'rumi.composer.default';
 const mobileAgentAiInputId = 'rumi.composer.default:default_ai_input';
 const mobileAgentToolPolicyId = 'rumi.composer.default:default_tools';
+const assistantProgressToolName = 'assistant_progress';
+const assistantProgressDisplayName = '作業状況';
+const mobileAssistantProgressSystemInstruction =
+    'Internal progress tool: assistant_progress is only for short user-visible status, not reasoning. '
+    'Call it at most at phase changes, important discoveries, failures, or final verification. '
+    'Do not call it before every tool. Do not include hidden reasoning, analysis, or chain-of-thought. '
+    'Keep summary and next_action under 120 characters. A normal external tool should occur between repeated progress updates unless you are finalizing or blocked.';
+
+const _assistantProgressTextLimit = 120;
+const _assistantProgressRelatedToolLimit = 4;
+const _assistantProgressPhases = <String>{
+  'inspect',
+  'change',
+  'verify',
+  'recover',
+  'finalize',
+};
+const _assistantProgressStatuses = <String>{
+  'active',
+  'completed',
+  'blocked',
+};
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -124,6 +146,45 @@ class MobileToolRuntime {
         'required': ['query'],
       },
     ),
+    MobileToolDefinition(
+      name: assistantProgressToolName,
+      description:
+          'Emit a brief user-visible work progress update. Use sparingly at phase changes, important findings, failures, or final verification.',
+      tags: [
+        'tool',
+        'progress',
+        'internal',
+        mobileCompatibleTag,
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': false,
+        'properties': {
+          'phase': {
+            'type': 'string',
+            'enum': ['change', 'finalize', 'inspect', 'recover', 'verify'],
+          },
+          'status': {
+            'type': 'string',
+            'enum': ['active', 'blocked', 'completed'],
+          },
+          'summary': {
+            'type': 'string',
+            'maxLength': _assistantProgressTextLimit,
+          },
+          'next_action': {
+            'type': 'string',
+            'maxLength': _assistantProgressTextLimit,
+          },
+          'related_tool_call_ids': {
+            'type': 'array',
+            'maxItems': _assistantProgressRelatedToolLimit,
+            'items': {'type': 'string'},
+          },
+        },
+        'required': ['phase', 'status', 'summary', 'next_action'],
+      },
+    ),
   ];
 
   static const unavailableDefaultspackTools = <MobileToolDefinition>[
@@ -165,6 +226,49 @@ class MobileToolRuntime {
   List<Map<String, dynamic>> openAiTools() =>
       supportedTools.map((tool) => tool.toOpenAiTool()).toList();
 
+  static bool isAssistantProgressToolName(String name) =>
+      name.trim() == assistantProgressToolName;
+
+  static Map<String, dynamic> assistantProgressPayload(
+    MobileToolResult result,
+  ) {
+    final parsed = _decodeObject(result.output);
+    final data = parsed['data'];
+    if (data is Map<String, dynamic>) return data;
+    if (data is Map) return data.map((key, value) => MapEntry('$key', value));
+    return normalizeAssistantProgressPayload({
+      'summary': result.summary,
+      'next_action': '',
+    });
+  }
+
+  static Map<String, dynamic> normalizeAssistantProgressPayload(
+    Map<String, dynamic>? arguments,
+  ) {
+    final args = arguments ?? const {};
+    final phase = '${args['phase'] ?? ''}'.trim();
+    final status = '${args['status'] ?? ''}'.trim();
+    final summary = _clampText(args['summary'], _assistantProgressTextLimit);
+    final nextAction =
+        _clampText(args['next_action'], _assistantProgressTextLimit);
+    final relatedRaw = args['related_tool_call_ids'];
+    final related = <String>[];
+    if (relatedRaw is List) {
+      for (final item in relatedRaw) {
+        final value = '$item'.trim();
+        if (value.isNotEmpty) related.add(value);
+        if (related.length >= _assistantProgressRelatedToolLimit) break;
+      }
+    }
+    return {
+      'phase': _assistantProgressPhases.contains(phase) ? phase : 'inspect',
+      'status': _assistantProgressStatuses.contains(status) ? status : 'active',
+      'summary': summary.isNotEmpty ? summary : '作業状況を更新しています',
+      'next_action': nextAction.isNotEmpty ? nextAction : '続行します',
+      'related_tool_call_ids': related,
+    };
+  }
+
   MobileToolResult execute(MobileToolCall call) {
     switch (call.name) {
       case 'calculator':
@@ -173,6 +277,8 @@ class MobileToolRuntime {
         return _currentTime(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
+      case assistantProgressToolName:
+        return _assistantProgress(call.arguments);
       default:
         return MobileToolResult(
           ok: false,
@@ -274,6 +380,21 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _assistantProgress(Map<String, dynamic> args) {
+    final payload = normalizeAssistantProgressPayload(args);
+    final summary = '${payload['summary']}';
+    return MobileToolResult(
+      ok: true,
+      summary: summary,
+      output: jsonEncode({
+        'status': 'ok',
+        'summary': summary,
+        'next_action': payload['next_action'],
+        'data': payload,
+      }),
+    );
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -283,6 +404,26 @@ class MobileToolRuntime {
     }
     return 'このtoolはこのスマホのmobile-compatible runtimeに未登録です。PC接続時はPC側のtool catalogを確認してください。';
   }
+}
+
+Map<String, dynamic> _decodeObject(String raw) {
+  try {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) {
+      return decoded.map((key, value) => MapEntry('$key', value));
+    }
+  } catch (_) {
+    return const {};
+  }
+  return const {};
+}
+
+String _clampText(Object? value, int limit) {
+  final text = '$value'.trim();
+  if (text.isEmpty || text == 'null') return '';
+  if (text.length <= limit) return text;
+  return text.substring(0, limit);
 }
 
 String _formatNumber(double value) {
