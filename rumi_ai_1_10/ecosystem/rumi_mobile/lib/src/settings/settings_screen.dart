@@ -1449,6 +1449,36 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                 ),
               ),
             ],
+            const SizedBox(height: 20),
+            TextField(
+              decoration: const InputDecoration(
+                labelText: 'プロバイダーを検索',
+                prefixIcon: Icon(Icons.search),
+              ),
+              onChanged: (value) => setState(() => _query = value),
+            ),
+            const SizedBox(height: 12),
+            if (widget.providerConfigs.isEmpty) ...[
+              const _ProviderHintCard(),
+            ] else if (filtered.isEmpty) ...[
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Text('一致するプロバイダーがありません'),
+                ),
+              ),
+            ] else ...[
+              for (final provider in filtered) ...[
+                _MobileProviderCard(
+                  provider: provider,
+                  active: widget.isActiveProvider(provider),
+                  supported: widget.providerRunsOnMobile(provider),
+                  onUse: () => unawaited(widget.onUseProvider(provider)),
+                  onEdit: () => unawaited(widget.onEditProvider(provider)),
+                ),
+                const SizedBox(height: 10),
+              ],
+            ],
             const SizedBox(height: 12),
             Theme(
               data:
@@ -1526,36 +1556,6 @@ class _MobileApiSettingsPageState extends State<_MobileApiSettingsPage> {
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            TextField(
-              decoration: const InputDecoration(
-                labelText: 'プロバイダーを検索',
-                prefixIcon: Icon(Icons.search),
-              ),
-              onChanged: (value) => setState(() => _query = value),
-            ),
-            const SizedBox(height: 12),
-            if (widget.providerConfigs.isEmpty) ...[
-              const _ProviderHintCard(),
-            ] else if (filtered.isEmpty) ...[
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Text('一致するプロバイダーがありません'),
-                ),
-              ),
-            ] else ...[
-              for (final provider in filtered) ...[
-                _MobileProviderCard(
-                  provider: provider,
-                  active: widget.isActiveProvider(provider),
-                  supported: widget.providerRunsOnMobile(provider),
-                  onUse: () => unawaited(widget.onUseProvider(provider)),
-                  onEdit: () => unawaited(widget.onEditProvider(provider)),
-                ),
-                const SizedBox(height: 10),
-              ],
-            ],
           ],
         ),
       ),
