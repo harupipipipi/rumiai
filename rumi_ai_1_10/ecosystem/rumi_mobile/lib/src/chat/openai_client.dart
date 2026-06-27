@@ -136,12 +136,15 @@ class OpenAiClient {
     }
     if (config.apiCompatibility != 'openai') {
       yield const OpenAiStatusUpdate(
-        'このプロバイダーではスマホ内tool呼び出しは未対応です。通常チャットで続行します。',
-        phase: 'tools_unavailable',
+        'このプロバイダーではJSON tool protocolでスマホ内toolを試します。',
+        phase: 'tools_text_protocol',
       );
-      await for (final delta in streamChat(config: config, history: history)) {
-        yield OpenAiContentDelta(delta);
-      }
+      yield* _streamTextToolProtocolAgentChat(
+        config: config,
+        history: history,
+        toolRuntime: toolRuntime,
+        maxToolRounds: maxToolRounds,
+      );
       return;
     }
 
@@ -173,13 +176,15 @@ class OpenAiClient {
       } on OpenAiException catch (error) {
         if (toolRounds == 0 && _looksLikeToolCompatibilityError(error)) {
           yield const OpenAiStatusUpdate(
-            'このモデルはスマホ内tool呼び出しを受け付けませんでした。通常チャットで再試行します。',
+            'このモデルはnative tool呼び出しを受け付けませんでした。JSON tool protocolで続行します。',
             phase: 'tools_fallback',
           );
-          await for (final delta
-              in streamChat(config: config, history: history)) {
-            yield OpenAiContentDelta(delta);
-          }
+          yield* _streamTextToolProtocolAgentChat(
+            config: config,
+            history: history,
+            toolRuntime: toolRuntime,
+            maxToolRounds: maxToolRounds,
+          );
           return;
         }
         rethrow;
@@ -366,6 +371,317 @@ class OpenAiClient {
         (message.contains('tool') ||
             message.contains('function') ||
             message.contains('unsupported'));
+  }
+
+  Stream<OpenAiClientEvent> _streamTextToolProtocolAgentChat({
+    required ApiConfig config,
+    required List<ChatMessage> history,
+    required MobileToolRuntime toolRuntime,
+    required int maxToolRounds,
+  }) async* {
+    final messages =
+        _buildTextToolProtocolMessages(config, history, toolRuntime);
+    var toolRounds = 0;
+
+    while (!_cancelled) {
+      final text = await _collectOpenAiTextTurn(
+        config: config,
+        messages: messages,
+      );
+      if (_cancelled) return;
+      final parsed = _parseTextToolProtocolResponse(text);
+
+      if (parsed.calls.isEmpty) {
+        final finalText =
+            parsed.finalText.trim().isEmpty ? text : parsed.finalText;
+        if (finalText.isNotEmpty) yield OpenAiContentDelta(finalText);
+        return;
+      }
+
+      if (toolRounds >= maxToolRounds) {
+        yield const OpenAiContentDelta(
+          'tool実行回数の上限に達したため、ここまでの結果で停止しました。',
+        );
+        return;
+      }
+
+      toolRounds += 1;
+      messages.add({'role': 'assistant', 'content': text.trim()});
+      final externalToolCount = parsed.calls
+          .where((call) =>
+              !MobileToolRuntime.isAssistantProgressToolName(call.name))
+          .length;
+      if (externalToolCount > 0) {
+        yield OpenAiStatusUpdate(
+          '$externalToolCount 個のtoolを実行しています',
+          phase: 'tool_execution',
+        );
+      }
+
+      final toolResults = <Map<String, dynamic>>[];
+      for (final call in parsed.calls) {
+        if (_cancelled) return;
+        final isProgress =
+            MobileToolRuntime.isAssistantProgressToolName(call.name);
+        if (!isProgress) {
+          yield OpenAiToolCallUpdate(call: call, status: 'running');
+        }
+        final result = toolRuntime.execute(call);
+        yield OpenAiToolCallUpdate(
+          call: call,
+          status: result.ok ? 'completed' : 'failed',
+          result: result,
+        );
+        toolResults.add({
+          'id': call.id,
+          'name': call.name,
+          'status': result.ok ? 'ok' : 'error',
+          'summary': result.summary,
+          'output': result.output,
+        });
+      }
+
+      messages.add({
+        'role': 'user',
+        'content': [
+          'Tool results JSON:',
+          jsonEncode({'tool_results': toolResults}),
+          'Continue. If more tools are required, respond only with the tool_calls JSON object. Otherwise answer the user normally.',
+        ].join('\n'),
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _buildTextToolProtocolMessages(
+    ApiConfig config,
+    List<ChatMessage> history,
+    MobileToolRuntime toolRuntime,
+  ) {
+    final messages = <Map<String, dynamic>>[];
+    final system = [
+      _agentSystemPrompt(config),
+      _textToolProtocolInstruction(toolRuntime),
+    ].where((part) => part.trim().isNotEmpty).join('\n\n');
+    if (system.trim().isNotEmpty) {
+      messages.add({'role': 'system', 'content': system.trim()});
+    }
+    for (final m in history) {
+      if (m.content.trim().isEmpty && m.role != ChatRole.user) continue;
+      messages.add({'role': m.role.value, 'content': m.content});
+    }
+    return messages;
+  }
+
+  String _textToolProtocolInstruction(MobileToolRuntime toolRuntime) {
+    final available =
+        toolRuntime.availableTools.where((tool) => tool.available).map((tool) {
+      final names = tool.openAiNames.take(4).join(', ');
+      return {'names': names, 'description': tool.description};
+    }).toList();
+    final hostBoundCount =
+        toolRuntime.availableTools.where((tool) => !tool.available).length;
+    return [
+      'JSON tool protocol fallback:',
+      'When a tool helps, respond ONLY with a JSON object and no markdown:',
+      '{"tool_calls":[{"id":"call_1","name":"tool_name","arguments":{}}]}',
+      'When no more tools are needed, answer the user normally. You may also respond as {"final":"..."} if you need structured final text.',
+      'Available phone-executable tools:',
+      jsonEncode(available),
+      'For unknown/defaultspack tools, call tool_search or tool_schema first. $hostBoundCount known tools are PC-only; if a tool result says unavailable, explain that reason and suggest switching to the PC space.',
+    ].join('\n');
+  }
+
+  Future<String> _collectOpenAiTextTurn({
+    required ApiConfig config,
+    required List<Map<String, dynamic>> messages,
+  }) async {
+    final uri = _chatCompletionsUri(config.baseUrl);
+    final body = jsonEncode({
+      'model': config.model,
+      'messages': messages,
+      'stream': true,
+      'temperature': config.temperature,
+    });
+
+    final request = http.Request('POST', uri);
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'Authorization': 'Bearer ${config.apiKey.trim()}',
+    });
+    request.body = body;
+
+    final streamed =
+        await _http.send(request).timeout(const Duration(seconds: 30));
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final text = await streamed.stream.bytesToString();
+      throw OpenAiException(
+        _friendlyHttpError(streamed.statusCode, text),
+        statusCode: streamed.statusCode,
+      );
+    }
+
+    final content = StringBuffer();
+    final buffer = StringBuffer();
+    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+      if (_cancelled) break;
+      buffer.write(chunk);
+      while (true) {
+        final nl = buffer.toString().indexOf('\n');
+        if (nl < 0) break;
+        final line = buffer.toString().substring(0, nl);
+        final remaining = buffer.toString().substring(nl + 1);
+        buffer.clear();
+        buffer.write(remaining);
+        final trimmed = line.trim();
+        if (trimmed.isEmpty) continue;
+        if (!trimmed.startsWith('data:')) continue;
+        final data = trimmed.substring(5).trim();
+        if (data == '[DONE]') return content.toString();
+        content.write(_parseDelta(data));
+      }
+    }
+    return content.toString();
+  }
+
+  _TextToolProtocolResponse _parseTextToolProtocolResponse(String text) {
+    final candidates = <String>[_stripJsonCodeFence(text.trim())];
+    final embeddedJson = _firstJsonObject(text);
+    if (embeddedJson != null && embeddedJson.trim().isNotEmpty) {
+      candidates.add(embeddedJson);
+    }
+    for (final candidate in candidates) {
+      try {
+        final decoded = jsonDecode(candidate);
+        final parsed = _textToolProtocolFromDecoded(decoded);
+        if (parsed != null) return parsed;
+      } catch (_) {
+        // Try the next candidate.
+      }
+    }
+    return _TextToolProtocolResponse(finalText: text, calls: const []);
+  }
+
+  _TextToolProtocolResponse? _textToolProtocolFromDecoded(Object? decoded) {
+    if (decoded is List) {
+      final calls = _textToolCallsFromList(decoded);
+      if (calls.isNotEmpty) {
+        return _TextToolProtocolResponse(finalText: '', calls: calls);
+      }
+      return null;
+    }
+    if (decoded is! Map) return null;
+    final json = Map<String, dynamic>.from(decoded);
+    final toolCalls = json['tool_calls'] ?? json['tools'];
+    if (toolCalls is List) {
+      return _TextToolProtocolResponse(
+        finalText: '',
+        calls: _textToolCallsFromList(toolCalls),
+      );
+    }
+    final singleName = json['name'] ?? json['tool'] ?? json['tool_name'];
+    if (singleName is String && singleName.trim().isNotEmpty) {
+      final call = _textToolCallFromMap(json, 0);
+      if (call != null) {
+        return _TextToolProtocolResponse(finalText: '', calls: [call]);
+      }
+    }
+    final finalText = json['final'] ?? json['answer'] ?? json['content'];
+    if (finalText is String) {
+      return _TextToolProtocolResponse(
+        finalText: finalText,
+        calls: const [],
+      );
+    }
+    return null;
+  }
+
+  List<MobileToolCall> _textToolCallsFromList(List<dynamic> rawCalls) {
+    final calls = <MobileToolCall>[];
+    for (var i = 0; i < rawCalls.length; i += 1) {
+      final raw = rawCalls[i];
+      if (raw is! Map) continue;
+      final call = _textToolCallFromMap(Map<String, dynamic>.from(raw), i);
+      if (call != null) calls.add(call);
+    }
+    return calls;
+  }
+
+  MobileToolCall? _textToolCallFromMap(Map<String, dynamic> raw, int index) {
+    final name = (raw['name'] ?? raw['tool'] ?? raw['tool_name'] ?? '')
+        .toString()
+        .trim();
+    if (name.isEmpty) return null;
+    final id = (raw['id'] ?? raw['tool_call_id'] ?? 'call_text_$index')
+        .toString()
+        .trim();
+    return MobileToolCall(
+      id: id.isEmpty ? 'call_text_$index' : id,
+      name: name,
+      arguments: _decodeTextToolArguments(
+        raw['arguments'] ?? raw['args'] ?? raw['input'] ?? const {},
+      ),
+    );
+  }
+
+  Map<String, dynamic> _decodeTextToolArguments(Object? raw) {
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return raw.map((key, value) => MapEntry('$key', value));
+    if (raw is String) {
+      final trimmed = raw.trim();
+      if (trimmed.isEmpty) return const {};
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) {
+          return decoded.map((key, value) => MapEntry('$key', value));
+        }
+      } catch (_) {
+        return {'input': trimmed};
+      }
+      return {'input': trimmed};
+    }
+    return const {};
+  }
+
+  String _stripJsonCodeFence(String text) {
+    final trimmed = text.trim();
+    if (!trimmed.startsWith('```')) return trimmed;
+    final lines = trimmed.split(RegExp(r'\r?\n'));
+    if (lines.length < 2 || !lines.last.trim().startsWith('```')) {
+      return trimmed;
+    }
+    return lines.sublist(1, lines.length - 1).join('\n').trim();
+  }
+
+  String? _firstJsonObject(String text) {
+    final start = text.indexOf('{');
+    if (start < 0) return null;
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var i = start; i < text.length; i += 1) {
+      final char = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char == '\\') {
+          escaped = true;
+        } else if (char == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char == '"') {
+        inString = true;
+      } else if (char == '{') {
+        depth += 1;
+      } else if (char == '}') {
+        depth -= 1;
+        if (depth == 0) return text.substring(start, i + 1);
+      }
+    }
+    return null;
   }
 
   Stream<OpenAiClientEvent> _streamAnthropicAgentChat({
@@ -759,6 +1075,16 @@ class OpenAiClient {
     if (path.isEmpty || path == '/') return '';
     return path.endsWith('/') ? path.substring(0, path.length - 1) : path;
   }
+}
+
+class _TextToolProtocolResponse {
+  const _TextToolProtocolResponse({
+    required this.finalText,
+    required this.calls,
+  });
+
+  final String finalText;
+  final List<MobileToolCall> calls;
 }
 
 class _ToolCallAccumulator {

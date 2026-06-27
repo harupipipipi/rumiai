@@ -274,6 +274,103 @@ void main() {
       expect(events.whereType<ChatMessageCommitted>().single.content, '答えは4です');
     });
 
+    test('sendMessage falls back to JSON tool protocol when tools are rejected',
+        () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      String textDelta(String text) {
+        return 'data: ${jsonEncode({
+              'choices': [
+                {
+                  'delta': {'content': text},
+                },
+              ],
+            })}\n\n';
+      }
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode(jsonEncode({
+                'error': {'message': 'tools are unsupported by this model'},
+              })),
+            ]),
+            400,
+          );
+        }
+        if (requestCount == 2) {
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode(textDelta(jsonEncode({
+                'tool_calls': [
+                  {
+                    'id': 'call_fallback',
+                    'name': 'tool_calculator',
+                    'arguments': {'expression': '9 - 4'},
+                  },
+                ],
+              }))),
+              utf8.encode('data: [DONE]\n\n'),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode(textDelta('答えは5です')),
+            utf8.encode('data: [DONE]\n\n'),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: configStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: '9-4を計算して',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 3);
+      expect(bodies.first.containsKey('tools'), isTrue);
+      expect(bodies[1].containsKey('tools'), isFalse);
+      final fallbackSystem = (bodies[1]['messages'] as List)
+          .where((message) => message['role'] == 'system')
+          .single['content'] as String;
+      expect(fallbackSystem, contains('JSON tool protocol fallback'));
+      final finalMessages = bodies.last['messages'] as List;
+      expect(
+        finalMessages.any((message) =>
+            message['role'] == 'user' &&
+            '${message['content']}'.contains('Tool results JSON')),
+        isTrue,
+      );
+      final statuses = events.whereType<ChatStatusEvent>().toList();
+      expect(statuses.map((event) => event.phase), contains('tools_fallback'));
+      expect(statuses.map((event) => event.phase), contains('tool_execution'));
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.map((event) => event.status),
+          containsAll(['running', 'completed']));
+      expect(toolEvents.last.toolName, 'tool_calculator');
+      expect(toolEvents.last.output, contains('9 - 4 = 5'));
+      expect(events.whereType<ChatMessageCommitted>().single.content, '答えは5です');
+    });
+
     test('sendMessage executes Anthropic tool_use calls on phone', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);
