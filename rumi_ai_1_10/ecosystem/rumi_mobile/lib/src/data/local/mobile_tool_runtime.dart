@@ -48,14 +48,21 @@ class MobileToolDefinition {
 
   bool get available => unavailableReason.trim().isEmpty;
 
-  Map<String, dynamic> toOpenAiTool() => {
+  Map<String, dynamic> toOpenAiTool({String? exportedName}) => {
         'type': 'function',
         'function': {
-          'name': name,
+          'name': exportedName ?? name,
           'description': description,
           'parameters': parameters,
         },
       };
+
+  Iterable<String> get openAiNames sync* {
+    final names = <String>{name, ...aliases};
+    for (final candidate in names) {
+      if (_isOpenAiFunctionName(candidate)) yield candidate;
+    }
+  }
 }
 
 class MobileToolCall {
@@ -246,6 +253,128 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'tool_names',
+      description:
+          'List tool function names available to the mobile defaultspack-compatible runtime.',
+      tags: ['tool', 'catalog', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_names',
+        'defaultspack_tool_names',
+        'defaults.tool.names',
+        'defaultspack.tool.names',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tool_list',
+      description:
+          'List mobile-compatible tools and known PC-only defaultspack tools with reasons.',
+      tags: ['tool', 'catalog', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_list',
+        'defaultspack_tool_list',
+        'defaults.tool.list',
+        'defaultspack.tool.list',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'include_unavailable': {
+            'type': 'boolean',
+            'default': true,
+          },
+          'limit': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 100,
+            'default': 50,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tool_schema',
+      description:
+          'Return the schema and mobile execution status for a defaultspack tool name.',
+      tags: ['tool', 'catalog', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_schema',
+        'defaultspack_tool_schema',
+        'defaults.tool.schema',
+        'defaultspack.tool.schema',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'tool_name': {'type': 'string'},
+          'name': {'type': 'string'},
+          'tool_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'agent_plan',
+      description:
+          'Create a lightweight phone-local agent plan using the defaultspack agent_plan convention.',
+      tags: ['agent', 'planning', mobileCompatibleTag],
+      aliases: [
+        'defaults_agent_plan',
+        'defaultspack_agent_plan',
+        'defaults.agent.plan',
+        'defaultspack.agent.plan',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'objective': {'type': 'string'},
+          'title': {'type': 'string'},
+          'steps': {
+            'type': 'array',
+            'items': {'type': 'string'},
+          },
+          'plan': {},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'agent_progress',
+      description:
+          'Return phone-local agent progress, plans, task board cards, and todos.',
+      tags: ['agent', 'status', mobileCompatibleTag],
+      aliases: [
+        'defaults_agent_progress',
+        'defaultspack_agent_progress',
+        'defaults.agent.progress',
+        'defaultspack.agent.progress',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'agent_status',
+      description:
+          'Return phone-local agent status using the defaultspack agent_status convention.',
+      tags: ['agent', 'status', mobileCompatibleTag],
+      aliases: [
+        'defaults_agent_status',
+        'defaultspack_agent_status',
+        'defaults.agent.status',
+        'defaultspack.agent.status',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
       name: assistantProgressToolName,
       description:
           'Emit a brief user-visible work progress update. Use sparingly at phase changes, important findings, failures, or final verification.',
@@ -367,8 +496,11 @@ class MobileToolRuntime {
 
   List<MobileToolDefinition> get availableTools => supportedTools;
 
-  List<Map<String, dynamic>> openAiTools() =>
-      supportedTools.map((tool) => tool.toOpenAiTool()).toList();
+  List<Map<String, dynamic>> openAiTools() => [
+        for (final tool in supportedTools)
+          for (final name in tool.openAiNames)
+            tool.toOpenAiTool(exportedName: name),
+      ];
 
   static bool isAssistantProgressToolName(String name) =>
       name.trim() == assistantProgressToolName;
@@ -427,6 +559,17 @@ class MobileToolRuntime {
         return _taskBoard(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
+      case 'tool_names':
+        return _toolNames(call.arguments);
+      case 'tool_list':
+        return _toolList(call.arguments);
+      case 'tool_schema':
+        return _toolSchema(call.arguments);
+      case 'agent_plan':
+        return _agentPlan(call.arguments);
+      case 'agent_progress':
+      case 'agent_status':
+        return _agentStatus(call.arguments, name);
       case assistantProgressToolName:
         return _assistantProgress(call.arguments);
       default:
@@ -752,6 +895,156 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _toolNames(Map<String, dynamic> args) {
+    final includeAliases = args['include_aliases'] != false;
+    final includeUnavailable = args['include_unavailable'] != false;
+    final tools = includeUnavailable
+        ? [...supportedTools, ...unavailableDefaultspackTools]
+        : supportedTools;
+    final names = <String>[];
+    for (final tool in tools) {
+      names.add(tool.name);
+      if (includeAliases) {
+        names.addAll(tool.aliases.where(_isOpenAiFunctionName));
+      }
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: '${names.length} tool names',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'names': names.toSet().toList()..sort(),
+          'mobile_compatible_tag': mobileCompatibleTag,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _toolList(Map<String, dynamic> args) {
+    final includeUnavailable = args['include_unavailable'] != false;
+    final limit = (args['limit'] is num)
+        ? math.max(1, math.min(100, (args['limit'] as num).toInt()))
+        : 50;
+    final tools = includeUnavailable
+        ? [...supportedTools, ...unavailableDefaultspackTools]
+        : supportedTools;
+    final records = tools.take(limit).map(_toolRecord).toList();
+    return MobileToolResult(
+      ok: true,
+      summary: '${records.length} tools',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'agent_template': _agentTemplateRecord(),
+          'tools': records,
+          'truncated': tools.length > records.length,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _toolSchema(Map<String, dynamic> args) {
+    final requested =
+        '${args['tool_name'] ?? args['name'] ?? args['tool_id'] ?? ''}'.trim();
+    if (requested.isEmpty) {
+      return const MobileToolResult(
+        ok: false,
+        summary: 'tool_name is required',
+        output: 'tool_name is required',
+      );
+    }
+    final canonical = _canonicalToolName(requested);
+    final tool = _findToolDefinition(canonical);
+    final record = tool == null
+        ? _unsupportedToolRecord(canonical)
+        : _toolRecord(tool, requestedName: requested);
+    return MobileToolResult(
+      ok: true,
+      summary: '${record['tool_id']} schema',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': record,
+      }),
+    );
+  }
+
+  MobileToolResult _agentPlan(Map<String, dynamic> args) {
+    final action = '${args['action'] ?? 'create'}'.trim().toLowerCase();
+    if (action == 'clear') {
+      final count = _mobileAgentPlans.length;
+      _mobileAgentPlans.clear();
+      return MobileToolResult(
+        ok: true,
+        summary: 'cleared $count plans',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {'cleared': count, 'plans': _mobileAgentPlans},
+        }),
+      );
+    }
+    if (action == 'list' || action == 'show' || action == 'status') {
+      return _agentStatus(args, 'agent_plan');
+    }
+    final objective =
+        '${args['objective'] ?? args['title'] ?? args['task'] ?? ''}'.trim();
+    final steps = _normalizePlanSteps(args['steps'] ?? args['plan']);
+    final plan = {
+      'id': _nextToolId('plan'),
+      'title': objective.isEmpty ? 'Mobile agent plan' : objective,
+      'objective': objective,
+      'steps': steps,
+      'status': 'active',
+      'created_at': DateTime.now().millisecondsSinceEpoch,
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    };
+    _mobileAgentPlans.add(plan);
+    return MobileToolResult(
+      ok: true,
+      summary: '${steps.length} step plan',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'plan': plan,
+          'agent_template': _agentTemplateRecord(),
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _agentStatus(Map<String, dynamic> args, String toolName) {
+    final openTodos =
+        _mobileTodos.where((todo) => todo['status'] != 'done').length;
+    final activePlans = _mobileAgentPlans
+        .where((plan) => '${plan['status'] ?? ''}' != 'done')
+        .toList();
+    final data = {
+      'tool': toolName,
+      'status':
+          activePlans.isEmpty && _mobileTaskCards.isEmpty ? 'idle' : 'active',
+      'agent_template': _agentTemplateRecord(),
+      'plans': _mobileAgentPlans,
+      'task_board': _taskBoardSnapshot(),
+      'todos': _mobileTodos,
+      'summary': {
+        'plans': _mobileAgentPlans.length,
+        'active_plans': activePlans.length,
+        'task_cards': _mobileTaskCards.length,
+        'todos': _mobileTodos.length,
+        'open_todos': openTodos,
+      },
+    };
+    return MobileToolResult(
+      ok: true,
+      summary:
+          '${activePlans.length} active plans, ${_mobileTaskCards.length} cards, $openTodos open todos',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': data,
+      }),
+    );
+  }
+
   MobileToolResult _assistantProgress(Map<String, dynamic> args) {
     final payload = normalizeAssistantProgressPayload(args);
     final summary = '${payload['summary']}';
@@ -828,6 +1121,77 @@ String _canonicalToolName(String name) {
   return normalized;
 }
 
+bool _isOpenAiFunctionName(String name) {
+  final trimmed = name.trim();
+  return RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(trimmed);
+}
+
+Map<String, dynamic> _agentTemplateRecord() => {
+      'template_id': mobileAgentTemplateId,
+      'ai_input_id': mobileAgentAiInputId,
+      'tool_policy_id': mobileAgentToolPolicyId,
+    };
+
+MobileToolDefinition? _findToolDefinition(String name) {
+  final normalized = name.trim().toLowerCase();
+  for (final tool in [
+    ...MobileToolRuntime.supportedTools,
+    ...MobileToolRuntime.unavailableDefaultspackTools,
+  ]) {
+    if (normalized == tool.name || tool.aliases.contains(normalized)) {
+      return tool;
+    }
+  }
+  return null;
+}
+
+Map<String, dynamic> _toolRecord(
+  MobileToolDefinition tool, {
+  String requestedName = '',
+}) {
+  return {
+    'tool_id': tool.name,
+    if (requestedName.trim().isNotEmpty) 'requested_name': requestedName,
+    'aliases': tool.aliases,
+    'tags': tool.tags,
+    'mobile_compatible': tool.available,
+    'execution_location': tool.available ? 'phone' : 'pc',
+    'unavailable_reason': tool.unavailableReason,
+    'summary': tool.description,
+    'parameters': tool.parameters,
+  };
+}
+
+Map<String, dynamic> _unsupportedToolRecord(String name) {
+  final normalized = name.trim();
+  return {
+    'tool_id': normalized,
+    'aliases': const <String>[],
+    'tags': _inferredDefaultspackTags(normalized),
+    'mobile_compatible': false,
+    'execution_location': 'pc',
+    'unavailable_reason': const MobileToolRuntime()._unsupportedReason(
+      normalized,
+    ),
+    'summary':
+        'Defaultspack function is not executable in the phone-local runtime.',
+    'parameters': {'type': 'object', 'additionalProperties': true},
+  };
+}
+
+List<String> _inferredDefaultspackTags(String name) {
+  final tags = <String>[];
+  if (name.startsWith('agent_')) tags.add('agent');
+  if (name.startsWith('tool_')) tags.add('tool');
+  if (name.startsWith('browser_')) tags.addAll(['tool', 'browser']);
+  if (name.startsWith('computer_')) tags.addAll(['tool', 'computer']);
+  if (name.startsWith('coding_') || name.startsWith('sandbox_')) {
+    tags.addAll(['tool', 'workspace']);
+  }
+  if (tags.isEmpty) tags.add('defaultspack');
+  return tags.toSet().toList();
+}
+
 Map<String, dynamic> _decodeObject(String raw) {
   try {
     final decoded = jsonDecode(raw);
@@ -855,6 +1219,7 @@ final Map<String, dynamic> _mobileTaskBoard = {
   'columns': _taskBoardDefaultColumns,
 };
 final List<Map<String, dynamic>> _mobileTaskCards = [];
+final List<Map<String, dynamic>> _mobileAgentPlans = [];
 int _mobileToolIdSequence = 0;
 
 String _nextToolId(String prefix) {
@@ -940,6 +1305,24 @@ String _taskBoardSummary(String action) {
   final countsText =
       counts.entries.map((entry) => '${entry.key}:${entry.value}').join(', ');
   return '$action: ${_mobileTaskCards.length} cards ($countsText)';
+}
+
+List<String> _normalizePlanSteps(Object? raw) {
+  final steps = <String>[];
+  if (raw is List) {
+    for (final item in raw) {
+      final value = '$item'.trim();
+      if (value.isNotEmpty) steps.add(value);
+    }
+  } else if (raw is String && raw.trim().isNotEmpty) {
+    for (final line in raw.split(RegExp(r'[\n;]+'))) {
+      final normalized =
+          line.replaceFirst(RegExp(r'^\s*[-*\d.)]+\s*'), '').trim();
+      if (normalized.isNotEmpty) steps.add(normalized);
+    }
+  }
+  if (steps.isNotEmpty) return steps;
+  return const ['状況を確認する', '必要な作業を実行する', '結果を検証する'];
 }
 
 String _formatNumber(double value) {

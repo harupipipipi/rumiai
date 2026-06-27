@@ -23,14 +23,26 @@ void main() {
           arguments: {'action': 'clear'},
         ),
       );
+      runtime.execute(
+        const MobileToolCall(
+          id: 'reset_plans',
+          name: 'agent_plan',
+          arguments: {'action': 'clear'},
+        ),
+      );
     });
 
-    test('marks local agent tools as mobile-compatible', () {
+    test('marks local agent tools as mobile-compatible and advertises aliases',
+        () {
       final tools = runtime.availableTools;
       expect(
         tools
-            .where((tool) =>
-                ['todo', 'tool_task_board', 'calculator'].contains(tool.name))
+            .where((tool) => [
+                  'todo',
+                  'tool_task_board',
+                  'calculator',
+                  'agent_plan',
+                ].contains(tool.name))
             .every((tool) => tool.tags.contains(mobileCompatibleTag)),
         isTrue,
       );
@@ -38,7 +50,22 @@ void main() {
           .openAiTools()
           .map((tool) => tool['function']['name'] as String)
           .toSet();
-      expect(openAiNames, containsAll(['todo', 'tool_task_board']));
+      expect(
+        openAiNames,
+        containsAll([
+          'todo',
+          'tool_todo',
+          'tool_task_board',
+          'tool_calculator',
+          'tool_names',
+          'tool_list',
+          'tool_schema',
+          'agent_plan',
+          'agent_progress',
+          'agent_status',
+        ]),
+      );
+      expect(openAiNames, isNot(contains('defaultspack.tool.todo')));
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -154,6 +181,63 @@ void main() {
       expect(tools.single['mobile_compatible'], isTrue);
     });
 
+    test('defaultspack catalog tools list names and schemas on phone', () {
+      final names = runtime.execute(
+        const MobileToolCall(
+          id: 'names_1',
+          name: 'tool_names',
+          arguments: {},
+        ),
+      );
+      expect(names.ok, isTrue);
+      final namesPayload = jsonDecode(names.output) as Map<String, dynamic>;
+      final nameData = namesPayload['data'] as Map<String, dynamic>;
+      expect(nameData['names'], containsAll(['tool_todo', 'agent_plan']));
+
+      final schema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_1',
+          name: 'defaultspack.tool.schema',
+          arguments: {'tool_name': 'agent_execute'},
+        ),
+      );
+      expect(schema.ok, isTrue);
+      final schemaPayload = jsonDecode(schema.output) as Map<String, dynamic>;
+      final data = schemaPayload['data'] as Map<String, dynamic>;
+      expect(data['tool_id'], 'agent_execute');
+      expect(data['mobile_compatible'], isFalse);
+      expect(data['unavailable_reason'], contains('PC側'));
+    });
+
+    test('runs phone-local defaultspack agent plan and status tools', () {
+      final plan = runtime.execute(
+        const MobileToolCall(
+          id: 'agent_plan_1',
+          name: 'agent_plan',
+          arguments: {
+            'objective': 'スマホでtool実行を確認する',
+            'steps': ['toolを選ぶ', '実行する', '結果を見る'],
+          },
+        ),
+      );
+      expect(plan.ok, isTrue);
+      expect(plan.summary, contains('3 step plan'));
+
+      final status = runtime.execute(
+        const MobileToolCall(
+          id: 'agent_status_1',
+          name: 'defaultspack.agent.status',
+          arguments: {},
+        ),
+      );
+      expect(status.ok, isTrue);
+      final payload = jsonDecode(status.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['status'], 'active');
+      expect(data['plans'], isNotEmpty);
+      expect(data['agent_template']['template_id'], mobileAgentTemplateId);
+    });
+
     test('explains defaultspack function ids even when not in local catalog',
         () {
       final result = runtime.execute(
@@ -197,6 +281,55 @@ void main() {
           result.output,
           isNot(contains('mobile-compatible runtimeに未登録')),
           reason: '$id must be executable on phone or classified with a reason',
+        );
+      }
+    });
+
+    test('returns schema or reason for every defaultspack tool or agent id',
+        () {
+      final functionsRoot = Directory('../defaultspack/functions');
+      final manifests = functionsRoot
+          .listSync(recursive: true)
+          .whereType<File>()
+          .where((file) => file.path.endsWith('/manifest.json'));
+      final ids = <String>[];
+      for (final file in manifests) {
+        final manifest = jsonDecode(file.readAsStringSync());
+        if (manifest is! Map<String, dynamic>) continue;
+        final tags = (manifest['tags'] as List? ?? const [])
+            .map((tag) => '$tag')
+            .toSet();
+        if (!tags.contains('tool') && !tags.contains('agent')) continue;
+        final functionId = '${manifest['function_id'] ?? ''}'.trim();
+        if (functionId.isNotEmpty) ids.add(functionId);
+      }
+      expect(ids, isNotEmpty);
+
+      for (final id in ids) {
+        final result = runtime.execute(
+          MobileToolCall(
+            id: 'schema_$id',
+            name: 'tool_schema',
+            arguments: {'tool_name': id},
+          ),
+        );
+        expect(result.ok, isTrue, reason: '$id schema should be inspectable');
+        final payload = jsonDecode(result.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final aliases = (data['aliases'] as List? ?? const [])
+            .map((alias) => '$alias')
+            .toSet();
+        expect(
+          data['tool_id'] == id ||
+              data['requested_name'] == id ||
+              aliases.contains(id),
+          isTrue,
+          reason: '$id must resolve directly or as a mobile alias',
+        );
+        expect(
+          '${data['unavailable_reason'] ?? ''}',
+          isNot(contains('mobile-compatible runtimeに未登録')),
+          reason: '$id must have a specific phone/PC execution answer',
         );
       }
     });
