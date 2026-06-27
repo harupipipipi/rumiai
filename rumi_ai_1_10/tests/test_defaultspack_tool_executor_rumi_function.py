@@ -566,6 +566,47 @@ def test_tool_executor_mimo_company_rumi_api_denial_falls_back_to_direct_pack_ca
     assert seen["context"]["_tool_server_approved"] is True
 
 
+def test_tool_executor_mimo_company_rumi_api_handler_failure_falls_back_to_local_tool(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+    from ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    ToolRegistry._instance = None
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="Handler execution failed: ",
+        error_type="function_execution_error",
+    )
+    seen = {}
+
+    def fake_run(arguments, context):
+        seen["arguments"] = arguments
+        seen["context"] = context
+        return {"status": "ok", "data": {"routes": [], "count": 0}}
+
+    def fail_invoke(*args, **kwargs):
+        raise KeyError("Function not found: rumi_default_tools_pack:rumi_api")
+
+    monkeypatch.setattr("core_runtime.pack_function_runtime.invoke_pack_function", fail_invoke)
+    monkeypatch.setattr(rumi_api, "run", fake_run)
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("rumi_api"),
+        {"action": "list_routes"},
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "principal_id": "rumi_default_tools_pack",
+            "capability_executor": capability_executor,
+        },
+    )
+
+    assert result["is_error"] is False
+    assert seen["arguments"] == {"action": "list_routes"}
+    assert seen["context"]["_tool_server_approved"] is True
+
+
 def test_tool_executor_mimo_company_post_rumi_api_request_still_requires_approval():
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry

@@ -538,6 +538,9 @@ class ToolExecutor:
         } and not (
             error_type in {"caller_requires_denied", "requires_denied"}
             and _context_has_tool_server_approval(context)
+        ) and not (
+            error_type == "function_execution_error"
+            and str(request.get("qualified_name") or "").strip() == "rumi_default_tools_pack:rumi_api"
         ):
             return None
         qualified_name = str(request.get("qualified_name") or "")
@@ -569,6 +572,13 @@ class ToolExecutor:
                 context=fallback_context,
             )
         except Exception:
+            if (pack_id, function_id) == ("rumi_default_tools_pack", "rumi_api"):
+                return ToolExecutor()._execute_local_with_tool_def(
+                    "rumi_api",
+                    request.get("args") or {},
+                    fallback_context if "fallback_context" in locals() else context,
+                    tool_def,
+                )
             return None
         return ToolExecutor._tool_response_from_pack_function_output(output)
 
@@ -999,6 +1009,15 @@ class ToolExecutor:
                 "is_error": False,
                 "widget": {"type": "research_sources", **result.as_dict()}
             }
+        elif tool_name == "rumi_api":
+            from ecosystem.rumi_default_tools_pack.domain.tool.rumi_api import run as run_rumi_api
+
+            return ToolExecutor._tool_response_from_pack_function_output(
+                run_rumi_api(
+                    arguments if isinstance(arguments, dict) else {},
+                    context if isinstance(context, dict) else {},
+                )
+            )
         elif tool_name in {"browser_computer", "browser_use", "computer_use"}:
             from domain.host_bridge.computer_router import run_computer_action
 
