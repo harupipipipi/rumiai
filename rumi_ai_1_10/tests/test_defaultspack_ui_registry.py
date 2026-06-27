@@ -214,6 +214,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         mimo_field_ids = {field["id"] for field in mimo_section["fields"]}
         self.assertIn("docker_worker_count", mimo_field_ids)
         self.assertIn("docker_personas", mimo_field_ids)
+        mimo_fields = {field["id"]: field for field in mimo_section["fields"]}
+        self.assertEqual(mimo_fields["max_tool_calls"]["min"], 0)
+        self.assertEqual(mimo_fields["docker_worker_count"]["min"], 0)
         self.assertNotIn("research", section_ids)
         self.assertNotIn("browser_computer", section_ids)
         self.assertNotIn("collaboration", section_ids)

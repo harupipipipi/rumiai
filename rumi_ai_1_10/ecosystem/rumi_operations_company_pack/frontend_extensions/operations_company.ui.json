@@ -74,8 +74,8 @@
         {"id": "heartbeat_minutes", "label": "Heartbeat Minutes", "type": "number", "default": 30, "min": 1, "max": 1440},
         {"id": "review_interval_minutes", "label": "Improvement Loop Minutes", "type": "number", "default": 180, "min": 5, "max": 1440},
         {"id": "qa_interval_minutes", "label": "QA Loop Minutes", "type": "number", "default": 240, "min": 5, "max": 1440},
-        {"id": "max_tool_calls", "label": "Max Tool Calls", "type": "number", "default": 80, "min": 1, "max": 200},
-        {"id": "docker_worker_count", "label": "Docker Worker Count", "type": "number", "default": 3, "min": 1, "max": 16},
+        {"id": "max_tool_calls", "label": "Max Tool Calls", "type": "number", "default": 80, "min": 0, "max": 200, "help": "Use 0 for unlimited tool calls."},
+        {"id": "docker_worker_count", "label": "Docker Worker Count", "type": "number", "default": 3, "min": 0, "max": 16, "help": "Use 0 to run the MiMo QA loop without Docker workers."},
         {"id": "run_initial_review_now", "label": "Trigger Initial Review Now", "type": "toggle", "default": true},
         {
           "id": "model_allowlist",

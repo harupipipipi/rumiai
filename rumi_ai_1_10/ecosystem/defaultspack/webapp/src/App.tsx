@@ -4538,7 +4538,7 @@ function ChatApp() {
   const mimoCodingMaxToolCalls = () => {
     const raw = settingsValues.mimo_coding_company?.max_tool_calls;
     if (raw === null || raw === undefined || raw === "" || raw === false) return null;
-    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+    return Math.max(0, Math.min(200, settingNumber(raw, 80)));
   };
   const mimoCodingMaxToolCallsPayload = () => {
     const value = mimoCodingMaxToolCalls();
@@ -4574,7 +4574,7 @@ function ChatApp() {
         vision_model: preferredMimoVisionModel(),
         fast_model: preferredMimoFastModel(),
         qa_targets: mimoCodingTargets(),
-        docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+        docker_worker_count: Math.max(0, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
         docker_personas: mimoCodingPersonas(),
         ...mimoCodingWorkspacePayload(),
         run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
@@ -4693,7 +4693,7 @@ function ChatApp() {
           vision_model: preferredMimoVisionModel(),
           fast_model: preferredMimoFastModel(),
           qa_targets: mimoCodingTargets(),
-          docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
+          docker_worker_count: Math.max(0, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
           docker_personas: mimoCodingPersonas(),
           ...mimoCodingWorkspacePayload(),
           run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,

@@ -23,6 +23,17 @@ def _as_int(value, default):
     return int(value)
 
 
+def _bounded_int(value, default, *, minimum, maximum):
+    return max(minimum, min(_as_int(value, default), maximum))
+
+
+def _max_tool_calls(value):
+    if value in (None, ""):
+        return DEFAULT_MAX_TOOL_CALLS
+    parsed = int(value)
+    return None if parsed <= 0 else parsed
+
+
 def _as_string_list(value):
     if value is None:
         return []
@@ -54,9 +65,9 @@ def run(input_data, context):
             vision_model=_validated_model(input_data.get("vision_model"), label="vision_model", default=DEFAULT_VISION_MODEL),
             fast_model=_validated_model(input_data.get("fast_model"), label="fast_model", default=DEFAULT_FAST_MODEL),
             qa_targets=_as_string_list(input_data.get("qa_targets")),
-            docker_worker_count=max(1, min(_as_int(input_data.get("docker_worker_count"), 3), 16)),
+            docker_worker_count=_bounded_int(input_data.get("docker_worker_count"), 3, minimum=0, maximum=16),
             docker_personas=_as_string_list(input_data.get("docker_personas")),
-            max_tool_calls=max(1, min(_as_int(input_data.get("max_tool_calls"), 80), 200)),
+            max_tool_calls=_max_tool_calls(input_data.get("max_tool_calls")),
             workspace_id=str(input_data.get("workspace_id") or "").strip() or None,
             workspace_label=str(input_data.get("workspace_label") or "").strip() or None,
             workspace_root=str(input_data.get("workspace_root") or "").strip() or None,

@@ -13,8 +13,9 @@ from typing import Any
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    if _path in sys.path:
+        sys.path.remove(_path)
+    sys.path.insert(0, _path)
 
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager
@@ -513,11 +514,15 @@ class MimoCodingCompanyRuntime:
         }
 
     @staticmethod
-    def _max_tool_calls(value: int | None) -> int:
+    def _max_tool_calls(value: int | None) -> int | None:
+        if value in (None, ""):
+            return None
         try:
-            parsed = int(value if value not in (None, "") else DEFAULT_MAX_TOOL_CALLS)
+            parsed = int(value)
         except (TypeError, ValueError):
             parsed = DEFAULT_MAX_TOOL_CALLS
+        if parsed <= 0:
+            return None
         return max(1, min(parsed, MAX_TOOL_CALLS_LIMIT))
 
     @staticmethod
@@ -600,7 +605,7 @@ class MimoCodingCompanyRuntime:
         }
         state["qa_targets"] = cleaned_targets
         state["docker_swarm"] = self._docker_swarm_state(
-            worker_count=max(1, min(int(docker_worker_count or DEFAULT_DOCKER_WORKER_COUNT), 16)),
+            worker_count=docker_worker_count if docker_worker_count is not None else DEFAULT_DOCKER_WORKER_COUNT,
             persona_ids=cleaned_personas,
             qa_targets=cleaned_targets,
             workspace_root=workspace_metadata.get("workspace_root"),
@@ -769,8 +774,28 @@ class MimoCodingCompanyRuntime:
         personas = self._clean_personas(persona_ids)
         targets = list(qa_targets or [])
         bundle_dir = self._docker_bundle_dir()
+        try:
+            safe_worker_count = max(0, min(int(worker_count), 16))
+        except (TypeError, ValueError):
+            safe_worker_count = DEFAULT_DOCKER_WORKER_COUNT
+        if safe_worker_count <= 0:
+            runtime_dir = self._docker_runtime_dir()
+            return {
+                "enabled": False,
+                "worker_count": 0,
+                "personas": personas,
+                "qa_targets": targets,
+                "bundle_dir": str(bundle_dir),
+                "runtime_dir": str(runtime_dir),
+                "assignment_dir": str(runtime_dir / "assignments"),
+                "status_dir": str(runtime_dir / "status"),
+                "project_name": self._docker_project_name(),
+                "workers": [],
+                "commands": {},
+                "disabled_reason": "docker_worker_count is 0",
+            }
         workers: list[dict[str, Any]] = []
-        for index in range(max(1, worker_count)):
+        for index in range(safe_worker_count):
             persona_id = personas[index % len(personas)] if personas else "first_time_user"
             target = targets[index % len(targets)] if targets else ""
             workers.append(
@@ -785,7 +810,7 @@ class MimoCodingCompanyRuntime:
         compose_path = bundle_dir / "compose.yaml"
         swarm_state = {
             "enabled": True,
-            "worker_count": max(1, worker_count),
+            "worker_count": safe_worker_count,
             "personas": personas,
             "qa_targets": targets,
             "bundle_dir": str(bundle_dir),
@@ -1518,6 +1543,28 @@ class MimoCodingCompanyRuntime:
     def _qa_swarm_plan(self, state: dict[str, Any]) -> dict[str, Any]:
         docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()
         workers = docker_swarm.get("workers") if isinstance(docker_swarm.get("workers"), list) else []
+        if not workers and docker_swarm.get("enabled") is False:
+            personas = (
+                list(docker_swarm.get("personas"))
+                if isinstance(docker_swarm.get("personas"), list)
+                else self._clean_personas(None)
+            )
+            targets = (
+                list(docker_swarm.get("qa_targets"))
+                if isinstance(docker_swarm.get("qa_targets"), list)
+                else list(state.get("qa_targets"))
+                if isinstance(state.get("qa_targets"), list)
+                else []
+            )
+            workers = [
+                {
+                    "worker_id": f"local-{index + 1}",
+                    "container_name": "",
+                    "persona_id": persona_id,
+                    "qa_target": targets[index % len(targets)] if targets else "",
+                }
+                for index, persona_id in enumerate(personas)
+            ]
         persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
         assignments: list[dict[str, Any]] = []
         for worker in workers:
