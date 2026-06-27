@@ -121,5 +121,20 @@ void main() {
       expect(tools.single['mobile_compatible'], isFalse);
       expect(tools.single['unavailable_reason'], contains('PC側defaultspack'));
     });
+
+    test('explains defaultspack function ids even when not in local catalog',
+        () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'missing_1',
+          name: 'coding_git_status',
+          arguments: {},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(result.output, contains('defaultspack tool'));
+      expect(result.output, contains('PC側'));
+    });
   });
 }

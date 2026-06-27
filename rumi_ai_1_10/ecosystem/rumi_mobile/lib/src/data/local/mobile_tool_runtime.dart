@@ -762,6 +762,41 @@ class MobileToolRuntime {
         return tool.unavailableReason;
       }
     }
+    if (normalized.startsWith('coding_') ||
+        normalized.startsWith('sandbox_') ||
+        normalized.contains('terminal') ||
+        normalized.contains('workspace') ||
+        normalized.contains('git_')) {
+      return 'このdefaultspack toolはPC側のcoding/workspace/terminal runtimeに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+    }
+    if (normalized.startsWith('browser_')) {
+      return 'このdefaultspack toolはPC側のbrowser sessionに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+    }
+    if (normalized.startsWith('computer_')) {
+      return 'このdefaultspack toolはPC画面の操作権限が必要なため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+    }
+    if (normalized.startsWith('agent_')) {
+      return 'このdefaultspack toolはPC側のagent serviceまたはagent queueに依存するため、このスマホ単体では実行できません。スマホ内agentではmobile-compatible toolだけを実行します。';
+    }
+    if (normalized.startsWith('ai_')) {
+      return 'このdefaultspack toolはPC側のAI provider catalog/routing/key管理に依存します。スマホ単体では設定済みモデルへのチャットとmobile-compatible tool実行に対応しています。';
+    }
+    if (normalized.startsWith('chat_')) {
+      return 'このdefaultspack toolはPC側の会話storeに依存します。PC接続時はPCスペースで実行し、スマホ単体ではローカル会話として送信してください。';
+    }
+    if (normalized.startsWith('media_') ||
+        normalized.startsWith('ambient_') ||
+        normalized.startsWith('input_endpoint_')) {
+      return 'このdefaultspack toolはPC側のOS/media/input runtimeに依存するため、このスマホ単体ではまだ実行できません。';
+    }
+    if (normalized.startsWith('memory_') ||
+        normalized.startsWith('knowledge_') ||
+        normalized.startsWith('artifact_')) {
+      return 'このdefaultspack toolはPC側のprofile/workspace storageに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+    }
+    if (normalized.startsWith('tool_')) {
+      return 'このdefaultspack toolはPC側のtool registryまたは外部serviceに依存するため、このスマホ単体では未対応です。mobile-compatible tag付きtoolだけをスマホ内で実行できます。';
+    }
     return 'このtoolはこのスマホのmobile-compatible runtimeに未登録です。PC接続時はPC側のtool catalogを確認してください。';
   }
 }
