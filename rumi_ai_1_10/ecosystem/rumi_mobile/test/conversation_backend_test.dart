@@ -578,6 +578,93 @@ void main() {
       expect(events.whereType<ChatMessageCommitted>().single.content, '完了');
     });
 
+    test('sendMessage exposes PC-only defaultspack tools with reasons',
+        () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          final args = jsonEncode({'objective': 'PC agent task'});
+          final toolChunk = jsonEncode({
+            'choices': [
+              {
+                'delta': {
+                  'tool_calls': [
+                    {
+                      'index': 0,
+                      'id': 'pc_only_1',
+                      'type': 'function',
+                      'function': {
+                        'name': 'agent_execute',
+                        'arguments': args,
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          });
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode('data: $toolChunk\n\n'),
+              utf8.encode('data: [DONE]\n\n'),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode(
+              'data: {"choices":[{"delta":{"content":"PC側runtimeが必要です"}}]}\n\n',
+            ),
+            utf8.encode('data: [DONE]\n\n'),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: configStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: 'PC agentを動かして',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 2);
+      final toolNames = (bodies.first['tools'] as List)
+          .map((tool) => tool['function']['name'] as String)
+          .toSet();
+      expect(toolNames, contains('agent_execute'));
+      final exposed = (bodies.first['tools'] as List).singleWhere(
+        (tool) => tool['function']['name'] == 'agent_execute',
+      );
+      expect(
+        exposed['function']['description'],
+        contains('not phone-executable'),
+      );
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.map((event) => event.status),
+          containsAll(['running', 'failed']));
+      expect(toolEvents.last.toolName, 'agent_execute');
+      expect(toolEvents.last.output, contains('PC側'));
+      expect(events.whereType<ChatMessageCommitted>().single.content,
+          'PC側runtimeが必要です');
+    });
+
     test('sendMessage surfaces unconfigured api as error event', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);

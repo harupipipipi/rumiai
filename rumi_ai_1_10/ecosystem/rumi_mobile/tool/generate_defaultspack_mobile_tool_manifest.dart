@@ -3,13 +3,23 @@ import 'dart:io';
 
 void main() {
   final functionsDir = Directory('../defaultspack/functions').absolute;
+  final toolsDir = Directory('../defaultspack/tools').absolute;
   if (!functionsDir.existsSync()) {
     stderr.writeln('defaultspack functions directory not found: $functionsDir');
     exitCode = 1;
     return;
   }
+  if (!toolsDir.existsSync()) {
+    stderr.writeln('defaultspack tools directory not found: $toolsDir');
+    exitCode = 1;
+    return;
+  }
 
-  final entries = <_ManifestEntry>[];
+  final entriesById = <String, _ManifestEntry>{};
+  void addEntry(_ManifestEntry entry) {
+    entriesById[entry.id] = entriesById[entry.id]?.merge(entry) ?? entry;
+  }
+
   for (final file in functionsDir
       .listSync(recursive: true)
       .whereType<File>()
@@ -21,7 +31,7 @@ void main() {
     if (!tags.contains('tool') && !tags.contains('agent')) continue;
     final id = _string(manifest['function_id']);
     if (id == null) continue;
-    entries.add(
+    addEntry(
       _ManifestEntry(
         id: id,
         description: _string(manifest['description']) ?? '',
@@ -34,7 +44,42 @@ void main() {
     );
   }
 
-  entries.sort((a, b) => a.id.compareTo(b.id));
+  for (final file in toolsDir
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((file) => file.path.endsWith('/manifest.json'))) {
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is! Map) continue;
+    final manifest = decoded.map((key, value) => MapEntry('$key', value));
+    final config = _map(manifest['config']);
+    final id = _string(config['tool_id']) ?? _string(manifest['id']);
+    if (id == null) continue;
+    final schema = _map(config['schema']);
+    final parameters = _map(schema['parameters']);
+    final tags = <String>{
+      'tool_registry',
+      ..._stringList(config['tags']),
+    };
+    if (config['requires_approval'] == true) tags.add('requires_approval');
+    final category = _string(config['tool_category']);
+    if (category != null) tags.add(category);
+    addEntry(
+      _ManifestEntry(
+        id: id,
+        description: _string(config['summary']) ??
+            _string(manifest['description']) ??
+            '',
+        tags: tags.toList()..sort(),
+        aliases: const [],
+        inputSchema: parameters.isEmpty
+            ? const {'type': 'object', 'additionalProperties': true}
+            : parameters,
+      ),
+    );
+  }
+
+  final entries = entriesById.values.toList()
+    ..sort((a, b) => a.id.compareTo(b.id));
   final outFile =
       File('lib/src/data/local/defaultspack_tool_agent_manifest.g.dart');
   outFile.writeAsStringSync(_render(entries));
@@ -143,4 +188,16 @@ class _ManifestEntry {
   final List<String> tags;
   final List<String> aliases;
   final Map<String, dynamic> inputSchema;
+
+  _ManifestEntry merge(_ManifestEntry other) {
+    return _ManifestEntry(
+      id: id,
+      description:
+          other.description.isNotEmpty ? other.description : description,
+      tags: {...tags, ...other.tags}.toList()..sort(),
+      aliases: {...aliases, ...other.aliases}.toList()..sort(),
+      inputSchema:
+          other.inputSchema.isNotEmpty ? other.inputSchema : inputSchema,
+    );
+  }
 }

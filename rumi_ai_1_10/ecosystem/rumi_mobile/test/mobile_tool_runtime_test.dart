@@ -199,6 +199,16 @@ void main() {
       final nameData = namesPayload['data'] as Map<String, dynamic>;
       expect(nameData['names'], containsAll(['tool_todo', 'agent_plan']));
       expect(nameData['names'], containsAll(manifestIds));
+      final openAiNames = runtime
+          .openAiTools()
+          .map((tool) => tool['function']['name'] as String)
+          .toSet();
+      expect(openAiNames, containsAll(_nativeDefaultspackToolAgentIds()));
+      final agentExecuteTool = runtime.openAiTools().singleWhere(
+            (tool) => tool['function']['name'] == 'agent_execute',
+          );
+      expect(agentExecuteTool['function']['description'],
+          contains('not phone-executable'));
 
       final list = runtime.execute(
         const MobileToolCall(
@@ -330,24 +340,8 @@ void main() {
       expect(result.output, contains('PC側'));
     });
 
-    test('classifies every defaultspack tool or agent function id', () {
-      final functionsRoot = Directory('../defaultspack/functions');
-      expect(functionsRoot.existsSync(), isTrue);
-      final manifests = functionsRoot
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((file) => file.path.endsWith('/manifest.json'));
-      final ids = <String>[];
-      for (final file in manifests) {
-        final manifest = jsonDecode(file.readAsStringSync());
-        if (manifest is! Map<String, dynamic>) continue;
-        final tags = (manifest['tags'] as List? ?? const [])
-            .map((tag) => '$tag')
-            .toSet();
-        if (!tags.contains('tool') && !tags.contains('agent')) continue;
-        final functionId = '${manifest['function_id'] ?? ''}'.trim();
-        if (functionId.isNotEmpty) ids.add(functionId);
-      }
+    test('classifies every defaultspack tool or agent id', () {
+      final ids = _defaultspackToolAgentIds();
       expect(ids, isNotEmpty);
 
       for (final id in ids) {
@@ -402,15 +396,36 @@ List<String> _defaultspackToolAgentIds() {
   return _defaultspackToolAgentRecords().keys.toList()..sort();
 }
 
+List<String> _nativeDefaultspackToolAgentIds() {
+  return _defaultspackToolAgentRecords()
+      .entries
+      .where((entry) {
+        final tags = entry.value.tags.toSet();
+        return tags.contains('agent') ||
+            (tags.contains('tool') && !tags.contains('tool_registry'));
+      })
+      .map((entry) => entry.key)
+      .toList()
+    ..sort();
+}
+
 Map<String, _ManifestRecord> _defaultspackToolAgentRecords() {
   final functionsRoot = Directory('../defaultspack/functions');
+  final toolsRoot = Directory('../defaultspack/tools');
   expect(functionsRoot.existsSync(), isTrue);
-  final manifests = functionsRoot
+  expect(toolsRoot.existsSync(), isTrue);
+  final records = <String, _ManifestRecord>{};
+
+  void putRecord(String id, _ManifestRecord record) {
+    if (id.isEmpty) return;
+    records[id] = records[id]?.merge(record) ?? record;
+  }
+
+  final functionManifests = functionsRoot
       .listSync(recursive: true)
       .whereType<File>()
       .where((file) => file.path.endsWith('/manifest.json'));
-  final records = <String, _ManifestRecord>{};
-  for (final file in manifests) {
+  for (final file in functionManifests) {
     final manifest = jsonDecode(file.readAsStringSync());
     if (manifest is! Map<String, dynamic>) continue;
     final tags =
@@ -429,11 +444,54 @@ Map<String, _ManifestRecord> _defaultspackToolAgentRecords() {
             'type': 'object',
             'additionalProperties': true,
           };
-    records[functionId] = _ManifestRecord(
-      description: '${manifest['description'] ?? ''}',
-      tags: tags.toList()..sort(),
-      aliases: aliases,
-      inputSchema: inputSchema,
+    putRecord(
+      functionId,
+      _ManifestRecord(
+        description: '${manifest['description'] ?? ''}',
+        tags: tags.toList()..sort(),
+        aliases: aliases,
+        inputSchema: inputSchema,
+      ),
+    );
+  }
+
+  final toolManifests = toolsRoot
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((file) => file.path.endsWith('/manifest.json'));
+  for (final file in toolManifests) {
+    final manifest = jsonDecode(file.readAsStringSync());
+    if (manifest is! Map<String, dynamic>) continue;
+    final config = manifest['config'] is Map<String, dynamic>
+        ? manifest['config'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final id = '${config['tool_id'] ?? manifest['id'] ?? ''}'.trim();
+    if (id.isEmpty) continue;
+    final tags = <String>{
+      'tool_registry',
+      ...(config['tags'] as List? ?? const []).map((tag) => '$tag'),
+    };
+    if (config['requires_approval'] == true) tags.add('requires_approval');
+    final category = '${config['tool_category'] ?? ''}'.trim();
+    if (category.isNotEmpty) tags.add(category);
+    final schema = config['schema'] is Map<String, dynamic>
+        ? config['schema'] as Map<String, dynamic>
+        : const <String, dynamic>{};
+    final parameters = schema['parameters'] is Map<String, dynamic>
+        ? schema['parameters'] as Map<String, dynamic>
+        : const <String, dynamic>{
+            'type': 'object',
+            'additionalProperties': true,
+          };
+    putRecord(
+      id,
+      _ManifestRecord(
+        description:
+            '${config['summary'] ?? manifest['description'] ?? ''}'.trim(),
+        tags: tags.toList()..sort(),
+        aliases: const [],
+        inputSchema: parameters,
+      ),
     );
   }
   return records;
@@ -466,4 +524,15 @@ class _ManifestRecord {
   final List<String> tags;
   final List<String> aliases;
   final Map<String, dynamic> inputSchema;
+
+  _ManifestRecord merge(_ManifestRecord other) {
+    return _ManifestRecord(
+      description:
+          other.description.isNotEmpty ? other.description : description,
+      tags: {...tags, ...other.tags}.toList()..sort(),
+      aliases: {...aliases, ...other.aliases}.toList()..sort(),
+      inputSchema:
+          other.inputSchema.isNotEmpty ? other.inputSchema : inputSchema,
+    );
+  }
 }

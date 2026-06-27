@@ -581,6 +581,200 @@ const defaultspackToolAgentManifestCatalog =
     },
   ),
   DefaultspackToolAgentManifestEntry(
+    id: "artifact_export",
+    description:
+        "Export artifacts to zip, html, pdf, png, docx, pptx, xlsx, or csv.",
+    tags: <String>["agent_os", "artifact_workspace", "export", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path", "format"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_file_delete",
+    description: "Delete a file inside the artifact workspace after approval.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "checkpoint": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_file_list",
+    description: "List files inside the artifact workspace.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "recursive": <String, dynamic>{"type": "boolean"},
+        "include_hidden": <String, dynamic>{"type": "boolean"},
+        "max_entries": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_file_patch",
+    description:
+        "Patch text inside an artifact file with replacement-count safety.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "old_text": <String, dynamic>{"type": "string"},
+        "new_text": <String, dynamic>{"type": "string"},
+        "expected_replacements": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>["path", "old_text", "new_text"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_file_read",
+    description: "Read a file from the artifact workspace.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_file_write",
+    description:
+        "Write a file inside the artifact workspace with diff/checkpoint metadata.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "content": <String, dynamic>{"type": "string"},
+        "checkpoint": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["path", "content"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_preview",
+    description:
+        "Preview artifact text, image, pdf, html, or directory metadata.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "preview",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "artifact_zip",
+    description: "Create a zip archive from an artifact file or folder.",
+    tags: <String>[
+      "agent_os",
+      "artifact",
+      "artifact_workspace",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "audio_transcribe",
+    description: "Transcribe audio using optional local dependencies.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "audio_transcribe_local",
+    description: "Transcribe audio locally using optional dependencies.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
     id: "browser_artifacts",
     description: "List persistent browser coding artifacts.",
     tags: <String>["browser", "tool"],
@@ -591,6 +785,48 @@ const defaultspackToolAgentManifestCatalog =
     inputSchema: <String, dynamic>{
       "type": "object",
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "browser_download_collect",
+    description: "Collect browser downloads into the artifact workspace.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "browser",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "download_dir": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"},
+        "max_files": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "browser_extract_table",
+    description: "Extract HTML table data into structured rows.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "browser",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "html": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -606,6 +842,26 @@ const defaultspackToolAgentManifestCatalog =
     inputSchema: <String, dynamic>{
       "type": "object",
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "browser_save_page",
+    description: "Save browser page HTML into the artifact workspace.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "browser",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "html": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["html"]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -632,6 +888,69 @@ const defaultspackToolAgentManifestCatalog =
     inputSchema: <String, dynamic>{
       "type": "object",
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "browser_upload_file",
+    description: "Prepare an artifact workspace file for browser upload.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "browser",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "calendar_create",
+    description: "Prepare calendar event creation request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "title": <String, dynamic>{"type": "string"},
+        "start": <String, dynamic>{"type": "string"},
+        "end": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["title"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "chart_create",
+    description: "Create a local chart image artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "spreadsheet",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "title": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -708,6 +1027,1645 @@ const defaultspackToolAgentManifestCatalog =
     inputSchema: <String, dynamic>{
       "type": "object",
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_access_grant",
+    description: "Approve or deny a protected desktop access request.",
+    tags: <String>[
+      "access",
+      "approval",
+      "desktop",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "request_id": <String, dynamic>{"type": "string"},
+        "approved": <String, dynamic>{"type": "boolean"},
+        "owner_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["request_id"],
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["seat_id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["desktop_id"]
+        }
+      ]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_access_request",
+    description: "Request access to a protected desktop.",
+    tags: <String>["access", "approval", "desktop", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "requester_id": <String, dynamic>{"type": "string"},
+        "owner_id": <String, dynamic>{"type": "string"},
+        "reason": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_control_acquire",
+    description: "Acquire a managed desktop control lease.",
+    tags: <String>[
+      "computer_use",
+      "control",
+      "desktop",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "owner_id": <String, dynamic>{"type": "string"},
+        "access_key": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_control_release",
+    description: "Release a managed desktop control lease.",
+    tags: <String>[
+      "computer_use",
+      "control",
+      "desktop",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "owner_id": <String, dynamic>{"type": "string"},
+        "access_key": <String, dynamic>{"type": "string"},
+        "lease_token": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["lease_token"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_control_renew",
+    description: "Renew a managed desktop control lease.",
+    tags: <String>[
+      "computer_use",
+      "control",
+      "desktop",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "owner_id": <String, dynamic>{"type": "string"},
+        "access_key": <String, dynamic>{"type": "string"},
+        "lease_token": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["lease_token"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_create",
+    description: "Create an approved managed desktop seat.",
+    tags: <String>[
+      "computer_use",
+      "desktop",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "name": <String, dynamic>{"type": "string"},
+        "template_id": <String, dynamic>{
+          "type": "string",
+          "default": "desktop.linux_native"
+        },
+        "provider_id": <String, dynamic>{
+          "type": <dynamic>["string", "null"]
+        },
+        "starter": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["empty", "browser", "terminal", "browser_url"],
+          "description":
+              "Initial desktop startup action. Use browser_url only with an http(s) browser_url."
+        },
+        "browser_url": <String, dynamic>{
+          "type": "string",
+          "description": "HTTP(S) URL to open when starter is browser_url."
+        },
+        "resolution": <String, dynamic>{
+          "type": "object",
+          "properties": <String, dynamic>{
+            "width": <String, dynamic>{"type": "integer"},
+            "height": <String, dynamic>{"type": "integer"}
+          }
+        },
+        "workspace_id": <String, dynamic>{
+          "type": <dynamic>["string", "null"],
+          "description":
+              "Optional workspace binding id. Leave empty for no workspace mount."
+        },
+        "workspace_access": <String, dynamic>{
+          "type": <dynamic>["string", "null"],
+          "enum": <dynamic>["none", "read_only", "overlay", null],
+          "description": "Workspace access requested by the template policy."
+        },
+        "assigned_agent": <String, dynamic>{
+          "type": <dynamic>["string", "null"],
+          "description":
+              "Agent id allowed to operate this desktop with AI input."
+        },
+        "assigned_agent_id": <String, dynamic>{
+          "type": <dynamic>["string", "null"],
+          "description": "Alias for assigned_agent."
+        },
+        "role": <String, dynamic>{"type": "string"},
+        "rules": <String, dynamic>{
+          "description":
+              "Role instructions or rule ids that the desktop loader should expose when this desktop is used."
+        },
+        "access": <String, dynamic>{
+          "type": "object",
+          "properties": <String, dynamic>{
+            "mode": <String, dynamic>{
+              "type": "string",
+              "enum": <dynamic>[
+                "owner_only",
+                "key_required",
+                "request_required"
+              ]
+            },
+            "owner_id": <String, dynamic>{"type": "string"},
+            "access_key": <String, dynamic>{"type": "string"},
+            "request_required": <String, dynamic>{"type": "boolean"}
+          }
+        },
+        "access_request_required": <String, dynamic>{"type": "boolean"},
+        "provisioning": <String, dynamic>{
+          "type": "object",
+          "properties": <String, dynamic>{
+            "apps": <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            "packages": <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "object"}
+            },
+            "mcp_servers": <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            }
+          }
+        }
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_frame",
+    description: "Fetch a managed desktop screenshot frame.",
+    tags: <String>["computer_use", "desktop", "screenshot", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "owner_id": <String, dynamic>{"type": "string"},
+        "access_key": <String, dynamic>{"type": "string"},
+        "after": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_input",
+    description:
+        "Send an approved AI mouse or keyboard action to a managed desktop.",
+    tags: <String>[
+      "computer_use",
+      "desktop",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "access_key": <String, dynamic>{"type": "string"},
+        "action": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>[
+            "move",
+            "click",
+            "double_click",
+            "drag",
+            "scroll",
+            "type_text",
+            "key"
+          ]
+        },
+        "x": <String, dynamic>{"type": "integer"},
+        "y": <String, dynamic>{"type": "integer"},
+        "to_x": <String, dynamic>{"type": "integer"},
+        "to_y": <String, dynamic>{"type": "integer"},
+        "button": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["left", "middle", "right"]
+        },
+        "text": <String, dynamic>{"type": "string"},
+        "key": <String, dynamic>{"type": "string"},
+        "delta_x": <String, dynamic>{"type": "integer"},
+        "delta_y": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>["action"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_list",
+    description: "List managed desktop seats.",
+    tags: <String>["computer_use", "desktop", "sandbox", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "properties": <String, dynamic>{}
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "desktop_rules_update",
+    description: "Update desktop role, rules, or access policy.",
+    tags: <String>[
+      "computer_use",
+      "desktop",
+      "policy",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "seat_id": <String, dynamic>{"type": "string"},
+        "desktop_id": <String, dynamic>{"type": "string"},
+        "role": <String, dynamic>{"type": "string"},
+        "rules": <String, dynamic>{},
+        "access": <String, dynamic>{
+          "type": "object",
+          "properties": <String, dynamic>{
+            "mode": <String, dynamic>{
+              "type": "string",
+              "enum": <dynamic>[
+                "owner_only",
+                "key_required",
+                "request_required"
+              ]
+            },
+            "owner_id": <String, dynamic>{"type": "string"},
+            "access_key": <String, dynamic>{"type": "string"},
+            "request_required": <String, dynamic>{"type": "boolean"}
+          }
+        },
+        "access_request_required": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "discord_send",
+    description: "Prepare Discord send request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "channel_id": <String, dynamic>{"type": "string"},
+        "text": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["text"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "doc_create",
+    description: "Create a local Markdown or DOCX document artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "document",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "title": <String, dynamic>{"type": "string"},
+        "content": <String, dynamic>{"type": "string"},
+        "markdown": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "doc_export",
+    description: "Export a document artifact to DOCX/PDF/HTML.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "document",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "doc_to_pdf",
+    description: "Export a document artifact to PDF.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "document",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "doc_update",
+    description: "Update a local text document artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "document",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "content": <String, dynamic>{"type": "string"},
+        "append": <String, dynamic>{"type": "string"},
+        "replace": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "drive_create",
+    description: "Prepare Drive file creation request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "name": <String, dynamic>{"type": "string"},
+        "content": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["name"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "drive_export",
+    description: "Prepare Drive export request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "file_id": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["file_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "external_send",
+    description:
+        "Tool-backed external output sender for prompt-routed response actions.",
+    tags: <String>[
+      "external",
+      "integration",
+      "output",
+      "requires_approval",
+      "response",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "required": <dynamic>["provider", "text"],
+      "properties": <String, dynamic>{
+        "provider": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["line", "discord", "slack", "generic", "web"]
+        },
+        "text": <String, dynamic>{"type": "string"},
+        "channel_id": <String, dynamic>{"type": "string"},
+        "webhook_url": <String, dynamic>{"type": "string"},
+        "callback_url": <String, dynamic>{"type": "string"},
+        "reply_token": <String, dynamic>{"type": "string"},
+        "target_id": <String, dynamic>{"type": "string"},
+        "user_id": <String, dynamic>{"type": "string"},
+        "group_id": <String, dynamic>{"type": "string"},
+        "room_id": <String, dynamic>{"type": "string"},
+        "thread_ts": <String, dynamic>{"type": "string"},
+        "dry_run": <String, dynamic>{"type": "boolean", "default": false},
+        "metadata": <String, dynamic>{"type": "object"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "github_issue_create",
+    description: "Create a GitHub issue via gh CLI when explicitly executed.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "title": <String, dynamic>{"type": "string"},
+        "body": <String, dynamic>{"type": "string"},
+        "execute": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["title"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "github_issue_list",
+    description: "List GitHub issues via gh CLI when explicitly executed.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "issue_sync",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "repo": <String, dynamic>{
+          "type": "string",
+          "description": "Optional owner/repo override."
+        },
+        "state": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["open", "closed", "all"]
+        },
+        "status": <String, dynamic>{"type": "string"},
+        "assignee": <String, dynamic>{"type": "string"},
+        "label": <String, dynamic>{"type": "string"},
+        "labels": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        },
+        "search": <String, dynamic>{"type": "string"},
+        "limit": <String, dynamic>{"type": "integer"},
+        "execute": <String, dynamic>{"type": "boolean"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      }
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "github_issue_update",
+    description:
+        "Update a GitHub issue or append a sync comment via gh CLI when explicitly executed.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "issue_sync",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "issue": <String, dynamic>{
+          "type": "string",
+          "description": "Issue number, URL, or gh-supported issue reference."
+        },
+        "issue_number": <String, dynamic>{"type": "string"},
+        "id": <String, dynamic>{"type": "string"},
+        "key": <String, dynamic>{"type": "string"},
+        "repo": <String, dynamic>{
+          "type": "string",
+          "description": "Optional owner/repo override."
+        },
+        "title": <String, dynamic>{"type": "string"},
+        "body": <String, dynamic>{"type": "string"},
+        "status": <String, dynamic>{
+          "type": "string",
+          "description": "open, closed, or a status label value."
+        },
+        "assignee": <String, dynamic>{"type": "string"},
+        "comment": <String, dynamic>{"type": "string"},
+        "execute": <String, dynamic>{"type": "boolean"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["issue"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["issue_number"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["key"]
+        }
+      ]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "github_pr_create",
+    description:
+        "Create a GitHub pull request via gh CLI when explicitly executed.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "title": <String, dynamic>{"type": "string"},
+        "body": <String, dynamic>{"type": "string"},
+        "draft": <String, dynamic>{"type": "boolean"},
+        "execute": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["title"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "github_search",
+    description: "Search GitHub via gh CLI when explicitly executed.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "query": <String, dynamic>{"type": "string"},
+        "kind": <String, dynamic>{"type": "string"},
+        "limit": <String, dynamic>{"type": "integer"},
+        "execute": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["query"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "gmail_draft",
+    description: "Prepare Gmail draft request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "to": <String, dynamic>{"type": "string"},
+        "subject": <String, dynamic>{"type": "string"},
+        "body": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["to", "subject", "body"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "gmail_search",
+    description: "Prepare Gmail connector search request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "query": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["query"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "html_preview",
+    description:
+        "Preview an artifact HTML file and create preview metadata/screenshot artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "preview",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "viewport": <String, dynamic>{"type": "object"},
+        "full_page": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "human_operator_canvas_open",
+    description:
+        "Open a local Human Operator Canvas session for manual AI roleplay and context inspection.",
+    tags: <String>["human_operator", "local_only", "preview", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "session_id": <String, dynamic>{"type": "string"},
+        "command": <String, dynamic>{"type": "string"},
+        "note": <String, dynamic>{"type": "string"},
+        "model": <String, dynamic>{"type": "string"},
+        "messages": <String, dynamic>{"type": "array"},
+        "params": <String, dynamic>{"type": "object"},
+        "tool_names": <String, dynamic>{"type": "array"}
+      },
+      "required": <dynamic>["session_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "image_convert",
+    description: "Convert a local image artifact to another format.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path", "output_path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "image_generate_local_or_provider",
+    description: "Generate a local placeholder/provider image artifact.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "prompt": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"},
+        "width": <String, dynamic>{"type": "integer"},
+        "height": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "image_render",
+    description:
+        "Render simple local image output for previews and generated visual artifacts.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "preview",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "text": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"},
+        "width": <String, dynamic>{"type": "integer"},
+        "height": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "image_resize",
+    description: "Resize a local image artifact.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"},
+        "width": <String, dynamic>{"type": "integer"},
+        "height": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>["path", "output_path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "jira_issue_sync",
+    description:
+        "Plan or execute a Jira issue sync update with local CLI approval.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "issue_sync",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "issue": <String, dynamic>{"type": "string"},
+        "issue_id": <String, dynamic>{"type": "string"},
+        "id": <String, dynamic>{"type": "string"},
+        "key": <String, dynamic>{"type": "string"},
+        "title": <String, dynamic>{"type": "string"},
+        "description": <String, dynamic>{"type": "string"},
+        "status": <String, dynamic>{"type": "string"},
+        "assignee": <String, dynamic>{"type": "string"},
+        "comment": <String, dynamic>{"type": "string"},
+        "metadata": <String, dynamic>{
+          "type": "object",
+          "additionalProperties": true
+        },
+        "execute": <String, dynamic>{"type": "boolean"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["issue"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["issue_id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["key"]
+        }
+      ]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_artifacts",
+    description: "List artifacts attached to a local job.",
+    tags: <String>["agent_os", "artifact_workspace", "job", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "job_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["job_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_cancel",
+    description: "Cancel a local job record.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "job",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "job_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["job_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_create",
+    description:
+        "Create and optionally run a local artifact-backed job record.",
+    tags: <String>["agent_os", "artifact_workspace", "job", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "kind": <String, dynamic>{"type": "string"},
+        "job_id": <String, dynamic>{"type": "string"},
+        "input": <String, dynamic>{"type": "object"},
+        "query": <String, dynamic>{"type": "string"},
+        "run_immediately": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_history",
+    description: "Read local job event history.",
+    tags: <String>["agent_os", "artifact_workspace", "job", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "job_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["job_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_resume",
+    description: "Resume a local job record.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "job",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "job_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["job_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "job_status",
+    description: "Read job status or list local jobs.",
+    tags: <String>["agent_os", "artifact_workspace", "job", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "job_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "line_push",
+    description: "Prepare LINE push request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "target_id": <String, dynamic>{"type": "string"},
+        "text": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["text"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "linear_issue_sync",
+    description:
+        "Plan or execute a Linear issue sync update with local CLI approval.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "issue_sync",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "issue": <String, dynamic>{"type": "string"},
+        "issue_id": <String, dynamic>{"type": "string"},
+        "id": <String, dynamic>{"type": "string"},
+        "key": <String, dynamic>{"type": "string"},
+        "title": <String, dynamic>{"type": "string"},
+        "description": <String, dynamic>{"type": "string"},
+        "status": <String, dynamic>{"type": "string"},
+        "assignee": <String, dynamic>{"type": "string"},
+        "comment": <String, dynamic>{"type": "string"},
+        "metadata": <String, dynamic>{
+          "type": "object",
+          "additionalProperties": true
+        },
+        "execute": <String, dynamic>{"type": "boolean"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "anyOf": <dynamic>[
+        <String, dynamic>{
+          "required": <dynamic>["issue"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["issue_id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["id"]
+        },
+        <String, dynamic>{
+          "required": <dynamic>["key"]
+        }
+      ]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "node_exec",
+    description:
+        "Request approved Node.js code/script execution in the managed sandbox runtime; fail closed when no provider is ready.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "code": <String, dynamic>{"type": "string"},
+        "script_path": <String, dynamic>{"type": "string"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "ocr_extract",
+    description:
+        "Extract OCR text from an image artifact when optional deps are available.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "package_install_plan",
+    description:
+        "Plan pip/npm/pnpm package installation commands without executing them.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "manager": <String, dynamic>{"type": "string"},
+        "packages": <String, dynamic>{}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "pdf_export",
+    description: "Export an artifact to PDF.",
+    tags: <String>["agent_os", "artifact_workspace", "export", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "pdf_extract",
+    description: "Extract text from a PDF artifact with local fallback.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "pdf_extract_tables",
+    description:
+        "Extract tables from a PDF artifact when optional deps are available.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "pdf_preview",
+    description: "Preview a PDF artifact with screenshot metadata fallback.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "preview",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "project_scaffold",
+    description: "Scaffold a static HTML/plain JS/Vite React artifact project.",
+    tags: <String>["agent_os", "artifact_workspace", "tool_registry", "webapp"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "name": <String, dynamic>{"type": "string"},
+        "template": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "python_exec",
+    description:
+        "Request approved Python code/script execution in the managed sandbox runtime; fail closed when no provider is ready.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "code": <String, dynamic>{"type": "string"},
+        "script_path": <String, dynamic>{"type": "string"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "research_report_export",
+    description: "Export a research report artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "research",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "report_path": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sandbox_exec",
+    description:
+        "Request approved command execution in the managed sandbox runtime; fail closed when no provider is ready.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "argv": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"},
+          "description":
+              "Preferred command argument vector. Public callers must use argv arrays, not shell strings."
+        },
+        "command": <String, dynamic>{
+          "description":
+              "Legacy compatibility input. Strings are parsed without shell syntax; arrays are treated as argv."
+        },
+        "cwd": <String, dynamic>{"type": "string"},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sandbox_files_apply_patch",
+    description: "Apply an approved file patch inside a managed sandbox.",
+    tags: <String>[
+      "agent_os",
+      "files",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "sandbox_id": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"},
+        "content": <String, dynamic>{"type": "string"},
+        "content_base64": <String, dynamic>{"type": "string"},
+        "files": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "object"}
+        },
+        "patch": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "object"}
+        }
+      },
+      "required": <dynamic>["sandbox_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sandbox_port_expose",
+    description: "Expose or resolve a managed sandbox port.",
+    tags: <String>[
+      "agent_os",
+      "network",
+      "port",
+      "requires_approval",
+      "sandbox",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "sandbox_id": <String, dynamic>{"type": "string"},
+        "port": <String, dynamic>{"type": "integer"},
+        "protocol": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["http", "https", "tcp"]
+        }
+      },
+      "required": <dynamic>["sandbox_id", "port"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sheet_analyze",
+    description:
+        "Analyze row counts, missing values, and numeric stats for a sheet artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "spreadsheet",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sheet_create",
+    description: "Create a local CSV/XLSX spreadsheet artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "spreadsheet",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "rows": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "array",
+            "items": <String, dynamic>{"type": "string"}
+          }
+        },
+        "columns": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        },
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sheet_export",
+    description: "Export sheet artifact.",
+    tags: <String>["agent_os", "artifact_workspace", "export", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sheet_read",
+    description: "Read a local CSV/XLSX spreadsheet artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "spreadsheet",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "limit": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "sheet_update",
+    description: "Update spreadsheet rows in a local CSV/XLSX artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "spreadsheet",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "rows": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "array",
+            "items": <String, dynamic>{"type": "string"}
+          }
+        }
+      },
+      "required": <dynamic>["path", "rows"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "slack_send",
+    description: "Prepare Slack send request.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "connector",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "channel": <String, dynamic>{"type": "string"},
+        "text": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["text"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "slides_create",
+    description: "Create a local PPTX presentation artifact.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "presentation",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "title": <String, dynamic>{"type": "string"},
+        "slides": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "object",
+            "properties": <String, dynamic>{
+              "title": <String, dynamic>{"type": "string"},
+              "bullets": <String, dynamic>{
+                "type": "array",
+                "items": <String, dynamic>{"type": "string"}
+              }
+            }
+          }
+        },
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "slides_export",
+    description: "Export slides artifact.",
+    tags: <String>["agent_os", "artifact_workspace", "export", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "format": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "slides_from_markdown",
+    description: "Create slides from markdown headings and bullets.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "presentation",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "markdown": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "slides_update",
+    description: "Rewrite a local PPTX presentation artifact from slide JSON.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "presentation",
+      "requires_approval",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "slides": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "object",
+            "properties": <String, dynamic>{
+              "title": <String, dynamic>{"type": "string"},
+              "bullets": <String, dynamic>{
+                "type": "array",
+                "items": <String, dynamic>{"type": "string"}
+              }
+            }
+          }
+        }
+      },
+      "required": <dynamic>["path", "slides"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "source_extract",
+    description:
+        "Extract text/title metadata from a local artifact source or URL placeholder.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "research",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "source": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"},
+        "url": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "source_rank",
+    description: "Rank source snippets by query term frequency.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "research",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "query": <String, dynamic>{"type": "string"},
+        "sources": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "object",
+            "properties": <String, dynamic>{
+              "title": <String, dynamic>{"type": "string"},
+              "content": <String, dynamic>{"type": "string"},
+              "source": <String, dynamic>{"type": "string"}
+            }
+          }
+        }
+      },
+      "required": <dynamic>["query", "sources"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "static_site_export",
+    description: "Zip a static site artifact folder.",
+    tags: <String>["agent_os", "artifact_workspace", "tool_registry", "webapp"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -882,12 +2840,21 @@ const defaultspackToolAgentManifestCatalog =
   ),
   DefaultspackToolAgentManifestEntry(
     id: "tool_names",
-    description: "List registered tool names only.",
-    tags: <String>["tool"],
+    description:
+        "List the currently registered tool names without loading full schemas.",
+    tags: <String>["discovery", "introspection", "tool", "tool_registry"],
     aliases: <String>["defaults.tool.names", "defaultspack.tool.names"],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": false,
+      "properties": <String, dynamic>{
+        "filter": <String, dynamic>{
+          "type": "object",
+          "description": "Optional ToolRegistry filter, for example tags.",
+          "additionalProperties": true
+        }
+      },
+      "required": <dynamic>[]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -916,6 +2883,54 @@ const defaultspackToolAgentManifestCatalog =
     },
   ),
   DefaultspackToolAgentManifestEntry(
+    id: "tool_search",
+    description:
+        "Find relevant tools and, when needed, inspect their JSON schema.",
+    tags: <String>[
+      "docs",
+      "schema",
+      "search",
+      "skill",
+      "tool",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "properties": <String, dynamic>{
+        "query": <String, dynamic>{
+          "type": "string",
+          "description":
+              "What the user wants to do, or keywords such as coding/file/search."
+        },
+        "limit": <String, dynamic>{
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 24,
+          "default": 8
+        },
+        "phase": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["overview", "schema"],
+          "default": "overview",
+          "description":
+              "Use overview to decide which tool fits; use schema after choosing a concrete tool."
+        },
+        "include_schema": <String, dynamic>{
+          "type": "boolean",
+          "default": false
+        },
+        "tool_ids": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"},
+          "description": "Optional concrete tool ids to inspect."
+        }
+      },
+      "required": <dynamic>["query"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
     id: "tool_subagent",
     description: "Run the default delegation tool.",
     tags: <String>["agent", "tool"],
@@ -927,23 +2942,148 @@ const defaultspackToolAgentManifestCatalog =
   ),
   DefaultspackToolAgentManifestEntry(
     id: "tool_task_board",
-    description:
-        "Create and update Kanban workspace task cards from the Task Board tool.",
-    tags: <String>["planning", "task_board", "tool"],
+    description: "Task Board",
+    tags: <String>[
+      "planning",
+      "task_board",
+      "tool",
+      "tool_registry",
+      "workspace"
+    ],
     aliases: <String>[
       "defaults.tool.task_board",
       "defaultspack.tool.task_board"
     ],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "action": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>[
+            "list",
+            "create",
+            "update",
+            "move",
+            "delete",
+            "configure",
+            "block",
+            "unblock",
+            "subtask_add",
+            "subtask_update",
+            "subtask_complete",
+            "subtask_remove",
+            "clear"
+          ],
+          "default": "list"
+        },
+        "title": <String, dynamic>{"type": "string"},
+        "task": <String, dynamic>{"type": "string"},
+        "card_id": <String, dynamic>{"type": "string"},
+        "id": <String, dynamic>{"type": "string"},
+        "column_id": <String, dynamic>{"type": "string"},
+        "target_column_id": <String, dynamic>{"type": "string"},
+        "column": <String, dynamic>{"type": "string"},
+        "status": <String, dynamic>{"type": "string"},
+        "position": <String, dynamic>{"type": "integer", "minimum": 0},
+        "notes": <String, dynamic>{"type": "string"},
+        "description": <String, dynamic>{"type": "string"},
+        "priority": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["low", "normal", "high"]
+        },
+        "assignee": <String, dynamic>{"type": "string"},
+        "due_at": <String, dynamic>{"type": "string"},
+        "labels": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            <String, dynamic>{"type": "string"}
+          ]
+        },
+        "depends_on": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            <String, dynamic>{"type": "string"}
+          ]
+        },
+        "dependencies": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            <String, dynamic>{"type": "string"}
+          ]
+        },
+        "blocked_by": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            <String, dynamic>{"type": "string"}
+          ]
+        },
+        "blockers": <String, dynamic>{
+          "oneOf": <dynamic>[
+            <String, dynamic>{
+              "type": "array",
+              "items": <String, dynamic>{"type": "string"}
+            },
+            <String, dynamic>{"type": "string"}
+          ]
+        },
+        "blocker_reason": <String, dynamic>{"type": "string"},
+        "reason": <String, dynamic>{"type": "string"},
+        "subtasks": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "oneOf": <dynamic>[
+              <String, dynamic>{"type": "string"},
+              <String, dynamic>{"type": "object"}
+            ]
+          }
+        },
+        "subtask_id": <String, dynamic>{"type": "string"},
+        "done": <String, dynamic>{"type": "boolean"},
+        "columns": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "oneOf": <dynamic>[
+              <String, dynamic>{"type": "string"},
+              <String, dynamic>{
+                "type": "object",
+                "properties": <String, dynamic>{
+                  "id": <String, dynamic>{"type": "string"},
+                  "title": <String, dynamic>{"type": "string"},
+                  "done": <String, dynamic>{"type": "boolean"},
+                  "is_done": <String, dynamic>{"type": "boolean"}
+                }
+              }
+            ]
+          }
+        }
+      },
+      "required": <dynamic>[]
     },
   ),
   DefaultspackToolAgentManifestEntry(
     id: "tool_task_board_agent_session",
-    description:
-        "Link Kanban-backed task board cards to defaultspack coding agent sessions.",
-    tags: <String>["agent", "planning", "task_board", "tool"],
+    description: "Task Board agent sessions",
+    tags: <String>[
+      "agent",
+      "coding_session",
+      "planning",
+      "task_board",
+      "tool",
+      "tool_registry"
+    ],
     aliases: <String>[
       "defaults.tool.task_board.agent.session",
       "defaults.tool.task_board_agent_session",
@@ -952,7 +3092,60 @@ const defaultspackToolAgentManifestCatalog =
     ],
     inputSchema: <String, dynamic>{
       "type": "object",
-      "additionalProperties": true
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "action": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>[
+            "start",
+            "status",
+            "merge_report",
+            "mark_ready",
+            "apply",
+            "dismiss",
+            "unlink"
+          ],
+          "default": "start"
+        },
+        "card_id": <String, dynamic>{"type": "string"},
+        "id": <String, dynamic>{"type": "string"},
+        "session_id": <String, dynamic>{"type": "string"},
+        "board_id": <String, dynamic>{"type": "string"},
+        "kanban_board_id": <String, dynamic>{"type": "string"},
+        "scope": <String, dynamic>{
+          "type": "object",
+          "additionalProperties": true,
+          "properties": <String, dynamic>{
+            "type": <String, dynamic>{"type": "string"},
+            "id": <String, dynamic>{"type": "string"},
+            "scope_type": <String, dynamic>{"type": "string"},
+            "scope_id": <String, dynamic>{"type": "string"}
+          }
+        },
+        "scope_type": <String, dynamic>{"type": "string"},
+        "scope_id": <String, dynamic>{"type": "string"},
+        "task": <String, dynamic>{"type": "string"},
+        "agents": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "object"}
+        },
+        "model": <String, dynamic>{"type": "string"},
+        "tools": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        },
+        "orchestration": <String, dynamic>{
+          "type": "string",
+          "enum": <dynamic>["round_robin", "directed", "free"]
+        },
+        "max_turns": <String, dynamic>{"type": "integer", "minimum": 1},
+        "worktree_mode": <String, dynamic>{"type": "string"},
+        "workspace_root": <String, dynamic>{"type": "string"},
+        "workspace_id": <String, dynamic>{"type": "string"},
+        "column": <String, dynamic>{"type": "string"},
+        "move_to": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["card_id"]
     },
   ),
   DefaultspackToolAgentManifestEntry(
@@ -1020,6 +3213,259 @@ const defaultspackToolAgentManifestCatalog =
       },
       "required": <dynamic>["query"],
       "additionalProperties": true
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tts_generate",
+    description: "Generate a local TTS audio artifact or fallback WAV.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "text": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "tts_generate_local",
+    description: "Generate local TTS audio artifact or fallback WAV.",
+    tags: <String>["agent_os", "artifact_workspace", "media", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "text": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "webapp_build",
+    description: "Build or mark a local artifact webapp as build-ready.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry",
+      "webapp"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "command": <String, dynamic>{},
+        "timeout": <String, dynamic>{"type": "integer"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "webapp_export_static",
+    description: "Zip a webapp artifact folder for static delivery.",
+    tags: <String>["agent_os", "artifact_workspace", "tool_registry", "webapp"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"},
+        "output_path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "webapp_lint",
+    description: "Run simple structural lint checks for an artifact webapp.",
+    tags: <String>["agent_os", "artifact_workspace", "tool_registry", "webapp"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "webapp_preview",
+    description: "Preview a local artifact webapp index.html.",
+    tags: <String>["agent_os", "artifact_workspace", "tool_registry", "webapp"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "path": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "wide_research",
+    description:
+        "Create a local wide-research report artifact from local/source inputs.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "research",
+      "tool_registry"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "query": <String, dynamic>{"type": "string"},
+        "depth": <String, dynamic>{"type": "string"},
+        "source_types": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        },
+        "max_sources": <String, dynamic>{"type": "integer"},
+        "output_path": <String, dynamic>{"type": "string"},
+        "export_formats": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        },
+        "local_sources": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{"type": "string"}
+        }
+      },
+      "required": <dynamic>["query"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "workflow_cancel",
+    description: "Cancel a workflow run record.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry",
+      "workflow"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "run_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["run_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "workflow_define",
+    description: "Persist a local workflow definition.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "tool_registry",
+      "workflow"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "workflow_id": <String, dynamic>{"type": "string"},
+        "name": <String, dynamic>{"type": "string"},
+        "steps": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "object",
+            "properties": <String, dynamic>{
+              "id": <String, dynamic>{"type": "string"},
+              "tool": <String, dynamic>{"type": "string"},
+              "args": <String, dynamic>{"type": "object"}
+            }
+          }
+        }
+      },
+      "required": <dynamic>["steps"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "workflow_retry",
+    description: "Retry a persisted workflow.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry",
+      "workflow"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "workflow_id": <String, dynamic>{"type": "string"},
+        "approved": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>["workflow_id"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "workflow_run",
+    description: "Run a persisted or inline local workflow.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "requires_approval",
+      "tool_registry",
+      "workflow"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "workflow_id": <String, dynamic>{"type": "string"},
+        "steps": <String, dynamic>{
+          "type": "array",
+          "items": <String, dynamic>{
+            "type": "object",
+            "properties": <String, dynamic>{
+              "id": <String, dynamic>{"type": "string"},
+              "tool": <String, dynamic>{"type": "string"},
+              "args": <String, dynamic>{"type": "object"}
+            }
+          }
+        },
+        "approved": <String, dynamic>{"type": "boolean"}
+      },
+      "required": <dynamic>[]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
+    id: "workflow_status",
+    description: "Read a workflow run record.",
+    tags: <String>[
+      "agent_os",
+      "artifact_workspace",
+      "tool_registry",
+      "workflow"
+    ],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": true,
+      "properties": <String, dynamic>{
+        "run_id": <String, dynamic>{"type": "string"}
+      },
+      "required": <dynamic>["run_id"]
     },
   ),
 ];

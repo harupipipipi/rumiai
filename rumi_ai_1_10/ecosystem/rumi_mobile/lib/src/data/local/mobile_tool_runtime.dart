@@ -295,8 +295,8 @@ class MobileToolRuntime {
           'limit': {
             'type': 'integer',
             'minimum': 1,
-            'maximum': 100,
-            'default': 50,
+            'maximum': 400,
+            'default': 240,
           },
         },
       },
@@ -509,11 +509,48 @@ class MobileToolRuntime {
           .where((record) => record['mobile_compatible'] != true)
           .length;
 
-  List<Map<String, dynamic>> openAiTools() => [
-        for (final tool in supportedTools)
-          for (final name in tool.openAiNames)
-            tool.toOpenAiTool(exportedName: name),
-      ];
+  List<Map<String, dynamic>> openAiTools() {
+    final exported = <Map<String, dynamic>>[];
+    final seenNames = <String>{};
+
+    void addTool({
+      required String name,
+      required String description,
+      required Map<String, dynamic> parameters,
+    }) {
+      final trimmed = name.trim();
+      if (!_isOpenAiFunctionName(trimmed) || !seenNames.add(trimmed)) return;
+      exported.add({
+        'type': 'function',
+        'function': {
+          'name': trimmed,
+          'description': description,
+          'parameters': parameters,
+        },
+      });
+    }
+
+    for (final tool in supportedTools) {
+      for (final name in tool.openAiNames) {
+        addTool(
+          name: name,
+          description: tool.description,
+          parameters: tool.parameters,
+        );
+      }
+    }
+
+    for (final record in _catalogRecords(includeUnavailable: true)) {
+      if (!_shouldExportCatalogRecordAsNativeTool(record)) continue;
+      addTool(
+        name: '${record['function_id'] ?? ''}',
+        description: _openAiCatalogDescription(record),
+        parameters: _asObjectSchema(record['parameters']),
+      );
+    }
+
+    return exported;
+  }
 
   static bool isAssistantProgressToolName(String name) =>
       name.trim() == assistantProgressToolName;
@@ -927,8 +964,8 @@ class MobileToolRuntime {
   MobileToolResult _toolList(Map<String, dynamic> args) {
     final includeUnavailable = args['include_unavailable'] != false;
     final limit = (args['limit'] is num)
-        ? math.max(1, math.min(200, (args['limit'] as num).toInt()))
-        : 120;
+        ? math.max(1, math.min(400, (args['limit'] as num).toInt()))
+        : 240;
     final allRecords = _catalogRecords(includeUnavailable: includeUnavailable);
     final records = allRecords.take(limit).toList();
     return MobileToolResult(
@@ -1075,6 +1112,10 @@ class MobileToolRuntime {
           tool.aliases.contains(normalized)) {
         return tool.unavailableReason;
       }
+    }
+    final catalogEntry = _findDefaultspackCatalogEntry(normalized);
+    if (catalogEntry != null) {
+      return _unsupportedReasonForTags(normalized, catalogEntry.tags);
     }
     if (normalized.startsWith('coding_') ||
         normalized.startsWith('sandbox_') ||
@@ -1257,6 +1298,83 @@ Map<String, dynamic> _toolRecord(
     'summary': tool.description,
     'parameters': tool.parameters,
   };
+}
+
+String _openAiCatalogDescription(Map<String, dynamic> record) {
+  final summary = '${record['summary'] ?? ''}'.trim();
+  final location = '${record['execution_location'] ?? ''}'.trim();
+  if (record['mobile_compatible'] == true) {
+    return [
+      if (summary.isNotEmpty) summary,
+      'Execution: phone-local defaultspack-compatible runtime.',
+    ].join(' ');
+  }
+  final reason = '${record['unavailable_reason'] ?? ''}'.trim();
+  return [
+    if (summary.isNotEmpty) summary,
+    'Execution: not phone-executable; calling this function returns the unavailable reason.',
+    if (location.isNotEmpty) 'Required runtime: $location.',
+    if (reason.isNotEmpty) 'Reason: $reason',
+  ].join(' ');
+}
+
+bool _shouldExportCatalogRecordAsNativeTool(Map<String, dynamic> record) {
+  if (record['mobile_compatible'] == true) return true;
+  final tags =
+      (record['manifest_tags'] as List? ?? record['tags'] as List? ?? const [])
+          .map((tag) => '$tag')
+          .toSet();
+  if (tags.contains('agent')) return true;
+  return tags.contains('tool') && !tags.contains('tool_registry');
+}
+
+String _unsupportedReasonForTags(String name, List<String> tags) {
+  final normalized = name.trim().toLowerCase();
+  final tagSet = tags.map((tag) => tag.trim().toLowerCase()).toSet();
+  bool hasAny(Iterable<String> values) => values.any(tagSet.contains);
+
+  if (hasAny(['desktop', 'computer_use', 'computer'])) {
+    return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+  }
+  if (hasAny(['browser'])) {
+    return 'このdefaultspack toolはPC側のbrowser sessionに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+  }
+  if (hasAny(['connector', 'integration', 'external'])) {
+    return 'このdefaultspack toolはPC側のconnector認証、外部連携、または送信承認に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+  }
+  if (hasAny(['sandbox', 'agent_os', 'artifact_workspace']) ||
+      normalized.endsWith('_exec')) {
+    return 'このdefaultspack toolはPC側のagent OS、sandbox、artifact workspace、または実行承認に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+  }
+  if (hasAny([
+    'artifact',
+    'document',
+    'spreadsheet',
+    'presentation',
+    'export',
+    'media',
+    'preview',
+    'research',
+    'source',
+    'webapp',
+    'workflow',
+    'job',
+  ])) {
+    return 'このdefaultspack toolはPC側のartifact/media/workflow runtimeまたは外部providerに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+  }
+  if (hasAny(['agent'])) {
+    return 'このdefaultspack toolはPC側のagent serviceまたはagent queueに依存するため、このスマホ単体では実行できません。スマホ内agentではmobile-compatible toolだけを実行します。';
+  }
+  if (hasAny(['tool_registry', 'tool'])) {
+    return 'このdefaultspack toolはPC側のtool registryまたはdefaultspack runtimeに依存するため、このスマホ単体では実行できません。mobile-compatible tag付きtoolだけをスマホ内で実行できます。';
+  }
+  return 'このdefaultspack toolはPC側defaultspack runtimeに依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
+}
+
+Map<String, dynamic> _asObjectSchema(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) return value.map((key, value) => MapEntry('$key', value));
+  return const {'type': 'object', 'additionalProperties': true};
 }
 
 Map<String, dynamic> _unsupportedToolRecord(String name) {
