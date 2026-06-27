@@ -22,6 +22,7 @@ import 'defaultspack_action_icon.dart';
 import 'chat_models.dart';
 import 'chat_store.dart';
 import 'composer_bar.dart';
+import 'model_selection_screen.dart';
 import 'message_view.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -932,132 +933,44 @@ class _ChatScreenState extends State<ChatScreen> {
       final catalog = await _ensurePcCatalog();
       if (!mounted) return;
       final profiles = catalog?.selectableProfiles ?? const <ProfileEntry>[];
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        useSafeArea: true,
-        builder: (context) {
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-            children: [
-              Text('モデルを選択', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              if (profiles.isEmpty)
-                const ListTile(title: Text('PCからモデル一覧を取得できませんでした')),
-              for (final profile in profiles)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  enabled: profile.configured || profile.local,
-                  leading: Icon(
-                    profile.supportsVision
-                        ? Icons.visibility_outlined
-                        : Icons.smart_toy_outlined,
-                  ),
-                  title: Text(profile.displayLabel),
-                  subtitle: Text(
-                    [
-                      profile.providerDisplayName.isNotEmpty
-                          ? profile.providerDisplayName
-                          : profile.providerId,
-                      profile.modelId,
-                      if (profile.maxContext > 0)
-                        '${(profile.maxContext / 1000).round()}k',
-                    ].where((part) => part.isNotEmpty).join(' · '),
-                  ),
-                  trailing: profile.effectiveProfileId == _activeModelId()
-                      ? const Icon(Icons.check)
-                      : null,
-                  onTap: profile.configured || profile.local
-                      ? () {
-                          Navigator.of(context).pop();
-                          unawaited(_setPcModel(profile.effectiveProfileId));
-                        }
-                      : null,
-                ),
-            ],
-          );
-        },
+      final selected = await Navigator.of(context).push<ModelSelectionResult>(
+        MaterialPageRoute(
+          builder: (_) => ModelSelectionScreen.pc(
+            profiles: profiles,
+            activeModelId: _activeModelId(),
+          ),
+        ),
       );
+      if (selected?.pcProfileId?.trim().isNotEmpty == true) {
+        await _setPcModel(selected!.pcProfileId!.trim());
+      }
       return;
     }
     final providers = (await widget.configStore.loadProviderConfigs())
         .where((provider) => provider.isConfigured)
         .toList();
     if (!mounted) return;
-    if (providers.isNotEmpty) {
-      final selected = await showModalBottomSheet<Object>(
-        context: context,
-        showDragHandle: true,
-        useSafeArea: true,
-        builder: (context) {
-          return ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
-            children: [
-              Text('このスマホのモデル', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 8),
-              for (final provider in providers)
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    provider.providerId == 'anthropic'
-                        ? Icons.auto_awesome_outlined
-                        : Icons.cloud_outlined,
-                  ),
-                  title: Text(provider.effectiveLabel),
-                  subtitle: Text('${provider.displayName} · ${provider.model}'),
-                  trailing: provider.providerId == _apiConfig?.providerId &&
-                          provider.model == _activeModelId()
-                      ? const Icon(Icons.check)
-                      : null,
-                  onTap: () => Navigator.pop(context, provider),
-                ),
-              const Divider(),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('モデル名を直接入力'),
-                onTap: () => Navigator.pop(context, 'custom'),
-              ),
-            ],
-          );
-        },
-      );
-      if (selected is MobileProviderConfig) {
-        await _setLocalProvider(selected);
-        return;
-      }
-      if (selected != 'custom') return;
-      if (!mounted) return;
-    }
-    final controller = TextEditingController(text: _activeModelId());
-    final selected = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('このスマホのモデル'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(
-            labelText: 'model',
-            hintText: 'gpt-4o-mini',
-          ),
+    final selected = await Navigator.of(context).push<ModelSelectionResult>(
+      MaterialPageRoute(
+        builder: (_) => ModelSelectionScreen.local(
+          providers: providers,
+          activeModelId: _activeModelId(),
+          activeProviderId: _apiConfig?.providerId ?? '',
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('保存'),
-          ),
-        ],
       ),
     );
-    controller.dispose();
-    if (selected != null && selected.trim().isNotEmpty) {
-      await _setLocalModel(selected.trim());
+    if (selected == null) return;
+    switch (selected.kind) {
+      case ModelSelectionKind.mobileProvider:
+        final provider = selected.mobileProvider;
+        if (provider != null) await _setLocalProvider(provider);
+        return;
+      case ModelSelectionKind.localModel:
+        final model = selected.localModel?.trim();
+        if (model != null && model.isNotEmpty) await _setLocalModel(model);
+        return;
+      case ModelSelectionKind.pcProfile:
+        return;
     }
   }
 
@@ -1637,6 +1550,16 @@ class _ChatScreenState extends State<ChatScreen> {
         : Icons.desktop_windows;
   }
 
+  Widget _buildHeaderSubtitle(BuildContext context) {
+    return Row(
+      children: [
+        Flexible(child: _buildSpaceSwitcherSubtitle(context)),
+        const SizedBox(width: 8),
+        Flexible(child: _buildModelSwitcherSubtitle(context)),
+      ],
+    );
+  }
+
   Widget _buildSpaceSwitcherSubtitle(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
@@ -1648,7 +1571,7 @@ class _ChatScreenState extends State<ChatScreen> {
         const SizedBox(width: 4),
         Flexible(
           child: Text(
-            '${_activeSpaceLabel()} · ${_activeModelLabel()}',
+            _activeSpaceLabel(),
             style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w400,
@@ -1695,6 +1618,42 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
       ],
       child: child,
+    );
+  }
+
+  Widget _buildModelSwitcherSubtitle(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: () => unawaited(_openModelPicker()),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.model_training_outlined,
+              size: 13,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                _activeModelLabel(),
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w400,
+                  color: scheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(Icons.chevron_right, size: 14, color: scheme.onSurfaceVariant),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1758,7 +1717,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                _buildSpaceSwitcherSubtitle(context),
+                _buildHeaderSubtitle(context),
               ],
             ),
             actions: [
