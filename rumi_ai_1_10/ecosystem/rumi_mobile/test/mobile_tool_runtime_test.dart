@@ -183,6 +183,9 @@ void main() {
     });
 
     test('defaultspack catalog tools list names and schemas on phone', () {
+      expect(runtime.knownDefaultspackToolAgentCount, greaterThan(0));
+      expect(runtime.knownUnavailableDefaultspackToolCount, greaterThan(0));
+
       final manifestIds = _defaultspackToolAgentIds();
       final names = runtime.execute(
         const MobileToolCall(

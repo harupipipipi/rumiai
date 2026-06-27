@@ -501,6 +501,14 @@ class MobileToolRuntime {
 
   List<MobileToolDefinition> get availableTools => supportedTools;
 
+  int get knownDefaultspackToolAgentCount =>
+      _defaultspackToolAgentManifestCatalog.length;
+
+  int get knownUnavailableDefaultspackToolCount =>
+      _catalogRecords(includeUnavailable: true)
+          .where((record) => record['mobile_compatible'] != true)
+          .length;
+
   List<Map<String, dynamic>> openAiTools() => [
         for (final tool in supportedTools)
           for (final name in tool.openAiNames)

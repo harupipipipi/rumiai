@@ -264,6 +264,12 @@ void main() {
       expect(requestCount, 2);
       expect((bodies.first['tools'] as List).first['function']['name'],
           'calculator');
+      final system = (bodies.first['messages'] as List)
+          .where((message) => message['role'] == 'system')
+          .single['content'] as String;
+      expect(system, contains('defaultspack mobile agent template'));
+      expect(system, contains('agent_plan'));
+      expect(system, contains('tool_task_board'));
       final secondMessages = bodies.last['messages'] as List;
       expect(secondMessages.any((m) => m['role'] == 'tool'), isTrue);
       final toolEvents = events.whereType<ToolCallEvent>().toList();
@@ -353,6 +359,10 @@ void main() {
           .where((message) => message['role'] == 'system')
           .single['content'] as String;
       expect(fallbackSystem, contains('JSON tool protocol fallback'));
+      expect(fallbackSystem, contains('Generated defaultspack catalog'));
+      expect(fallbackSystem, contains('not phone-executable'));
+      expect(fallbackSystem, isNot(contains('. 0 are not phone-executable')));
+      expect(fallbackSystem, contains('agent_plan'));
       final finalMessages = bodies.last['messages'] as List;
       expect(
         finalMessages.any((message) =>

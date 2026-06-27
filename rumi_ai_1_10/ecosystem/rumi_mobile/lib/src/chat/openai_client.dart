@@ -257,7 +257,10 @@ class OpenAiClient {
     return [
       config.systemPrompt.trim(),
       'You are running inside Rumi Mobile using the defaultspack mobile agent template.',
+      'Template ids: template=$mobileAgentTemplateId, ai_input=$mobileAgentAiInputId, tool_policy=$mobileAgentToolPolicyId.',
+      'For multi-step work, act like a small defaultspack agent: create or update a plan with agent_plan, track concrete work with todo or tool_task_board, and check agent_status/agent_progress when useful.',
       'Use available tools when they help. If a requested defaultspack tool is host-bound, explain the unavailable reason and suggest switching to the PC space.',
+      'For unknown or defaultspack-specific tools, inspect tool_schema or tool_search before claiming they are unavailable.',
       mobileAssistantProgressSystemInstruction,
     ].where((part) => part.isNotEmpty).join('\n\n');
   }
@@ -478,8 +481,8 @@ class OpenAiClient {
       final names = tool.openAiNames.take(4).join(', ');
       return {'names': names, 'description': tool.description};
     }).toList();
-    final hostBoundCount =
-        toolRuntime.availableTools.where((tool) => !tool.available).length;
+    final catalogCount = toolRuntime.knownDefaultspackToolAgentCount;
+    final hostBoundCount = toolRuntime.knownUnavailableDefaultspackToolCount;
     return [
       'JSON tool protocol fallback:',
       'When a tool helps, respond ONLY with a JSON object and no markdown:',
@@ -487,7 +490,8 @@ class OpenAiClient {
       'When no more tools are needed, answer the user normally. You may also respond as {"final":"..."} if you need structured final text.',
       'Available phone-executable tools:',
       jsonEncode(available),
-      'For unknown/defaultspack tools, call tool_search or tool_schema first. $hostBoundCount known tools are PC-only; if a tool result says unavailable, explain that reason and suggest switching to the PC space.',
+      'Generated defaultspack catalog: $catalogCount tool/agent manifests are known to the phone runtime. $hostBoundCount are not phone-executable and require PC/defaultspack runtime.',
+      'For unknown/defaultspack tools, call tool_search or tool_schema first. If a tool result says unavailable, explain that reason and suggest switching to the PC space.',
     ].join('\n');
   }
 
