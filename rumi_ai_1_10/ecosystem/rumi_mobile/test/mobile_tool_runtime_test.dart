@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rumi_remote_app/src/data/local/defaultspack_tool_agent_manifest.g.dart';
 import 'package:rumi_remote_app/src/data/local/mobile_tool_runtime.dart';
 
 void main() {
@@ -260,6 +261,28 @@ void main() {
       expect(webData['aliases'], contains('defaultspack.tool.web_search'));
     });
 
+    test('generated defaultspack tool catalog matches source manifests', () {
+      final source = _defaultspackToolAgentRecords();
+      final generated = {
+        for (final entry in defaultspackToolAgentManifestCatalog)
+          entry.id: entry,
+      };
+
+      expect(generated.keys.toList()..sort(), source.keys.toList()..sort());
+      for (final id in source.keys) {
+        final expected = source[id]!;
+        final actual = generated[id]!;
+        expect(actual.description, expected.description, reason: id);
+        expect(actual.tags, expected.tags, reason: id);
+        expect(actual.aliases, expected.aliases, reason: id);
+        expect(
+          _canonicalJson(actual.inputSchema),
+          _canonicalJson(expected.inputSchema),
+          reason: id,
+        );
+      }
+    });
+
     test('runs phone-local defaultspack agent plan and status tools', () {
       final plan = runtime.execute(
         const MobileToolCall(
@@ -373,13 +396,17 @@ void main() {
 }
 
 List<String> _defaultspackToolAgentIds() {
+  return _defaultspackToolAgentRecords().keys.toList()..sort();
+}
+
+Map<String, _ManifestRecord> _defaultspackToolAgentRecords() {
   final functionsRoot = Directory('../defaultspack/functions');
   expect(functionsRoot.existsSync(), isTrue);
   final manifests = functionsRoot
       .listSync(recursive: true)
       .whereType<File>()
       .where((file) => file.path.endsWith('/manifest.json'));
-  final ids = <String>[];
+  final records = <String, _ManifestRecord>{};
   for (final file in manifests) {
     final manifest = jsonDecode(file.readAsStringSync());
     if (manifest is! Map<String, dynamic>) continue;
@@ -387,8 +414,53 @@ List<String> _defaultspackToolAgentIds() {
         (manifest['tags'] as List? ?? const []).map((tag) => '$tag').toSet();
     if (!tags.contains('tool') && !tags.contains('agent')) continue;
     final functionId = '${manifest['function_id'] ?? ''}'.trim();
-    if (functionId.isNotEmpty) ids.add(functionId);
+    if (functionId.isEmpty) continue;
+    final aliases = (manifest['vocab_aliases'] as List? ?? const [])
+        .map((alias) => '$alias'.trim())
+        .where((alias) => alias.isNotEmpty)
+        .toList()
+      ..sort();
+    final inputSchema = manifest['input_schema'] is Map<String, dynamic>
+        ? manifest['input_schema'] as Map<String, dynamic>
+        : const <String, dynamic>{
+            'type': 'object',
+            'additionalProperties': true,
+          };
+    records[functionId] = _ManifestRecord(
+      description: '${manifest['description'] ?? ''}',
+      tags: tags.toList()..sort(),
+      aliases: aliases,
+      inputSchema: inputSchema,
+    );
   }
-  ids.sort();
-  return ids;
+  return records;
+}
+
+String _canonicalJson(Object? value) => jsonEncode(_normalizeJson(value));
+
+Object? _normalizeJson(Object? value) {
+  if (value is Map) {
+    final keys = value.keys.map((key) => '$key').toList()..sort();
+    return {
+      for (final key in keys) key: _normalizeJson(value[key]),
+    };
+  }
+  if (value is List) {
+    return value.map(_normalizeJson).toList();
+  }
+  return value;
+}
+
+class _ManifestRecord {
+  const _ManifestRecord({
+    required this.description,
+    required this.tags,
+    required this.aliases,
+    required this.inputSchema,
+  });
+
+  final String description;
+  final List<String> tags;
+  final List<String> aliases;
+  final Map<String, dynamic> inputSchema;
 }

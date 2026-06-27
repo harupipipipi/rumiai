@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -66,6 +68,49 @@ void main() {
     expect(find.text('ようこそ'), findsOneWidget);
     expect(find.text('Rumiへようこそ'), findsNothing);
     expect(find.byType(ComposerBar), findsOneWidget);
+  });
+
+  testWidgets('app still launches with stale or malformed persisted state',
+      (tester) async {
+    final storage = _FakeSecureStorage()
+      .._values['rumi.api_config.v1'] = '{"temperature":"bad"}'
+      .._values['rumi.mobile_provider_configs.v1'] =
+          '[{"providerId":123,"openaiCompatible":"yes"}]'
+      .._values['rumi.mobile_model_favorites.v1'] =
+          '[{"source":"pc","profileId":123}]'
+      .._values['rumi.paired_device.v1'] = '{"scopes":"chat.read"}'
+      .._values['rumi.paired_devices.v1'] =
+          '[null, {"deviceId":"mobile-old","deviceToken":"dtk-old","scopes":["chat.read"],"pcBaseUrl":"http://192.168.11.25:8765","pcLabel":"Old Mac","pairingId":"old-pair"}]';
+    final chatStorage = _FakeChatStorage()
+      .._values['rumi_chat.conversations.v1'] = jsonEncode([
+        {'id': 1, 'messages': 'bad'},
+        {
+          'id': 'valid',
+          'title': 'Valid',
+          'messages': const [],
+          'createdAt': DateTime.now().toIso8601String(),
+          'updatedAt': DateTime.now().toIso8601String(),
+        },
+      ])
+      .._values['rumi_chat.active_id.v1'] = 'missing-active';
+    final store = ChatStore(storage: chatStorage);
+    final configStore = ApiConfigStore(storage: storage);
+    final deviceStore = MobileDeviceStore(storage: storage);
+
+    await tester.pumpWidget(MaterialApp(
+      theme: theme.buildRumiTheme(),
+      home: ChatScreen(
+        store: store,
+        configStore: configStore,
+        deviceStore: deviceStore,
+      ),
+    ));
+    await tester.pumpAndSettle(const Duration(seconds: 3));
+
+    expect(find.text('ようこそ'), findsOneWidget);
+    expect(find.text('このスマホ'), findsWidgets);
+    expect(find.byType(ComposerBar), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('settings screen opens and shows sections', (tester) async {
