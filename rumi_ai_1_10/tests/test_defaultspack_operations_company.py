@@ -16,6 +16,7 @@ def _reset_defaultspack_singletons():
     from domain.agent.scheduler import Scheduler
     from domain.chat.store import ChatStore
     from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.store import CompanyStore
     from domain.tool.registry import ToolRegistry
 
     scheduler = Scheduler._instance
@@ -26,6 +27,7 @@ def _reset_defaultspack_singletons():
     OrgManager._instance = None
     ChatStore._instance = None
     CompanyRuntimeStore._instance = None
+    CompanyStore._instance = None
     ToolRegistry._instance = None
 
 
@@ -369,6 +371,88 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
     assert "1/3 attempted browser launch" in qa_schedule["task"]["message"]
 
     for schedule in refreshed["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
+    append_history(
+        heartbeat_schedule["id"],
+        {
+            "schedule_id": heartbeat_schedule["id"],
+            "execution_id": "exec_subagent_timeout",
+            "trigger": "heartbeat",
+            "status": "completed",
+            "started_at": "2026-06-27T00:00:00Z",
+            "completed_at": "2026-06-27T00:00:05Z",
+            "result": "subagent delegation timed out; rumi_api returned Handler execution failed",
+        },
+    )
+
+    chat_store = ChatStore()
+    child = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        parent_conversation_id=status["conversation_id"],
+        conversation_kind="subagent",
+        agent_id="subagent",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    chat_store.update_conversation(child["id"], {"title": "Subagent capability probe"})
+    chat_store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Simple test: List 3 things you can do as a subagent."}],
+        },
+    )
+
+    observed = runtime.status()
+    observability = observed["harness"]["observability"]
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
+
+    assert observability["schedule_history"]["signals"][0]["signal"] == "subagent_timeout"
+    assert observability["subagents"]["unanswered_count"] == 1
+    assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
+    assert total == 2
+    assert {message["metadata"]["sync_source"] for message in messages} == {
+        "mimo_schedule_history",
+        "mimo_subagent_monitor",
+    }
+
+    runtime.status()
+    _messages_again, total_again = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
+    assert total_again == total
+
+    for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 

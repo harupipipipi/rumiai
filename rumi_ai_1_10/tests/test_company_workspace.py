@@ -313,6 +313,35 @@ def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):
     assert listed_messages["data"]["messages"][0]["metadata"]["route_id"] == "slack-team"
 
 
+def test_company_channels_include_runtime_message_counts(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, channels, messages
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "scheduler",
+            "content": "MiMo workspace visibility check",
+        },
+        {},
+    )
+    listed = channels.run({"company_id": company_id}, {})
+    fetched = channels.run({"action": "get", "company_id": company_id, "channel_id": "ops-company"}, {})
+
+    assert created["status"] == "ok"
+    ops_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "ops-company")
+    assert ops_channel["message_count"] == 1
+    assert ops_channel["last_message_at"]
+    assert fetched["data"]["message_count"] == 1
+    assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
+
+
 def test_operations_company_runtime_syncs_default_company_record(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler

@@ -13,8 +13,10 @@ from typing import Any
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    if _path in sys.path:
+        sys.path.remove(_path)
+for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
+    sys.path.insert(0, _path)
 
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager
@@ -22,6 +24,7 @@ from domain.agent.role_registry import RoleRegistry
 from domain.agent.scheduler import Scheduler
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.providers import get_all_known_models
+from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.service import CompanyService
 from domain.company.task_store import CompanyTaskStore
 from domain.knowledge.store import KnowledgeStore
@@ -454,7 +457,8 @@ class MimoCodingCompanyRuntime:
         state = self._load_state()
         org_id = state.get("org_id")
         org = OrgManager().get_org(org_id) if org_id else None
-        company = self._sync_company_record(state)
+        observability = self._sync_company_observability(state)
+        company = self._sync_company_record({**state, "observability": observability})
         open_tasks = 0
         try:
             task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
@@ -504,6 +508,7 @@ class MimoCodingCompanyRuntime:
                 "seeded_knowledge_ids": list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else []),
                 "open_task_count": open_tasks,
                 "knowledge_entry_count": knowledge_total,
+                "observability": observability,
                 "autonomy_board": autonomy_board,
                 "qa_swarm_plan": qa_swarm_plan,
             },
@@ -1197,6 +1202,8 @@ class MimoCodingCompanyRuntime:
                 "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),
                 "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
             }
+            if isinstance(state.get("observability"), dict):
+                metadata["observability"] = deepcopy(state["observability"])
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
                 name=COMPANY_NAME,
@@ -1330,6 +1337,236 @@ class MimoCodingCompanyRuntime:
         if not status:
             return True
         return status not in TERMINAL_TASK_STATUSES
+
+    def _sync_company_observability(self, state: dict[str, Any]) -> dict[str, Any]:
+        summary: dict[str, Any] = {
+            "status": "ok",
+            "company_id": COMPANY_ID,
+            "channel_id": "ops-company",
+            "team_workspace": {"synced_messages": 0},
+            "schedule_history": {"checked": 0, "latest": [], "signals": []},
+            "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": []},
+            "desktop_monitoring": {
+                "surface": "desktops",
+                "expected_api": "GET /api/desktops",
+                "status": "external_probe_required",
+            },
+        }
+        try:
+            runtime_store = CompanyRuntimeStore()
+            known_sync_keys = self._company_runtime_sync_keys(runtime_store)
+            synced = 0
+            scheduler = Scheduler()
+            schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+            for loop_key, schedule_id in schedule_ids.items():
+                schedule = scheduler.get_schedule(str(schedule_id))
+                history = scheduler.get_history(str(schedule_id), limit=5).get("entries", [])
+                for entry in reversed([item for item in history if isinstance(item, dict)]):
+                    summary["schedule_history"]["checked"] += 1
+                    latest = self._schedule_history_observation(str(loop_key), schedule, entry)
+                    summary["schedule_history"]["latest"].append(latest)
+                    if latest.get("signal"):
+                        summary["schedule_history"]["signals"].append(latest)
+                    sync_key = "schedule:" + str(entry.get("execution_id") or "").strip()
+                    if sync_key == "schedule:" or sync_key in known_sync_keys:
+                        continue
+                    runtime_store.add_message(
+                        COMPANY_ID,
+                        channel_id="ops-company",
+                        sender_id=str((schedule or {}).get("task", {}).get("agent_id") or "scheduler"),
+                        content=self._schedule_history_message(str(loop_key), schedule, entry),
+                        metadata={
+                            "sync_source": "mimo_schedule_history",
+                            "sync_key": sync_key,
+                            "loop_key": str(loop_key),
+                            "schedule_id": str(entry.get("schedule_id") or schedule_id),
+                            "execution_id": str(entry.get("execution_id") or ""),
+                            "status": str(entry.get("status") or ""),
+                            "signal": latest.get("signal"),
+                        },
+                    )
+                    known_sync_keys.add(sync_key)
+                    synced += 1
+
+            subagent_gaps = self._subagent_reply_gaps(state)
+            summary["subagents"]["checked"] = len(subagent_gaps.get("checked_ids", []))
+            summary["subagents"]["unanswered"] = subagent_gaps.get("unanswered", [])
+            summary["subagents"]["unanswered_count"] = len(summary["subagents"]["unanswered"])
+            for gap in summary["subagents"]["unanswered"]:
+                sync_key = "subagent_gap:" + str(gap.get("child_conversation_id") or "")
+                if sync_key in known_sync_keys:
+                    continue
+                runtime_store.add_message(
+                    COMPANY_ID,
+                    channel_id="ops-company",
+                    sender_id="scheduler",
+                    content=self._subagent_gap_message(gap),
+                    metadata={
+                        "sync_source": "mimo_subagent_monitor",
+                        "sync_key": sync_key,
+                        "child_conversation_id": gap.get("child_conversation_id"),
+                        "parent_conversation_id": state.get("conversation_id"),
+                        "signal": "subagent_unanswered",
+                    },
+                )
+                known_sync_keys.add(sync_key)
+                synced += 1
+
+            stats = runtime_store.stats(COMPANY_ID)
+            summary["team_workspace"] = {
+                "synced_messages": synced,
+                "messages": stats.get("messages", 0),
+                "tasks": stats.get("tasks", 0),
+                "runs": stats.get("runs", 0),
+                "threads": stats.get("threads", 0),
+            }
+            summary["schedule_history"]["latest"] = summary["schedule_history"]["latest"][-12:]
+            summary["schedule_history"]["signals"] = summary["schedule_history"]["signals"][-12:]
+            summary["subagents"]["unanswered"] = summary["subagents"]["unanswered"][:10]
+            return summary
+        except Exception as exc:
+            summary["status"] = "error"
+            summary["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+            return summary
+
+    @staticmethod
+    def _company_runtime_sync_keys(runtime_store: CompanyRuntimeStore) -> set[str]:
+        try:
+            messages, _total = runtime_store.list_messages(COMPANY_ID, limit=1000, offset=0)
+        except Exception:
+            return set()
+        keys: set[str] = set()
+        for message in messages:
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            sync_key = str(metadata.get("sync_key") or "").strip()
+            if sync_key:
+                keys.add(sync_key)
+        return keys
+
+    @staticmethod
+    def _schedule_history_observation(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> dict[str, Any]:
+        text = (str(entry.get("error") or "") + "\n" + str(entry.get("result") or "")).lower()
+        signal = ""
+        if "subagent" in text and ("timeout" in text or "timed out" in text):
+            signal = "subagent_timeout"
+        elif "handler execution failed" in text or ("rumi_api" in text and "fail" in text):
+            signal = "tool_handler_failure"
+        elif "browser_companion" in text or "0 clients paired" in text:
+            signal = "browser_companion_unpaired"
+        elif "approval" in text or "permission" in text:
+            signal = "approval_wait"
+        elif str(entry.get("status") or "").lower() == "error" or entry.get("error"):
+            signal = "schedule_error"
+        return {
+            "loop_key": loop_key,
+            "schedule_id": str(entry.get("schedule_id") or (schedule or {}).get("id") or ""),
+            "schedule_name": str((schedule or {}).get("name") or ""),
+            "execution_id": str(entry.get("execution_id") or ""),
+            "status": str(entry.get("status") or ""),
+            "trigger": str(entry.get("trigger") or ""),
+            "started_at": entry.get("started_at"),
+            "completed_at": entry.get("completed_at"),
+            "signal": signal,
+        }
+
+    @staticmethod
+    def _schedule_history_message(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> str:
+        status = str(entry.get("status") or "unknown")
+        name = str((schedule or {}).get("name") or loop_key)
+        body = str(entry.get("error") or entry.get("result") or "").strip()
+        if len(body) > 2400:
+            body = body[:2400].rstrip() + "\n\n... truncated by MiMo Team Workspace sync ..."
+        lines = [
+            f"**MiMo schedule {status}: {name}**",
+            f"- Loop: `{loop_key}`",
+            f"- Schedule: `{entry.get('schedule_id') or (schedule or {}).get('id') or ''}`",
+            f"- Execution: `{entry.get('execution_id') or ''}`",
+            f"- Trigger: `{entry.get('trigger') or ''}`",
+            f"- Started: `{entry.get('started_at') or ''}`",
+            f"- Completed: `{entry.get('completed_at') or ''}`",
+        ]
+        if body:
+            lines.extend(["", body])
+        return "\n".join(lines)
+
+    def _subagent_reply_gaps(self, state: dict[str, Any]) -> dict[str, Any]:
+        conversation_id = str(state.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return {"checked_ids": [], "unanswered": []}
+        try:
+            from domain.chat.store import ChatStore
+
+            store = ChatStore()
+            parent = store.get_conversation(conversation_id) or {}
+            child_ids = [
+                str(item)
+                for item in parent.get("child_conversation_ids", [])
+                if str(item or "").strip()
+            ]
+            unanswered: list[dict[str, Any]] = []
+            for child_id in child_ids:
+                child = store.get_conversation(child_id) or {}
+                if str(child.get("conversation_kind") or "") != "subagent":
+                    continue
+                messages = child.get("messages") if isinstance(child.get("messages"), list) else []
+                has_assistant_text = any(
+                    str(message.get("role") or "") == "assistant"
+                    and self._message_text(message).strip()
+                    for message in messages
+                    if isinstance(message, dict)
+                )
+                if has_assistant_text:
+                    continue
+                unanswered.append(
+                    {
+                        "child_conversation_id": child_id,
+                        "title": str(child.get("title") or "Subagent"),
+                        "message_count": len(messages),
+                        "created_at": child.get("created_at"),
+                        "last_user_prompt": next(
+                            (
+                                self._message_text(message)[:300]
+                                for message in messages
+                                if isinstance(message, dict) and str(message.get("role") or "") == "user"
+                            ),
+                            "",
+                        ),
+                    }
+                )
+            return {"checked_ids": child_ids, "unanswered": unanswered}
+        except Exception:
+            return {"checked_ids": [], "unanswered": []}
+
+    @staticmethod
+    def _message_text(message: dict[str, Any]) -> str:
+        raw = str(message.get("raw_text") or "").strip()
+        if raw:
+            return raw
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict):
+                    parts.append(str(block.get("text") or block.get("content") or ""))
+                else:
+                    parts.append(str(block))
+            return "\n".join(part for part in parts if part)
+        return ""
+
+    @staticmethod
+    def _subagent_gap_message(gap: dict[str, Any]) -> str:
+        prompt = str(gap.get("last_user_prompt") or "").strip()
+        lines = [
+            "**MiMo subagent child conversation has no assistant reply**",
+            f"- Child conversation: `{gap.get('child_conversation_id') or ''}`",
+            f"- Title: {gap.get('title') or 'Subagent'}",
+            f"- Message count: {gap.get('message_count') or 0}",
+        ]
+        if prompt:
+            lines.extend(["", "Latest user prompt:", "```text", prompt[:600], "```"])
+        return "\n".join(lines)
 
     def _schedule_policy(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
         state = state if isinstance(state, dict) else {}
@@ -1558,6 +1795,7 @@ class MimoCodingCompanyRuntime:
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
         return (
             "Run a short heartbeat for the MiMo Coding Company. Check pending tasks, recent failures, QA bugs, and blocked work. "
+            "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops. "
             + (monitoring_summary + " " if monitoring_summary else "")
             + "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
         )
