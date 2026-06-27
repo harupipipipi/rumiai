@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from domain.agent.subagent_orchestrator import run_subagent_compat
 from domain.ui_compiler import UIAgentResult, UIAgentTask
 
 
@@ -15,6 +14,9 @@ class SubagentToolBackend:
         output_dir = Path(task.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         try:
+            from importlib import import_module
+
+            run_subagent_compat = import_module("domain.agent.subagent_orchestrator").run_subagent_compat
             result = run_subagent_compat(
                 "delegate",
                 {
