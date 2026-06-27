@@ -8,6 +8,8 @@ from tests.ui_compiler_test_utils import build_args, fake_context, write_pass_pa
 from domain.tool.executor import ToolExecutor
 from domain.tool.registry import ToolRegistry
 from domain.tool.ui_compiler_tools import ui_build_recursive
+from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
+from domain.ui_compiler import UIAgentTask
 from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
 
@@ -81,3 +83,31 @@ def test_recursive_ui_http_routes_are_registered() -> None:
 
     assert ("POST", "/api/ui/build-recursive") in routes
     assert ("GET", "/api/ui/generation-status") in routes
+
+
+def test_subagent_tool_backend_runs_real_delegate_path(tmp_path: Path, monkeypatch) -> None:
+    from domain.agent import subagent_orchestrator
+
+    def fake_delegate(role_id, payload, *, model="", settings=None, call_handler=None, context=None):
+        output_dir = Path(payload["output_dir"])
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir / "result.txt").write_text("delegate wrote output", encoding="utf-8")
+        return {"role_id": role_id, "route_kind": "agent.delegate", "model": model}
+
+    monkeypatch.setattr(subagent_orchestrator, "run_subagent_compat", fake_delegate)
+    task = UIAgentTask(
+        task_id="delegate-task",
+        run_id="delegate-run",
+        node_id="delegate-node",
+        candidate_id="candidate-1",
+        kind="leaf",
+        prompt="create a component",
+        output_dir=str(tmp_path / "candidate"),
+        allowed_paths=[str(tmp_path / "candidate")],
+    )
+
+    result = SubagentToolBackend().run_task(task, {})
+
+    assert result.ok
+    assert result.files == ["result.txt"]
+    assert result.metadata["subagent"]["route_kind"] == "agent.delegate"
