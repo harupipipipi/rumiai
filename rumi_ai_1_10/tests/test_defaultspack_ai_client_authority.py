@@ -335,6 +335,33 @@ def test_ai_client_opencode_authority_resource_describes_endpoint_without_secret
     assert "api_key" not in resource
 
 
+def test_ai_client_rumi_provider_requires_authority(monkeypatch):
+    from domain.ai_client.client import AIClient, AuthorityApprovalRequired
+    from domain.ai_client.providers.stub_provider import StubProvider
+
+    AIClient._instance = None
+    client = AIClient()
+    client._providers = {"stub": StubProvider(), "rumi": _FakeProvider()}
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr("domain.ai_client.client.provider_api_metadata", lambda provider_id, api_id: {})
+    authority = _CaptureDenyAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+
+    try:
+        client.complete(
+            "rumi/default",
+            [{"role": "user", "content": "hi"}],
+            params={"_authority_context": {"principal_id": "profile:work"}},
+        )
+    except AuthorityApprovalRequired as exc:
+        assert exc.decision.permission_id == "model.invoke"
+    else:
+        raise AssertionError("AuthorityApprovalRequired was not raised")
+
+    assert authority.calls[0]["resource"]["provider_id"] == "rumi"
+    assert client._providers["rumi"].calls == []
+
+
 def test_authority_followup_metadata_carries_multiple_approval_tokens():
     from domain.chat.run_request import _apply_authority_context
 

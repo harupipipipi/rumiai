@@ -331,6 +331,137 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+def _sandbox_input_schema(
+    properties: dict[str, Any],
+    *,
+    required: tuple[str, ...] = (),
+    any_of: tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "workspace_id": {"type": "string"},
+            "include_paths": {"type": "array", "items": {"type": "string"}},
+            **properties,
+        },
+    }
+    if required:
+        schema["required"] = list(required)
+    if any_of:
+        schema["anyOf"] = list(any_of)
+    return schema
+
+
+SANDBOX_TERMINAL_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "command": {"type": "string"},
+        "argv": {"type": "array", "items": {"type": "string"}},
+        "cwd": {"type": "string"},
+        "timeout": {"type": "integer", "minimum": 1, "maximum": 120},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+        "max_diff_chars": {"type": "integer", "minimum": 1},
+        "network": {"type": "boolean"},
+        "network_enabled": {"type": "boolean"},
+    },
+    any_of=({"required": ["command"]}, {"required": ["argv"]}),
+)
+SANDBOX_FILE_READ_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "max_chars": {"type": "integer", "minimum": 1},
+        "max_output_chars": {"type": "integer", "minimum": 1},
+    },
+    required=("path",),
+)
+SANDBOX_FILE_WRITE_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    required=("path", "content"),
+)
+SANDBOX_FILE_PATCH_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "old": {"type": "string"},
+        "new": {"type": "string"},
+    },
+    required=("path", "old", "new"),
+)
+SANDBOX_DIFF_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "max_chars": {"type": "integer", "minimum": 1},
+        "max_output_chars": {"type": "integer", "minimum": 1},
+    }
+)
+SANDBOX_ARTIFACT_EXPORT_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "paths": {"type": "array", "items": {"type": "string"}},
+    }
+)
+
+
+SANDBOX_CODING_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "sandbox_terminal_exec",
+        "Execute a command inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "terminal"),
+        block="blocks.coding.sandbox_terminal_exec",
+        requires=("sandbox.terminal.exec",),
+        caller_requires=(),
+        input_schema=SANDBOX_TERMINAL_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_read",
+        "Read a file from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_read",
+        requires=("sandbox.workspace.read",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_READ_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_write",
+        "Write a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_write",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_WRITE_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_patch",
+        "Patch a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_patch",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_PATCH_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_diff_preview",
+        "Preview sandbox-only workspace changes as a diff.",
+        ("sandbox", "coding", "diff"),
+        block="blocks.coding.sandbox_diff_preview",
+        requires=("sandbox.workspace.diff",),
+        caller_requires=(),
+        input_schema=SANDBOX_DIFF_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_artifact_export",
+        "Export files from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "artifact"),
+        block="blocks.coding.sandbox_artifact_export",
+        requires=("sandbox.artifact.export",),
+        caller_requires=(),
+        input_schema=SANDBOX_ARTIFACT_EXPORT_INPUT_SCHEMA,
+    ),
+)
+
+
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
 )
@@ -684,6 +815,122 @@ EXTERNAL_INPUT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+CONTINUITY_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "continuity_list_nodes",
+        "List paired Rumi Node and cloud continuity destinations.",
+        ("continuity", "node"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "nodes_list"},
+        aliases=("defaults.continuity.list_nodes", "defaultspack.continuity.list_nodes", "continuity.list_nodes"),
+    ),
+    _spec(
+        "continuity_pairing_start",
+        "Start an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_start"},
+        aliases=("defaults.continuity.pairing.start", "defaultspack.continuity.pairing.start"),
+    ),
+    _spec(
+        "continuity_pairing_accept",
+        "Accept an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_accept"},
+        aliases=("defaults.continuity.pairing.accept", "defaultspack.continuity.pairing.accept"),
+    ),
+    _spec(
+        "continuity_remove_node",
+        "Remove a paired continuity destination.",
+        ("continuity", "node"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_delete"},
+        aliases=("defaults.continuity.node.remove", "defaultspack.continuity.node.remove"),
+    ),
+    _spec(
+        "continuity_probe_node",
+        "Probe a continuity destination without exporting credentials.",
+        ("continuity", "node", "probe"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_probe"},
+        aliases=("defaults.continuity.node.probe", "defaultspack.continuity.node.probe"),
+    ),
+    _spec(
+        "continuity_provider_routes",
+        "List API provider routes eligible for continuity.",
+        ("continuity", "provider"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_routes"},
+        aliases=("defaults.continuity.provider_routes", "defaultspack.continuity.provider_routes"),
+    ),
+    _spec(
+        "continuity_probe_provider_route",
+        "Probe a provider route against a continuity destination.",
+        ("continuity", "provider", "probe"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_probe"},
+        aliases=("defaults.continuity.provider_route.probe", "defaultspack.continuity.provider_route.probe"),
+    ),
+    _spec(
+        "continuity_set_provider_fallbacks",
+        "Set explicit continuity fallback route ordering.",
+        ("continuity", "provider", "fallback"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_set_fallbacks"},
+        aliases=("defaults.continuity.provider_route.set_fallbacks", "defaultspack.continuity.provider_route.set_fallbacks"),
+    ),
+    _spec(
+        "continuity_provider_extensions",
+        "List portable provider extension requirements.",
+        ("continuity", "provider", "extension"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_extensions"},
+        aliases=("defaults.continuity.provider_extensions", "defaultspack.continuity.provider_extensions"),
+    ),
+    _spec(
+        "continuity_plan_handoff",
+        "Plan a continuity handoff and run provider, credential, runtime, and destination preflight.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "plan"},
+        aliases=("defaults.continuity.plan_handoff", "defaultspack.continuity.plan_handoff", "continuity.plan_handoff"),
+    ),
+    _spec(
+        "continuity_status",
+        "Get a continuity handoff operation status.",
+        ("continuity", "handoff"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_get"},
+        aliases=("defaults.continuity.status", "defaultspack.continuity.status", "continuity.status"),
+    ),
+    _spec(
+        "continuity_cancel",
+        "Cancel a continuity handoff before cutover.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_cancel"},
+        aliases=("defaults.continuity.cancel", "defaultspack.continuity.cancel", "continuity.cancel"),
+    ),
+    _spec(
+        "continuity_checkpoint",
+        "Create a continuity checkpoint without cutting over to another destination.",
+        ("continuity", "checkpoint"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "checkpoint"},
+        aliases=("defaults.continuity.checkpoint", "defaultspack.continuity.checkpoint", "continuity.checkpoint"),
+    ),
+)
+
+
 FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
@@ -691,6 +938,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + SKILL_FUNCTIONS
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
+    + SANDBOX_CODING_FUNCTIONS
     + AGENT_FUNCTIONS
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
@@ -701,6 +949,7 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
     + EXTERNAL_INPUT_FUNCTIONS
+    + CONTINUITY_FUNCTIONS
 )
 
 

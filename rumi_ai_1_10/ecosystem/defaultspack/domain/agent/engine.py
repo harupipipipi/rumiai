@@ -29,8 +29,7 @@ from domain.tool.schema_adapter import (
     runtime_profile_enforced_tool_names,
     tool_name_from_definition,
 )
-
-MAX_FLOW_CALL_DEPTH = 10
+from domain.chat.loop_guard import emergency_budget_from_context, explicit_param_max_tool_calls
 
 
 def _truthy(value):
@@ -431,7 +430,11 @@ class AgentEngine:
         return True
 
     def _reject_policy_violation(self, execution, parsed):
-        limit = max_tool_calls(getattr(execution, "context", {}) or {})
+        context = getattr(execution, "context", {}) or {}
+        limit = max_tool_calls(context)
+        if limit is None:
+            params = context.get("params") if isinstance(context, dict) and isinstance(context.get("params"), dict) else {}
+            limit = explicit_param_max_tool_calls(params)
         if limit is None or self._tool_call_count(execution) < limit:
             return False
         tool_name = parsed.get("tool_name", "")
@@ -761,15 +764,24 @@ class AgentEngine:
                 "status": execution.status,
                 "result": execution.to_dict(),
             }
-        depth = sum(1 for s in execution.steps if s.step_type == "tool_call")
-        if depth >= MAX_FLOW_CALL_DEPTH:
-            execution.status = "error"
-            execution.error = "max flow call depth exceeded"
-            execution.add_step("error", {"error": "max flow call depth exceeded"})
-            self._persist_execution(execution, "run_failed", {"error": execution.error})
+        tool_executions = sum(1 for s in execution.steps if s.step_type == "tool_result")
+        emergency_budget = emergency_budget_from_context(getattr(execution, "context", {}) or {})
+        if tool_executions >= emergency_budget.max_tool_executions:
+            execution.status = "paused_emergency"
+            execution.error = "operator emergency tool execution budget reached"
+            execution.add_step(
+                "pause",
+                {
+                    "reason": "max_tool_executions",
+                    "tool_executions": tool_executions,
+                    "max_tool_executions": emergency_budget.max_tool_executions,
+                    "resumable": True,
+                },
+            )
+            self._persist_execution(execution, "run_paused_emergency", {"error": execution.error})
             return {
                 "execution_id": execution_id,
-                "status": "error",
+                "status": execution.status,
                 "result": execution.to_dict(),
             }
         self._inject_pending_instructions(execution)

@@ -1,0 +1,38 @@
+{
+  "id": "sandbox_diff_preview",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Sandbox Diff",
+  "description": "Preview sandbox-only file changes before any trusted host application.",
+  "enabled": true,
+  "config": {
+    "name": "sandbox_diff_preview",
+    "summary": "Preview sandbox changes",
+    "tags": ["sandbox", "coding", "diff"],
+    "ui": {
+      "group_id": "sandbox/coding/diff",
+      "group_label": "Sandbox Diff",
+      "group_icon": "diff",
+      "widget_kind": "tool_toggle"
+    },
+    "tool_category": "sandbox",
+    "action_type": "sandbox_diff",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["sandbox.workspace.diff"],
+    "requires_approval": false,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {"type": "string"},
+          "max_chars": {"type": "integer", "minimum": 1},
+          "max_output_chars": {"type": "integer", "minimum": 1},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:sandbox_diff_preview"}
+  }
+}

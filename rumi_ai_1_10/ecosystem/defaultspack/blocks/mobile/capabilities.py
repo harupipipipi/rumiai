@@ -35,6 +35,8 @@ from ecosystem.defaultspack.backend.ai_client.provider_catalog import (
 from ecosystem.defaultspack.domain.template.gallery import get_gallery
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.frontend.command_registry import SlashCommandRegistry
+from domain.mobile.tools import mobile_agent_template, mobile_tool_records, mobile_tool_summary
+from domain.tool.registry import ToolRegistry
 
 
 def _provider_summary(provider: dict) -> dict:
@@ -245,7 +247,6 @@ def _optional_bool(value, default: bool) -> bool:
 
 
 def run(input_data, context):
-    del context
     args = _merged_input(input_data)
 
     include_templates = _optional_bool(args.get("include_templates"), True)
@@ -256,6 +257,11 @@ def run(input_data, context):
     models = [_model_summary(m) for m in list_model_catalog(provider=provider_filter)]
     profiles = [_profile_summary(p, settings) for p in list_profile_catalog()]
     commands, command_errors = _commands_payload()
+    try:
+        tools = ToolRegistry().list_tools()
+        tool_records = mobile_tool_records(tools, context=context if isinstance(context, dict) else {})
+    except Exception:
+        tool_records = []
 
     templates: list[dict] = []
     if include_templates:
@@ -274,5 +280,8 @@ def run(input_data, context):
             "runtime": _runtime_summary(settings),
             "commands": commands,
             "command_manifest_errors": command_errors,
+            "agent_template": mobile_agent_template(),
+            "tools": tool_records,
+            "tool_summary": mobile_tool_summary(tool_records),
         }
     )

@@ -10,5 +10,7 @@ rules:
     decision: require
   - id: secrets_never_mount_by_default
     decision: require
+  - id: destructive_lifecycle_requires_confirmation
+    decision: require
   - id: artifacts_need_output_manifest
     decision: require

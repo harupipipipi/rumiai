@@ -66,6 +66,10 @@ def run(context):
         # ---- Tool read/invoke routes ----
         ("GET", "/api/tools", _lazy("blocks.tool.list"), {}),
         ("GET", "/api/tools/names", _lazy("blocks.tool.names"), {}),
+        ("GET", "/api/tools/catalog", _lazy("blocks.tool.catalog"), {}),
+        ("POST", "/api/tools/selection/preview", _lazy("blocks.tool.selection_preview"), {}),
+        ("GET", "/api/tools/selection/traces/{trace_id}", _lazy("blocks.tool.selection_trace"), {"trace_id": "trace_id"}),
+        ("POST", "/api/tools/embedding-index/rebuild", _lazy("blocks.tool.embedding_index_rebuild"), {}),
         ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
         ("POST", "/api/tools/browser-computer", _lazy("blocks.tool.browser_computer"), {}),
         ("POST", "/api/tools/browser-companion/bridge/poll", _lazy("blocks.tool.browser_companion_bridge", "run_poll"), {}),

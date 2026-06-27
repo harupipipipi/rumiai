@@ -28,6 +28,73 @@ def test_computer_use_action_suffix_tool_name_is_normalized():
     }
 
 
+def test_chat_run_engine_has_no_default_four_tool_call_limit(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    model_turns = {"count": 0}
+    executed = []
+
+    def fake_model_turn(self, prepared, messages, draft):
+        if False:
+            yield {}
+        model_turns["count"] += 1
+        if model_turns["count"] <= 5:
+            return (
+                {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": f"call-{model_turns['count']}",
+                            "name": "lookup",
+                            "input": {"path": f"file-{model_turns['count']}.txt"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "usage": {},
+                },
+                [
+                    {
+                        "type": "tool_use",
+                        "id": f"call-{model_turns['count']}",
+                        "name": "lookup",
+                        "input": {"path": f"file-{model_turns['count']}.txt"},
+                    }
+                ],
+            )
+        return {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop", "usage": {}}, []
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        executed.append((tool_name, dict(arguments)))
+        return {"status": "ok", "data": {"content": arguments.get("path")}}
+
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+
+    engine = ChatRunEngine()
+    events = list(
+        engine.stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "read several files"},
+                "tools": [{"name": "lookup", "description": "lookup"}],
+                "params": {},
+            },
+            {},
+        )
+    )
+
+    assert len(executed) == 5
+    assert not any(event.get("phase") == "tool_call_limit" for event in events)
+    ChatStore._instance = None
+
+
 def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run as send_run
@@ -677,6 +744,65 @@ def test_complete_turn_retries_wrapped_429_after_tool_use():
     assert any(event.get("type") == "ai_retry_scheduled" for event in engine._activity_events)
 
 
+def test_final_response_reports_unattached_requested_tools():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "coding_file_read",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    unselected_entry = {
+        "tool_name": "coding_terminal_exec",
+        "status": "blocked",
+        "reason_code": "not_connected_to_profile",
+        "reason": "selected tool is not connected to the active runtime profile",
+    }
+    engine = ChatRunEngine(store=object(), client=object())
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={},
+        request_context={},
+        tool_context={
+            "requested_tool_ids": ["coding_file_read", "coding_terminal_exec"],
+            "unselected_requested_tools": [unselected_entry],
+        },
+        standard_messages=[],
+        user_text="run pwd",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["coding_file_read"],
+        connected_tool_names={"coding_file_read"},
+        call_handler=None,
+        model_routing={},
+    )
+
+    response = engine._final_response(
+        prepared,
+        {"content": [{"type": "text", "text": "done"}], "finish_reason": "stop"},
+    )
+
+    metadata = response["metadata"]
+    assert metadata["requested_tools"] == ["coding_file_read", "coding_terminal_exec"]
+    assert metadata["attached_tools"] == ["coding_file_read"]
+    assert metadata["unattached_requested_tools"] == ["coding_terminal_exec"]
+    assert metadata["tool_attachment_diagnostics"]["unselected_requested_tools"] == [unselected_entry]
+
+
 def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine
@@ -1033,3 +1159,21 @@ def test_stream_engine_ir_finalizes_assistant_message(tmp_path, monkeypatch):
     assert stored["finish_reason"] == "stop"
     assert stored["metadata"]["provider_capabilities"]["provider_id"] == "openai"
     ChatStore._instance = None
+
+
+def test_compact_tool_log_value_truncates_large_outputs():
+    from blocks.chat.send import _compact_tool_log_value
+
+    compact = _compact_tool_log_value({
+        "status": "ok",
+        "data": {
+            "content": "x" * 5_000,
+            "stdout": "y" * 5_000,
+            "items": list(range(25)),
+        },
+    })
+
+    assert len(compact["data"]["content"]) < 2_000
+    assert "tool log truncated" in compact["data"]["content"]
+    assert len(compact["data"]["stdout"]) < 2_000
+    assert compact["data"]["items"][-1]["omitted_items"] == 9

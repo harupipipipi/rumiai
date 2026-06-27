@@ -64,6 +64,7 @@ class _MockHandlerDef:
     handler_dir: Path = Path("/fake")
     entrypoint: str = "handler.py:handle"
     is_builtin: bool = False
+    pack_id: str = ""
 
 
 @dataclass
@@ -212,13 +213,15 @@ class TestExecuteSuccess(unittest.TestCase):
         mock_proc.stdout = '{"result": "ok"}'
         mock_proc.stderr = ""
 
-        with patch("subprocess.run", return_value=mock_proc):
-            with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
-                mock_tmpfile.return_value.__enter__ = MagicMock(
-                    return_value=MagicMock(name="/tmp/fake_runner.py")
-                )
-                mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
-                resp = executor.execute("principal_a", {"permission_id": "test.permission"})
+        with patch.object(executor, "_handler_def_requires_managed_sandbox", return_value=False):
+            with patch.object(executor, "_entry_requires_managed_sandbox", return_value=False):
+                with patch("subprocess.run", return_value=mock_proc):
+                    with patch("tempfile.NamedTemporaryFile") as mock_tmpfile:
+                        mock_tmpfile.return_value.__enter__ = MagicMock(
+                            return_value=MagicMock(name="/tmp/fake_runner.py")
+                        )
+                        mock_tmpfile.return_value.__exit__ = MagicMock(return_value=False)
+                        resp = executor.execute("principal_a", {"permission_id": "test.permission"})
 
         self.assertTrue(resp.success)
 
@@ -757,20 +760,22 @@ class TestHandlerSubprocessEntrypointCompatibility(unittest.TestCase):
             handler_py_path=str(handler_path),
             handler_dir=handler_dir,
             entrypoint="handler.py",
+            is_builtin=True,
         )
         success = CapabilityResponse(success=True, output={"ok": True})
 
-        with patch.object(executor, "_run_runner_on_host", return_value=success) as mock_run:
-            resp = executor._execute_handler_subprocess(
-                handler_def=handler_def,
-                principal_id="principal_a",
-                permission_id="perm.test",
-                grant_config={},
-                args={},
-                timeout_seconds=5,
-                request_id="req-subproc",
-                start_time=time.time(),
-            )
+        with patch.object(executor, "_handler_def_requires_managed_sandbox", return_value=False):
+            with patch.object(executor, "_run_runner_on_host", return_value=success) as mock_run:
+                resp = executor._execute_handler_subprocess(
+                    handler_def=handler_def,
+                    principal_id="principal_a",
+                    permission_id="perm.test",
+                    grant_config={},
+                    args={},
+                    timeout_seconds=5,
+                    request_id="req-subproc",
+                    start_time=time.time(),
+                )
 
         self.assertTrue(resp.success)
         mock_run.assert_called_once()

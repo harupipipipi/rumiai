@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, KanbanSquare, PanelLeftOpen, PanelLeftClose, X,
+  GripVertical, FolderOpen, Folder, KanbanSquare, Monitor, PanelLeftOpen, PanelLeftClose, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -66,6 +66,7 @@ export type ChatItem = {
 
 export type ChatGroup = {
   id: string;
+  sourceGroupId?: string;
   title: string;
   chats: ChatItem[];
   subGroups: ChatGroup[];
@@ -268,6 +269,38 @@ function saveCustomGroups(groups: CustomGroupInfo[]) {
   }
 }
 
+function collectGroupIds(groups: ChatGroup[], ids = new Set<string>()): Set<string> {
+  for (const group of groups) {
+    ids.add(group.id);
+    collectGroupIds(group.subGroups, ids);
+  }
+  return ids;
+}
+
+function uniqueHistoryGroupId(baseId: string, usedIds: Set<string>, prefix: string): string {
+  const normalizedBaseId = stringOrNull(baseId) ?? "group";
+  let candidate = usedIds.has(normalizedBaseId) ? `${prefix}${normalizedBaseId}` : normalizedBaseId;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${prefix}${normalizedBaseId}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function uniquifyGroupTreeIds(groups: ChatGroup[], usedIds: Set<string>, prefix: string): ChatGroup[] {
+  return groups.map((group) => {
+    const id = uniqueHistoryGroupId(group.id, usedIds, prefix);
+    return {
+      ...group,
+      id,
+      sourceGroupId: id === group.id ? group.sourceGroupId : group.sourceGroupId ?? group.id,
+      subGroups: uniquifyGroupTreeIds(group.subGroups, usedIds, prefix),
+    };
+  });
+}
+
 export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
   const dateBuckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
@@ -418,8 +451,12 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       ];
 
   const visibleGroups = groups.filter((group) => group.chats.length > 0 || group.subGroups.length > 0);
+  const reservedGroupIds = collectGroupIds(visibleGroups);
+  const integration = uniquifyGroupTreeIds([...integrationGroups.values()], reservedGroupIds, "integration-");
+  const usedGroupIds = collectGroupIds([...integration, ...visibleGroups]);
   const custom = [...metadataGroupsById.values()].map((group) => ({
-    id: group.id,
+    id: uniqueHistoryGroupId(group.id, usedGroupIds, "custom-"),
+    sourceGroupId: group.id,
     title: group.title,
     workspaceId: group.workspaceId ?? null,
     workspaceLabel: group.workspaceLabel ?? null,
@@ -430,7 +467,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
     subGroups: [],
     custom: true,
   }));
-  return [...custom, ...integrationGroups.values(), ...visibleGroups];
+  return [...custom, ...integration, ...visibleGroups];
 }
 
 // ============================================================
@@ -1161,6 +1198,8 @@ interface HistoryBoardProps {
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
+  onDesktopsOpen?: () => void;
+  isDesktopsActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -1369,6 +1408,8 @@ export function HistoryBoard({
   onKanbanOpen,
   onGroupKanbanOpen,
   isKanbanActive = false,
+  onDesktopsOpen,
+  isDesktopsActive = false,
   onSettingsClick,
   onChatMetadataChange,
   onMinimize,
@@ -1586,9 +1627,10 @@ export function HistoryBoard({
 
   // --- Actions ---
   const handleRenameGroup = (id: string, newTitle: string) => {
+    const sourceGroupId = findGroupById(groups, id)?.sourceGroupId ?? id;
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, title: newTitle } : g));
     setCustomGroups((prev) => {
-      const next = prev.map((group) => group.id === id ? { ...group, title: newTitle } : group);
+      const next = prev.map((group) => group.id === sourceGroupId ? { ...group, title: newTitle } : group);
       saveCustomGroups(next);
       return next;
     });
@@ -1952,6 +1994,21 @@ export function HistoryBoard({
               >
                 <KanbanSquare size={14} />
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDesktopsOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isDesktopsActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Desktops"
+                aria-label="Desktops"
+                aria-current={isDesktopsActive ? "page" : undefined}
+              >
+                <Monitor size={14} />
+              </button>
             </>
           )}
         </div>
@@ -2102,6 +2159,23 @@ export function HistoryBoard({
               >
                 <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
                 <span className="truncate">Kanban</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDesktopsOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isDesktopsActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Desktops"
+                aria-current={isDesktopsActive ? "page" : undefined}
+              >
+                <Monitor size={15} className="shrink-0 text-zinc-500" />
+                <span className="truncate">Desktops</span>
               </button>
             </>
           )}

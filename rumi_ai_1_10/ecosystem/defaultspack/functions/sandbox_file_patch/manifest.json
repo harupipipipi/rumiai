@@ -1,0 +1,70 @@
+{
+  "function_id": "sandbox_file_patch",
+  "description": "Patch a file inside a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "file"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.workspace.write"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.file_patch",
+    "defaultspack.sandbox.file_patch",
+    "defaults.sandbox.file.patch",
+    "defaultspack.sandbox.file.patch"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "path": {
+        "type": "string"
+      },
+      "old": {
+        "type": "string"
+      },
+      "new": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "old",
+      "new"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_file_patch",
+      "default_args": {}
+    }
+  }
+}

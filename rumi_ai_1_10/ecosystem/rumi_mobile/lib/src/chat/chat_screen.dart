@@ -779,6 +779,10 @@ class _ChatScreenState extends State<ChatScreen> {
 
   Map<String, dynamic> _pcRequestParams() {
     final profile = _activePcProfile();
+    final toolPolicy = <String, dynamic>{
+      'ai_input_id': 'rumi.composer.default:default_ai_input',
+      'template_tool_policy_id': 'rumi.composer.default:default_tools',
+    };
     final params = <String, dynamic>{
       'deepthink_enabled': _pcDeepthinkEnabled,
       'tool_selection': const {
@@ -788,18 +792,23 @@ class _ChatScreenState extends State<ChatScreen> {
         'scope': 'turn',
         'must_use': false,
       },
-      'metadata': {'mode': _pcMode},
+      'tool_policy': toolPolicy,
+      'metadata': {
+        'mode': _pcMode,
+        'agent_template_id': 'rumi.composer.default',
+        'agent_ai_input_id': 'rumi.composer.default:default_ai_input',
+      },
     };
     if (profile?.supportsThinking ?? true) {
       params['thinking_level'] = _pcThinkingLevel;
     }
     if (_pcYoloMode || _pcUltraYoloMode) {
-      params['tool_policy'] = {
+      toolPolicy.addAll({
         'yolo_mode': true,
         'allow_shell': true,
         'allow_file_write': true,
         'write_actions_require_approval': false,
-      };
+      });
     }
     return params;
   }

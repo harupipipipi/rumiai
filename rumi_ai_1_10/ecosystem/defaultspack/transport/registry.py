@@ -27,6 +27,13 @@ class HttpRouteSpec:
     block_module: str = ""
     function_name: str = ""
     fallback_block_module: str = ""
+    permission_id: str = ""
+    owner_pack_id: str = ""
+    provider_id: str = ""
+    frontend_id: str = ""
+    audience: str = "kernel_api"
+    resource_template: Dict[str, Any] = field(default_factory=dict)
+    core_only: bool = False
 
     def __post_init__(self) -> None:
         resolved_function_id = str(self.function_id or self.function_name or "").strip()
@@ -215,6 +222,15 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                     handler_name=handler_name,
                     path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
                     defaults=dict(defaults) if isinstance(defaults, dict) else {},
+                    permission_id=str(route.get("permission_id") or "").strip(),
+                    owner_pack_id=str(route.get("owner_pack_id") or source_pack_id).strip(),
+                    provider_id=str(route.get("provider_id") or "").strip(),
+                    frontend_id=str(route.get("frontend_id") or "").strip(),
+                    audience=str(route.get("audience") or "kernel_api").strip(),
+                    resource_template=dict(route.get("resource_template") or {})
+                    if isinstance(route.get("resource_template"), dict)
+                    else {},
+                    core_only=bool(route.get("core_only", False)),
                 )
             )
     return specs
@@ -268,11 +284,20 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 function_id=function_id,
                 function_name=f"defaultspack:{function_id}",
                 block_module=str(item.get("block_module") or "").strip(),
-                defaults=dict(item.get("default_args") or {}),
                 path_inject=dict(item.get("path_inject") or {}),
+                defaults=dict(item.get("default_args") or {}),
                 pre_auth=bool(item.get("pre_auth")),
                 sensitive=sensitive,
                 local_only=local_only,
+                permission_id=str(item.get("permission_id") or "").strip(),
+                owner_pack_id=str(item.get("owner_pack_id") or "defaultspack").strip(),
+                provider_id=str(item.get("provider_id") or "").strip(),
+                frontend_id=str(item.get("frontend_id") or "").strip(),
+                audience=str(item.get("audience") or "kernel_api").strip(),
+                resource_template=dict(item.get("resource_template") or {})
+                if isinstance(item.get("resource_template"), dict)
+                else {},
+                core_only=bool(item.get("core_only", False)),
             )
         )
     return specs
@@ -763,6 +788,54 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "/api/chat/conversations/{id}/auto-compact",
         block_module="blocks.chat.auto_compact",
         path_inject={"id": "conversation_id"},
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/chat/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "GET"},
+        permission_id="chat.tool_preferences.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/chat/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "PUT"},
+        permission_id="chat.tool_preferences.write",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "GET"},
+        permission_id="chat.tool_preferences.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "PUT"},
+        permission_id="chat.tool_preferences.write",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
     ),
     HttpRouteSpec(
         "GET",
@@ -1716,9 +1789,19 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST",
         "/api/authority/requests/{request_id}/approve",
         handler_name="_handle_authority_approve",
+        permission_id="authority.request.approve",
     ),
     HttpRouteSpec(
-        "POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"
+        "POST",
+        "/api/authority/requests/{request_id}/challenge",
+        handler_name="_handle_authority_challenge",
+        permission_id="authority.request.approve",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/authority/requests/{request_id}/deny",
+        handler_name="_handle_authority_deny",
+        permission_id="authority.request.deny",
     ),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),
     HttpRouteSpec(
@@ -1817,6 +1900,24 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     *_PROMPT_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
+    HttpRouteSpec("GET", "/api/tools/catalog", block_module="blocks.tool.catalog"),
+    HttpRouteSpec("POST", "/api/tools/selection/preview", block_module="blocks.tool.selection_preview"),
+    HttpRouteSpec(
+        "GET",
+        "/api/tools/selection/traces/{trace_id}",
+        block_module="blocks.tool.selection_trace",
+        path_inject={"trace_id": "trace_id"},
+        permission_id="tool_selection.trace.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"trace_id": "{path.trace_id}"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/tools/embedding-index/rebuild",
+        block_module="blocks.tool.embedding_index_rebuild",
+    ),
     HttpRouteSpec(
         "GET",
         "/api/defaultspack/modules",
@@ -2080,6 +2181,21 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ai/models/recommend", block_module="blocks.ai.recommend_model"),
     HttpRouteSpec("POST", "/api/ai/models/route", block_module="blocks.ai.route_model"),
     HttpRouteSpec("GET", "/api/ai/profiles", block_module="blocks.ai.profiles"),
+    HttpRouteSpec("GET", "/api/continuity/nodes", function_id="continuity_list_nodes", block_module="blocks.continuity.api", defaults={"_handler": "nodes_list"}),
+    HttpRouteSpec("POST", "/api/continuity/pairing/start", function_id="continuity_pairing_start", block_module="blocks.continuity.api", defaults={"_handler": "pairing_start"}),
+    HttpRouteSpec("POST", "/api/continuity/pairing/accept", function_id="continuity_pairing_accept", block_module="blocks.continuity.api", defaults={"_handler": "pairing_accept"}),
+    HttpRouteSpec("DELETE", "/api/continuity/nodes/{node_id}", function_id="continuity_remove_node", block_module="blocks.continuity.api", path_inject={"node_id": "node_id"}, defaults={"_handler": "node_delete"}),
+    HttpRouteSpec("POST", "/api/continuity/nodes/{node_id}/probe", function_id="continuity_probe_node", block_module="blocks.continuity.api", path_inject={"node_id": "node_id"}, defaults={"_handler": "node_probe"}),
+    HttpRouteSpec("POST", "/api/continuity/plans", function_id="continuity_plan_handoff", block_module="blocks.continuity.api", defaults={"_handler": "plan"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs", function_id="continuity_status", block_module="blocks.continuity.api", defaults={"_handler": "handoffs_list"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs/{operation_id}", function_id="continuity_status", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_get"}),
+    HttpRouteSpec("POST", "/api/continuity/handoffs/{operation_id}/cancel", function_id="continuity_cancel", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_cancel"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs/{operation_id}/events", function_id="continuity_status", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_get"}),
+    HttpRouteSpec("GET", "/api/continuity/provider-routes", function_id="continuity_provider_routes", block_module="blocks.continuity.api", defaults={"_handler": "provider_routes"}),
+    HttpRouteSpec("POST", "/api/continuity/provider-routes/{route_id}/probe", function_id="continuity_probe_provider_route", block_module="blocks.continuity.api", path_inject={"route_id": "route_id"}, defaults={"_handler": "provider_route_probe"}),
+    HttpRouteSpec("POST", "/api/continuity/provider-routes/{route_id}/set-fallbacks", function_id="continuity_set_provider_fallbacks", block_module="blocks.continuity.api", path_inject={"route_id": "route_id"}, defaults={"_handler": "provider_route_set_fallbacks"}),
+    HttpRouteSpec("GET", "/api/continuity/provider-extensions", function_id="continuity_provider_extensions", block_module="blocks.continuity.api", defaults={"_handler": "provider_extensions"}),
+    HttpRouteSpec("POST", "/api/continuity/checkpoints", function_id="continuity_checkpoint", block_module="blocks.continuity.api", defaults={"_handler": "checkpoint"}),
     HttpRouteSpec(
         "POST", "/api/vision/describe-images", block_module="blocks.vision.describe_images"
     ),
@@ -2229,15 +2345,37 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             handler = _handler
         else:
             handler = getattr(server, spec.handler_name)
-        try:
-            setattr(handler, "__rumi_route_pattern__", spec.pattern)
-            setattr(handler, "__rumi_route_sensitive__", bool(spec.sensitive))
-            setattr(handler, "__rumi_route_pre_auth__", bool(spec.pre_auth))
-            setattr(handler, "__rumi_route_local_only__", bool(spec.local_only))
-        except Exception:
-            pass
+        _set_http_route_handler_metadata(handler, spec)
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))
     return routes
+
+
+def _set_http_route_handler_metadata(handler: Any, spec: HttpRouteSpec) -> None:
+    target = getattr(handler, "__func__", handler)
+    try:
+        setattr(target, "__rumi_route_pattern__", spec.pattern)
+        setattr(target, "__rumi_route_sensitive__", bool(spec.sensitive))
+        setattr(target, "__rumi_route_pre_auth__", bool(spec.pre_auth))
+        setattr(target, "__rumi_route_local_only__", bool(spec.local_only))
+        setattr(target, "__rumi_route_authority__", http_route_authority_metadata(spec))
+    except Exception:
+        pass
+
+
+def http_route_authority_metadata(spec: HttpRouteSpec) -> dict[str, Any]:
+    metadata = {
+        "permission_id": str(spec.permission_id or "").strip(),
+        "owner_pack_id": str(spec.owner_pack_id or "").strip(),
+        "provider_id": str(spec.provider_id or "").strip(),
+        "frontend_id": str(spec.frontend_id or "").strip(),
+        "audience": str(spec.audience or "kernel_api").strip(),
+        "resource_template": dict(spec.resource_template or {}),
+    }
+    if spec.core_only:
+        metadata["core_only"] = True
+    if spec.function_id:
+        metadata["function_id"] = spec.function_id
+    return {key: value for key, value in metadata.items() if value not in ("", {}, None)}
 
 
 def build_always_available_http_routes(server: Any):

@@ -437,6 +437,54 @@ class PcCommandItem {
   }
 }
 
+class PcToolEntry {
+  const PcToolEntry({
+    required this.toolId,
+    required this.serviceId,
+    required this.name,
+    required this.summary,
+    required this.tags,
+    required this.mobileCompatible,
+    required this.mobileAvailable,
+    required this.executionLocation,
+    required this.mobileUnavailableReason,
+  });
+
+  final String toolId;
+  final String serviceId;
+  final String name;
+  final String summary;
+  final List<String> tags;
+  final bool mobileCompatible;
+  final bool mobileAvailable;
+  final String executionLocation;
+  final String mobileUnavailableReason;
+
+  bool get hasMobileTag => tags.contains('mobile-compatible');
+
+  factory PcToolEntry.fromJson(Map<String, dynamic> json) {
+    final mobile =
+        Map<String, dynamic>.from(json['mobile'] as Map? ?? const {});
+    return PcToolEntry(
+      toolId: json['tool_id'] as String? ?? '',
+      serviceId: json['service_id'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      summary: json['summary'] as String? ?? '',
+      tags: (json['tags'] as List? ?? []).map((e) => e.toString()).toList(),
+      mobileCompatible: json['mobile_compatible'] as bool? ??
+          mobile['compatible'] as bool? ??
+          false,
+      mobileAvailable: mobile['available'] as bool? ?? false,
+      executionLocation: json['execution_location'] as String? ??
+          mobile['execution_location'] as String? ??
+          '',
+      mobileUnavailableReason: json['mobile_unavailable_reason'] as String? ??
+          mobile['unavailable_reason'] as String? ??
+          '',
+    );
+  }
+}
+
 class PcModelCandidate {
   const PcModelCandidate({
     required this.profileId,
@@ -548,6 +596,7 @@ class PcCatalog {
     required this.models,
     required this.profiles,
     required this.templates,
+    required this.tools,
     required this.fetchedAt,
     this.runtime = PcRuntimeSettings.empty,
     this.commands = const [],
@@ -558,6 +607,7 @@ class PcCatalog {
   final List<ModelEntry> models;
   final List<ProfileEntry> profiles;
   final List<TemplateEntry> templates;
+  final List<PcToolEntry> tools;
   final DateTime fetchedAt;
   final PcRuntimeSettings runtime;
   final List<PcCommandItem> commands;
@@ -568,6 +618,9 @@ class PcCatalog {
 
   List<ProviderEntry> get configuredProviders =>
       providers.where((p) => p.configured).toList();
+
+  List<PcToolEntry> get mobileCompatibleTools =>
+      tools.where((tool) => tool.mobileCompatible).toList();
 
   List<ProfileEntry> get selectableProfiles {
     final list = profiles
@@ -623,6 +676,9 @@ class PcCatalog {
           .toList(),
       templates: (json['templates'] as List? ?? [])
           .map((e) => TemplateEntry.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      tools: (json['tools'] as List? ?? [])
+          .map((e) => PcToolEntry.fromJson(e as Map<String, dynamic>))
           .toList(),
       fetchedAt: DateTime.now(),
       runtime: PcRuntimeSettings.fromJson(

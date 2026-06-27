@@ -1,0 +1,47 @@
+{
+  "id": "desktop_control_release",
+  "description": "Release an approved control lease for a managed desktop seat.",
+  "metadata": {
+    "aliases": ["desktop.control.release", "release desktop control"],
+    "keywords": ["desktop", "control", "lease", "release", "computer use"]
+  },
+  "config": {
+    "tool_id": "desktop_control_release",
+    "name": "Desktop Control Release",
+    "summary": "Release a managed desktop control lease.",
+    "tool_category": "desktop",
+    "action_type": "write",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["desktop", "control", "computer_use"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "hand",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Release",
+      "composer_description": "Release a control lease for a managed desktop.",
+      "composer_icon": "hand"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "owner_id": { "type": "string" },
+          "access_key": { "type": "string" },
+          "lease_token": { "type": "string" }
+        },
+        "required": ["lease_token"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_control_release"
+    }
+  }
+}

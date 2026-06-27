@@ -73,6 +73,26 @@ def test_mobile_capabilities_returns_provider_and_model_catalogs():
     assert "preferred_model" in data["runtime"]
     assert "commands" in data
     assert any(command["name"] == "model" for command in data["commands"])
+    assert data["agent_template"]["template_id"] == "rumi.composer.default"
+    assert "tools" in data
+    assert "tool_summary" in data
+    if data["tools"]:
+        assert "mobile_compatible" in data["tools"][0]
+        assert "mobile" in data["tools"][0]
+
+
+def test_mobile_tools_endpoint_tags_compatible_tools():
+    from blocks.mobile.tools import run
+
+    result = run({}, None)
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["agent_template"]["template_id"] == "rumi.composer.default"
+    assert "tools" in data
+    compatible = [tool for tool in data["tools"] if tool.get("mobile_compatible")]
+    assert data["summary"]["compatible_count"] == len(compatible)
+    if compatible:
+        assert "mobile-compatible" in compatible[0]["tags"]
 
 
 def test_mobile_capabilities_provider_filter_narrows_models():
@@ -233,6 +253,7 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         required_device_scope("POST", "/api/mobile/v1/commands/execute")
         == "chat.write"
     )
+    assert required_device_scope("GET", "/api/mobile/v1/tools") == "tools.observe"
     assert required_device_scope("GET", "/api/packs") == ""
     assert required_device_scope("GET", "/api/mobile/v1/approvals") == ""
     assert required_device_scope("POST", "/api/mobile/v1/approvals/auth_1/approve") == ""

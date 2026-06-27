@@ -1057,8 +1057,14 @@ export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
+  run_id?: string;
+  seq?: number;
   message?: string;
   phase?: string;
+  status?: string;
+  summary?: string;
+  next_action?: string;
+  nextAction?: string;
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
@@ -1276,7 +1282,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -1287,6 +1293,109 @@ export type SidebarField = {
   configured_field?: string;
   advanced?: boolean;
   api_keys?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityNode = {
+  node_id: string;
+  display_name?: string;
+  destination_kind?: string;
+  platform?: string;
+  architecture?: string;
+  online?: boolean;
+  last_seen_at?: string;
+  app_version?: string;
+  runtime_providers?: string[];
+  sandbox_capabilities?: string[];
+  network_reachability_classes?: string[];
+  desktop_capacity?: number;
+  [key: string]: unknown;
+};
+
+export type ContinuityProviderRoute = {
+  route_id: string;
+  provider_id: string;
+  api_id: string;
+  model_id: string;
+  qualified_route?: string;
+  adapter_id?: string;
+  provider_extension_ref?: string | null;
+  base_url?: string | null;
+  auth_scheme?: string;
+  header_profile?: string | null;
+  allowed_models?: string[];
+  capability_hash?: string;
+  endpoint_class?: string;
+  credential_ref?: string;
+  fallback_routes?: string[];
+  portable?: boolean;
+  blocked_reason?: string | null;
+  [key: string]: unknown;
+};
+
+export type ContinuityPreflightResult = {
+  ok: boolean;
+  route?: ContinuityProviderRoute | Record<string, unknown> | null;
+  destination?: ContinuityNode | Record<string, unknown> | null;
+  checks?: Array<Record<string, unknown>>;
+  errors?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityHandoffPlan = {
+  plan_id: string;
+  mode: string;
+  sandbox_id: string;
+  destination_node_id: string;
+  provider_route_ref: ContinuityProviderRoute | Record<string, unknown>;
+  fallback_route_refs?: Array<ContinuityProviderRoute | Record<string, unknown>>;
+  credential_delegation?: Record<string, unknown>;
+  checkpoint_estimate?: Record<string, unknown>;
+  resource_preflight?: ContinuityPreflightResult | Record<string, unknown>;
+  cutover?: Record<string, unknown>;
+  status: string;
+  created_at?: string;
+  [key: string]: unknown;
+};
+
+export type ContinuityHandoffOperation = {
+  operation_id: string;
+  status: string;
+  mode?: string;
+  sandbox_id?: string;
+  destination_node_id?: string;
+  plan?: ContinuityHandoffPlan | Record<string, unknown>;
+  message?: string;
+  checkpoint_id?: string;
+  credential_envelope_id?: string | null;
+  destination_primary?: boolean;
+  source_primary?: boolean;
+  primary_lease?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  events?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type ContinuityPairingStartResponse = {
+  request_id: string;
+  code: string;
+  display_name?: string;
+  created_at?: string;
+};
+
+export type ContinuityHandoffRequest = {
+  sandbox_id?: string;
+  seat_id?: string;
+  destination_node_id?: string;
+  node_id?: string;
+  route_id?: string;
+  provider_id?: string;
+  api_id?: string;
+  model_id?: string;
+  provider_route?: Record<string, unknown>;
+  mode?: string;
+  credential_ttl_seconds?: number;
+  credential_max_requests?: number;
+  state?: Record<string, unknown>;
 };
 
 export type SidebarAction = {
@@ -1719,12 +1828,62 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
+export type ToolSelectionScope = "turn" | "conversation";
+export type ToolSelectionStrategy = "hybrid" | "semantic" | "catalog_ai" | "all_with_hints" | "all_schemas" | "lexical";
+export type ToolTarget = { kind: "tool" | "service"; id: string };
+
 export type ToolSelectionRequest = {
-  mode?: "auto" | "manual" | "none";
-  include?: string[];
-  exclude?: string[];
-  scope?: "turn";
+  mode?: ToolSelectionMode;
+  strategy?: ToolSelectionStrategy | null;
+  include?: Array<string | ToolTarget>;
+  exclude?: Array<string | ToolTarget>;
+  scope?: ToolSelectionScope;
   must_use?: boolean;
+  preview_id?: string | null;
+};
+
+export type ToolCatalogService = {
+  service_id: string;
+  label: string;
+  summary?: string;
+  connection_status?: string;
+  tool_count?: number;
+  action_classes?: string[];
+};
+
+export type ToolCatalogTool = {
+  tool_id: string;
+  service_id: string;
+  service_label: string;
+  name: string;
+  summary?: string;
+  action_class: string;
+  risk?: string;
+  requires_explicit_intent?: boolean;
+  connection_status?: string;
+  minimum_permission?: string;
+  tags?: string[];
+  permission?: Record<string, unknown>;
+};
+
+export type ToolCatalogResponse = {
+  services: ToolCatalogService[];
+  tools: ToolCatalogTool[];
+  count: number;
+};
+
+export type ToolSelectionPreviewResponse = {
+  preview_id: string;
+  expires_at: string;
+  decision: {
+    selected_tools: string[];
+    selected_services: ToolCatalogService[];
+    recommendations: Array<{ tool_id: string; confidence?: number; reason?: string }>;
+    permission_summary: Record<string, number>;
+    fallbacks?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  };
 };
 
 type SendMessageOptions = {
@@ -1756,6 +1915,10 @@ export type ChatToolStreamEvent = ChatActivityEvent & {
     | "browser_screenshot"
     | "approval_requested"
     | "ai_retry_scheduled"
+    | "tool_selection_started"
+    | "tool_selection_completed"
+    | "tool_selection_fallback"
+    | "tool_selection_reviewed"
     | "task_failed";
 };
 
@@ -2519,6 +2682,45 @@ export const api = {
     return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
   },
 
+  toolCatalog() {
+    return request<ToolCatalogResponse>("/api/tools/catalog", { cache: "no-store" });
+  },
+
+  previewToolSelection(payload: {
+    conversation_id?: string | null;
+    user_text?: string;
+    text?: string;
+    attachment_metadata?: unknown[];
+    tool_selection?: ToolSelectionRequest;
+    model?: string | null;
+  }) {
+    return request<ToolSelectionPreviewResponse>("/api/tools/selection/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rebuildToolEmbeddingIndex(payload: { model?: string | null }) {
+    return request<Record<string, unknown>>("/api/tools/embedding-index/rebuild", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getConversationToolPreferences(conversationId: string) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { cache: "no-store" },
+    );
+  },
+
+  updateConversationToolPreferences(conversationId: string, preferences: Record<string, unknown>) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { method: "PUT", body: JSON.stringify({ preferences }) },
+    );
+  },
+
   executeUiCommand(payload: {
     command: string;
     args?: Record<string, unknown>;
@@ -2535,6 +2737,102 @@ export const api = {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  listContinuityNodes() {
+    return request<{ nodes: ContinuityNode[]; local_node: ContinuityNode }>("/api/continuity/nodes", { cache: "no-store" });
+  },
+
+  startContinuityPairing(payload?: { display_name?: string }) {
+    return request<ContinuityPairingStartResponse>("/api/continuity/pairing/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  acceptContinuityPairing(payload: {
+    request_id: string;
+    code: string;
+    display_name?: string;
+    descriptor?: Record<string, unknown>;
+    simulate_local_destination?: boolean;
+    destination_kind?: string;
+  }) {
+    return request<{ node: ContinuityNode }>("/api/continuity/pairing/accept", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  removeContinuityNode(nodeId: string) {
+    return request<{ removed: boolean; node_id: string }>(`/api/continuity/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  probeContinuityNode(nodeId: string, payload?: Record<string, unknown>) {
+    return request<{ node: ContinuityNode; checks: Array<Record<string, unknown>>; ok: boolean }>(
+      `/api/continuity/nodes/${encodeURIComponent(nodeId)}/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  },
+
+  listContinuityProviderRoutes() {
+    return request<{ routes: ContinuityProviderRoute[] }>("/api/continuity/provider-routes", { cache: "no-store" });
+  },
+
+  probeContinuityProviderRoute(routeId: string, payload?: { destination_node_id?: string; node_id?: string }) {
+    return request<ContinuityPreflightResult>(`/api/continuity/provider-routes/${encodeURIComponent(routeId)}/probe`, {
+      method: "POST",
+      body: JSON.stringify({ ...(payload ?? {}), route_id: routeId }),
+    });
+  },
+
+  setContinuityProviderFallbacks(routeId: string, fallbackRouteIds: string[]) {
+    return request<{ route_id: string; fallback_route_ids: string[] }>(
+      `/api/continuity/provider-routes/${encodeURIComponent(routeId)}/set-fallbacks`,
+      {
+        method: "POST",
+        body: JSON.stringify({ route_id: routeId, fallback_route_ids: fallbackRouteIds }),
+      },
+    );
+  },
+
+  listContinuityProviderExtensions() {
+    return request<{ extensions: Array<Record<string, unknown>> }>("/api/continuity/provider-extensions", { cache: "no-store" });
+  },
+
+  planContinuityHandoff(payload: ContinuityHandoffRequest) {
+    return request<{ plan: ContinuityHandoffPlan }>("/api/continuity/plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  listContinuityHandoffs() {
+    return request<{ operations: ContinuityHandoffOperation[] }>("/api/continuity/handoffs", { cache: "no-store" });
+  },
+
+  getContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}`, {
+      cache: "no-store",
+    });
+  },
+
+  cancelContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  createContinuityCheckpoint(payload: ContinuityHandoffRequest) {
+    return request<{ operation: ContinuityHandoffOperation; checkpoint: Record<string, unknown> }>("/api/continuity/checkpoints", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -2862,12 +3160,16 @@ export const api = {
     heartbeat_minutes?: number;
     review_interval_minutes?: number;
     qa_interval_minutes?: number;
+    max_tool_calls?: number;
     model?: string;
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
     docker_worker_count?: number;
     docker_personas?: string[];
+    workspace_id?: string | null;
+    workspace_label?: string | null;
+    workspace_root?: string | null;
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;

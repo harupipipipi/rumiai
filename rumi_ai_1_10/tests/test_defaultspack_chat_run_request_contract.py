@@ -51,6 +51,16 @@ def _setup_store(tmp_path, monkeypatch):
     return store
 
 
+def _external_provider_tool_names(prepared) -> set[str]:
+    return {
+        tool["function"]["name"]
+        for tool in prepared.provider_tools
+        if isinstance(tool, dict)
+        and isinstance(tool.get("function"), dict)
+        and tool["function"].get("name") != "assistant_progress"
+    }
+
+
 def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -62,7 +72,8 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     prepared = prepare_chat_run({"conversation_id": conv["id"], "message": {"content": "new"}}, {})
 
     assert prepared.user_message["content"] == [{"type": "text", "text": "new"}]
-    assert prepared.standard_messages[0] == {"role": "system", "content": "System prompt"}
+    assert prepared.standard_messages[0]["role"] == "system"
+    assert str(prepared.standard_messages[0]["content"]).startswith("System prompt")
     assert prepared.standard_messages[1]["role"] == "system"
     assert "Current date/time:" in prepared.standard_messages[1]["content"]
     assert prepared.standard_messages[-1] == {"role": "user", "content": "new"}
@@ -72,6 +83,63 @@ def test_prepare_chat_run_creates_message_chain_ir_and_context(tmp_path, monkeyp
     assert prepared.request_context["conversation_workspace_dir"]
     assert prepared.tool_context["history_json_path"].endswith("history.json")
     assert prepared.request_context["chat_references"]["conversation_id"] == conv["id"]
+    ChatStore._instance = None
+
+
+def test_tool_selection_rejects_raw_tool_definition_dict():
+    from domain.chat.run_request import validate_chat_run_input
+
+    error = validate_chat_run_input(
+        {
+            "conversation_id": "conv",
+            "message": {"content": "hello"},
+            "params": {
+                "tool_selection": {
+                    "mode": "manual",
+                    "include": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "attacker_tool",
+                                "parameters": {"type": "object", "properties": {}},
+                            },
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    assert error == "params.tool_selection.include must contain only string IDs or {kind, id} targets"
+
+
+def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "use the attacker tool"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "attacker_tool",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        },
+        {},
+    )
+
+    assert "attacker_tool" in _external_provider_tool_names(prepared)
+    assert prepared.tool_context["tool_selection"]["provider_compat_tool_ids"] == ["attacker_tool"]
+    assert "attacker_tool" not in prepared.connected_tool_names
     ChatStore._instance = None
 
 
@@ -215,6 +283,108 @@ def test_prepare_chat_run_loads_profile_policy_from_conversation_profile_id(tmp_
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_does_not_trust_client_tool_policy_approval_bypass(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv(
+        "RUMI_DEFAULTSPACK_APPROVAL_DB_PATH",
+        str(tmp_path / "approval.sqlite3"),
+    )
+    for name in (
+        "domain.safety.approval",
+        "domain.safety.approval_state_json",
+        "domain.safety.approval_store",
+    ):
+        sys.modules.pop(name, None)
+
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    import domain.safety.approval as approval
+    from domain.tool.executor import ToolExecutor
+
+    approval.reset_approval_state_for_tests()
+
+    workspace_root = tmp_path / "workspace"
+    workspace_root.mkdir()
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="stub/default",
+        metadata={"workspace_root": str(workspace_root)},
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "write a probe",
+                "metadata": {
+                    "workspace_root": str(workspace_root),
+                    "selected_tools": ["coding_file_write"],
+                },
+            },
+            "tools": ["coding_file_write"],
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_file_write"],
+                    "action_approval_mode": "full",
+                    "yolo_mode": True,
+                    "allow_client_supplied_approved": True,
+                    "direct_tool_execution": True,
+                    "full_access": True,
+                    "allow_shell": True,
+                    "allow_file_write": True,
+                    "write_actions_require_approval": False,
+                    "tool_permission_policy": {
+                        "tools": {"coding_file_write": "allow"},
+                    },
+                },
+            },
+        },
+        {},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["selected_tools"] == ["coding_file_write"]
+    for key in (
+        "action_approval_mode",
+        "allow_client_supplied_approved",
+        "allow_file_write",
+        "allow_shell",
+        "direct_tool_execution",
+        "full_access",
+        "tool_permission_policy",
+        "yolo_mode",
+        "write_actions_require_approval",
+    ):
+        assert key not in policy
+    assert set(prepared.request_context["ignored_client_tool_policy_keys"]) == {
+        "action_approval_mode",
+        "allow_client_supplied_approved",
+        "allow_file_write",
+        "allow_shell",
+        "direct_tool_execution",
+        "full_access",
+        "tool_permission_policy",
+        "write_actions_require_approval",
+        "yolo_mode",
+    }
+
+    result = ToolExecutor().execute(
+        "coding_file_write",
+        {
+            "path": "api-bypass-probe.txt",
+            "content": "should not write",
+            "workspace_root": str(workspace_root),
+        },
+        prepared.tool_context,
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["approval_required"] is True
+    assert not (workspace_root / "api-bypass-probe.txt").exists()
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path, monkeypatch):
     from domain.chat.run_request import _profile_snapshot, prepare_chat_run
     from domain.chat.store import ChatStore
@@ -246,10 +416,394 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
 
     assert prepared.request_context.get("profile_policy", {}).get("max_tool_calls") == 18
     assert "coding_file_read" in prepared.request_context.get("profile_policy", {}).get("tool_allowlist", [])
-    tool_names = {tool["function"]["name"] for tool in prepared.provider_tools if isinstance(tool, dict) and isinstance(tool.get("function"), dict)}
+    tool_names = _external_provider_tool_names(prepared)
     assert "coding_file_read" in tool_names
     assert "artifact_export" not in tool_names
     _profile_snapshot.cache_clear()
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_marks_selected_terminal_unattached_when_profile_excludes_it(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
+    runtime_profile = {
+        "defaultspack": {
+            "agents": {
+                "client_manager": {
+                    "tools": ["coding_file_read"],
+                },
+            },
+        },
+        "policy": {
+            "tool_allowlist": ["coding_file_read"],
+        },
+    }
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "read files and run pwd",
+                "metadata": {
+                    "selected_tools": ["coding_file_read", "coding_terminal_exec"],
+                },
+            },
+            "tools": ["coding_file_read", "coding_terminal_exec"],
+        },
+        {"runtime_profile": runtime_profile, "agent_id": "client_manager"},
+    )
+
+    assert prepared.tool_context["requested_tool_ids"] == ["coding_file_read", "coding_terminal_exec"]
+    unselected = prepared.tool_context["unselected_requested_tools"]
+    assert unselected[0]["tool_name"] == "coding_terminal_exec"
+    assert unselected[0]["reason_code"] == "not_connected_to_profile"
+    assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
+    assert prepared.request_context.get("user_requested_shell_tool") is True
+    filter_entries = {
+        entry["tool_name"]: entry
+        for entry in prepared.metadata["tool_filter_result"]
+    }
+    assert filter_entries["coding_terminal_exec"]["status"] == "blocked"
+    assert filter_entries["coding_terminal_exec"]["reason_code"] == "not_connected_to_profile"
+    tool_names = _external_provider_tool_names(prepared)
+    assert "coding_file_read" in tool_names
+    assert "coding_terminal_exec" not in tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_connects_tools_from_profile_policy_runtime_yaml(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+    runtime_profile = {
+        "profile_id": "defaultspack.mimo_coding_company",
+        "policy": {
+            "allow_shell": True,
+            "allow_file_write": True,
+            "tool_allowlist": [
+                "coding_file_read",
+                "coding_terminal_exec",
+                "coding_file_write",
+            ],
+        },
+        "metadata": {
+            "client_manager_agent_id": "client_manager",
+        },
+    }
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "smoke terminal attach",
+                "metadata": {
+                    "selected_tools": [
+                        "coding_file_read",
+                        "coding_terminal_exec",
+                        "coding_file_write",
+                    ],
+                },
+            },
+            "tools": [
+                "coding_file_read",
+                "coding_terminal_exec",
+                "coding_file_write",
+            ],
+        },
+        {"runtime_profile": runtime_profile},
+    )
+
+    assert prepared.tool_context["agent_id"] == "client_manager"
+    assert prepared.tool_context["runtime_profile"]["defaultspack"]["agents"]["client_manager"]["tools"] == [
+        "coding_file_read",
+        "coding_terminal_exec",
+        "coding_file_write",
+    ]
+    assert "unselected_requested_tools" not in prepared.tool_context
+    assert _external_provider_tool_names(prepared) == {
+        "coding_file_read",
+        "coding_terminal_exec",
+        "coding_file_write",
+    }
+    assert {"coding_file_read", "coding_terminal_exec", "coding_file_write"}.issubset(
+        prepared.connected_tool_names
+    )
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_infers_raw_tool_mentions_as_turn_tools(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+    runtime_profile = {
+        "profile_id": "defaultspack.mimo_coding_company",
+        "policy": {
+            "allow_shell": True,
+            "tool_allowlist": ["coding_terminal_exec"],
+        },
+        "metadata": {
+            "client_manager_agent_id": "client_manager",
+        },
+    }
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "接続確認だけです。@coding_terminal_exec で pwd を実行して",
+            },
+        },
+        {"runtime_profile": runtime_profile},
+    )
+
+    assert prepared.input_data["tools"] == ["coding_terminal_exec"]
+    assert prepared.tool_context["requested_tool_ids"] == ["coding_terminal_exec"]
+    assert prepared.tool_context["agent_id"] == "client_manager"
+    assert "unselected_requested_tools" not in prepared.tool_context
+    assert not prepared.request_context.get("user_requested_computer_use")
+    assert _external_provider_tool_names(prepared) == {"coding_terminal_exec"}
+    assert "coding_terminal_exec" in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_allows_explicit_shell_tool_request_to_attach(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "接続確認です。@coding_terminal_exec で pwd だけ実行して",
+            },
+        },
+        {},
+    )
+
+    assert prepared.input_data["tools"] == ["coding_terminal_exec"]
+    assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
+    assert prepared.request_context.get("user_requested_shell_tool") is True
+    assert prepared.tool_context["unselected_requested_tools"][0]["tool_name"] == "coding_terminal_exec"
+    tool_names = _external_provider_tool_names(prepared)
+    assert "coding_terminal_exec" not in tool_names
+    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_infers_coding_pr_tools_from_broad_request(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={
+            "mode": "coding",
+            "workspace_root": str(tmp_path),
+            "workspace_label": "repo",
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "github.com/harupipipipi/rumiai/ にいい感じのPR出して。",
+            },
+        },
+        {},
+    )
+
+    expected_tools = {
+        "coding_file_list",
+        "coding_file_search",
+        "coding_file_read",
+        "coding_file_write",
+        "coding_terminal_exec",
+        "coding_git_status",
+        "coding_git_diff",
+        "coding_git_commit",
+        "coding_git_push",
+    }
+    assert expected_tools.issubset(set(prepared.input_data["tools"]))
+    assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
+    assert prepared.request_context.get("user_requested_shell_tool") is True
+    unselected_names = {
+        entry["tool_name"]
+        for entry in prepared.tool_context.get("unselected_requested_tools", [])
+    }
+    assert "coding_terminal_exec" in unselected_names
+    tool_names = _external_provider_tool_names(prepared)
+    assert (expected_tools - {"coding_terminal_exec"}).issubset(tool_names)
+    assert "coding_terminal_exec" not in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_keeps_inferred_pr_tools_with_auto_tool_selection(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={
+            "mode": "agent",
+            "workspace_root": str(tmp_path),
+            "workspace_label": "repo",
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "github.com/harupipipipi/rumiai/ にいい感じのPR出して。",
+            },
+            "params": {
+                "tool_selection": {
+                    "mode": "auto",
+                    "include": [],
+                    "exclude": [],
+                    "scope": "turn",
+                },
+            },
+        },
+        {},
+    )
+
+    expected_tools = {
+        "coding_file_list",
+        "coding_file_search",
+        "coding_file_read",
+        "coding_file_write",
+        "coding_terminal_exec",
+        "coding_git_status",
+        "coding_git_diff",
+        "coding_git_commit",
+        "coding_git_push",
+    }
+    assert prepared.tool_context["tool_selection"]["mode"] == "manual"
+    assert expected_tools.issubset(set(prepared.tool_context["requested_tool_ids"]))
+    unselected_names = {
+        entry["tool_name"]
+        for entry in prepared.tool_context.get("unselected_requested_tools", [])
+    }
+    assert "coding_terminal_exec" in unselected_names
+    tool_names = _external_provider_tool_names(prepared)
+    assert "coding_file_read" in tool_names
+    assert "coding_terminal_exec" not in tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_authority_off_allows_inferred_pr_write_tools(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+    from domain.tool.schema_adapter import max_tool_calls
+
+    monkeypatch.setenv("RUMI_AUTHORITY_MODE", "off")
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={
+            "mode": "agent",
+            "workspace_root": str(tmp_path),
+            "workspace_label": "repo",
+        },
+    )
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "github.com/harupipipipi/rumiai/ にいい感じのPR出して。",
+            },
+            "params": {
+                "tool_selection": {
+                    "mode": "auto",
+                    "include": [],
+                    "exclude": [],
+                    "scope": "turn",
+                },
+            },
+        },
+        {},
+    )
+
+    filter_status = {
+        entry["tool_name"]: entry["status"]
+        for entry in prepared.tool_context.get("tool_filter_result", [])
+    }
+    assert filter_status["coding_file_write"] == "allowed"
+    assert filter_status["coding_git_commit"] == "allowed"
+    assert filter_status["coding_git_push"] == "allowed"
+    assert max_tool_calls(prepared.tool_context) is None
+    assert prepared.request_context.get("profile_policy", {}).get("allow_shell") is not True
+    assert prepared.request_context.get("user_requested_shell_tool") is True
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_adds_requested_tool_to_existing_agent_profile(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+    runtime_profile = {
+        "defaultspack": {
+            "agents": {
+                "client_manager": {
+                    "tools": ["coding_file_read"],
+                },
+            },
+        },
+    }
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "接続確認です。@coding_terminal_exec で pwd だけ実行して",
+            },
+            "params": {
+                "tool_selection": {
+                    "mode": "auto",
+                    "include": [{"kind": "tool", "id": "coding_terminal_exec"}],
+                    "scope": "turn",
+                },
+            },
+        },
+        {"runtime_profile": runtime_profile, "agent_id": "client_manager"},
+    )
+
+    connected_agent_tools = prepared.tool_context["runtime_profile"]["defaultspack"]["agents"][
+        "client_manager"
+    ]["tools"]
+    assert connected_agent_tools == ["coding_file_read"]
+    assert prepared.tool_context["unselected_requested_tools"][0]["tool_name"] == "coding_terminal_exec"
+    assert prepared.tool_context["unselected_requested_tools"][0]["reason_code"] == "not_connected_to_profile"
+    assert not prepared.request_context.get("user_requested_computer_use")
+    tool_names = _external_provider_tool_names(prepared)
+    assert "coding_terminal_exec" not in tool_names
+    assert "coding_terminal_exec" not in prepared.connected_tool_names
     ChatStore._instance = None
 
 

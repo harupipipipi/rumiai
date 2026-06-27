@@ -31,10 +31,13 @@ AUTHORITY_PERMISSION_IDS = frozenset(
         "authority.request.list",
         "authority.request.approve",
         "authority.request.deny",
-        "authority.host_intent.approve",
-        "authority.host_intent.deny",
         "authority.grant.read",
         "authority.grant.manage",
+        "authority.host_intent.approve",
+        "authority.host_intent.deny",
+        "auth.token.issue",
+        "auth.token.list",
+        "auth.token.revoke",
     }
 ) | HOST_PERMISSION_IDS
 

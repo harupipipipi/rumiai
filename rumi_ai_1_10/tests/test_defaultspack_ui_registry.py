@@ -182,19 +182,19 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             section for section in catalog["settings"]["sections"] if section["id"] == "tools"
         )
         tools_field_ids = {field["id"] for field in tools_section["fields"]}
-        self.assertIn("tool_assist_mode", tools_field_ids)
-        tool_assist_field = next(
-            field for field in tools_section["fields"] if field["id"] == "tool_assist_mode"
-        )
-        self.assertEqual(catalog["settings"]["values"]["tools"]["settings_version"], 2)
-        self.assertEqual(catalog["settings"]["values"]["tools"]["tool_assist_mode"], "auto")
-        tool_assist_options = {option["value"] for option in tool_assist_field["options"]}
-        self.assertIn("auto", tool_assist_options)
-        self.assertIn("vector", tool_assist_options)
-        self.assertIn("all_schemas", tool_assist_options)
-        general_section = next(
-            section for section in catalog["settings"]["sections"] if section["id"] == "general"
-        )
+        self.assertIn("default_mode", tools_field_ids)
+        self.assertIn("selection_strategy", tools_field_ids)
+        default_mode_field = next(field for field in tools_section["fields"] if field["id"] == "default_mode")
+        strategy_field = next(field for field in tools_section["fields"] if field["id"] == "selection_strategy")
+        self.assertEqual(catalog["settings"]["values"]["tools"]["settings_version"], 3)
+        self.assertEqual(catalog["settings"]["values"]["tools"]["default_mode"], "auto")
+        self.assertEqual(catalog["settings"]["values"]["tools"]["selection_strategy"], "hybrid")
+        default_mode_options = {option["value"] for option in default_mode_field["options"]}
+        strategy_options = {option["value"] for option in strategy_field["options"]}
+        self.assertIn("auto", default_mode_options)
+        self.assertIn("manual", default_mode_options)
+        self.assertIn("all_schemas", strategy_options)
+        general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
         self.assertEqual(catalog["settings"]["values"]["general"]["language"], "ja")
@@ -1078,7 +1078,9 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
 
-        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertEqual(values["tools"]["settings_version"], 3)
+        self.assertEqual(values["tools"]["default_mode"], "auto")
+        self.assertEqual(values["tools"]["selection_strategy"], "hybrid")
         self.assertEqual(values["tools"]["tool_assist_mode"], "auto")
 
     def test_settings_migrates_legacy_keep_selected_tools_after_send_true_to_false(self):
@@ -1097,8 +1099,27 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
 
-        self.assertEqual(values["tools"]["settings_version"], 2)
+        self.assertEqual(values["tools"]["settings_version"], 3)
         self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
+    def test_settings_migrates_legacy_selector_model_without_rewriting_tools_key(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps({"tools": {"selector_model": "custom/tool-helper"}}),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        self.assertEqual(values["models"]["utility_models"]["tool_selector"], "custom/tool-helper")
+        self.assertNotIn("selector_model", values["tools"])
 
     def test_settings_migrates_model_api_routes_from_apis_to_models(self):
         from domain.frontend.registry import FrontendRegistry

@@ -1,10 +1,10 @@
 {
   "id": "python_exec",
-  "description": "Execute approved Python code/script in an isolated Docker container with only the artifact workspace mounted.",
+  "description": "Request approved Python code/script execution in the managed sandbox runtime; fail closed when no provider is ready.",
   "config": {
     "tool_id": "python_exec",
     "name": "Python Exec",
-    "summary": "Execute approved Python code/script in an isolated Docker container with only the artifact workspace mounted.",
+    "summary": "Request approved Python code/script execution in the managed sandbox runtime; fail closed when no provider is ready.",
     "tool_category": "sandbox",
     "action_type": "execute",
     "write_action": true,
@@ -22,7 +22,7 @@
       "item_icon": "terminal",
       "widget_kind": "tool_toggle",
       "composer_label": "Python Exec",
-      "composer_description": "Execute approved Python code/script in an isolated Docker container with only the artifact workspace mounted.",
+      "composer_description": "Request approved Python code/script execution in the managed sandbox runtime; fail closed when no provider is ready.",
       "composer_icon": "terminal"
     },
     "schema": {

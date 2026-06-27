@@ -8,8 +8,10 @@ from urllib.parse import unquote
 
 from ._helpers import _SAFE_ERROR_MSG, _log_internal_error
 from .api_response import APIResponse
+from .request_authorizer import authorize_route
 from .route_errors import api_route_function_error_status, api_route_function_public_error
 from .route_handlers import _compile_template_path, _is_safe_path_param
+from .safe_headers import RESERVED_REQUEST_CONTEXT_KEYS, strip_reserved_request_context
 from ..validation import HANDLER_NAME_RE
 
 
@@ -111,6 +113,13 @@ class APIRouteTableMixin:
                 "handler": handler_name,
                 "function_id": function_id,
                 "pack_id": pack_id,
+                "owner_pack_id": str(route.get("owner_pack_id") or pack_id),
+                "permission_id": str(route.get("permission_id") or ""),
+                "provider_id": str(route.get("provider_id") or ""),
+                "frontend_id": str(route.get("frontend_id") or ""),
+                "audience": str(route.get("audience") or "kernel_api"),
+                "core_only": bool(route.get("core_only", False)),
+                "resource_template": dict(route.get("resource_template") or {}),
                 "pass_body": route.get("pass_body", False),
                 "pass_query": route.get("pass_query", False),
                 "response_mode": route.get("response_mode", "result"),
@@ -212,6 +221,31 @@ class APIRouteTableMixin:
         if entry is None:
             return False
 
+        entry_for_auth = dict(entry)
+        entry_for_auth["resource_template"] = self._resolve_api_route_resource_template(
+            entry.get("resource_template") if isinstance(entry.get("resource_template"), dict) else {},
+            path_params=path_params,
+            body=body,
+            query=query,
+        )
+        principal = getattr(self, "_authenticated_principal", None)
+        if principal is not None:
+            if entry.get("core_only") and not principal.core_role:
+                self._send_response(APIResponse(False, error="Forbidden"), 403)
+                return True
+            authorization = authorize_route(
+                principal=principal,
+                method=method_upper,
+                path=path,
+                route_entry=entry_for_auth,
+            )
+            if not authorization.allowed:
+                self._send_response(
+                    APIResponse(False, error=authorization.reason or "Forbidden"),
+                    authorization.status_code,
+                )
+                return True
+
         pack_id = entry.get("pack_id", "")
         if not self._is_pack_approved_for_runtime_routes(pack_id):
             self._send_response(
@@ -246,30 +280,54 @@ class APIRouteTableMixin:
                     )
                     return True
 
-                call_args = dict(body if pass_body and body is not None else {})
+                call_args = strip_reserved_request_context(body) if pass_body else {}
                 if pass_query:
-                    call_args.update(dict(query or {}))
-                call_args.update(entry.get("args") or {})
+                    call_args.update(strip_reserved_request_context(query))
+                call_args.update(strip_reserved_request_context(entry.get("args") or {}))
                 param_map = entry.get("path_param_map") or {}
                 if param_map:
                     for target_key, source_key in param_map.items():
+                        if str(target_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
                         if source_key in path_params:
                             call_args[target_key] = path_params[source_key]
                 else:
-                    call_args.update(path_params)
+                    for target_key, value in path_params.items():
+                        if str(target_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
+                        call_args[target_key] = value
+                route_context = {
+                    "pack_id": entry["pack_id"],
+                    "method": method_upper,
+                    "path": path,
+                    "_api_route": True,
+                }
+                execution_principal = entry["pack_id"]
+                if principal is not None:
+                    principal_payload = principal.to_dict()
+                    route_context["_authenticated_principal"] = principal_payload
+                    to_subject = getattr(principal, "to_internal_subject", None)
+                    route_context["_authority_subject"] = (
+                        to_subject(
+                            owner_pack_id=str(
+                                entry.get("owner_pack_id") or entry.get("pack_id") or ""
+                            ),
+                            provider_id=str(entry.get("provider_id") or ""),
+                            frontend_id=str(entry.get("frontend_id") or ""),
+                        )
+                        if callable(to_subject)
+                        else principal_payload
+                    )
+                    if not principal.core_role:
+                        execution_principal = principal.principal_id
                 response = get_capability_executor().execute(
-                    entry["pack_id"],
+                    execution_principal,
                     {
                         "type": "function.call",
                         "qualified_name": f"{entry['pack_id']}:{entry['function_id']}",
                         "args": call_args,
                         "request_id": f"api-route:{method_upper}:{path}",
-                        "context": {
-                            "pack_id": entry["pack_id"],
-                            "method": method_upper,
-                            "path": path,
-                            "_api_route": True,
-                        },
+                        "context": route_context,
                     },
                 )
                 if not getattr(response, "success", False):
@@ -324,3 +382,33 @@ class APIRouteTableMixin:
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
         return True
+
+    @staticmethod
+    def _resolve_api_route_resource_template(
+        template: dict[str, Any],
+        *,
+        path_params: dict[str, str],
+        body: Optional[dict[str, Any]],
+        query: Optional[dict[str, Any]],
+    ) -> dict[str, Any]:
+        sources = {
+            "path": path_params or {},
+            "params": path_params or {},
+            "body": body if isinstance(body, dict) else {},
+            "query": query if isinstance(query, dict) else {},
+        }
+        resolved: dict[str, Any] = {}
+        for key, value in template.items():
+            if not str(key).strip():
+                continue
+            if isinstance(value, str) and value.startswith("{") and value.endswith("}"):
+                ref = value[1:-1].strip()
+                source_name, _, source_key = ref.partition(".")
+                if source_key and source_name in sources:
+                    resolved[str(key)] = sources[source_name].get(source_key, "")
+                    continue
+                if ref in path_params:
+                    resolved[str(key)] = path_params.get(ref, "")
+                    continue
+            resolved[str(key)] = value
+        return resolved

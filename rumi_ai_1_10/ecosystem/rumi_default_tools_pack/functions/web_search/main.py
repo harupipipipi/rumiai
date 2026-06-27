@@ -8,7 +8,7 @@ from functions._tool_common import tool_result
 
 
 def run(context, args):
-    from domain.research.providers import ExternalWebProvider
+    from domain.research.providers import ExternalWebProvider, compact_provider_result
 
     result = ExternalWebProvider().search(
         args.get("query", ""),
@@ -17,5 +17,10 @@ def run(context, args):
         domains=args.get("domains"),
         official_only=bool(args.get("official_only", False)),
         fetch_pages=bool(args.get("fetch_pages", False)),
+    )
+    result = compact_provider_result(
+        result,
+        max_chars=args.get("max_chars") or args.get("max_output_chars"),
+        max_tokens=args.get("max_tokens") or args.get("max_output_tokens"),
     )
     return tool_result(result.summary, widget={"type": "research_sources", **result.as_dict()})

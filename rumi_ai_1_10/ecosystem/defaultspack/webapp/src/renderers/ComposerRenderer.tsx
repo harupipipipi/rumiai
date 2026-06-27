@@ -39,6 +39,9 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
+import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
+import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
+import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -1407,6 +1410,9 @@ export function ComposerRenderer({
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
+  actionApprovalMode = "ask",
+  toolSelectionTargets = [],
+  toolSelectionReview = null,
   keyboardButtonNavigation = false,
   steerStatus = null,
   steerBusy = false,
@@ -1415,6 +1421,12 @@ export function ComposerRenderer({
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
+  onActionApprovalModeChange,
+  onToolSelectionTargetRemove,
+  onToolSelectionReviewApprove,
+  onToolSelectionReviewEdit,
+  onToolSelectionReviewNoTools,
+  onToolSelectionReviewCancel,
   onSwitchToVisionModel,
   onExtensionSelect,
   onCommandSelect,
@@ -1519,6 +1531,13 @@ export function ComposerRenderer({
 	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
 	  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
 	  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
+  const serviceLabelById = useMemo(() => new Map(toolGroups.map((group) => [group.id, group.label])), [toolGroups]);
+  const toolLabelById = useMemo(() => new Map(toolItems.map((item) => [item.id, item.label || item.id])), [toolItems]);
+  const labelForServiceId = useCallback((serviceId: string) => serviceLabelById.get(serviceId) ?? serviceId, [serviceLabelById]);
+  const labelForToolTarget = useCallback((target: { kind: string; id: string }) => (
+    target.kind === "tool" ? (toolLabelById.get(target.id) ?? target.id) : labelForServiceId(target.id)
+  ), [labelForServiceId, toolLabelById]);
   const computerUseSelected = selectedToolIds.some((toolId) => (
     toolId === "computer_use"
     || toolId === "browser_computer"
@@ -1553,7 +1572,6 @@ export function ComposerRenderer({
   ], [droppedWidgets, mentionPreviewWidgets]);
   const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
   const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
-  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
@@ -2280,7 +2298,7 @@ export function ComposerRenderer({
       id: "yolo-status",
       slot: "leading",
       homeSlot: "toolbar-leading",
-      order: 50,
+      order: 55,
       visible: yoloMode && visibleModelStatusIndicators.length === 0,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
@@ -2288,6 +2306,24 @@ export function ComposerRenderer({
         <span className="rounded-full border border-orange-500/30 px-2 py-0.5 text-[11px] text-orange-300">
           YOLO
         </span>
+      ),
+    },
+    {
+      id: "action-approval-control",
+      slot: "leading",
+      homeSlot: "toolbar-leading",
+      order: 50,
+      width: { basis: "auto", min: "4rem", max: "8.5rem", shrink: 1 },
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <ActionApprovalControl
+          mode={actionApprovalMode}
+          disabled={isGenerating}
+          surfaceClassName={COMPOSER_CONTROL_SURFACE_CLASSNAME}
+          tabIndex={chromeButtonTabIndex}
+          onModeChange={(nextMode) => onActionApprovalModeChange?.(nextMode)}
+          onOpenSettings={onOpenToolSettings}
+        />
       ),
     },
     {
@@ -2299,9 +2335,9 @@ export function ComposerRenderer({
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
-        <span aria-label="Computer ON" title="Computer ON" className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 max-[430px]:px-1.5">
+        <span aria-label="PC操作" title="PC操作" className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 max-[430px]:px-1.5">
           <MousePointerClick size={12} className="flex-shrink-0" />
-          <span className="truncate max-[430px]:hidden">Computer ON</span>
+          <span className="truncate max-[430px]:hidden">PC操作</span>
         </span>
       ),
     },
@@ -2793,6 +2829,21 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {toolSelectionReview && (
+            <ToolSelectionReviewCard
+              review={toolSelectionReview}
+              labelForService={labelForServiceId}
+              onApprove={() => onToolSelectionReviewApprove?.()}
+              onEdit={() => {
+                onToolSelectionReviewEdit?.();
+                setOpenFolder("tools");
+                setMenuOpen(true);
+              }}
+              onNoTools={() => onToolSelectionReviewNoTools?.()}
+              onCancel={() => onToolSelectionReviewCancel?.()}
+            />
+          )}
+
           {isNewConversation ? (
             <div className="grid gap-1.5">
               <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
@@ -2884,6 +2935,14 @@ export function ComposerRenderer({
                 </span>
               ))}
             </div>
+          )}
+
+          {!isNewConversation && toolSelectionTargets.length > 0 && (
+            <ToolOverrideChips
+              targets={toolSelectionTargets}
+              labelForTarget={labelForToolTarget}
+              onRemove={(target) => onToolSelectionTargetRemove?.(target)}
+            />
           )}
 
           {isSteerMode && (

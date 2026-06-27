@@ -1,0 +1,40 @@
+{
+  "id": "desktop_list",
+  "description": "List managed desktop seats that the local runtime currently knows about.",
+  "metadata": {
+    "aliases": ["desktop.list", "desktops", "desktop seats"],
+    "keywords": ["desktop", "seat", "ubuntu", "computer use"]
+  },
+  "config": {
+    "tool_id": "desktop_list",
+    "name": "Desktop List",
+    "summary": "List managed desktop seats.",
+    "tool_category": "desktop",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": ["desktop", "sandbox", "computer_use"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "monitor",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop List",
+      "composer_description": "List managed desktop seats.",
+      "composer_icon": "monitor"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_list"
+    }
+  }
+}

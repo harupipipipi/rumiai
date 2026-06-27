@@ -16,6 +16,12 @@ import http.server
 import urllib.parse
 from pathlib import Path
 
+from core_runtime.api.safe_headers import (
+    RESERVED_REQUEST_CONTEXT_KEYS,
+    sanitized_forwarded_headers,
+    strip_reserved_request_context,
+)
+
 from bridge.block_adapter import invoke_block
 from domain.safety.local_guard import (
     METHOD_SENSITIVE_CODING_PATHS,
@@ -141,6 +147,24 @@ class DefaultsHttpServer:
                             entry.get("fallback_block_module") or ""
                         ).strip()
                         path_inject = entry.get("path_inject", {})
+                        route_authority = {
+                            "permission_id": str(entry.get("permission_id") or "").strip(),
+                            "owner_pack_id": str(entry.get("owner_pack_id") or entry.get("pack_id") or "defaultspack").strip(),
+                            "provider_id": str(entry.get("provider_id") or "").strip(),
+                            "frontend_id": str(entry.get("frontend_id") or "").strip(),
+                            "function_id": str(entry.get("function_id") or "").strip(),
+                            "audience": str(entry.get("audience") or "kernel_api").strip(),
+                            "resource_template": dict(entry.get("resource_template") or {})
+                            if isinstance(entry.get("resource_template"), dict)
+                            else {},
+                        }
+                        if entry.get("core_only", False):
+                            route_authority["core_only"] = True
+                        route_authority = {
+                            key: value
+                            for key, value in route_authority.items()
+                            if value not in ("", {}, None)
+                        }
                         route_sensitive = bool(entry.get("sensitive"))
                         route_pre_auth = bool(entry.get("pre_auth"))
                         route_local_only = bool(entry.get("local_only"))
@@ -183,7 +207,7 @@ class DefaultsHttpServer:
                             except Exception:
                                 pass
                             route_entries.append(
-                                (method, pattern, _flow_handler, path_inject, index)
+                                (method, pattern, _flow_handler, path_inject, index, route_authority)
                             )
                         elif method and pattern and callable(handler):
                             try:
@@ -213,14 +237,16 @@ class DefaultsHttpServer:
                                 )
                             except Exception:
                                 pass
-                            route_entries.append((method, pattern, handler, path_inject, index))
-                    for method, pattern, handler, path_inject, index in sorted(
+                            route_entries.append((method, pattern, handler, path_inject, index, route_authority))
+                    for method, pattern, handler, path_inject, index, route_authority in sorted(
                         route_entries,
                         key=lambda item: http_route_sort_key(item[0], item[1], item[4]),
                     ):
                         compiled = compile_http_route_pattern(pattern)
+                        target = getattr(handler, "__func__", handler)
                         try:
-                            setattr(handler, "__rumi_route_pattern__", pattern)
+                            setattr(target, "__rumi_route_pattern__", pattern)
+                            setattr(target, "__rumi_route_authority__", route_authority)
                         except Exception:
                             pass
                         registry_routes.append(
@@ -348,6 +374,7 @@ class DefaultsHttpServer:
             return handler(request_data, path_params or {})
         context = self._build_context()
         context["_facade"] = self.facade
+        _apply_authenticated_principal_context(context, request_data)
         _apply_ambient_browser_qa_context(context, request_data)
         _apply_defaultspack_local_ui_context(context, request_data)
         return handler(request_data, context)
@@ -357,6 +384,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
         # Standalone live-server scripts start transport with no kernel facade.
@@ -379,7 +407,7 @@ class DefaultsHttpServer:
                     qualified_name,
                     payload,
                     context,
-                    principal_id="defaultspack",
+                    principal_id=_function_principal_from_context(context, "defaultspack"),
                     timeout_seconds=timeout_seconds,
                 )
                 result = self._retry_after_dev_auto_approve(
@@ -428,6 +456,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         context["flow_id"] = flow_id
         context["_defaultspack_http_route_adapter"] = True
         try:
@@ -468,6 +497,7 @@ class DefaultsHttpServer:
         for source_key, dest_key in (inject or {}).items():
             payload[dest_key] = path_params.get(source_key, "")
         context = self._build_context()
+        _apply_authenticated_principal_context(context, payload)
         context["flow_id"] = "transport_function_route"
         context["_defaultspack_http_route_adapter"] = True
         _apply_ambient_browser_qa_context(context, payload)
@@ -490,7 +520,7 @@ class DefaultsHttpServer:
                 function_name,
                 payload,
                 context,
-                principal_id="defaultspack",
+                principal_id=_function_principal_from_context(context, "defaultspack"),
                 timeout_seconds=timeout_seconds,
             )
             result = self._retry_after_dev_auto_approve(
@@ -552,7 +582,7 @@ class DefaultsHttpServer:
             qualified_name,
             payload,
             context,
-            principal_id=pack_id,
+            principal_id=_function_principal_from_context(context, pack_id),
             timeout_seconds=timeout_seconds,
         )
 
@@ -976,10 +1006,12 @@ class DefaultsHttpServer:
             )
 
             sync_pending_pack_requests_to_authority()
-            return ok(get_authority_service().list_requests(
-                str(request_data.get("status") or "all"),
-                actor_principal=request_data.get("_authenticated_principal"),
-            ))
+            return ok(
+                get_authority_service().list_requests(
+                    str(request_data.get("status") or "all"),
+                    actor_principal=request_data.get("_authenticated_principal"),
+                )
+            )
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
@@ -1148,12 +1180,8 @@ class DefaultsHttpServer:
             "expires_in_seconds": request_data.get("expires_in_seconds"),
             "ui_operator": ui_operator,
         }
-        actor_principal = request_data.get("_authenticated_principal")
-        if actor_principal is not None:
-            approval_kwargs["actor_principal"] = actor_principal
-        attestation = request_data.get("attestation")
-        if isinstance(attestation, dict):
-            approval_kwargs["attestation"] = attestation
+        if isinstance(request_data.get("attestation"), dict):
+            approval_kwargs["attestation"] = request_data.get("attestation")
         if related_permissions:
             approval_kwargs["related_permissions"] = [str(item) for item in related_permissions]
         try:
@@ -1161,6 +1189,7 @@ class DefaultsHttpServer:
 
             result = get_authority_service().approve_request(
                 request_id,
+                actor_principal=request_data.get("_authenticated_principal"),
                 **approval_kwargs,
             )
         except Exception as exc:
@@ -1193,6 +1222,24 @@ class DefaultsHttpServer:
             if role or device_id:
                 return ":".join(value for value in (role, device_id) if value)
         return "authority"
+
+    def _handle_authority_challenge(self, request_data, path_params):
+        request_id = str((path_params or {}).get("request_id") or "").strip()
+        try:
+            from core_runtime.authority import get_authority_service
+
+            result = get_authority_service().create_approval_challenge(
+                request_id,
+                decision=str(request_data.get("decision") or "approve"),
+                scope=str(request_data.get("scope") or "once"),
+                expires_in_seconds=request_data.get("expires_in_seconds"),
+                actor_principal=request_data.get("_authenticated_principal"),
+            )
+        except Exception as exc:
+            return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result)
+        return ok(result)
 
     def _handle_authority_deny(self, request_data, path_params):
         request_id = str((path_params or {}).get("request_id") or "").strip()
@@ -1588,6 +1635,45 @@ def _allow_local_pairing_start_without_token(method, path, headers):
     return bool(csrf.strip())
 
 
+def _apply_authenticated_principal_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    device_id = str(payload.get("_authenticated_device_id") or "").strip()
+    scopes = payload.get("_authenticated_scopes")
+    if device_id:
+        context["_authenticated_device_id"] = device_id
+    if isinstance(scopes, list):
+        context["_authenticated_scopes"] = [str(scope) for scope in scopes if str(scope or "").strip()]
+    principal = payload.get("_authenticated_principal")
+    if not isinstance(principal, dict):
+        return
+    principal_payload = dict(principal)
+    context["_authenticated_principal"] = principal_payload
+    subject = payload.get("_authority_subject")
+    context["_authority_subject"] = dict(subject) if isinstance(subject, dict) else dict(principal_payload)
+    principal_id = str(principal_payload.get("principal_id") or "").strip()
+    profile_id = str(principal_payload.get("profile_id") or "").strip()
+    if profile_id:
+        context["profile_id"] = profile_id
+    if principal_id:
+        context["authority_principal_id"] = principal_id
+        if not bool(principal_payload.get("core_role")):
+            context["principal_id"] = principal_id
+
+
+def _function_principal_from_context(context, default="defaultspack"):
+    if isinstance(context, dict):
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict) and not bool(principal.get("core_role")):
+            candidate = str(principal.get("principal_id") or "").strip()
+            if candidate:
+                return candidate
+            candidate = str(context.get("principal_id") or "").strip()
+        if candidate:
+            return candidate
+    return default
+
+
 class _RequestHandler(http.server.BaseHTTPRequestHandler):
     server_ref = None
     protocol_version = "HTTP/1.1"
@@ -1613,21 +1699,26 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             parsed_url = urllib.parse.urlsplit(self.path)
             path = parsed_url.path
-            request_data = {
+            query_params = {
                 key: values[-1]
                 for key, values in urllib.parse.parse_qs(
                     parsed_url.query, keep_blank_values=True
                 ).items()
-                if values
+                if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
             }
-            request_data["_headers"] = {str(key): str(value) for key, value in self.headers.items()}
+            request_data = dict(query_params)
+            server_context = {
+                "_path": path,
+                "_query_params": dict(query_params),
+                "_headers": sanitized_forwarded_headers(self.headers),
+            }
             if method in ("POST", "PUT"):
                 content_length = int(self.headers.get("Content-Length", 0))
                 if content_length > 0:
                     raw_body = self.rfile.read(content_length)
                     raw_text = raw_body.decode("utf-8", errors="replace")
-                    request_data["_raw_body"] = raw_text
-                    request_data["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
+                    server_context["_raw_body"] = raw_text
+                    server_context["_raw_body_base64"] = base64.b64encode(raw_body).decode("ascii")
                     content_type = str(self.headers.get("Content-Type", "")).lower()
                     if "application/x-www-form-urlencoded" in content_type:
                         body_data = {
@@ -1646,7 +1737,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                         if not isinstance(body_data, dict):
                             self._send_json(400, error("JSON body must be an object"))
                             return
-                    request_data.update(body_data)
+                    request_data.update(strip_reserved_request_context(body_data))
+            request_data.update(server_context)
+            request_data["_method"] = method
+            request_data["_actual_method"] = method
 
             handler, path_params, source, path_inject, route_pattern = self.server_ref._match_route(
                 method, path
@@ -1690,6 +1784,8 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 # Inject path parameters into request_data per route config
                 if path_inject and path_params:
                     for url_param, data_key in path_inject.items():
+                        if str(data_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                            continue
                         request_data[data_key] = path_params.get(url_param, "")
                 request_data["_method"] = method
                 request_data["_actual_method"] = method
@@ -1704,7 +1800,19 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
                 # Fallback: original handler signature (request_data, path_params)
                 result = handler(request_data, path_params)
 
-            if isinstance(result, dict) and result.get("_static"):
+            if isinstance(result, dict) and result.get("_binary"):
+                self._send_binary(
+                    int(result.get("status_code", 200)),
+                    result.get("content_type", "application/octet-stream"),
+                    result.get("body", b""),
+                    result.get("headers") if isinstance(result.get("headers"), dict) else None,
+                )
+            elif isinstance(result, dict) and result.get("_empty"):
+                self._send_empty(
+                    int(result.get("status_code", 204)),
+                    result.get("headers") if isinstance(result.get("headers"), dict) else None,
+                )
+            elif isinstance(result, dict) and result.get("_static"):
                 self._send_static(
                     200, result.get("content_type", "text/html"), result.get("body", "")
                 )
@@ -1794,6 +1902,36 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body_bytes)
         except BrokenPipeError:
             pass
+
+    def _send_binary(self, status_code, content_type, body, headers=None):
+        if isinstance(body, str):
+            body_bytes = body.encode("utf-8")
+        else:
+            body_bytes = body or b""
+        self.send_response(status_code)
+        self._send_cors_headers()
+        self.send_header("Content-Type", str(content_type or "application/octet-stream"))
+        self.send_header("Cache-Control", "no-store")
+        for key, value in (headers or {}).items():
+            if str(key).lower() in {"content-type", "content-length"}:
+                continue
+            self.send_header(str(key), str(value))
+        self.send_header("Content-Length", str(len(body_bytes)))
+        self.end_headers()
+        try:
+            self.wfile.write(body_bytes)
+        except BrokenPipeError:
+            pass
+
+    def _send_empty(self, status_code=204, headers=None):
+        self.send_response(status_code)
+        self._send_cors_headers()
+        for key, value in (headers or {}).items():
+            if str(key).lower() in {"content-type", "content-length"}:
+                continue
+            self.send_header(str(key), str(value))
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def _sensitive_request_error(self, method, path, request_data=None):
         route_sensitive, route_local_only = self._route_metadata_flags(method, path)

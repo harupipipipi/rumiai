@@ -1,0 +1,55 @@
+{
+  "id": "desktop_input",
+  "description": "Send an approved AI mouse or keyboard action to a managed desktop seat.",
+  "metadata": {
+    "aliases": ["desktop.input", "computer use", "mouse keyboard"],
+    "keywords": ["desktop", "computer use", "mouse", "keyboard", "click", "type"]
+  },
+  "config": {
+    "tool_id": "desktop_input",
+    "name": "Desktop Input",
+    "summary": "Send an approved AI mouse or keyboard action to a managed desktop.",
+    "tool_category": "desktop",
+    "action_type": "execute",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["desktop", "computer_use", "sandbox"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "mouse-pointer",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Input",
+      "composer_description": "Control a managed desktop with approved AI input.",
+      "composer_icon": "mouse-pointer"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "access_key": { "type": "string" },
+          "action": { "type": "string", "enum": ["move", "click", "double_click", "drag", "scroll", "type_text", "key"] },
+          "x": { "type": "integer" },
+          "y": { "type": "integer" },
+          "to_x": { "type": "integer" },
+          "to_y": { "type": "integer" },
+          "button": { "type": "string", "enum": ["left", "middle", "right"] },
+          "text": { "type": "string" },
+          "key": { "type": "string" },
+          "delta_x": { "type": "integer" },
+          "delta_y": { "type": "integer" }
+        },
+        "required": ["action"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_input"
+    }
+  }
+}

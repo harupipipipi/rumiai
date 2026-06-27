@@ -6,6 +6,14 @@ import os
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from .config_lattice import (
+    AuthorityConfigError,
+    AUTHORITY_RESOURCE_CONFIG_FIELDS,
+    authority_constraints_from_config,
+    authority_config_from_resource,
+    meet_authority_configs,
+    validate_authority_config,
+)
 from .approval_attestation import verify_mobile_approval_attestation
 from .approval_challenge_store import (
     ApprovalChallengeStore,
@@ -21,18 +29,7 @@ from ..host_permissions import get_host_permission_definition
 
 AUTHORITY_APPROVAL_SCOPES = frozenset({"once", "conversation", "profile", "node"})
 
-RESOURCE_CONFIG_FIELDS: tuple[tuple[str, str], ...] = (
-    ("provider_id", "provider_ids"),
-    ("api_id", "api_ids"),
-    ("model_id", "model_ids"),
-    ("function_id", "function_ids"),
-    ("pack_id", "pack_ids"),
-    ("caller_pack_id", "caller_pack_ids"),
-    ("caller_function_id", "caller_function_ids"),
-    ("domain", "domains"),
-    ("host_action", "host_actions"),
-    ("operation", "host_actions"),
-)
+RESOURCE_CONFIG_FIELDS = AUTHORITY_RESOURCE_CONFIG_FIELDS
 
 
 class AuthorityService:
@@ -253,10 +250,6 @@ class AuthorityService:
         if permission_id not in AUTHORITY_PERMISSION_IDS:
             return self._decision(False, permission_id, principal_id, resource, "Unknown authority permission", risk_level)
 
-        if self._resource_always_allowed(permission_id, resource):
-            self._audit_check("allowed_builtin", principal_id, permission_id, resource)
-            return self._decision(True, permission_id, principal_id, resource, "Built-in/local resource allowed", "low")
-
         mode = self.mode
         if mode == "off":
             self._audit_check("allowed_off", principal_id, permission_id, resource)
@@ -353,30 +346,6 @@ class AuthorityService:
         scope = str(scope or "once").strip().lower()
         if scope not in AUTHORITY_APPROVAL_SCOPES:
             return {"success": False, "error": "Authority approval scope is invalid", "status_code": 400}
-        confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
-        if self._typed_confirmation_required(request):
-            if scope != "once":
-                return {
-                    "success": False,
-                    "error": "Critical host approval must use once scope",
-                    "status_code": 400,
-                }
-            confirmation_phrase = self._confirmation_phrase(request)
-            if not confirmation_phrase or confirmation_text != confirmation_phrase:
-                self._request_store.audit(
-                    "authority_typed_confirmation_rejected",
-                    {
-                        "request_id": request.request_id,
-                        "permission_id": request.permission_id,
-                        "resource_hash": self._request_store.resource_hash(request.resource),
-                    },
-                )
-                return {
-                    "success": False,
-                    "error": "Typed confirmation is required for this host operation",
-                    "status_code": 400,
-                }
-
         mobile_approver = self._actor_mobile_approver(actor_principal)
         if mobile_approver and scope != "once":
             return {
@@ -425,6 +394,30 @@ class AuthorityService:
                     "status_code": attestation_result.status_code,
                 }
             mobile_attestation_audit = attestation_result.audit
+        confirmation_text = str(config.pop("confirmation_text", "") or "").strip()
+        if self._typed_confirmation_required(request):
+            if scope != "once":
+                return {
+                    "success": False,
+                    "error": "Critical host approval must use once scope",
+                    "status_code": 400,
+                }
+            confirmation_phrase = self._confirmation_phrase(request)
+            if not confirmation_phrase or confirmation_text != confirmation_phrase:
+                self._request_store.audit(
+                    "authority_typed_confirmation_rejected",
+                    {
+                        "request_id": request.request_id,
+                        "permission_id": request.permission_id,
+                        "resource_hash": self._request_store.resource_hash(request.resource),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": "Typed confirmation is required for this host operation",
+                    "status_code": 400,
+                }
+        if mobile_approver:
             operator_audit = dict(mobile_attestation_audit)
         else:
             operator_ok, operator_error, operator_payload = verify_ui_operator(ui_operator, request_id=request.request_id)
@@ -474,7 +467,10 @@ class AuthorityService:
         grant_principal = self._principal_for_scope(request, scope)
         if not grant_principal:
             return {"success": False, "error": "Scope cannot be resolved for authority request", "status_code": 400}
-        grant_config = self._grant_config_for_persistent_approval(request.resource, config)
+        try:
+            grant_config = self._grant_config_for_persistent_approval(request.resource, config)
+        except AuthorityConfigError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
@@ -763,30 +759,6 @@ class AuthorityService:
             return {"success": False, "error": "Authority request not found", "status_code": 404}
         return {"success": True, "request": self._request_view(request)}
 
-    def one_shot_approval_issued(
-        self,
-        *,
-        request_id: str,
-        permission_id: str,
-        token: str,
-        conversation_id: str | None = None,
-        principal_id: str | None = None,
-    ) -> bool:
-        request = self._request_store.get_request(request_id)
-        if request is None:
-            return False
-        if request.permission_id != str(permission_id or "").strip():
-            return False
-        if conversation_id and request.conversation_id and request.conversation_id != conversation_id:
-            return False
-        expected_principal = str(principal_id or request.principal_id or "").strip() or None
-        return self._request_store.one_shot_matches_request(
-            request_id=request.request_id,
-            principal_id=expected_principal,
-            permission_id=request.permission_id,
-            token=token,
-        )
-
     @classmethod
     def _actor_can_access_request(
         cls,
@@ -855,31 +827,78 @@ class AuthorityService:
         if permission_id in self._actor_scopes(actor_principal):
             return True
         manager = self._capability_grant_manager
-        if manager is None or not callable(getattr(manager, "check", None)):
+        if manager is None:
             return False
         profile_id = self._actor_profile_id(actor_principal)
-        device_id = self._actor_device_id(actor_principal)
-        if not profile_id or not device_id:
+        if not profile_id:
             return False
-        principal_ids = [
-            f"profile:{profile_id}__surface:mobile-approver__device:{device_id}",
-            f"profile:{profile_id}__surface:mobile_approver__device:{device_id}",
-        ]
-        for principal_id in principal_ids:
+        profile = f"profile:{profile_id}"
+        principals = [profile]
+        surface_id = "mobile-approver"
+        device_id = self._actor_device_id(actor_principal)
+        surface = f"{profile}__surface:{surface_id}"
+        principals.append(surface)
+        if device_id:
+            principals.append(f"{surface}__device:{device_id}")
+        configs: list[dict[str, Any]] = []
+        for principal_id in principals:
             try:
-                check = manager.check(principal_id, permission_id)
+                if callable(getattr(manager, "check_authority", None)):
+                    check = manager.check_authority(principal_id, permission_id)
+                elif callable(getattr(manager, "check", None)):
+                    check = manager.check(principal_id, permission_id)
+                else:
+                    return False
             except Exception:
-                continue
-            if bool(getattr(check, "allowed", False)):
-                return True
-        return False
+                return False
+            if not getattr(check, "allowed", False):
+                return False
+            config = getattr(check, "config", None)
+            configs.append(dict(config) if isinstance(config, dict) else {})
+        try:
+            meet_authority_configs(*configs)
+        except AuthorityConfigError:
+            return False
+        return True
+
+    def one_shot_approval_issued(
+        self,
+        *,
+        request_id: str,
+        permission_id: str,
+        token: str,
+        conversation_id: str | None = None,
+        principal_id: str | None = None,
+    ) -> bool:
+        request = self._request_store.get_request(request_id)
+        if request is None:
+            return False
+        if request.permission_id != str(permission_id or "").strip():
+            return False
+        if conversation_id and request.conversation_id and request.conversation_id != conversation_id:
+            return False
+        expected_principal = str(principal_id or request.principal_id or "").strip() or None
+        return self._request_store.one_shot_matches_request(
+            request_id=request.request_id,
+            principal_id=expected_principal,
+            permission_id=request.permission_id,
+            token=token,
+        )
 
     def list_grants(self, principal_id: str = "", *, actor_principal: Any = None) -> dict[str, Any]:
         manager = self._capability_grant_manager
         if manager is None:
             return {"grants": {}, "count": 0}
+        principal_id = str(principal_id or "").strip()
+        actor_profile_id = self._actor_profile_id(actor_principal)
         if actor_principal is not None and not self._actor_core_role(actor_principal):
-            return {"success": False, "error": "Forbidden", "status_code": 403}
+            profile_prefix = f"profile:{actor_profile_id}"
+            if not actor_profile_id:
+                return {"success": False, "error": "Forbidden", "status_code": 403}
+            if not principal_id:
+                principal_id = profile_prefix
+            if principal_id != profile_prefix and not principal_id.startswith(f"{profile_prefix}__"):
+                return {"success": False, "error": "Authority grants not found", "status_code": 404}
         if principal_id:
             grant = manager.get_grant(principal_id) if callable(getattr(manager, "get_grant", None)) else None
             return {
@@ -916,17 +935,93 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "get_grant", None)):
             return None
+        profile_chain = self._profile_principal_chain(candidates[0] if candidates else "")
+        if profile_chain:
+            profile_match, _profile_has_grant = self._matching_profile_chain_grant(profile_chain, permission_id, resource)
+            return profile_match
         for candidate in candidates:
-            grant = manager.get_grant(candidate)
-            if grant is None or not getattr(grant, "enabled", False):
+            permission_state, config = self._permission_state_for_principal(candidate, permission_id)
+            if permission_state == "disabled":
+                return None
+            if permission_state != "enabled":
                 continue
-            permission = getattr(grant, "permissions", {}).get(permission_id)
-            if permission is None or not getattr(permission, "enabled", False):
-                continue
-            config = dict(getattr(permission, "config", {}) or {})
+            try:
+                config = authority_constraints_from_config(config)
+            except AuthorityConfigError:
+                return None
             if self._resource_allowed(config, resource):
                 return candidate, config
         return None
+
+    def _matching_profile_chain_grant(
+        self,
+        profile_chain: list[str],
+        permission_id: str,
+        resource: dict[str, Any],
+    ) -> tuple[tuple[str, dict[str, Any]] | None, bool]:
+        configs: list[dict[str, Any]] = []
+        matched_principal = ""
+        for principal_id in profile_chain:
+            permission_state, config = self._permission_state_for_principal(principal_id, permission_id)
+            if permission_state == "disabled":
+                return None, True
+            if permission_state != "enabled":
+                if self._profile_chain_segment_optional(principal_id):
+                    continue
+                return None, True
+            configs.append(config)
+            matched_principal = principal_id
+        if not configs:
+            return None, True
+        try:
+            effective_config = meet_authority_configs(*configs)
+        except AuthorityConfigError:
+            return None, True
+        if self._resource_allowed(effective_config, resource):
+            return (matched_principal, effective_config), True
+        return None, True
+
+    def _permission_config_for_principal(
+        self,
+        principal_id: str,
+        permission_id: str,
+    ) -> tuple[bool, dict[str, Any]]:
+        permission_state, config = self._permission_state_for_principal(principal_id, permission_id)
+        return permission_state == "enabled", config
+
+    def _permission_state_for_principal(
+        self,
+        principal_id: str,
+        permission_id: str,
+    ) -> tuple[str, dict[str, Any]]:
+        manager = self._capability_grant_manager
+        if manager is None or not callable(getattr(manager, "get_grant", None)):
+            return "missing", {}
+        grant = manager.get_grant(principal_id)
+        if grant is None:
+            return "missing", {}
+        if not getattr(grant, "enabled", False):
+            return "disabled", {}
+        permission = getattr(grant, "permissions", {}).get(permission_id)
+        if permission is None:
+            return "missing", {}
+        if not getattr(permission, "enabled", False):
+            return "disabled", {}
+        return "enabled", dict(getattr(permission, "config", {}) or {})
+
+    @staticmethod
+    def _profile_principal_chain(principal_id: str) -> list[str]:
+        principal_id = str(principal_id or "").strip()
+        if not principal_id.startswith("profile:"):
+            return []
+        parts = [part for part in principal_id.split("__") if part]
+        return ["__".join(parts[:index]) for index in range(1, len(parts) + 1)]
+
+    @staticmethod
+    def _profile_chain_segment_optional(principal_id: str) -> bool:
+        segment = str(principal_id or "").split("__")[-1]
+        key = segment.split(":", 1)[0] if ":" in segment else ""
+        return key in {"graph", "node"}
 
     @staticmethod
     def _normalize_resource(resource: dict[str, Any]) -> dict[str, Any]:
@@ -1010,6 +1105,10 @@ class AuthorityService:
             if definition is not None:
                 return definition.risk_level
             return "high"
+        if permission_id in {"auth.token.issue", "auth.token.revoke", "authority.grant.manage"}:
+            return "critical"
+        if permission_id.endswith(".manage"):
+            return "high"
         if permission_id == "network.egress" and resource.get("domain") == "*":
             return "high"
         if permission_id == "network.egress":
@@ -1023,21 +1122,7 @@ class AuthorityService:
 
     @staticmethod
     def _grant_config_from_resource(resource: dict[str, Any]) -> dict[str, Any]:
-        config: dict[str, Any] = {}
-        for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
-            value = str(resource.get(resource_key) or "").strip()
-            if value:
-                values = config.setdefault(config_key, [])
-                if value not in values:
-                    values.append(value)
-        if resource.get("stream"):
-            config["allow_stream"] = True
-        if resource.get("port") is not None:
-            config["ports"] = [resource.get("port")]
-        input_tokens = AuthorityService._positive_int(resource.get("input_tokens"))
-        if input_tokens is not None:
-            config["max_input_tokens"] = input_tokens
-        return config
+        return authority_config_from_resource(resource)
 
     @staticmethod
     def _grant_config_for_persistent_approval(
@@ -1047,6 +1132,7 @@ class AuthorityService:
         grant_config = AuthorityService._grant_config_from_resource(resource)
         if not isinstance(client_config, dict):
             return grant_config
+        client_config = validate_authority_config(client_config)
 
         for key in AuthorityService._resource_config_keys():
             if key not in client_config or key not in grant_config:

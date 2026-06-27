@@ -1,24 +1,43 @@
 import { conversationArtifactFileUrl, type ChatActivityEvent, type ToolLogEntry } from "./api";
-import { boundedDurationLabel, elapsedDurationLabel, formatCompactDuration } from "./duration";
+import { boundedDurationLabel, elapsedDurationLabel, formatCompactDuration, timestampMs } from "./duration";
 
-export type ToolActivityStatus = "running" | "completed" | "failed";
+export type ToolActivityStatus = "running" | "waiting_approval" | "completed" | "failed" | "blocked";
 
-export type ToolActivityItem = {
+export type RunActivityKind = "tool" | "progress";
+
+export type RunActivityItem = {
   id: string;
-  toolName: string;
+  kind: RunActivityKind;
+  runId?: string;
   toolCallId?: string;
+  startSeq?: number;
+  endSeq?: number;
+  startedAt?: number | string;
+  completedAt?: number | string;
   folder: string;
   folderLabel: string;
-  input: string;
   title: string;
   detail: string;
   durationLabel?: string;
   nextStep?: string;
+  nextAction?: string;
   status: ToolActivityStatus;
   timestamp?: number | string;
+  orderIndex?: number;
+};
+
+export type ToolActivityItem = RunActivityItem & {
+  kind: "tool";
+  toolName: string;
+  input: string;
   artifacts?: ToolActivityArtifact[];
   supported: boolean;
   rawJson?: string;
+};
+
+export type ProgressActivityItem = RunActivityItem & {
+  kind: "progress";
+  phase?: string;
 };
 
 export type ToolActivityGroup = {
@@ -35,6 +54,7 @@ export type ToolActivityArtifact = {
 };
 
 const FOLDER_RULES: Array<[RegExp, string, string]> = [
+  [/^sandbox_|sandbox/i, "sandbox/coding", "Sandbox"],
   [/calculator|calc|math/i, "calculation", "計算"],
   [/web|search/i, "web/search", "Web検索"],
   [/reddit/i, "web/reddit", "Reddit検索"],
@@ -50,6 +70,103 @@ function compact(value: unknown, maxLength = 96): string {
   if (value === null || value === undefined) return "";
   const text = typeof value === "string" ? value : JSON.stringify(value);
   return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text;
+}
+
+function lastPathSegment(value: string): string {
+  const normalized = value.replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalized.split("/").filter(Boolean).pop() || value;
+}
+
+function terminalActionTitle(command: string): string {
+  const text = command.trim();
+  const lowered = text.toLowerCase();
+  if (!text) return "ターミナルで作業";
+  if (/^(rg|grep|fd|find)\b/.test(lowered)) return "コードを検索";
+  if (/^(sed|cat|less|head|tail|nl)\b/.test(lowered)) return "ファイルを確認";
+  if (/^git\s+(status|diff|show|log|branch|rev-parse)\b/.test(lowered)) return "Git 状態を確認";
+  if (/^git\s+add\b/.test(lowered)) return "変更をステージ";
+  if (/^git\s+commit\b/.test(lowered)) return "コミットを作成";
+  if (/^git\s+push\b/.test(lowered)) return "変更を push";
+  if (/^(npm|pnpm|yarn)\s+(test|run\s+test)\b/.test(lowered) || /^(python\s+-m\s+pytest|pytest|cargo\s+test)\b/.test(lowered)) return "テストを実行";
+  if (/^(npm|pnpm|yarn)\s+(run\s+)?build\b/.test(lowered) || /^cargo\s+build\b/.test(lowered)) return "ビルドを実行";
+  if (/^(npm|pnpm|yarn)\s+(run\s+)?lint\b/.test(lowered) || /^(ruff|eslint)\b/.test(lowered)) return "lint を実行";
+  if (/^gh\s+(repo|pr|issue)\s+view\b/.test(lowered)) return "GitHub 情報を確認";
+  if (/^gh\s+pr\s+(create|edit)\b/.test(lowered)) return "PR を更新";
+  if (/^gh\b/.test(lowered)) return "GitHub を操作";
+  if (/^git\b/.test(lowered)) return "Git を操作";
+  return "ターミナルで作業";
+}
+
+function folderForTerminalCommand(args: Record<string, unknown>): { id: string; label: string } | null {
+  const command = pickString(args, ["command", "cmd"]).trim().toLowerCase();
+  if (!command) return null;
+  if (/^(git|gh)\b/.test(command)) return { id: "coding/git", label: "Git" };
+  if (/^(rg|grep|fd|find|sed|cat|less|head|tail|nl)\b/.test(command)) return { id: "coding/files", label: "ファイル" };
+  return null;
+}
+
+function activityFolderFor(toolName: string, args: Record<string, unknown>): { id: string; label: string } {
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return { id: "sandbox/terminal", label: "Sandbox" };
+    if (lowerName.includes("diff")) return { id: "sandbox/diff", label: "Sandbox" };
+    if (lowerName.includes("artifact") || lowerName.includes("export")) return { id: "sandbox/artifacts", label: "Sandbox" };
+    return { id: "sandbox/files", label: "Sandbox" };
+  }
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    return folderForTerminalCommand(args) ?? toolFolderFor(toolName);
+  }
+  return toolFolderFor(toolName);
+}
+
+function humanToolTitle(toolName: string, args: Record<string, unknown>, folderLabel: string, argumentSummary: string): string {
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    const path = pickString(args, ["path", "filename", "directory", "glob"]);
+    const label = path ? lastPathSegment(path) : "";
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return "Sandboxでコマンドを実行";
+    if (lowerName.includes("write") || lowerName.includes("patch")) return label ? `Sandboxで編集: ${label}` : "Sandboxでファイルを編集";
+    if (lowerName.includes("read")) return label ? `Sandboxで確認: ${label}` : "Sandboxでファイルを確認";
+    if (lowerName.includes("diff")) return "Sandboxの差分を確認";
+    if (lowerName.includes("artifact") || lowerName.includes("export")) return "Sandbox成果物をまとめる";
+    return "Sandboxで作業";
+  }
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    return terminalActionTitle(pickString(args, ["command", "cmd"]));
+  }
+  if (lowerName.includes("git")) {
+    if (lowerName.includes("push")) return "変更を push";
+    if (lowerName.includes("commit")) return "コミットを作成";
+    if (lowerName.includes("diff")) return "差分を確認";
+    if (lowerName.includes("branch")) return "ブランチを確認";
+    return "Git 状態を確認";
+  }
+  if (lowerName.includes("file")) {
+    const path = pickString(args, ["path", "filename", "directory", "glob"]);
+    const label = path ? lastPathSegment(path) : "";
+    if (lowerName.includes("write") || lowerName.includes("patch") || lowerName.includes("create") || lowerName.includes("delete")) {
+      return label ? `ファイルを編集: ${label}` : "ファイルを編集";
+    }
+    if (lowerName.includes("list")) {
+      return label ? `ファイル一覧を確認: ${label}` : "ファイル一覧を確認";
+    }
+    return label ? `ファイルを確認: ${label}` : "ファイルを確認";
+  }
+  if (lowerName.includes("search") || lowerName.includes("web") || lowerName.includes("reddit")) {
+    return argumentSummary ? `Webで検索: ${compact(argumentSummary, 56)}` : "Webで検索";
+  }
+  if (lowerName.includes("browser") || lowerName.includes("computer")) {
+    const action = pickString(args, ["action"]) || "画面を操作";
+    if (action.includes("screenshot")) return "画面を確認";
+    if (action.includes("click")) return "画面をクリック";
+    if (action.includes("type")) return "文字を入力";
+    if (action.includes("open")) return "ブラウザを開く";
+    return "画面を操作";
+  }
+  if (lowerName.includes("subagent") || lowerName.includes("agent") || lowerName.includes("delegate")) return "サブエージェントに依頼";
+  if (lowerName.includes("todo") || lowerName.includes("task")) return "タスクを整理";
+  if (lowerName.includes("calculator") || lowerName.includes("calc")) return argumentSummary ? `計算: ${argumentSummary}` : "計算";
+  return `${folderLabel}を使用`;
 }
 
 function jsonBlock(value: unknown, maxLength = 1600): string {
@@ -85,6 +202,10 @@ function isSupportedToolActivity(toolName: string, explicitSummary = ""): boolea
 export function summarizeToolArguments(toolName: string, args?: Record<string, unknown>): string {
   if (!args) return "";
   const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    if (lowerName.includes("terminal") || lowerName.includes("exec")) return pickString(args, ["command", "cmd"]);
+    return pickString(args, ["path", "filename", "directory", "glob", "sandbox_id"]);
+  }
   if (lowerName.includes("calculator") || lowerName.includes("calc")) {
     const expression = pickString(args, ["expression", "expr", "input", "query"]);
     if (expression) return expression;
@@ -139,13 +260,90 @@ function isGenericCompletionSummary(summary: string, toolName: string): boolean 
   return Boolean(lowerToolName && normalized.startsWith(lowerToolName) && /\b(completed|complete|done)\b/.test(normalized));
 }
 
+function parseJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "string") return null;
+  const text = value.trim();
+  if (!text.startsWith("{") || !text.endsWith("}")) return null;
+  try {
+    const parsed = JSON.parse(text);
+    return isRecord(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizedToolResultData(result: Record<string, unknown>): Record<string, unknown> {
+  const rawData = result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : result;
+  const parsedResult = parseJsonRecord(rawData.result);
+  const widget = isRecord(rawData.widget) ? rawData.widget : {};
+  const data = { ...rawData, ...(parsedResult ?? {}), ...widget };
+  if (parsedResult) delete data.result;
+  return data;
+}
+
+function countArray(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function summarizeGitResult(data: Record<string, unknown>): string {
+  const commitHash = pickString(data, ["commit_hash", "commit"]);
+  if (commitHash) return `コミットしました: ${commitHash}`;
+  if (data.pushed === true) {
+    const branch = pickString(data, ["branch"]);
+    return branch ? `pushしました: ${branch}` : "pushしました";
+  }
+  const branch = pickString(data, ["branch"]);
+  if (branch || typeof data.clean === "boolean") {
+    const changedCount = countArray(data.staged) + countArray(data.modified) + countArray(data.untracked);
+    const state = data.clean === true ? "変更なし" : `${changedCount}件の変更`;
+    return branch ? `ブランチ ${branch} · ${state}` : state;
+  }
+  return "";
+}
+
 function summarizeToolResult(toolName: string, result: unknown): string {
   if (!result || typeof result !== "object") {
     const summary = compact(result, 120);
     return isGenericCompletionSummary(summary, toolName) ? "" : summary;
   }
   const record = result as Record<string, unknown>;
-  const data = record.data && typeof record.data === "object" ? record.data as Record<string, unknown> : record;
+  const data = normalizedToolResultData(record);
+  const lowerName = toolName.toLowerCase();
+  if (lowerName.startsWith("sandbox_")) {
+    const diffSummary = pickString(data, ["diff_summary"]);
+    if (diffSummary) return diffSummary;
+    const artifactCount = Array.isArray(data.artifact_paths) ? data.artifact_paths.length : 0;
+    if (artifactCount) return `Sandbox成果物 ${artifactCount} 件`;
+    const path = pickString(data, ["path"]);
+    const label = path ? lastPathSegment(path) : "ファイル";
+    if (data.written === true) return `Sandbox内に保存: ${label}`;
+    if (data.patched === true) return `Sandbox内で変更: ${label}`;
+    if (typeof data.content === "string") return `Sandbox内で確認: ${label}`;
+    const exitCode = pickString(data, ["exit_code"]);
+    if (exitCode) return `Sandbox終了コード ${exitCode}`;
+  }
+  if (lowerName.includes("file")) {
+    const widget = isRecord(data.widget) ? data.widget : {};
+    const fileData = { ...data, ...widget };
+    const path = pickString(fileData, ["path"]);
+    const label = path ? lastPathSegment(path) : "ファイル";
+    if (fileData.written === true) return `保存しました: ${label}`;
+    if (fileData.patched === true) return `変更しました: ${label}`;
+    if (fileData.deleted === true) return `削除しました: ${label}`;
+    if (typeof fileData.content === "string" || typeof data.result === "string") {
+      return fileData.truncated === true ? `一部を読みました: ${label}` : `読みました: ${label}`;
+    }
+  }
+  const command = pickString(data, ["command", "cmd"]).toLowerCase();
+  if (lowerName.includes("git") || /^(git|gh)\b/.test(command)) {
+    const gitSummary = summarizeGitResult(data);
+    if (gitSummary) return gitSummary;
+  }
+  if (lowerName.includes("terminal") || lowerName.includes("shell") || lowerName.includes("exec")) {
+    const exitCode = pickString(data, ["exit_code"]);
+    if (exitCode) return `終了コード ${exitCode}`;
+    if (data.approval_required === true) return "承認待ち";
+  }
   const direct = pickString(data, ["summary", "result", "message", "output", "title"]);
   if (direct) {
     const formatted = toolName.toLowerCase().includes("calc") ? formatCalculatorResult(direct) : direct;
@@ -248,33 +446,107 @@ function statusForLog(log: ToolLogEntry): ToolActivityStatus {
   return "completed";
 }
 
+function numberValue(value: unknown): number | undefined {
+  const numeric = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function seqValue(value: unknown): number | undefined {
+  const numeric = numberValue(value);
+  return numeric !== undefined && numeric >= 0 ? numeric : undefined;
+}
+
+function minDefined(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  return Math.min(left, right);
+}
+
+function maxDefined(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined) return right;
+  if (right === undefined) return left;
+  return Math.max(left, right);
+}
+
+function timestampValue(value: unknown): number | string | undefined {
+  return typeof value === "number" || typeof value === "string" ? value : undefined;
+}
+
 function eventKey(event: ChatActivityEvent): string {
-  if (typeof event.tool_call_id === "string" && event.tool_call_id.trim()) {
-    return event.tool_call_id.trim();
+  const toolCallId = eventToolCallId(event);
+  if (toolCallId) {
+    return toolCallId;
   }
-  const args = event.arguments && typeof event.arguments === "object" ? event.arguments : {};
-  return `${event.tool_name ?? "tool"}:${JSON.stringify(args)}`;
+  const args = eventArguments(event);
+  return `${eventToolName(event) || "tool"}:${JSON.stringify(args)}`;
+}
+
+function eventData(event: ChatActivityEvent): Record<string, unknown> {
+  return isRecord(event.data) ? event.data : {};
+}
+
+function eventValue(event: ChatActivityEvent, key: string): unknown {
+  return event[key] ?? eventData(event)[key];
+}
+
+function eventPayloadValue(event: ChatActivityEvent, key: string): unknown {
+  const data = eventData(event);
+  return data[key] ?? event[key];
+}
+
+function pickEventString(event: ChatActivityEvent, keys: string[]): string {
+  for (const key of keys) {
+    const value = eventValue(event, key);
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" || typeof value === "boolean") return String(value);
+  }
+  return "";
+}
+
+function eventToolName(event: ChatActivityEvent): string {
+  return pickEventString(event, ["tool_name", "toolName"]);
+}
+
+function eventToolCallId(event: ChatActivityEvent): string {
+  return pickEventString(event, ["tool_call_id", "toolCallId"]);
+}
+
+function eventArguments(event: ChatActivityEvent): Record<string, unknown> {
+  const value = eventValue(event, "arguments");
+  return isRecord(value) ? value : {};
 }
 
 function isToolActivityEvent(event: ChatActivityEvent): boolean {
   return (
+    event.type === "tool_started" ||
+    event.type === "tool_completed" ||
     event.type === "tool_call" ||
     event.type === "tool_call_started" ||
     event.type === "tool_call_completed" ||
     event.type === "tool_result" ||
     event.type === "approval_requested" ||
+    event.phase === "tool_blocked" ||
+    event.type === "tool_blocked" ||
     event.phase === "tool_call" ||
     event.phase === "tool_call_started" ||
     event.phase === "tool_call_completed" ||
+    event.phase === "tool_started" ||
+    event.phase === "tool_completed" ||
     event.phase === "tool_result" ||
     event.phase === "approval_requested"
   );
 }
 
+function isProgressActivityEvent(event: ChatActivityEvent): boolean {
+  return event.type === "assistant_progress" || event.phase === "assistant_progress";
+}
+
 function eventRank(event: ChatActivityEvent): number {
   if (
+    event.type === "tool_completed" ||
     event.type === "tool_call_completed" ||
     event.type === "tool_result" ||
+    event.phase === "tool_completed" ||
     event.phase === "tool_call_completed" ||
     event.phase === "tool_result"
   ) {
@@ -285,14 +557,18 @@ function eventRank(event: ChatActivityEvent): number {
 }
 
 function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
+  if (event.type === "approval_requested" || event.phase === "approval_requested") return "waiting_approval";
+  if (event.type === "tool_blocked" || event.phase === "tool_blocked") return "blocked";
   if (
+    event.type === "tool_completed" ||
     event.type === "tool_call_completed" ||
     event.type === "tool_result" ||
+    event.phase === "tool_completed" ||
     event.phase === "tool_call_completed" ||
     event.phase === "tool_result"
   ) {
-    const result = event.result;
-    if (event.is_error === true || (isRecord(result) && statusForLog({ result }) === "failed")) return "failed";
+    const result = eventValue(event, "result");
+    if (eventValue(event, "is_error") === true || (isRecord(result) && statusForLog({ result }) === "failed")) return "failed";
     return "completed";
   }
   return "running";
@@ -300,8 +576,10 @@ function statusForEvent(event: ChatActivityEvent): ToolActivityStatus {
 
 function isStartEvent(event: ChatActivityEvent): boolean {
   return (
+    event.type === "tool_started" ||
     event.type === "tool_call" ||
     event.type === "tool_call_started" ||
+    event.phase === "tool_started" ||
     event.phase === "tool_call" ||
     event.phase === "tool_call_started"
   );
@@ -309,11 +587,21 @@ function isStartEvent(event: ChatActivityEvent): boolean {
 
 function isEndEvent(event: ChatActivityEvent): boolean {
   return (
+    event.type === "tool_completed" ||
     event.type === "tool_call_completed" ||
     event.type === "tool_result" ||
+    event.phase === "tool_completed" ||
     event.phase === "tool_call_completed" ||
     event.phase === "tool_result"
   );
+}
+
+function isApprovalEvent(event: ChatActivityEvent): boolean {
+  return event.type === "approval_requested" || event.phase === "approval_requested";
+}
+
+function isBlockedEvent(event: ChatActivityEvent): boolean {
+  return event.type === "tool_blocked" || event.phase === "tool_blocked";
 }
 
 function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent): ChatActivityEvent {
@@ -335,7 +623,7 @@ function mergeActivityEvents(base: ChatActivityEvent, update: ChatActivityEvent)
 }
 
 function resultValueForEvent(event: ChatActivityEvent): unknown {
-  return event.result ?? event.output ?? event.artifact ?? event.artifacts;
+  return eventValue(event, "result") ?? eventValue(event, "output") ?? eventValue(event, "artifact") ?? eventValue(event, "artifacts");
 }
 
 function durationLabelFromLog(log: ToolLogEntry): string {
@@ -358,11 +646,218 @@ function durationLabelFromEvent(event: ChatActivityEvent, status: ToolActivitySt
 function collectEventArtifacts(event: ChatActivityEvent, conversationId?: string): ToolActivityArtifact[] {
   const artifacts: ToolActivityArtifact[] = [];
   const seen = new Set<string>();
-  collectArtifacts(event.result, conversationId, artifacts, seen);
-  collectArtifacts(event.artifact, conversationId, artifacts, seen);
-  collectArtifacts(event.artifacts, conversationId, artifacts, seen);
-  collectArtifacts(event.output, conversationId, artifacts, seen);
+  collectArtifacts(eventValue(event, "result"), conversationId, artifacts, seen);
+  collectArtifacts(eventValue(event, "artifact"), conversationId, artifacts, seen);
+  collectArtifacts(eventValue(event, "artifacts"), conversationId, artifacts, seen);
+  collectArtifacts(eventValue(event, "output"), conversationId, artifacts, seen);
   return artifacts;
+}
+
+function collectCallArtifacts(log: ToolLogEntry | undefined, event: ChatActivityEvent | undefined, conversationId?: string): ToolActivityArtifact[] {
+  const artifacts: ToolActivityArtifact[] = [];
+  const seen = new Set<string>();
+  if (log) collectArtifacts(log.result, conversationId, artifacts, seen);
+  if (event) {
+    collectArtifacts(eventValue(event, "result"), conversationId, artifacts, seen);
+    collectArtifacts(eventValue(event, "artifact"), conversationId, artifacts, seen);
+    collectArtifacts(eventValue(event, "artifacts"), conversationId, artifacts, seen);
+    collectArtifacts(eventValue(event, "output"), conversationId, artifacts, seen);
+  }
+  return artifacts;
+}
+
+type AccumulatedToolCall = {
+  key: string;
+  event?: ChatActivityEvent;
+  log?: ToolLogEntry;
+  orderIndex: number;
+  startSeq?: number;
+  endSeq?: number;
+  startedAt?: number | string;
+  completedAt?: number | string;
+  status?: ToolActivityStatus;
+};
+
+function eventStartedAt(event: ChatActivityEvent): number | string | undefined {
+  return timestampValue(event.started_at) ?? timestampValue(event.startedAt) ?? (isStartEvent(event) ? event.timestamp : undefined);
+}
+
+function eventCompletedAt(event: ChatActivityEvent): number | string | undefined {
+  return timestampValue(event.completed_at) ?? timestampValue(event.completedAt) ?? (isEndEvent(event) ? event.timestamp : undefined);
+}
+
+function updateAccumulatedCallFromEvent(call: AccumulatedToolCall, event: ChatActivityEvent, index: number): void {
+  const seq = seqValue(event.seq);
+  call.orderIndex = Math.min(call.orderIndex, index);
+  if (isStartEvent(event)) {
+    call.startSeq = minDefined(call.startSeq, seq);
+    call.startedAt = call.startedAt ?? eventStartedAt(event);
+  }
+  if (isEndEvent(event) || isApprovalEvent(event) || isBlockedEvent(event)) {
+    call.endSeq = maxDefined(call.endSeq, seq);
+    call.completedAt = call.completedAt ?? eventCompletedAt(event) ?? event.timestamp;
+  }
+  if (call.startSeq === undefined && seq !== undefined && !call.event) {
+    call.startSeq = seq;
+  }
+  call.status = statusForEvent(event);
+  const existing = call.event;
+  if (!existing || eventRank(event) >= eventRank(existing)) {
+    call.event = existing ? mergeActivityEvents(existing, event) : event;
+  } else {
+    call.event = mergeActivityEvents(event, existing);
+  }
+}
+
+function updateAccumulatedCallFromLog(call: AccumulatedToolCall, log: ToolLogEntry, index: number, eventCount: number): void {
+  call.log = log;
+  call.orderIndex = Math.min(call.orderIndex, eventCount + index);
+  call.completedAt = call.completedAt ?? log.timestamp;
+  call.endSeq = maxDefined(call.endSeq, seqValue(log.seq));
+  call.status = statusForLog(log);
+  if (call.startSeq === undefined) call.startSeq = seqValue(log.seq);
+  if (call.startedAt === undefined && !call.event) call.startedAt = log.timestamp;
+}
+
+function logKey(log: ToolLogEntry): string {
+  const id = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
+  return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
+}
+
+function statusForProgressEvent(event: ChatActivityEvent): ToolActivityStatus {
+  const status = String(eventPayloadValue(event, "status") ?? "").toLowerCase();
+  if (status === "completed" || status === "complete" || status === "done") return "completed";
+  if (status === "failed" || status === "error") return "failed";
+  if (status === "blocked") return "blocked";
+  return "running";
+}
+
+function progressItemFromEvent(event: ChatActivityEvent, index: number): ProgressActivityItem {
+  const seq = seqValue(event.seq);
+  const status = statusForProgressEvent(event);
+  const summary = pickEventString(event, ["summary", "display_text", "display_summary", "message"]) || "作業状況";
+  const nextAction = pickEventString(event, ["next_action", "nextAction", "next_step", "nextStep"]);
+  const timestampValue = event.timestamp;
+  return {
+    id: `progress-${seq ?? index}`,
+    kind: "progress",
+    runId: typeof event.run_id === "string" ? event.run_id : undefined,
+    startSeq: seq,
+    endSeq: status === "running" ? undefined : seq,
+    startedAt: timestampValue,
+    completedAt: status === "running" ? undefined : timestampValue,
+    folder: "progress",
+    folderLabel: "作業状況",
+    title: compact(summary, 120),
+    detail: "",
+    nextStep: nextAction ? `次: ${compact(nextAction, 120)}` : undefined,
+    nextAction: nextAction ? compact(nextAction, 120) : undefined,
+    status,
+    timestamp: timestampValue,
+    orderIndex: index,
+    phase: String(eventPayloadValue(event, "phase") ?? ""),
+  };
+}
+
+function durationLabelFromActivity(
+  startedAt: number | string | undefined,
+  completedAt: number | string | undefined,
+  status: ToolActivityStatus,
+  fallbackLog: ToolLogEntry | undefined,
+  now = Date.now(),
+): string {
+  if (startedAt !== undefined || completedAt !== undefined) {
+    if (status === "running") return elapsedDurationLabel(startedAt, now);
+    return boundedDurationLabel(startedAt, completedAt);
+  }
+  return fallbackLog ? durationLabelFromLog(fallbackLog) : "";
+}
+
+function itemOrderSeq(item: RunActivityItem): number | undefined {
+  return item.startSeq ?? item.endSeq;
+}
+
+export function compareActivityOrder(left: RunActivityItem, right: RunActivityItem): number {
+  const leftSeq = itemOrderSeq(left);
+  const rightSeq = itemOrderSeq(right);
+  if (leftSeq !== undefined && rightSeq !== undefined && leftSeq !== rightSeq) return leftSeq - rightSeq;
+  if (leftSeq !== undefined && rightSeq === undefined) return -1;
+  if (leftSeq === undefined && rightSeq !== undefined) return 1;
+
+  const leftTime = timestampMs(left.startedAt ?? left.timestamp);
+  const rightTime = timestampMs(right.startedAt ?? right.timestamp);
+  if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime;
+  if (leftTime !== null && rightTime === null) return -1;
+  if (leftTime === null && rightTime !== null) return 1;
+
+  const leftIndex = left.orderIndex ?? 0;
+  const rightIndex = right.orderIndex ?? 0;
+  if (leftIndex !== rightIndex) return leftIndex - rightIndex;
+  return String(left.toolCallId ?? left.id).localeCompare(String(right.toolCallId ?? right.id));
+}
+
+function toolItemFromCall(call: AccumulatedToolCall, options: { conversationId?: string; now?: number }): ToolActivityItem | null {
+  const source = call.log ?? call.event;
+  if (!source) return null;
+  const event = call.event;
+  const log = call.log;
+  const toolName = String(log?.tool_name ?? (event ? eventToolName(event) : "")).trim();
+  if (!toolName) return null;
+  const args = (log?.arguments && typeof log.arguments === "object")
+    ? log.arguments as Record<string, unknown>
+    : event
+      ? eventArguments(event)
+      : {};
+  const folder = activityFolderFor(toolName, args);
+  const argumentSummary = summarizeToolArguments(toolName, args);
+  const status = call.status ?? (log ? statusForLog(log) : event ? statusForEvent(event) : "completed");
+  const resultSource = log ? log.result : event ? resultValueForEvent(event) : undefined;
+  const resultSummary = summarizeToolResult(toolName, resultSource);
+  const explicitSummary = log && isRecord(log.result) ? explicitToolText(log.result) : event ? pickEventString(event, ["display_text", "display_summary", "summary", "result_summary"]) : "";
+  const eventMessage = event ? pickEventString(event, ["message"]) : "";
+  const defaultDetail =
+    status === "running"
+      ? "使用中"
+      : status === "waiting_approval"
+        ? "承認待ち"
+        : status === "blocked"
+          ? "停止しました"
+          : status === "failed"
+            ? "失敗"
+            : "";
+  const fallbackDetail = status === "completed" && isGenericCompletionSummary(eventMessage || defaultDetail, toolName)
+    ? ""
+    : eventMessage || defaultDetail;
+  const supported = isSupportedToolActivity(toolName, explicitSummary);
+  const title = humanToolTitle(toolName, args, folder.label, argumentSummary);
+  const startedAt = call.startedAt ?? (event ? eventStartedAt(event) : undefined);
+  const completedAt = call.completedAt ?? (event ? eventCompletedAt(event) : undefined) ?? log?.timestamp;
+  const timestampValue = startedAt ?? completedAt ?? event?.timestamp ?? log?.timestamp;
+  return {
+    id: `tool-${call.startSeq ?? call.orderIndex}-${call.key}`,
+    kind: "tool",
+    runId: typeof event?.run_id === "string" ? event.run_id : undefined,
+    toolName,
+    toolCallId: log?.tool_call_id ?? (event ? eventToolCallId(event) : undefined),
+    startSeq: call.startSeq,
+    endSeq: call.endSeq,
+    startedAt,
+    completedAt,
+    folder: folder.id,
+    folderLabel: folder.label,
+    input: argumentSummary,
+    title,
+    detail: explicitSummary || resultSummary || fallbackDetail,
+    durationLabel: durationLabelFromActivity(startedAt, completedAt, status, log, options.now),
+    nextStep: event ? pickEventString(event, ["next_step", "nextStep"]) : undefined,
+    nextAction: event ? pickEventString(event, ["next_action", "nextAction", "next_step", "nextStep"]) : undefined,
+    status,
+    timestamp: timestampValue,
+    orderIndex: call.orderIndex,
+    artifacts: collectCallArtifacts(log, event, options.conversationId),
+    supported,
+    rawJson: undefined,
+  };
 }
 
 export function buildToolActivityGroups(
@@ -370,111 +865,56 @@ export function buildToolActivityGroups(
   events: ChatActivityEvent[] = [],
   options: { conversationId?: string; now?: number } = {},
 ): ToolActivityGroup[] {
-  const items = buildToolActivityItems(toolLogs, events, options);
-  const byFolder = new Map<string, ToolActivityGroup>();
+  const items = buildToolActivityItems(toolLogs, events, options).filter((item): item is ToolActivityItem => item.kind === "tool");
+  const groups: ToolActivityGroup[] = [];
+  const folderCounts = new Map<string, number>();
   for (const item of items) {
-    const existing = byFolder.get(item.folder);
-    if (existing) {
-      existing.items.push(item);
-    } else {
-      byFolder.set(item.folder, { id: item.folder, label: item.folderLabel, items: [item] });
+    const previous = groups[groups.length - 1];
+    if (previous && previous.label === item.folderLabel && previous.items[0]?.folder === item.folder) {
+      previous.items.push(item);
+      continue;
     }
+    const count = folderCounts.get(item.folder) ?? 0;
+    folderCounts.set(item.folder, count + 1);
+    groups.push({
+      id: count === 0 ? item.folder : `${item.folder}-${count}`,
+      label: item.folderLabel,
+      items: [item],
+    });
   }
-  return [...byFolder.values()];
+  return groups;
 }
 
 export function buildToolActivityItems(
   toolLogs: ToolLogEntry[] = [],
   events: ChatActivityEvent[] = [],
   options: { conversationId?: string; now?: number } = {},
-): ToolActivityItem[] {
-  const fromLogs = toolLogs
-    .filter((log) => typeof log.tool_name === "string" && log.tool_name.trim())
-    .map((log, index): ToolActivityItem => {
-      const toolName = String(log.tool_name);
-      const args = log.arguments && typeof log.arguments === "object" ? log.arguments as Record<string, unknown> : {};
-      const folder = toolFolderFor(toolName);
-      const argumentSummary = summarizeToolArguments(toolName, args);
-      const resultSummary = summarizeToolResult(toolName, log.result);
-      const explicitSummary = isRecord(log.result) ? explicitToolText(log.result) : "";
-      const supported = isSupportedToolActivity(toolName, explicitSummary);
-      return {
-        id: `log-${index}-${toolName}`,
-        toolName,
-        toolCallId: typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
-        folder: folder.id,
-        folderLabel: folder.label,
-        input: argumentSummary,
-        title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: resultSummary,
-        durationLabel: durationLabelFromLog(log),
-        nextStep: undefined,
-        status: statusForLog(log),
-        timestamp: log.timestamp,
-        artifacts: collectArtifacts(log.result, options.conversationId),
-        supported,
-        rawJson: supported ? undefined : jsonBlock({ arguments: args, result: log.result }),
-      };
-    });
+): Array<ToolActivityItem | ProgressActivityItem> {
+  const calls = new Map<string, AccumulatedToolCall>();
+  const progressItems: ProgressActivityItem[] = [];
 
-  const logKeys = new Set(
-    toolLogs.map((log) => {
-      const id = typeof log.tool_call_id === "string" ? log.tool_call_id.trim() : "";
-      return id || `${log.tool_name ?? "tool"}:${JSON.stringify(log.arguments ?? {})}`;
-    }),
-  );
-  const eventsByKey = new Map<string, ChatActivityEvent>();
-  for (const event of events) {
-    if (!isToolActivityEvent(event) || typeof event.tool_name !== "string") continue;
+  events.forEach((event, index) => {
+    if (isProgressActivityEvent(event)) {
+      progressItems.push(progressItemFromEvent(event, index));
+      return;
+    }
+    if (!isToolActivityEvent(event) || !eventToolName(event)) return;
     const key = eventKey(event);
-    if (logKeys.has(key)) continue;
-    const existing = eventsByKey.get(key);
-    if (!existing || eventRank(event) >= eventRank(existing)) {
-      eventsByKey.set(key, existing ? mergeActivityEvents(existing, event) : event);
-    } else {
-      eventsByKey.set(key, mergeActivityEvents(event, existing));
-    }
-  }
-  const eventItems = [...eventsByKey.values()]
-    .map((event, index): ToolActivityItem => {
-      const toolName = String(event.tool_name);
-      const args = event.arguments && typeof event.arguments === "object" ? event.arguments as Record<string, unknown> : {};
-      const folder = toolFolderFor(toolName);
-      const argumentSummary = summarizeToolArguments(toolName, args);
-      const status = statusForEvent(event);
-      const defaultDetail = status === "running" ? "使用中" : status === "failed" ? "失敗" : "";
-      const resultSummary = summarizeToolResult(toolName, resultValueForEvent(event));
-      const explicitSummary = explicitToolText(event);
-      const eventMessage = pickString(event, ["message"]);
-      const fallbackDetail = status === "completed" && isGenericCompletionSummary(eventMessage || defaultDetail, toolName)
-        ? ""
-        : eventMessage || defaultDetail;
-      const supported = isSupportedToolActivity(toolName, explicitSummary);
-      return {
-        id: `event-${index}-${toolName}`,
-        toolName,
-        toolCallId: typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
-        folder: folder.id,
-        folderLabel: folder.label,
-        input: argumentSummary,
-        title: argumentSummary ? `${folder.label} / ${toolName}: ${argumentSummary}` : `${folder.label} / ${toolName}`,
-        detail: explicitSummary || resultSummary || fallbackDetail,
-        durationLabel: durationLabelFromEvent(event, status, options.now),
-        nextStep: pickString(event, ["next_step", "nextStep"]),
-        status,
-        timestamp: event.timestamp,
-        artifacts: collectEventArtifacts(event, options.conversationId),
-        supported,
-        rawJson: supported ? undefined : jsonBlock({ arguments: args, event }),
-      };
-    });
-
-  return [...fromLogs, ...eventItems].sort((left, right) => {
-    const leftTime = Number(left.timestamp ?? 0);
-    const rightTime = Number(right.timestamp ?? 0);
-    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
-      return leftTime - rightTime;
-    }
-    return 0;
+    const existing = calls.get(key) ?? { key, orderIndex: index };
+    updateAccumulatedCallFromEvent(existing, event, index);
+    calls.set(key, existing);
   });
+
+  toolLogs.forEach((log, index) => {
+    if (typeof log.tool_name !== "string" || !log.tool_name.trim()) return;
+    const key = logKey(log);
+    const existing = calls.get(key) ?? { key, orderIndex: events.length + index };
+    updateAccumulatedCallFromLog(existing, log, index, events.length);
+    calls.set(key, existing);
+  });
+
+  const toolItems = [...calls.values()]
+    .map((call) => toolItemFromCall(call, options))
+    .filter((item): item is ToolActivityItem => item !== null);
+  return [...toolItems, ...progressItems].sort(compareActivityOrder);
 }

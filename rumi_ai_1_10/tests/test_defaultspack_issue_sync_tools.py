@@ -162,7 +162,7 @@ def test_issue_sync_executor_requires_approval_then_returns_dry_run_when_approve
     executed = ToolExecutor().execute(
         "github_issue_list",
         {"repo": "owner/repo"},
-        {"_tool_server_approved": True, "pack_id": "defaultspack"},
+        {"profile_policy": {"yolo_mode": True}, "pack_id": "defaultspack"},
     )
     assert executed["is_error"] is False
     assert executed["widget"]["data"]["dry_run"] is True

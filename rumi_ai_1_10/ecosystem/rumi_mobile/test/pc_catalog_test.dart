@@ -88,6 +88,30 @@ void main() {
             'updated_at': '2026-01-01T00:00:00Z',
           },
         ],
+        'tools': [
+          {
+            'tool_id': 'web_search',
+            'service_id': 'web',
+            'name': 'Web Search',
+            'summary': 'Search the web',
+            'tags': ['web', 'mobile-compatible'],
+            'mobile_compatible': true,
+            'execution_location': 'pc',
+            'mobile': {
+              'compatible': true,
+              'available': true,
+              'execution_location': 'pc',
+            },
+          },
+          {
+            'tool_id': 'desktop_input',
+            'service_id': 'computer',
+            'name': 'Desktop Input',
+            'tags': ['desktop'],
+            'mobile_compatible': false,
+            'mobile_unavailable_reason': 'PC側のhost runtimeが必要です',
+          },
+        ],
         'runtime': {
           'preferred_model': 'openai/gpt-5.4',
           'thinking_level': 'high',
@@ -127,6 +151,10 @@ void main() {
       expect(catalog.runtime.deepthinkEnabled, isTrue);
       expect(catalog.commands.single.name, 'model');
       expect(catalog.commands.single.args.single.name, 'query');
+      expect(catalog.tools.length, 2);
+      expect(catalog.mobileCompatibleTools.single.toolId, 'web_search');
+      expect(catalog.mobileCompatibleTools.single.hasMobileTag, isTrue);
+      expect(catalog.tools.last.mobileUnavailableReason, contains('host'));
     });
 
     test('PcMobileManifest drops authority routes from mobile route list', () {

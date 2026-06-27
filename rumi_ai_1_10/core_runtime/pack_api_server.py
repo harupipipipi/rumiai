@@ -38,6 +38,11 @@ from .validation import (
 from .api.route_handlers import _is_safe_path_param
 
 from .api.api_response import APIResponse
+from .api.safe_headers import (
+    RESERVED_REQUEST_CONTEXT_KEYS,
+    sanitized_forwarded_headers,
+    strip_reserved_request_context,
+)
 from .api.route_errors import (
     APIRouteFunctionError,
     api_route_function_error_status,
@@ -235,11 +240,12 @@ class PackAPIHandler(
     kernel = None  # Kernel インスタンス参照（Flow実行API用）
     app_lifecycle_manager = None  # AppLifecycleManager インスタンス参照（Phase A）
     _request_auth_mode: Optional[str] = None
+    _authenticated_principal: Optional[Any] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
-    _authenticated_principal: Optional[dict[str, Any]] = None
     _authenticated_device_id: Optional[str] = None
     _authenticated_scopes: list[str] = []
+    _authenticated_device_scope_authorized: bool = False
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
     _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
@@ -620,6 +626,15 @@ class PackAPIHandler(
         )
         route_context = dict(context or {})
         route_context["_api_route"] = True
+        principal_payload = route_context.get("_authenticated_principal")
+        execution_principal = pack_id
+        if isinstance(principal_payload, dict):
+            if not bool(principal_payload.get("core_role")):
+                execution_principal = str(principal_payload.get("principal_id") or "").strip() or pack_id
+            subject_payload = route_context.get("_authority_subject")
+            route_context["_authority_subject"] = (
+                dict(subject_payload) if isinstance(subject_payload, dict) else dict(principal_payload)
+            )
         request_id = "api-route:{}:{}".format(
             route_context.get("method", ""),
             route_context.get("path", ""),
@@ -631,7 +646,7 @@ class PackAPIHandler(
             "request_id": request_id,
             "context": route_context,
         }
-        response = get_capability_executor().execute(pack_id, request)
+        response = get_capability_executor().execute(execution_principal, request)
         if response.success:
             return response.output
 
@@ -800,20 +815,35 @@ class PackAPIHandler(
         body: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
         parsed_url = urlparse(self.path)
-        request_data: dict[str, Any] = {
+        query_params: dict[str, Any] = {
             key: values[-1]
             for key, values in parse_qs(parsed_url.query, keep_blank_values=True).items()
-            if values
+            if values and str(key) not in RESERVED_REQUEST_CONTEXT_KEYS
         }
-        request_data["_headers"] = {
-            str(key): str(value) for key, value in self.headers.items()
-        }
+        request_data: dict[str, Any] = dict(query_params)
         if body:
-            request_data.update(body)
+            request_data.update(strip_reserved_request_context(body))
         for url_param, data_key in (path_inject or {}).items():
+            if str(data_key) in RESERVED_REQUEST_CONTEXT_KEYS:
+                continue
             request_data[data_key] = (path_params or {}).get(url_param, "")
-        if self._authenticated_principal is not None:
-            request_data["_authenticated_principal"] = dict(self._authenticated_principal)
+        principal = getattr(self, "_authenticated_principal", None)
+        request_data["_path"] = parsed_url.path
+        request_data["_query_params"] = dict(query_params)
+        request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+        request_data["_authenticated_device_id"] = self._authenticated_device_id or ""
+        request_data["_authenticated_scopes"] = list(self._authenticated_scopes or [])
+        if principal is not None:
+            request_data["_authenticated_principal"] = principal.to_dict()
+            to_subject = getattr(principal, "to_internal_subject", None)
+            request_data["_authority_subject"] = (
+                to_subject(owner_pack_id="defaultspack")
+                if callable(to_subject)
+                else principal.to_dict()
+            )
+        else:
+            request_data.pop("_authenticated_principal", None)
+            request_data.pop("_authority_subject", None)
         request_data["_method"] = method.upper()
         request_data["_actual_method"] = method.upper()
         return request_data
@@ -830,9 +860,14 @@ class PackAPIHandler(
             "_authenticated_device_id": self._authenticated_device_id or "",
             "_authenticated_scopes": list(self._authenticated_scopes or []),
             "_authenticated_principal": (
-                dict(self._authenticated_principal)
-                if self._authenticated_principal is not None
+                principal.to_dict()
+                if (principal := getattr(self, "_authenticated_principal", None)) is not None
                 else None
+            ),
+            "_authority_subject": (
+                principal.to_internal_subject(owner_pack_id="defaultspack")
+                if principal is not None and hasattr(principal, "to_internal_subject")
+                else (principal.to_dict() if principal is not None else None)
             ),
         }
 
@@ -863,6 +898,11 @@ class PackAPIHandler(
             )
             if handler is None:
                 return False
+            route_entry = dict(getattr(handler, "__rumi_route_authority__", {}) or {})
+            route_entry.setdefault("pack_id", "defaultspack")
+            route_entry.setdefault("owner_pack_id", "defaultspack")
+            if not self._authorize_authenticated_route(method, path, route_entry):
+                return True
             request_data = self._defaultspack_request_data(
                 method,
                 path_params=path_params or {},
@@ -973,6 +1013,7 @@ class PackAPIHandler(
         self._authenticated_principal = None
         self._authenticated_device_id = None
         self._authenticated_scopes = []
+        self._authenticated_device_scope_authorized = False
 
     @staticmethod
     def _authority_device_scope(method: str | None, path: str | None) -> str:
@@ -1000,80 +1041,12 @@ class PackAPIHandler(
         *,
         allow_device: bool = True,
     ) -> bool:
-        auth_header = self.headers.get('Authorization', '')
-
-        if not auth_header:
-            return False
-
-        # Bearer プレフィックスを除去
-        if not auth_header.startswith("Bearer "):
-            return False
-        token = auth_header[7:]  # len("Bearer ") == 7
-
-        # 0. Device token (scoped mobile auth) — checked first for /api/mobile/v1/*
-        if token.startswith("dtk_"):
-            self._authenticated_device_id = None
-            self._authenticated_scopes = []
-            self._authenticated_principal = None
-            if not allow_device or not method or not path:
-                return False
-            try:
-                from ecosystem.defaultspack.domain.mobile.contract import required_device_scope
-                from ecosystem.defaultspack.domain.p2p.device_store import DeviceStore
-
-                store = DeviceStore()
-                device = store.verify_token(token)
-                if device is None:
-                    return False
-                scopes = set(device.scopes)
-                required_scope = ""
-                if str(path).startswith("/api/mobile/v1/"):
-                    required_scope = required_device_scope(method, path)
-                elif str(path).startswith("/api/authority/"):
-                    required_scope = self._authority_device_scope(method, path)
-                    if str(path).endswith("/challenge") and not (
-                        {"authority.request.approve", "authority.request.deny"} & scopes
-                    ):
-                        return False
-                else:
-                    return False
-                if not required_scope:
-                    return False
-                if required_scope not in scopes:
-                    return False
-                self._authenticated_device_id = device.device_id
-                self._authenticated_scopes = list(device.scopes)
-                role = (
-                    "mobile_approver"
-                    if any(scope.startswith("authority.request.") for scope in scopes)
-                    else "mobile_client"
-                )
-                self._authenticated_principal = {
-                    "token_id": hashlib.sha256(token.encode("utf-8")).hexdigest(),
-                    "profile_id": getattr(device, "profile_id", "") or "default",
-                    "surface_id": "mobile-approver" if role == "mobile_approver" else "mobile",
-                    "device_id": device.device_id,
-                    "role": role,
-                    "audiences": ["kernel_api"],
-                    "scopes": sorted(scopes),
-                    "core_role": False,
-                }
-                store.touch(device.device_id)
-                return True
-            except Exception:
-                logger.debug("device token auth failed", exc_info=True)
-            return False
-
-        # 1. HMACKeyManager 経由で検証（ローテーション対応）
-        if self._hmac_key_manager is not None:
-            return self._hmac_key_manager.verify_token(token)
-
-        # 2. フォールバック: 従来の internal_token での検証（後方互換）
-        if not self.internal_token:
-            logger.error("API token not configured - rejecting request")
-            return False
-
-        return hmac.compare_digest(token, self.internal_token)
+        return AuthGateMixin._check_bearer_auth(
+            self,
+            method,
+            path,
+            allow_device=allow_device,
+        )
 
     def _parse_cookie_header(self) -> dict[str, str]:
         raw_cookie = self.headers.get("Cookie", "")
@@ -1111,55 +1084,86 @@ class PackAPIHandler(
         return bool(self._get_cors_origin(origin))
 
     def _check_panel_session(self, method: str) -> bool:
-        if self._panel_auth_manager is None:
-            return False
-        cookies_map = self._parse_cookie_header()
-        session_id = cookies_map.get("rumi_panel_session", "")
-        session = self._panel_auth_manager.verify_session(session_id)
-        if session is None:
-            return False
-
-        if method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
-            if not self._check_panel_origin():
-                return False
-            csrf_header = self.headers.get("X-Rumi-CSRF", "")
-            session_csrf = session.get("csrf_token", "")
-            if not csrf_header or not hmac.compare_digest(csrf_header, session_csrf):
-                return False
-
-        self._panel_session = session
-        self._panel_session_cookie = self._build_set_cookie(
-            "rumi_panel_session",
-            session_id,
-            path="/",
-            max_age=int(session.get("expires_in", PanelAuthManager.DEFAULT_SESSION_TTL_SECONDS)),
-            http_only=True,
-        )
-        return True
+        return AuthGateMixin._check_panel_session(self, method)
 
     def _check_auth(self, method: str, path: str) -> bool:
-        if self._check_bearer_auth(method, path):
-            self._request_auth_mode = "bearer"
-            return True
-
-        if path.startswith("/api/") and self._check_panel_session(method):
-            self._request_auth_mode = "panel_session"
-            return True
-
-        self._request_auth_mode = None
-        return False
+        return AuthGateMixin._check_auth(self, method, path)
 
     def _check_web_mount_auth(self, method: str, web_mount: dict[str, Any]) -> bool:
-        if self._check_bearer_auth(method, web_mount.get("path_prefix", ""), allow_device=False):
-            self._request_auth_mode = "bearer"
-            return True
+        return AuthGateMixin._check_web_mount_auth(self, method, web_mount)
 
-        if self._check_panel_session(method):
-            self._request_auth_mode = "panel_session"
-            return True
+    def _current_principal(self):
+        return getattr(self, "_authenticated_principal", None)
 
-        self._request_auth_mode = None
+    def _require_core_principal(self) -> bool:
+        principal = self._current_principal()
+        if principal is not None and getattr(principal, "core_role", False):
+            return True
+        self._send_response(APIResponse(False, error="Forbidden"), 403)
         return False
+
+    def _auth_whoami(self) -> None:
+        principal = self._current_principal()
+        if principal is None:
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+        self._send_response(APIResponse(True, data=principal.whoami_dict()))
+
+    def _auth_list_access_tokens(self, query: dict[str, Any]) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import get_scoped_access_token_manager
+
+        profile_id = str(query.get("profile_id") or "").strip() or None
+        include_revoked = str(query.get("include_revoked") or "").strip().lower() in {"1", "true", "yes"}
+        rows = get_scoped_access_token_manager().list_tokens(
+            profile_id=profile_id,
+            include_revoked=include_revoked,
+            include_hash=False,
+        )
+        self._send_response(APIResponse(True, data={"tokens": rows, "count": len(rows)}))
+
+    def _auth_issue_access_token(self, body: dict[str, Any]) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import (
+            DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+            access_token_issue_policy,
+            get_scoped_access_token_manager,
+        )
+
+        expires_in_seconds = body.get("expires_in_seconds")
+        if expires_in_seconds is None:
+            expires_in_seconds = DEFAULT_ACCESS_TOKEN_TTL_SECONDS
+        try:
+            policy = access_token_issue_policy(
+                role=str(body.get("role") or "mobile_client"),
+                surface_id=str(body.get("surface_id") or ""),
+                audiences=body.get("audiences"),
+            )
+            issued = get_scoped_access_token_manager().issue_token(
+                profile_id=str(body.get("profile_id") or "main"),
+                surface_id=str(policy["surface_id"]),
+                device_id=str(body.get("device_id") or ""),
+                role=str(policy["role"]),
+                audiences=policy["audiences"],
+                expires_in_seconds=expires_in_seconds,
+            )
+        except (TypeError, ValueError) as exc:
+            self._send_response(APIResponse(False, error=str(exc)), 400)
+            return
+        payload = issued.metadata.to_dict(include_hash=False)
+        payload["access_token"] = issued.access_token
+        payload["token"] = issued.access_token
+        self._send_response(APIResponse(True, data=payload))
+
+    def _auth_revoke_access_token(self, token_id: str) -> None:
+        if not self._require_core_principal():
+            return
+        from .access_tokens import get_scoped_access_token_manager
+
+        revoked = get_scoped_access_token_manager().revoke_token(token_id=token_id)
+        self._send_response(APIResponse(True, data={"token_id": token_id, "revoked": revoked}))
 
     @staticmethod
     def _allows_public_bootstrap_page(request_path: str, web_mount: dict[str, Any]) -> bool:
@@ -1654,9 +1658,18 @@ class PackAPIHandler(
         query = self._parse_query()
 
         try:
+            if path == "/api/auth/whoami":
+                self._auth_whoami()
+                return
+            if path == "/api/auth/access-tokens":
+                self._auth_list_access_tokens(query)
+                return
+
             if self._dispatch_api_route("GET", path, query=query):
                 return
             if self._dispatch_defaultspack_http_route("GET", path):
+                return
+            if not self._authorize_authenticated_route("GET", path):
                 return
 
             if path == "/api/authority/requests":
@@ -1820,10 +1833,16 @@ class PackAPIHandler(
                 if values
             }
 
+            if path == "/api/auth/access-tokens":
+                self._auth_issue_access_token(body)
+                return
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("POST", path, body, query=query):
                 return
             if self._dispatch_defaultspack_http_route("POST", path, body):
+                return
+            if not self._authorize_authenticated_route("POST", path):
                 return
 
             if path == "/api/authority/check":
@@ -2296,6 +2315,8 @@ class PackAPIHandler(
                 return
             if self._dispatch_defaultspack_http_route("PUT", path, body):
                 return
+            if not self._authorize_authenticated_route("PUT", path):
+                return
 
             match = self._match_pack_route(path, "PUT")
             if match:
@@ -2365,10 +2386,20 @@ class PackAPIHandler(
                 for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
                 if values
             }
+            if path.startswith("/api/auth/access-tokens/"):
+                parts = path.strip("/").split("/")
+                if len(parts) == 4:
+                    self._auth_revoke_access_token(unquote(parts[3]))
+                else:
+                    self._send_response(APIResponse(False, error="Not found"), 404)
+                return
+
             # --- api_routes テーブルディスパッチ (施策3) ---
             if self._dispatch_api_route("DELETE", path, query=query):
                 return
             if self._dispatch_defaultspack_http_route("DELETE", path):
+                return
+            if not self._authorize_authenticated_route("DELETE", path):
                 return
 
             if path.startswith("/api/authority/grants/"):
@@ -2483,6 +2514,7 @@ _PACK_API_HANDLER_METHOD_MIXINS = (
     (AuthGateMixin, "_check_panel_session"),
     (AuthGateMixin, "_check_auth"),
     (AuthGateMixin, "_check_web_mount_auth"),
+    (AuthGateMixin, "_authorize_authenticated_route"),
     (RequestBodyMixin, "_read_raw_body"),
     (RequestBodyMixin, "_parse_body"),
     (RequestBodyMixin, "_discard_request_body"),

@@ -5,15 +5,16 @@ import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil,
 import { cn } from "../lib/cn";
 import type { ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
-import { ToolSettingsPanel } from "../components/ToolSettingsPanel";
 import { AppsSettingsPanel } from "../components/AppsSettingsPanel";
 import { CredentialTransferModal } from "../components/CredentialTransferModal";
+import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { t } from "../lib/i18n";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText, settingsSectionSearchText } from "../lib/settingsSearch";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
+import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
@@ -31,6 +32,13 @@ const settingsModalFieldRendererRegistry = createSettingsFieldRendererRegistry([
     renderers: ["model_routing", "model_api_routes", "ModelApiRoutesSettingsField"],
     component: "ModelApiRoutesSettingsField",
     render: ModelApiRoutesSettingsFieldRenderer,
+  },
+  {
+    id: "builtin-settings-continuity",
+    types: ["continuity"],
+    renderers: ["continuity", "ContinuitySettingsField"],
+    component: "ContinuitySettingsField",
+    render: ContinuitySettingsField,
   },
 ]);
 
@@ -80,6 +88,7 @@ function settingsFieldTakesFullWidth(field: SettingsSection["fields"][number]): 
     || type === "external_tokens"
     || type === "public_url"
     || type === "model_api_routes"
+    || type === "continuity"
     || type === "device_lock"
     || type === "slash_commands"
     || field.id.endsWith("_setup_guide")
@@ -3185,7 +3194,7 @@ export function SettingsModalRenderer({
               </nav>
 
               <div className="flex-1 overflow-y-auto p-6 space-y-8">
-                {(pinnedSettingsPlacements.length > 0 || settingsPlacementCandidates.length > 0) && (
+                {pinnedSettingsPlacements.length > 0 && (
                   <section className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
@@ -3196,15 +3205,9 @@ export function SettingsModalRenderer({
                         {pinnedSettingsPlacements.length} pinned
                       </span>
                     </div>
-                    {pinnedSettingsPlacements.length > 0 ? (
-                      <div className="grid gap-3 lg:grid-cols-2">
-                        {pinnedSettingsPlacements.map(renderSettingsPlacement)}
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-zinc-800 bg-zinc-950/20 px-4 py-3 text-xs text-zinc-500">
-                        まだ pinned placement はありません。右上の + から追加できます。
-                      </div>
-                    )}
+                    <div className="grid gap-3 lg:grid-cols-2">
+                      {pinnedSettingsPlacements.map(renderSettingsPlacement)}
+                    </div>
                   </section>
                 )}
                 {activeSection && (
@@ -3214,14 +3217,9 @@ export function SettingsModalRenderer({
                       {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
                     </div>
                     {activeSection.id === "tools" && (
-                      <ToolSettingsPanel
+                      <ToolExperienceSettingsPanel
                         tools={(catalog?.sidebar.items ?? []).filter((item) => item.category === "tool")}
-                        disabledToolIds={Array.isArray(settingsValues.tools?.disabled_tool_ids)
-                          ? settingsValues.tools?.disabled_tool_ids.map((item) => String(item)).filter(Boolean)
-                          : []}
-                        hiddenToolIds={Array.isArray(settingsValues.tools?.hidden_tool_ids)
-                          ? settingsValues.tools?.hidden_tool_ids.map((item) => String(item)).filter(Boolean)
-                          : []}
+                        settingsValues={settingsValues}
                         onSettingChange={onSettingChange}
                       />
                     )}
@@ -3234,23 +3232,27 @@ export function SettingsModalRenderer({
                         cloudflarePagesUrl={cloudflarePagesUrl}
                       />
                     )}
-                    <div className="grid gap-4 lg:grid-cols-2">
-                      {visiblePrimaryFields.map(renderField)}
-                    </div>
-                    {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-                        {t(locale, "settings.noFields")}
-                      </div>
-                    )}
-                    {visibleAdvancedFields.length > 0 && (
-                      <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
-                        <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
-                          {t(locale, "settings.advanced")}
-                        </summary>
-                        <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
-                          {visibleAdvancedFields.map(renderField)}
+                    {activeSection.id !== "tools" && (
+                      <>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          {visiblePrimaryFields.map(renderField)}
                         </div>
-                      </details>
+                        {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                            {t(locale, "settings.noFields")}
+                          </div>
+                        )}
+                        {visibleAdvancedFields.length > 0 && (
+                          <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
+                            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
+                              {t(locale, "settings.advanced")}
+                            </summary>
+                            <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
+                              {visibleAdvancedFields.map(renderField)}
+                            </div>
+                          </details>
+                        )}
+                      </>
                     )}
                   </section>
                 )}

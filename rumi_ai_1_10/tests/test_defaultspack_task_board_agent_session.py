@@ -75,7 +75,7 @@ def test_task_board_agent_session_tool_and_dispatcher_are_registered(tmp_path):
     executed = ToolExecutor().execute(
         "tool_task_board_agent_session",
         {"action": "start", "card_id": card["id"]},
-        {**context, "_tool_server_approved": True, "principal_id": "defaultspack"},
+        {**context, "profile_policy": {"yolo_mode": True}, "principal_id": "defaultspack"},
     )
 
     from ecosystem.defaultspack.domain.function_runtime.dispatcher import run_defaultspack_function

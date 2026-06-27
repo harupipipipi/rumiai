@@ -29,6 +29,9 @@ UNTRUSTED_TOOL_CONTEXT_KEYS = SENSITIVE_TOOL_CONTEXT_KEYS | {
     "runtime_profile",
     "workspaceRoot",
     "workspace_root",
+    "sandbox_session_id",
+    "_sandbox_session_id",
+    "_sandbox_session_trusted",
     "_tool_server_approved",
     "_tool_server_approval_token_valid",
 }
