@@ -27,6 +27,11 @@ def _engine_events(input_data, context):
     try:
         engine_context = dict(context or {}) if isinstance(context, dict) else {}
         engine_context.setdefault("run_source", "blocks.chat.stream")
+        yield {
+            "type": "status",
+            "phase": "preparing",
+            "message": "チャット実行を準備しています",
+        }
         for event in ChatRunEngine(client=AIClient()).stream(input_data, engine_context, stream_mode=True):
             legacy = to_legacy_chat_stream_event(event)
             if legacy is not None:

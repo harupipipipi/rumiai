@@ -159,6 +159,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
 
     for schedule in status["schedules"]:
+        assert schedule["task"]["history_mode"] == "current_turn"
+        assert schedule["task"]["auto_route_within_group"] is False
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
@@ -207,8 +209,22 @@ def test_mimo_coding_company_bootstrap_allows_non_docker_and_unlimited_tool_call
         assert permission_policy["missing_capability_mode"] == "deny"
         assert permission_policy["tools"]["coding_file_delete"] == "ask"
         assert permission_policy["tools"]["coding_file_restore"] == "ask"
+        assert schedule["task"]["history_mode"] == "current_turn"
+        assert schedule["task"]["auto_route_within_group"] is False
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_token_plan_defaults_use_supported_fast_model():
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        DEFAULT_FAST_MODEL,
+        MODEL_ALLOWLIST,
+        UTILITY_MODELS,
+    )
+
+    assert DEFAULT_FAST_MODEL == "xiaomi-token-plan-sgp/mimo-v2.5"
+    assert UTILITY_MODELS["fast_reply"] == DEFAULT_FAST_MODEL
+    assert "xiaomi-token-plan-sgp/mimo-v2-flash" not in MODEL_ALLOWLIST
 
 
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):
@@ -575,8 +591,9 @@ def test_scheduler_trigger_applies_task_timeout_to_chat_params_and_cancel_timer(
     monkeypatch.chdir(tmp_path)
     seen = {}
 
-    def cancellable_chat_send(input_data, _context):
+    def cancellable_chat_send(input_data, context):
         seen["params"] = input_data.get("params")
+        seen["context"] = context
         deadline = time.time() + 1.0
         while time.time() < deadline:
             if get_chat_cancellation_registry().is_cancelled("conv-timeout"):
@@ -592,6 +609,8 @@ def test_scheduler_trigger_applies_task_timeout_to_chat_params_and_cancel_timer(
             "message": "slow scheduled chat",
             "conversation_id": "conv-timeout",
             "timeout": 0.05,
+            "history_mode": "current_turn",
+            "auto_route_within_group": False,
         },
         {"run_at": "2099-01-01T00:00:00Z"},
     )
@@ -602,6 +621,8 @@ def test_scheduler_trigger_applies_task_timeout_to_chat_params_and_cancel_timer(
     assert result["error"] == "cancelled by schedule timeout"
     assert seen["params"]["request_timeout"] == 0.05
     assert seen["params"]["timeout"] == 0.05
+    assert seen["params"]["auto_route_within_group"] is False
+    assert seen["context"]["chat_history_mode"] == "current_turn"
     assert get_chat_cancellation_registry().is_cancelled("conv-timeout") is True
 
     Scheduler().delete_schedule(schedule["id"])

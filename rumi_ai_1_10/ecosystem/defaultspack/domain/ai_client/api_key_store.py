@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import json
+import sys
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -53,8 +54,22 @@ _KIND_CUSTOM = "custom"
 _VALID_KINDS = {_KIND_LLM, _KIND_CUSTOM}
 
 
+def _clear_provider_catalog_cache_if_loaded() -> None:
+    for module_name in (
+        "domain.ai_client.providers",
+        "ecosystem.defaultspack.domain.ai_client.providers",
+    ):
+        module = sys.modules.get(module_name)
+        clear = getattr(module, "clear_provider_catalog_cache", None) if module is not None else None
+        if callable(clear):
+            try:
+                clear()
+            except Exception:
+                pass
+
+
 def _pack_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).parents[2]
 
 
 def _secrets_dir(pack_root: Path | None = None) -> Path:
@@ -107,6 +122,7 @@ def _write_custom_providers(data: dict[str, dict[str, Any]], pack_root: Path | N
         json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    _clear_provider_catalog_cache_if_loaded()
 
 
 def list_custom_providers(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
@@ -172,6 +188,7 @@ def _write_api_metadata(data: dict[str, dict[str, Any]], pack_root: Path | None 
     path = _metadata_path(pack_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _clear_provider_catalog_cache_if_loaded()
 
 
 def _metadata_patch(

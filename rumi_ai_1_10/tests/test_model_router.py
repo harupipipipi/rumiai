@@ -99,6 +99,26 @@ def test_router_honors_explicit_concrete_model_when_tools_are_requested():
     assert "selected_model_does_not_support_thinking" in decision.warnings
 
 
+def test_router_keeps_unknown_explicit_model_when_auto_route_is_disabled():
+    from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
+
+    profiles = [
+        {"profile_id": "openai/gpt-5.4", "qualified_model_id": "openai/gpt-5.4", "provider_id": "openai", "model_id": "gpt-5.4", "type": "chat", "configured": True, "supports_vision": True, "supports_tool_calling": True, "supports_thinking": True, "speed_tier": "fast", "knowledge_level": 95},
+    ]
+    decision = route_model_request(
+        ModelRoutingRequest(
+            preferred_model="xiaomi-token-plan-sgp/mimo-v2-flash",
+            preferred_group="default",
+            auto_route_within_group=False,
+            settings={"model_groups": {"default": {"allowed_models": ["openai/gpt-5.4"]}}},
+        ),
+        profiles=profiles,
+    )
+
+    assert decision.selected_model == "xiaomi-token-plan-sgp/mimo-v2-flash"
+    assert "routed_within_group" not in decision.reason_codes
+
+
 def test_router_still_routes_from_default_anchor_for_tools():
     from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 

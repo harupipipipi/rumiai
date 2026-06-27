@@ -35,7 +35,7 @@ COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
 DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
-DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
+DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5"
 DEFAULT_DOCKER_WORKER_COUNT = 3
 DEFAULT_MAX_TOOL_CALLS = 80
 MAX_TOOL_CALLS_LIMIT = 200
@@ -167,7 +167,6 @@ MODEL_ALLOWLIST = [
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "xiaomi-token-plan-sgp/mimo-v2-pro",
     "xiaomi-token-plan-sgp/mimo-v2-omni",
-    "xiaomi-token-plan-sgp/mimo-v2-flash",
     "gitlawb-opengateway/mimo-v2.5-pro",
     "gitlawb-opengateway/mimo-v2.5",
     "gitlawb-opengateway/mimo-v2-pro",
@@ -1414,6 +1413,8 @@ class MimoCodingCompanyRuntime:
             "model": model,
             "conversation_id": state.get("conversation_id"),
             "timeout": 600,
+            "history_mode": "current_turn",
+            "auto_route_within_group": False,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
             "thinking_level": "high",
@@ -1466,6 +1467,8 @@ class MimoCodingCompanyRuntime:
             "model": model,
             "conversation_id": state.get("conversation_id"),
             "timeout": 900,
+            "history_mode": "current_turn",
+            "auto_route_within_group": False,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
             "thinking_level": "high",

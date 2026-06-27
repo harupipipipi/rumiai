@@ -44,7 +44,7 @@ _pending_states: dict[str, dict[str, Any]] = {}
 
 
 def _pack_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).parents[2]
 
 
 def _secrets_dir(pack_root: Path | None = None) -> Path:

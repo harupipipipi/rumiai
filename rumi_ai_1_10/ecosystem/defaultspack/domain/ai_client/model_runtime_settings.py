@@ -37,7 +37,7 @@ class ModelRuntimeSettingsService:
     """Owns model runtime settings persisted in frontend_settings.json."""
 
     def __init__(self, pack_root: Path | None = None) -> None:
-        self._pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self._pack_root = pack_root or Path(__file__).parents[2]
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
     def get_settings(self) -> dict[str, Any]:
@@ -342,10 +342,15 @@ class ModelRuntimeSettingsService:
             if provider_id:
                 available_providers.add(provider_id)
         try:
-            from domain.ai_client.providers import detect_available_providers, get_all_known_models
+            from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
 
-            provider_map = detect_available_providers()
-            available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
+            provider_map = get_provider_catalog_map()
+            for provider_id, entry in provider_map.items():
+                availability = entry.get("availability") if isinstance(entry.get("availability"), dict) else {}
+                if availability.get("active") or availability.get("configured") or availability.get("local"):
+                    provider_text = str(provider_id or "").strip()
+                    if provider_text:
+                        available_providers.add(provider_text)
             for model in get_all_known_models():
                 if not isinstance(model, dict):
                     continue

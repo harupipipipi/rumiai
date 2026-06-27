@@ -113,7 +113,12 @@ def route_model_request(
     if not candidates:
         candidates = models_for_group("default", settings, profiles=profiles)
     original_caps = get_model_capabilities(original, profiles=profiles)
-    selected = original_caps or (candidates[0] if candidates else {"profile_id": original})
+    if original_caps:
+        selected = original_caps
+    elif routing_request.auto_route_within_group:
+        selected = candidates[0] if candidates else {"profile_id": original}
+    else:
+        selected = {"profile_id": original, "qualified_model_id": original}
     reason_codes: list[str] = ["preferred_model"]
     warnings: list[str] = []
 

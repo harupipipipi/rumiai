@@ -11,6 +11,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool.schema_adapter import tool_requires_approval_by_policy  # noqa: E402
 from domain.tool_policy.orchestrator import ToolOrchestrator  # noqa: E402
 from domain.tool_policy.policy import decide_tool_policy  # noqa: E402
 from domain.tool_policy.profile_permission import resolve_profile_tool_permission  # noqa: E402
@@ -119,6 +120,35 @@ def test_tool_policy_allows_mimo_company_repo_writes_without_approval():
     assert decision.allowed is True
     assert decision.action == "allow"
     assert decision.requires_approval is False
+
+
+def test_tool_schema_uses_profile_permission_policy_allow_for_write_tools():
+    tool = {"tool_id": "coding_file_patch", "name": "coding_file_patch", "write_action": True}
+    policy = {
+        "tool_permission_policy": {
+            "default_mode": "allow",
+            "risk_defaults": {"low": "allow", "medium": "allow", "high": "allow"},
+            "unknown_tool_mode": "ask",
+            "untrusted_tool_mode": "ask",
+            "missing_capability_mode": "deny",
+            "tools": {},
+        }
+    }
+
+    assert tool_requires_approval_by_policy(tool, policy) is False
+
+
+def test_tool_schema_keeps_explicit_ask_policy_for_write_tools():
+    tool = {"tool_id": "coding_file_delete", "name": "coding_file_delete", "write_action": True}
+    policy = {
+        "tool_permission_policy": {
+            "default_mode": "allow",
+            "risk_defaults": {"low": "allow", "medium": "allow", "high": "allow"},
+            "tools": {"coding_file_delete": "ask"},
+        }
+    }
+
+    assert tool_requires_approval_by_policy(tool, policy) is True
 
 
 def test_tool_policy_allows_mimo_company_repo_patches_without_approval():

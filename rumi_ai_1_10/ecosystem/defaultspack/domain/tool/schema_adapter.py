@@ -585,6 +585,8 @@ def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]
         or str(policy.get("action_approval_mode") or "").strip().lower() == "full"
     ):
         return False
+    if isinstance(policy, dict) and _tool_permission_policy_allows(tool, policy):
+        return False
     if _is_write_like_tool_name(tool_name_from_definition(tool)):
         return True
     if _tool_metadata_value(tool, "write_action") is True or _tool_metadata_value(tool, "action_type") in {
@@ -607,6 +609,20 @@ def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]
         "create",
         "update",
     }
+
+
+def _tool_permission_policy_allows(tool: Any, policy: Dict[str, Any]) -> bool:
+    name = tool_name_from_definition(tool)
+    if not name:
+        return False
+    tool_def = tool if isinstance(tool, dict) else {"tool_id": name, "name": name}
+    try:
+        from domain.tool_policy.profile_permission import resolve_profile_tool_permission
+
+        decision = resolve_profile_tool_permission(tool_def, name, {}, policy)
+    except Exception:
+        return False
+    return bool(isinstance(decision, dict) and decision.get("status") == "allowed")
 
 
 def _truthy_policy_value(value: Any) -> bool:

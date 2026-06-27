@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,7 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
     source_path = component_manifest.get("source_path")
     if not isinstance(source_path, str) or not source_path:
         return None
-    path = (Path(source_path).parent / rel_path).resolve()
+    path = Path(os.path.abspath(os.path.normpath(os.path.join(os.fspath(Path(source_path).parent), rel_path))))
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -28,7 +29,11 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
 
 
 def _trusted_provider_component_root() -> Path:
-    return Path(__file__).resolve().parents[3] / "domain" / "providers"
+    return Path(__file__).parents[3] / "domain" / "providers"
+
+
+def _normalized_path_for_prefix_check(path: Path | str) -> str:
+    return os.path.normcase(os.path.abspath(os.path.normpath(os.fspath(path))))
 
 
 def _is_trusted_runtime_provider_component(component: Any) -> bool:
@@ -41,9 +46,11 @@ def _is_trusted_runtime_provider_component(component: Any) -> bool:
     are trusted to contribute those runtime manifests.
     """
     try:
-        manifest_path = Path(component.manifest_path).resolve()
-        manifest_path.relative_to(_trusted_provider_component_root().resolve())
-    except (AttributeError, OSError, ValueError):
+        manifest_path = _normalized_path_for_prefix_check(component.manifest_path)
+        trusted_root = _normalized_path_for_prefix_check(_trusted_provider_component_root())
+        if os.path.commonpath([trusted_root, manifest_path]) != trusted_root:
+            return False
+    except (AttributeError, OSError, TypeError, ValueError):
         return False
     return True
 

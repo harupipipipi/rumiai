@@ -51,7 +51,6 @@ node_settings:
         - xiaomi-token-plan-sgp/mimo-v2.5
         - xiaomi-token-plan-sgp/mimo-v2-pro
         - xiaomi-token-plan-sgp/mimo-v2-omni
-        - xiaomi-token-plan-sgp/mimo-v2-flash
         - gitlawb-opengateway/mimo-v2.5-pro
         - gitlawb-opengateway/mimo-v2.5
         - gitlawb-opengateway/mimo-v2-pro
@@ -67,10 +66,10 @@ node_settings:
       subagent_default: xiaomi-token-plan-sgp/mimo-v2.5-pro
       model_router: xiaomi-token-plan-sgp/mimo-v2.5-pro
       vision_ocr: xiaomi-token-plan-sgp/mimo-v2-omni
-      tool_selector: xiaomi-token-plan-sgp/mimo-v2-flash
-      prompt_compactor: xiaomi-token-plan-sgp/mimo-v2-flash
-      context_summarizer: xiaomi-token-plan-sgp/mimo-v2-flash
-      fast_reply: xiaomi-token-plan-sgp/mimo-v2-flash
+      tool_selector: xiaomi-token-plan-sgp/mimo-v2.5
+      prompt_compactor: xiaomi-token-plan-sgp/mimo-v2.5
+      context_summarizer: xiaomi-token-plan-sgp/mimo-v2.5
+      fast_reply: xiaomi-token-plan-sgp/mimo-v2.5
   defaultspack.tool:
     shared_with_profiles:
       - defaultspack.local_agent
@@ -181,7 +180,6 @@ policy:
     - xiaomi-token-plan-sgp/mimo-v2.5
     - xiaomi-token-plan-sgp/mimo-v2-pro
     - xiaomi-token-plan-sgp/mimo-v2-omni
-    - xiaomi-token-plan-sgp/mimo-v2-flash
     - gitlawb-opengateway/mimo-v2.5-pro
     - gitlawb-opengateway/mimo-v2.5
     - gitlawb-opengateway/mimo-v2-pro

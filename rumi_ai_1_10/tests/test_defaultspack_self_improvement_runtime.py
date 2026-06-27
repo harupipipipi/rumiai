@@ -20,7 +20,7 @@ def test_mimo_profile_assigns_main_vision_fast_models(tmp_path):
 
     assert runtime.role_map["main"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
     assert runtime.role_map["vision"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
-    assert runtime.role_map["fast"] == "xiaomi-token-plan-sgp/mimo-v2-flash"
+    assert runtime.role_map["fast"] == "xiaomi-token-plan-sgp/mimo-v2.5"
 
 
 def test_mimo_vision_role_uses_omni(tmp_path):

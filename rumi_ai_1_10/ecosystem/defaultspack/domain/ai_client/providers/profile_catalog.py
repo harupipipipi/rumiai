@@ -1,10 +1,11 @@
 import json
+import os
 from pathlib import Path
 
 
 def profile_dir_for(provider_name, base_file):
     return (
-        Path(base_file).resolve().parents[3]
+        Path(os.path.abspath(os.fspath(base_file))).parents[3]
         / "user_data"
         / "shared"
         / "ai_models"
@@ -20,7 +21,7 @@ def iter_profile_paths(profile_dir):
     seen = set()
     for pattern in ("*/profile.json", "*.json"):
         for path in sorted(profile_dir.glob(pattern)):
-            resolved = str(path.resolve())
+            resolved = os.path.normcase(os.path.abspath(os.fspath(path)))
             if resolved in seen:
                 continue
             seen.add(resolved)

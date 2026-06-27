@@ -504,7 +504,10 @@ def prepare_chat_run(
             preferred_model=model,
             preferred_group=preferred_group_override
             or str(model_settings.get("preferred_model_group") or "default"),
-            auto_route_within_group=bool(model_settings.get("auto_route_within_group", True)),
+            auto_route_within_group=_optional_bool(
+                params.get("auto_route_within_group"),
+                bool(model_settings.get("auto_route_within_group", True)),
+            ),
             task_hints={
                 **(
                     route_override.get("task_hints")
@@ -1029,6 +1032,19 @@ def _current_turn_history_only(context: dict[str, Any] | None) -> bool:
         .lower()
     )
     return mode in {"current_turn", "current_message", "stateless", "none"}
+
+
+def _optional_bool(value: Any, default: bool) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    return bool(value)
 
 
 def prefocus_computer_use_target_window(prepared: PreparedChatRun) -> Any:

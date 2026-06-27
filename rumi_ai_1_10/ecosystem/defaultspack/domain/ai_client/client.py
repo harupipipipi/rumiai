@@ -320,7 +320,7 @@ class AIClient:
         return provider, model_name
 
     def _settings_path(self):
-        return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"
+        return Path(__file__).parents[2] / "user_data" / "shared" / "frontend_settings.json"
 
     def _api_routes(self):
         data = self._settings_data()

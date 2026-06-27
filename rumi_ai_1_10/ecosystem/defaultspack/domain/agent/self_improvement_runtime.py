@@ -18,7 +18,7 @@ MIMO_PROFILE_ID = "defaultspack.mimo_coding_company"
 MIMO_ROLE_MAP: dict[str, str] = {
     "main": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "vision": "xiaomi-token-plan-sgp/mimo-v2-omni",
-    "fast": "xiaomi-token-plan-sgp/mimo-v2-flash",
+    "fast": "xiaomi-token-plan-sgp/mimo-v2.5",
 }
 
 SELF_IMPROVEMENT_TOOLS = [

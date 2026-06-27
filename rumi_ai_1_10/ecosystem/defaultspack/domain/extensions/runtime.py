@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Iterable, Optional
@@ -23,6 +24,8 @@ def get_extensions_root() -> Path:
 
 def _coerce_extension_root(path: Path | str) -> Path:
     candidate = Path(path).expanduser()
+    if candidate.name == "extensions":
+        return candidate
     if (candidate / "ecosystem.json").is_file():
         return candidate / "extensions"
     return candidate
@@ -100,6 +103,20 @@ def _app_ecosystem_dirs_from_env() -> list[Path]:
     return dirs
 
 
+def _clear_provider_catalog_cache_if_loaded() -> None:
+    for module_name in (
+        "domain.ai_client.providers",
+        "ecosystem.defaultspack.domain.ai_client.providers",
+    ):
+        module = sys.modules.get(module_name)
+        clear = getattr(module, "clear_provider_catalog_cache", None) if module is not None else None
+        if callable(clear):
+            try:
+                clear()
+            except Exception:
+                pass
+
+
 def build_extensions_roots(
     pack_root: Path | str,
     *,
@@ -163,4 +180,5 @@ def get_extension_registry(
                 _REGISTRY._root = _REGISTRY._roots[0] if _REGISTRY._roots else Path(".")
                 _REGISTRY._strict = strict
                 _REGISTRY.reload()
+                _clear_provider_catalog_cache_if_loaded()
     return _REGISTRY

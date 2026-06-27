@@ -17,6 +17,7 @@ from domain.ai_client.providers import (  # noqa: E402
     get_provider_catalog_map,
 )
 from domain.ai_client.providers.component_metadata import (  # noqa: E402
+    _is_trusted_runtime_provider_component,
     model_manifests_from_provider_components,
     provider_component_metadata_map,
     provider_manifests_from_components,
@@ -45,6 +46,18 @@ def test_provider_components_include_gitlawb_and_common_provider_aliases():
     assert registry.get("providers", "openrouter").id == "openrouter"
     assert registry.get("providers", "groq").id == "groq"
     assert registry.get("providers", "deepseek").id == "deepseek"
+
+
+def test_provider_component_trust_check_does_not_resolve_paths(monkeypatch):
+    class Component:
+        manifest_path = DEFAULTSPACK_ROOT / "domain" / "providers" / "openrouter" / "manifest.json"
+
+    def fail_resolve(self, *args, **kwargs):
+        raise AssertionError("Path.resolve should not run in provider trust checks")
+
+    monkeypatch.setattr(Path, "resolve", fail_resolve)
+
+    assert _is_trusted_runtime_provider_component(Component()) is True
 
 
 def test_gitlawb_provider_component_preserves_api_key_required_allowlist_metadata():

@@ -4528,9 +4528,11 @@ function ChatApp() {
 
   const preferredMimoFastModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
+    const tokenPlanFast = "xiaomi-token-plan-sgp/mimo-v2.5";
+    if (allowlist.includes(tokenPlanFast)) return tokenPlanFast;
     const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
     if (fastPreferred) return fastPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+    return tokenPlanFast;
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import os
 import sys
+from copy import deepcopy
 from typing import Any, Dict, Iterable, List, Optional
 
 from ...extensions.loading import import_entrypoint
@@ -519,10 +520,22 @@ _BEST_MODEL_BY_PROVIDER = {
     "rumi": "rumi",
 }
 
+_PROVIDER_CATALOG_CACHE: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+_KNOWN_MODELS_CACHE: dict[tuple[str, str, tuple[str, ...]], list[dict[str, Any]]] = {}
+
+
+def _active_provider_cache_key(active_provider_ids: Any = None) -> tuple[str, ...]:
+    return tuple(sorted({str(item).strip() for item in (active_provider_ids or []) if str(item).strip()}))
+
+
+def clear_provider_catalog_cache() -> None:
+    _PROVIDER_CATALOG_CACHE.clear()
+    _KNOWN_MODELS_CACHE.clear()
+
 
 def _list_provider_manifests() -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry()
         return registry.llm().providers(enabled_only=True)
     except Exception:
         return []
@@ -530,7 +543,7 @@ def _list_provider_manifests() -> List[Dict[str, Any]]:
 
 def _load_model_manifests(provider_id: str = "") -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry()
         return registry.llm().models(provider_id=provider_id, enabled_only=True)
     except Exception:
         return []
@@ -549,7 +562,7 @@ def _model_ref_matches(provider_id: str, model_ref: str, model: Dict[str, Any]) 
 def validate_provider_catalog_coverage(registry: Any = None) -> List[Dict[str, Any]]:
     """Validate provider/model manifest coverage for extension-backed catalogs."""
     try:
-        active_registry = registry or get_extension_registry(force_reload=True)
+        active_registry = registry or get_extension_registry()
         llm_registry = active_registry.llm()
         providers = llm_registry.providers(enabled_only=True)
         models = llm_registry.models(enabled_only=True)
@@ -792,10 +805,20 @@ def _subscription_plans(manifest: Dict[str, Any], curated: Dict[str, Any]) -> Li
     ]
 
 
-def _merge_provider_entry(provider_id: str, manifest: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def _merge_provider_entry(
+    provider_id: str,
+    manifest: Optional[Dict[str, Any]] = None,
+    *,
+    component_metadata_by_provider: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
     manifest = dict(manifest or {})
     manifest_was_present = bool(manifest)
-    component_metadata = dict(provider_component_metadata_map().get(provider_id, {}))
+    component_metadata_source = (
+        component_metadata_by_provider
+        if isinstance(component_metadata_by_provider, dict)
+        else provider_component_metadata_map()
+    )
+    component_metadata = dict(component_metadata_source.get(provider_id, {}))
     curated = {**dict(_CURATED_PROVIDER_METADATA.get(provider_id, {})), **component_metadata}
     component_provider_manifest = curated.pop("provider_manifest", {})
     if isinstance(component_provider_manifest, dict):
@@ -889,10 +912,19 @@ def _provider_status(entry: Dict[str, Any], active: bool, configured: bool) -> s
 
 def get_provider_catalog(active_provider_ids=None):
     active_ids = set(active_provider_ids or [])
+    cache_key = ("provider_catalog", _active_provider_cache_key(active_provider_ids))
+    cached = _PROVIDER_CATALOG_CACHE.get(cache_key)
+    if cached is not None:
+        return deepcopy(cached)
     manifests = _provider_manifest_map()
+    component_metadata_by_provider = provider_component_metadata_map()
     provider_ids = set(manifests.keys()) | set(_CURATED_PROVIDER_METADATA.keys()) | active_ids
     entries = [
-        _merge_provider_entry(provider_id, manifests.get(provider_id))
+        _merge_provider_entry(
+            provider_id,
+            manifests.get(provider_id),
+            component_metadata_by_provider=component_metadata_by_provider,
+        )
         for provider_id in provider_ids
     ]
     entries.sort(key=lambda item: (int(item.get("priority", 100)), item["provider_id"]))
@@ -945,6 +977,7 @@ def get_provider_catalog(active_provider_ids=None):
                 },
             }
         )
+    _PROVIDER_CATALOG_CACHE[cache_key] = deepcopy(catalog)
     return catalog
 
 
@@ -1058,8 +1091,13 @@ def _annotate_model_collisions(models):
 
 
 def get_all_known_models(provider_id=None, active_provider_ids=None):
+    provider_filter = str(provider_id or "").strip()
+    cache_key = ("known_models", provider_filter, _active_provider_cache_key(active_provider_ids))
+    cached = _KNOWN_MODELS_CACHE.get(cache_key)
+    if cached is not None:
+        return deepcopy(cached)
     catalog_map = get_provider_catalog_map(active_provider_ids=active_provider_ids)
-    provider_ids = [provider_id] if provider_id else list(catalog_map.keys())
+    provider_ids = [provider_filter] if provider_filter else list(catalog_map.keys())
     models = []
 
     for current_provider_id in provider_ids:
@@ -1125,7 +1163,9 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
     deduped: Dict[str, Dict[str, Any]] = {}
     for model in models:
         deduped.setdefault(model["qualified_model_id"], model)
-    return _annotate_model_collisions(list(deduped.values()))
+    result = _annotate_model_collisions(list(deduped.values()))
+    _KNOWN_MODELS_CACHE[cache_key] = deepcopy(result)
+    return result
 
 
 def _find_model_entry(models, model_ref="", provider_id="", model_id=""):
@@ -1361,7 +1401,7 @@ def detect_rumi_provider(client):
 def get_best_model_for_provider(name, use_case="chat"):
     """Return the preferred default model id for the provider."""
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry()
         best = registry.llm().best_model(name, use_case=use_case)
         if best is not None:
             return str(best.get("model_id", ""))

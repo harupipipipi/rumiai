@@ -277,7 +277,17 @@ class Scheduler:
             "conversation_id": task_config.get("conversation_id"),
             "timeout": task_config.get("timeout", 300),
         }
-        for key in ("profile_id", "agent_id", "tools", "tool_policy", "metadata", "thinking_level"):
+        for key in (
+            "profile_id",
+            "agent_id",
+            "tools",
+            "tool_policy",
+            "metadata",
+            "thinking_level",
+            "history_mode",
+            "chat_history_mode",
+            "auto_route_within_group",
+        ):
             if key in task_config:
                 task[key] = task_config.get(key)
 
@@ -635,6 +645,8 @@ class Scheduler:
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
+                if "auto_route_within_group" in task_cfg:
+                    params["auto_route_within_group"] = task_cfg.get("auto_route_within_group")
                 if timeout is not None:
                     params.setdefault("request_timeout", timeout)
                     params.setdefault("timeout", timeout)
@@ -660,6 +672,13 @@ class Scheduler:
                 context_payload = {
                     "profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
                 }
+                history_mode = str(
+                    task_cfg.get("chat_history_mode")
+                    or task_cfg.get("history_mode")
+                    or ""
+                ).strip()
+                if history_mode:
+                    context_payload["chat_history_mode"] = history_mode
                 result = self._run_with_timeout_cancel(
                     lambda: chat_send_run(input_payload, context_payload),
                     timeout,
