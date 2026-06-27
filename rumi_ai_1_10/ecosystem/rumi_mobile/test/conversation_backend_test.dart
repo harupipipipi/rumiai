@@ -274,6 +274,115 @@ void main() {
       expect(events.whereType<ChatMessageCommitted>().single.content, '答えは4です');
     });
 
+    test('sendMessage executes Anthropic tool_use calls on phone', () async {
+      final convo = await store.createAndPersist();
+      final locator = ConversationLocator.local(convo.id);
+      final anthropicStorage = _FakeSecureStorage();
+      final anthropicConfigStore = ApiConfigStore(storage: anthropicStorage);
+      await anthropicConfigStore.saveApi(const ApiConfig(
+        providerId: 'anthropic',
+        apiCompatibility: 'anthropic_messages',
+        baseUrl: 'https://anthropic.example.com/v1',
+        apiKey: 'sk-ant-test',
+        model: 'claude-test',
+      ));
+      var requestCount = 0;
+      final bodies = <Map<String, dynamic>>[];
+
+      String event(Map<String, dynamic> data) =>
+          'event: ${data['type']}\ndata: ${jsonEncode(data)}\n\n';
+
+      final client = MockClient.streaming((request, bodyStream) async {
+        requestCount += 1;
+        expect(request.url.toString(),
+            'https://anthropic.example.com/v1/messages');
+        expect(request.headers['x-api-key'], 'sk-ant-test');
+        bodies.add(jsonDecode(await bodyStream.transform(utf8.decoder).join())
+            as Map<String, dynamic>);
+        if (requestCount == 1) {
+          return http.StreamedResponse(
+            Stream<List<int>>.fromIterable([
+              utf8.encode(event({
+                'type': 'content_block_start',
+                'index': 0,
+                'content_block': {
+                  'type': 'tool_use',
+                  'id': 'toolu_1',
+                  'name': 'tool_calculator',
+                  'input': {},
+                },
+              })),
+              utf8.encode(event({
+                'type': 'content_block_delta',
+                'index': 0,
+                'delta': {
+                  'type': 'input_json_delta',
+                  'partial_json': '{"expression":"3 * 5"}',
+                },
+              })),
+              utf8.encode(event({'type': 'message_stop'})),
+            ]),
+            200,
+          );
+        }
+        return http.StreamedResponse(
+          Stream<List<int>>.fromIterable([
+            utf8.encode(event({
+              'type': 'content_block_start',
+              'index': 0,
+              'content_block': {'type': 'text', 'text': ''},
+            })),
+            utf8.encode(event({
+              'type': 'content_block_delta',
+              'index': 0,
+              'delta': {'type': 'text_delta', 'text': '答えは15です'},
+            })),
+            utf8.encode(event({'type': 'message_stop'})),
+          ]),
+          200,
+        );
+      });
+
+      final backend = LocalConversationBackend(
+        store: store,
+        configStore: anthropicConfigStore,
+        createClient: () => OpenAiClient(client: client),
+      );
+
+      final events = await backend
+          .sendMessage(
+            locator: locator,
+            text: '3*5を計算して',
+            clientMessageId: 'u1',
+            expectedRevision: 0,
+          )
+          .toList();
+
+      expect(requestCount, 2);
+      expect((bodies.first['tools'] as List).map((tool) => tool['name']),
+          contains('tool_calculator'));
+      expect(bodies.first['system'], contains('Rumi Mobile'));
+      final secondMessages = bodies.last['messages'] as List;
+      expect(
+        secondMessages.any((message) =>
+            message['role'] == 'user' &&
+            message['content'] is List &&
+            (message['content'] as List)
+                .any((block) => block['type'] == 'tool_result')),
+        isTrue,
+      );
+      final toolEvents = events.whereType<ToolCallEvent>().toList();
+      expect(toolEvents.map((e) => e.status),
+          containsAll(['running', 'completed']));
+      expect(toolEvents.last.output, contains('3 * 5 = 15'));
+      expect(
+        events.whereType<ChatStatusEvent>().map((event) => event.message),
+        isNot(contains(contains('未対応'))),
+      );
+      expect(
+          events.whereType<ChatMessageCommitted>().single.content, '答えは15です');
+    });
+
     test('sendMessage renders assistant_progress as status only', () async {
       final convo = await store.createAndPersist();
       final locator = ConversationLocator.local(convo.id);

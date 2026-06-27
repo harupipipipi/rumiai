@@ -124,6 +124,16 @@ class OpenAiClient {
     if (!config.isConfigured) {
       throw const OpenAiException('APIのURLとキーを設定してください。');
     }
+    if (config.apiCompatibility == 'anthropic_messages' ||
+        config.providerId == 'anthropic') {
+      yield* _streamAnthropicAgentChat(
+        config: config,
+        history: history,
+        toolRuntime: toolRuntime,
+        maxToolRounds: maxToolRounds,
+      );
+      return;
+    }
     if (config.apiCompatibility != 'openai') {
       yield const OpenAiStatusUpdate(
         'このプロバイダーではスマホ内tool呼び出しは未対応です。通常チャットで続行します。',
@@ -227,12 +237,7 @@ class OpenAiClient {
   List<Map<String, dynamic>> _buildAgentMessages(
       ApiConfig config, List<ChatMessage> history) {
     final messages = <Map<String, dynamic>>[];
-    final system = [
-      config.systemPrompt.trim(),
-      'You are running inside Rumi Mobile using the defaultspack mobile agent template.',
-      'Use available tools when they help. If a requested defaultspack tool is host-bound, explain the unavailable reason and suggest switching to the PC space.',
-      mobileAssistantProgressSystemInstruction,
-    ].where((part) => part.isNotEmpty).join('\n\n');
+    final system = _agentSystemPrompt(config);
     if (system.trim().isNotEmpty) {
       messages.add({'role': 'system', 'content': system.trim()});
     }
@@ -241,6 +246,15 @@ class OpenAiClient {
       messages.add({'role': m.role.value, 'content': m.content});
     }
     return messages;
+  }
+
+  String _agentSystemPrompt(ApiConfig config) {
+    return [
+      config.systemPrompt.trim(),
+      'You are running inside Rumi Mobile using the defaultspack mobile agent template.',
+      'Use available tools when they help. If a requested defaultspack tool is host-bound, explain the unavailable reason and suggest switching to the PC space.',
+      mobileAssistantProgressSystemInstruction,
+    ].where((part) => part.isNotEmpty).join('\n\n');
   }
 
   Stream<OpenAiClientEvent> _streamOpenAiTurn({
@@ -354,6 +368,81 @@ class OpenAiClient {
             message.contains('unsupported'));
   }
 
+  Stream<OpenAiClientEvent> _streamAnthropicAgentChat({
+    required ApiConfig config,
+    required List<ChatMessage> history,
+    required MobileToolRuntime toolRuntime,
+    required int maxToolRounds,
+  }) async* {
+    final messages = _buildAnthropicAgentMessages(history);
+    final system = _agentSystemPrompt(config);
+    final tools = _anthropicTools(toolRuntime.openAiTools());
+    var toolRounds = 0;
+
+    while (!_cancelled) {
+      final turnText = StringBuffer();
+      final toolCalls = <MobileToolCall>[];
+      await for (final event in _streamAnthropicTurn(
+        config: config,
+        system: system,
+        messages: messages,
+        tools: toolRounds < maxToolRounds ? tools : const [],
+      )) {
+        switch (event) {
+          case OpenAiContentDelta():
+            turnText.write(event.delta);
+            yield event;
+          case _OpenAiToolCallsReady():
+            toolCalls.addAll(event.calls);
+          case OpenAiStatusUpdate():
+            yield event;
+          case OpenAiToolCallUpdate():
+            yield event;
+        }
+      }
+
+      if (toolCalls.isEmpty) return;
+      toolRounds += 1;
+      messages.add(_anthropicAssistantToolUseMessage(
+        turnText.toString(),
+        toolCalls,
+      ));
+      final externalToolCount = toolCalls
+          .where((call) =>
+              !MobileToolRuntime.isAssistantProgressToolName(call.name))
+          .length;
+      if (externalToolCount > 0) {
+        yield OpenAiStatusUpdate(
+          '$externalToolCount 個のtoolを実行しています',
+          phase: 'tool_execution',
+        );
+      }
+
+      final toolResults = <Map<String, dynamic>>[];
+      for (final call in toolCalls) {
+        if (_cancelled) return;
+        final isProgress =
+            MobileToolRuntime.isAssistantProgressToolName(call.name);
+        if (!isProgress) {
+          yield OpenAiToolCallUpdate(call: call, status: 'running');
+        }
+        final result = toolRuntime.execute(call);
+        yield OpenAiToolCallUpdate(
+          call: call,
+          status: result.ok ? 'completed' : 'failed',
+          result: result,
+        );
+        toolResults.add({
+          'type': 'tool_result',
+          'tool_use_id': call.id,
+          'content': result.toToolMessageContent(),
+          if (!result.ok) 'is_error': true,
+        });
+      }
+      messages.add({'role': 'user', 'content': toolResults});
+    }
+  }
+
   Stream<String> _streamAnthropic({
     required ApiConfig config,
     required List<ChatMessage> history,
@@ -404,6 +493,62 @@ class OpenAiClient {
     }
   }
 
+  Stream<OpenAiClientEvent> _streamAnthropicTurn({
+    required ApiConfig config,
+    required String system,
+    required List<Map<String, dynamic>> messages,
+    required List<Map<String, dynamic>> tools,
+  }) async* {
+    final uri = _anthropicMessagesUri(config.baseUrl);
+    final body = jsonEncode({
+      'model': config.model,
+      'messages': messages,
+      'stream': true,
+      'max_tokens': 4096,
+      if (system.trim().isNotEmpty) 'system': system.trim(),
+      if (tools.isNotEmpty) 'tools': tools,
+      if (tools.isNotEmpty) 'tool_choice': {'type': 'auto'},
+    });
+
+    final request = http.Request('POST', uri);
+    request.headers.addAll({
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      'x-api-key': config.apiKey.trim(),
+      'anthropic-version': '2023-06-01',
+    });
+    request.body = body;
+
+    final streamed =
+        await _http.send(request).timeout(const Duration(seconds: 30));
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final text = await streamed.stream.bytesToString();
+      throw OpenAiException(
+        _friendlyHttpError(streamed.statusCode, text),
+        statusCode: streamed.statusCode,
+      );
+    }
+
+    final buffer = StringBuffer();
+    final toolAccumulator = _AnthropicToolCallAccumulator();
+    await for (final chunk in streamed.stream.transform(utf8.decoder)) {
+      if (_cancelled) break;
+      buffer.write(chunk);
+      while (true) {
+        final eventEnd = buffer.toString().indexOf('\n\n');
+        if (eventEnd < 0) break;
+        final block = buffer.toString().substring(0, eventEnd);
+        final remaining = buffer.toString().substring(eventEnd + 2);
+        buffer.clear();
+        buffer.write(remaining);
+        final event = _parseAnthropicAgentEvent(block, toolAccumulator);
+        if (event != null) yield event;
+      }
+    }
+    final calls = toolAccumulator.calls();
+    if (calls.isNotEmpty) yield _OpenAiToolCallsReady(calls);
+  }
+
   List<Map<String, String>> _buildAnthropicMessages(List<ChatMessage> history) {
     final messages = <Map<String, String>>[];
     for (final message in history) {
@@ -418,6 +563,59 @@ class OpenAiClient {
       messages.insert(0, {'role': 'user', 'content': ''});
     }
     return messages;
+  }
+
+  List<Map<String, dynamic>> _buildAnthropicAgentMessages(
+      List<ChatMessage> history) {
+    final messages = <Map<String, dynamic>>[];
+    for (final message in history) {
+      if (message.content.trim().isEmpty) continue;
+      if (message.role == ChatRole.system) continue;
+      messages.add({
+        'role': message.role == ChatRole.user ? 'user' : 'assistant',
+        'content': message.content,
+      });
+    }
+    if (messages.isEmpty || messages.first['role'] != 'user') {
+      messages.insert(0, {'role': 'user', 'content': ''});
+    }
+    return messages;
+  }
+
+  Map<String, dynamic> _anthropicAssistantToolUseMessage(
+    String content,
+    List<MobileToolCall> calls,
+  ) {
+    final blocks = <Map<String, dynamic>>[];
+    final text = content.trim();
+    if (text.isNotEmpty) {
+      blocks.add({'type': 'text', 'text': text});
+    }
+    for (final call in calls) {
+      blocks.add({
+        'type': 'tool_use',
+        'id': call.id,
+        'name': call.name,
+        'input': call.arguments,
+      });
+    }
+    return {'role': 'assistant', 'content': blocks};
+  }
+
+  List<Map<String, dynamic>> _anthropicTools(
+    List<Map<String, dynamic>> openAiTools,
+  ) {
+    return [
+      for (final tool in openAiTools)
+        if (tool['function'] is Map)
+          {
+            'name': '${tool['function']['name']}',
+            'description': '${tool['function']['description'] ?? ''}',
+            'input_schema':
+                tool['function']['parameters'] as Map<String, dynamic>? ??
+                    const {'type': 'object', 'additionalProperties': true},
+          },
+    ];
   }
 
   String _parseDelta(String json) {
@@ -492,6 +690,51 @@ class OpenAiClient {
       }
     }
     return '';
+  }
+
+  OpenAiClientEvent? _parseAnthropicAgentEvent(
+    String block,
+    _AnthropicToolCallAccumulator toolAccumulator,
+  ) {
+    for (final line in block.split(RegExp(r'\r?\n'))) {
+      final trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) continue;
+      final data = trimmed.substring(5).trim();
+      if (data.isEmpty || data == '[DONE]') continue;
+      try {
+        final decoded = jsonDecode(data) as Map<String, dynamic>;
+        final type = decoded['type'] as String? ?? '';
+        if (type == 'content_block_start') {
+          toolAccumulator.start(decoded);
+          final contentBlock =
+              decoded['content_block'] as Map<String, dynamic>? ?? const {};
+          if (contentBlock['type'] == 'text' &&
+              contentBlock['text'] is String &&
+              (contentBlock['text'] as String).isNotEmpty) {
+            return OpenAiContentDelta(contentBlock['text'] as String);
+          }
+        } else if (type == 'content_block_delta') {
+          final delta = decoded['delta'] as Map<String, dynamic>? ?? const {};
+          if (delta['type'] == 'input_json_delta') {
+            toolAccumulator.addDelta(decoded);
+          } else if (delta['type'] == 'text_delta') {
+            final text = delta['text'];
+            if (text is String && text.isNotEmpty) {
+              return OpenAiContentDelta(text);
+            }
+          }
+        } else if (type == 'error') {
+          final error = decoded['error'] as Map<String, dynamic>? ?? const {};
+          throw OpenAiException(
+              error['message'] as String? ?? 'Anthropic error');
+        }
+      } on OpenAiException {
+        rethrow;
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
   }
 
   String _friendlyHttpError(int code, String body) {
@@ -578,6 +821,68 @@ class _ToolCallDraft {
   String id = '';
   String name = '';
   final StringBuffer arguments = StringBuffer();
+}
+
+class _AnthropicToolCallAccumulator {
+  final Map<int, _ToolCallDraft> _drafts = {};
+
+  void start(Map<String, dynamic> event) {
+    final index = (event['index'] as num?)?.toInt() ?? _drafts.length;
+    final contentBlock =
+        event['content_block'] as Map<String, dynamic>? ?? const {};
+    if (contentBlock['type'] != 'tool_use') return;
+    final draft = _drafts.putIfAbsent(index, () => _ToolCallDraft());
+    final id = contentBlock['id'];
+    if (id is String && id.isNotEmpty) draft.id = id;
+    final name = contentBlock['name'];
+    if (name is String && name.isNotEmpty) draft.name = name;
+    final input = contentBlock['input'];
+    if (input is Map && input.isNotEmpty) {
+      draft.arguments.write(jsonEncode(input));
+    }
+  }
+
+  void addDelta(Map<String, dynamic> event) {
+    final index = (event['index'] as num?)?.toInt() ?? _drafts.length;
+    final delta = event['delta'] as Map<String, dynamic>? ?? const {};
+    final partial = delta['partial_json'];
+    if (partial is! String || partial.isEmpty) return;
+    final draft = _drafts.putIfAbsent(index, () => _ToolCallDraft());
+    draft.arguments.write(partial);
+  }
+
+  List<MobileToolCall> calls() {
+    final calls = <MobileToolCall>[];
+    final indexes = _drafts.keys.toList()..sort();
+    for (final index in indexes) {
+      final draft = _drafts[index]!;
+      final name = draft.name.trim();
+      if (name.isEmpty) continue;
+      calls.add(
+        MobileToolCall(
+          id: draft.id.trim().isEmpty ? 'toolu_$index' : draft.id.trim(),
+          name: name,
+          arguments: _decodeArguments(draft.arguments.toString()),
+        ),
+      );
+    }
+    return calls;
+  }
+
+  Map<String, dynamic> _decodeArguments(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return const {};
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) {
+        return decoded.map((key, value) => MapEntry('$key', value));
+      }
+    } catch (_) {
+      return {'input': trimmed};
+    }
+    return {'input': trimmed};
+  }
 }
 
 class OpenAiException implements Exception {
