@@ -448,6 +448,33 @@ def test_browser_companion_bridge_routes_support_batch_results(tmp_path, monkeyp
     assert completed["result"]["is_error"] is False
 
 
+def test_browser_companion_session_route_exposes_pairing_status(tmp_path, monkeypatch):
+    from blocks.tool import browser_companion_bridge as route_module
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    store.ensure_pairing(rotate=True)
+    store.upsert_client(
+        {
+            "client_id": "edge-1",
+            "browser_name": "Microsoft Edge",
+            "tabs": [{"id": 17, "active": True, "title": "Example", "url": "https://example.com"}],
+        }
+    )
+
+    monkeypatch.setattr(route_module, "BrowserCompanionBridgeStore", lambda: store)
+
+    response = route_module.run_session({})
+
+    assert response["status"] == "ok"
+    data = response["data"]
+    assert data["action"] == "session"
+    assert data["pairing"]["pairing_token"]
+    assert "http://127.0.0.1:8766" in data["pairing"]["server_urls"]
+    assert data["clients"][0]["client_id"] == "edge-1"
+    assert data["active_client_id"] == "edge-1"
+
+
 def test_browser_companion_pack_not_approved_does_not_fall_back_to_local(monkeypatch):
     from domain.tool.executor import ToolExecutor
 

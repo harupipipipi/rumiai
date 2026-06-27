@@ -6,6 +6,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
+from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
 from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import (
     BrowserCompanionBridgeStore,
     bearer_token_from_headers,
@@ -21,6 +22,12 @@ def _authorized_store(input_data):
         response["_http_status"] = 401
         return None, response
     return store, None
+
+
+def run_session(input_data=None, context=None):
+    del input_data, context
+    controller = BrowserCompanionController(bridge_store=BrowserCompanionBridgeStore())
+    return ok(controller.run("session", {}, context={}))
 
 
 def run_poll(input_data, context=None):

@@ -72,6 +72,7 @@ def run(context):
         ("POST", "/api/tools/embedding-index/rebuild", _lazy("blocks.tool.embedding_index_rebuild"), {}),
         ("POST", "/api/tools/invoke", _lazy("blocks.tool.invoke"), {}),
         ("POST", "/api/tools/browser-computer", _lazy("blocks.tool.browser_computer"), {}),
+        ("GET", "/api/tools/browser-companion/session", _lazy("blocks.tool.browser_companion_session"), {}),
         ("POST", "/api/tools/browser-companion/bridge/poll", _lazy("blocks.tool.browser_companion_bridge", "run_poll"), {}),
         ("POST", "/api/tools/browser-companion/bridge/result", _lazy("blocks.tool.browser_companion_bridge", "run_result"), {}),
         # ---- Capability catalog routes ----

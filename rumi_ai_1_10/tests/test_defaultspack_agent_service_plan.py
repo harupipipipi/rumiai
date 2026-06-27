@@ -3920,6 +3920,7 @@ def test_fallback_routes_expose_agent_service_and_coding_surfaces():
     assert ("POST", "/api/research/reddit-search", "blocks.research.reddit_search") in routes
     assert ("POST", "/api/chat/conversations/{id}/stop", "blocks.chat.stop") in routes
     assert ("POST", "/api/tools/browser-computer", "blocks.tool.browser_computer") in routes
+    assert ("GET", "/api/tools/browser-companion/session", "blocks.tool.browser_companion_session") in routes
     assert ("GET", "/api/ai/profiles", "blocks.ai.profiles") in routes
     assert ("POST", "/api/ui/clipboard", "blocks.ui.clipboard") in routes
     assert ("GET", "/api/agent/schedules", "blocks.agent.scheduler.list") in routes

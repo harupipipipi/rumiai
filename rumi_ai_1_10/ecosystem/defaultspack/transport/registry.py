@@ -1971,6 +1971,11 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/tools/browser-computer", block_module="blocks.tool.browser_computer"
     ),
     HttpRouteSpec(
+        "GET",
+        "/api/tools/browser-companion/session",
+        block_module="blocks.tool.browser_companion_session",
+    ),
+    HttpRouteSpec(
         "POST",
         "/api/tools/browser-companion/bridge/poll",
         block_module="blocks.tool.browser_companion_bridge_poll",
