@@ -1,0 +1,233 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from domain.ui_compiler import UIAgentResult, UIAgentTask
+
+from .project_writer import list_relative_files, write_json, write_text
+
+
+class FakeUIAgentBackend:
+    """Deterministic backend used by tests and dogfood runs."""
+
+    def run_task(self, task: UIAgentTask, context: dict[str, Any] | None = None) -> UIAgentResult:
+        output_dir = Path(task.output_dir)
+        if output_dir.exists() and any(output_dir.iterdir()):
+            return UIAgentResult(
+                status="error",
+                task_id=task.task_id,
+                output_dir=str(output_dir),
+                message="fake backend refuses to patch a non-empty output directory",
+            )
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if task.kind == "foundation":
+            self._write_foundation(task, output_dir)
+        else:
+            self._write_component(task, output_dir)
+        return UIAgentResult(
+            status="ok",
+            task_id=task.task_id,
+            output_dir=str(output_dir),
+            message="deterministic fake bundle generated",
+            files=list_relative_files(output_dir),
+            metadata={"backend": "fake"},
+        )
+
+    def _write_foundation(self, task: UIAgentTask, output_dir: Path) -> None:
+        candidate_id = task.candidate_id
+        variant_index = _variant_index(candidate_id)
+        primitives = [
+            "Button",
+            "TextInput",
+            "TextArea",
+            "Select",
+            "InlineAlert",
+            "Surface",
+            "Badge",
+            "Tabs",
+            "Dialog",
+            "IconButton",
+            "SegmentedControl",
+            "SearchField",
+        ]
+        foundation = {
+            "candidateId": candidate_id,
+            "direction": {
+                "productMode": "utility",
+                "qualities": ["precise", "calm", "information-forward"],
+                "avoid": ["toy-like", "over-compressed", "decorative-gradient"],
+            },
+            "typography": {
+                "fontStack": "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                "roles": {
+                    "pageTitle": "type-title-lg",
+                    "sectionTitle": "type-title-sm",
+                    "body": "type-body",
+                    "denseBody": "type-body-dense",
+                    "label": "type-label",
+                    "caption": "type-caption",
+                    "numeric": "type-numeric",
+                },
+            },
+            "spacing": {
+                "scale": [4, 6, 8, 12, 16, 20, 24, 32],
+                "relationships": {
+                    "withinControl": 8 + variant_index,
+                    "withinGroup": 12 + variant_index,
+                    "betweenGroups": 20,
+                    "betweenRegions": 32,
+                },
+            },
+            "color": {
+                "roles": [
+                    "canvas",
+                    "surface",
+                    "surfaceRaised",
+                    "textPrimary",
+                    "textSecondary",
+                    "textMuted",
+                    "borderSubtle",
+                    "borderStrong",
+                    "actionPrimary",
+                    "statusCritical",
+                    "statusWarning",
+                    "statusPositive",
+                ]
+            },
+            "surface": {"maxNestedDepth": 1, "borderPolicy": "semantic-only", "shadowPolicy": "rare"},
+            "primitives": primitives,
+        }
+        write_json(output_dir / "foundation.json", foundation)
+        write_json(output_dir / "primitive-manifest.json", {"primitives": primitives})
+        write_text(
+            output_dir / "tokens.css",
+            "\n".join(
+                [
+                    ":root {",
+                    "  --rui-canvas: rgb(248 249 251);",
+                    "  --rui-surface: rgb(255 255 255);",
+                    "  --rui-text-primary: rgb(18 24 32);",
+                    "  --rui-text-secondary: rgb(79 90 106);",
+                    "  --rui-border-subtle: rgb(218 224 232);",
+                    "  --rui-action-primary: rgb(28 105 212);",
+                    "  --rui-status-critical: rgb(184 40 52);",
+                    "  --rui-space-2: 8px;",
+                    "  --rui-space-3: 12px;",
+                    "  --rui-space-4: 16px;",
+                    "  --rui-space-5: 20px;",
+                    "  --rui-radius-control: 6px;",
+                    "}",
+                ]
+            ),
+        )
+        write_text(output_dir / "specimen" / "type-specimen.html", "<main><h1>Rumi UI Foundation</h1><p>日本語の長文と数値 12345</p></main>")
+        write_text(output_dir / "specimen" / "color-specimen.html", "<main><p>semantic color roles</p></main>")
+        write_json(output_dir / "report.json", {"status": "pass", "score": round(0.08 + variant_index * 0.03, 3)})
+
+    def _write_component(self, task: UIAgentTask, output_dir: Path) -> None:
+        contract = task.metadata.get("contract") if isinstance(task.metadata.get("contract"), dict) else {}
+        node_id = str(contract.get("id") or task.node_id)
+        candidate_id = task.candidate_id
+        fail_mode = str(task.metadata.get("fakeFailMode") or "")
+        required_states = list(contract.get("requiredStates") if isinstance(contract.get("requiredStates"), list) else [])
+        allowed_primitives = list(contract.get("allowedPrimitives") if isinstance(contract.get("allowedPrimitives"), list) else [])
+        visible_budget = int(contract.get("visibleActionBudget") or 3)
+        slot_mappings = list(contract.get("slotMappings") if isinstance(contract.get("slotMappings"), list) else [])
+        action_count = visible_budget + 2 if fail_mode == "action-pressure" else max(1, min(visible_budget, 2))
+        states = required_states if fail_mode != "missing-state" else required_states[:1]
+        design_intent = {
+            "primaryPerceptualTask": contract.get("primaryPerceptualTask") or contract.get("purpose") or node_id,
+            "visualFocus": "primary content first, actions second",
+            "readingOrder": ["title", "state", "content", "actions"],
+            "visibleAtRest": ["primary content", "one primary action"],
+            "progressivelyDisclosed": ["secondary metadata"],
+            "typographyRoles": ["sectionTitle", "body", "label"],
+            "colorRoles": ["surface", "textPrimary", "textSecondary", "actionPrimary"],
+            "spacingRelationships": ["withinGroup", "betweenGroups"],
+            "overflowStrategy": "wrap long Japanese text and keep primary action reachable",
+            "responsiveTopology": contract.get("layoutEnvelope", {}).get("mobileBehavior", "stack")
+            if isinstance(contract.get("layoutEnvelope"), dict)
+            else "stack",
+            "compressionAvoidancePlan": "keep gutters, reduce visible secondary actions, preserve line-height",
+        }
+        manifest = {
+            "nodeId": node_id,
+            "candidateId": candidate_id,
+            "implementationMode": contract.get("implementationMode") or "component",
+            "sourceFiles": ["source/Component.tsx", "source/Component.module.css"],
+            "fixtureFiles": [f"fixtures/{name}.json" for name in ["default", "long", "empty", "loading", "error"]],
+            "requiredStates": states,
+            "allowedPrimitives": allowed_primitives,
+            "visibleActionBudget": visible_budget,
+            "visibleActionCount": action_count,
+            "slotMappings": slot_mappings,
+            "designIntent": design_intent,
+        }
+        css_extra = " color: #123456;" if fail_mode == "non-token-color" else ""
+        write_json(output_dir / "design-intent.json", design_intent)
+        write_json(output_dir / "component.manifest.json", manifest)
+        write_text(
+            output_dir / "source" / "Component.tsx",
+            "\n".join(
+                [
+                    "import styles from './Component.module.css';",
+                    "",
+                    "export default function Component(props: Record<string, unknown>) {",
+                    f"  const actions = {action_count};",
+                    "  return (",
+                    f"    <section className={{styles.root}} data-node-id=\"{node_id}\" data-visible-actions={{actions}}>",
+                    f"      <h2>{_title(node_id)}</h2>",
+                    f"      <p>{_purpose(contract)}</p>",
+                    "      <div className={styles.actions}>",
+                    "        {Array.from({ length: actions }).map((_, index) => (",
+                    "          <button key={index} className={styles.button}>Action {index + 1}</button>",
+                    "        ))}",
+                    "      </div>",
+                    "      {props.children}",
+                    "    </section>",
+                    "  );",
+                    "}",
+                ]
+            ),
+        )
+        write_text(
+            output_dir / "source" / "Component.module.css",
+            "\n".join(
+                [
+                    ".root {",
+                    "  background: var(--rui-surface);",
+                    "  color: var(--rui-text-primary);",
+                    "  border: 1px solid var(--rui-border-subtle);",
+                    "  border-radius: var(--rui-radius-control);",
+                    "  padding: var(--rui-space-4);",
+                    "  display: grid;",
+                    "  gap: var(--rui-space-3);",
+                    "  line-height: 1.5;",
+                    f"  {css_extra}",
+                    "}",
+                    ".actions { display: flex; flex-wrap: wrap; gap: var(--rui-space-2); }",
+                    ".button { min-height: 36px; padding: 0 var(--rui-space-3); background: var(--rui-action-primary); color: var(--rui-surface); border: 0; border-radius: var(--rui-radius-control); }",
+                ]
+            ),
+        )
+        write_text(output_dir / "source" / "Component.test.tsx", "export const testContract = true;")
+        write_text(output_dir / "source" / "Component.stories.tsx", "export const Default = {};")
+        for state in ["default", "long", "empty", "loading", "error"]:
+            write_json(output_dir / "fixtures" / f"{state}.json", {"state": state, "nodeId": node_id})
+        write_json(output_dir / "status.json", {"status": "generated", "backend": "fake", "failMode": fail_mode})
+
+
+def _variant_index(candidate_id: str) -> int:
+    suffix = str(candidate_id).rsplit("-", 1)[-1]
+    if suffix.isdigit():
+        return int(suffix)
+    return sum(ord(char) for char in str(candidate_id)) % 3
+
+
+def _title(node_id: str) -> str:
+    return str(node_id).replace("-", " ").title()
+
+
+def _purpose(contract: dict[str, Any]) -> str:
+    return str(contract.get("purpose") or "Generated Rumi UI component.")
