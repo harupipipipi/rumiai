@@ -65,6 +65,389 @@ class MobileToolDefinition {
   }
 }
 
+class _DefaultspackCatalogEntry {
+  const _DefaultspackCatalogEntry({
+    required this.id,
+    required this.description,
+    required this.tags,
+  });
+
+  final String id;
+  final String description;
+  final List<String> tags;
+}
+
+const _defaultspackToolAgentManifestCatalog = <_DefaultspackCatalogEntry>[
+  _DefaultspackCatalogEntry(
+    id: 'agent_add_instruction',
+    description: 'Add an instruction to an agent.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_approve',
+    description: 'Approve an agent action.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_cancel',
+    description: 'Cancel an agent execution.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_execute',
+    description: 'Start an agent execution.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_interrupt_add',
+    description: 'Add an agent interrupt.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_interrupt_cancel',
+    description: 'Cancel an agent interrupt.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_multi_execute',
+    description: 'Compatibility wrapper that routes to CompanySlackRuntime.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_multi_message',
+    description: 'Post a compatibility message to CompanySlackRuntime.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_multi_status',
+    description: 'Read compatibility CompanySlackRuntime thread status.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_ask',
+    description: 'Ask an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_create',
+    description: 'Create an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_delete',
+    description: 'Delete an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_get',
+    description: 'Get an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_instruct',
+    description: 'Instruct an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_list',
+    description: 'List agent organizations.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_member_add',
+    description: 'Add an agent organization member.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_member_remove',
+    description: 'Remove an agent organization member.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_report',
+    description: 'Request an agent organization report.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_role_define',
+    description: 'Define an agent organization role.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_roles_list',
+    description: 'List agent organization roles.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_org_transfer_context',
+    description: 'Transfer context to an agent organization.',
+    tags: ['agent', 'org'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_pause',
+    description: 'Pause an agent.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_plan',
+    description: 'Create an agent plan.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_progress',
+    description: 'Get agent progress.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_queue_get',
+    description: 'Get the agent queue.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_queue_update',
+    description: 'Update the agent queue.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_redirect',
+    description: 'Redirect an agent.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_reject',
+    description: 'Reject an agent action.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_resume',
+    description: 'Resume an agent.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_run_subagent',
+    description:
+        'Compatibility alias for utility model routing or delegated runs.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_create',
+    description: 'Create an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_delete',
+    description: 'Delete an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_get',
+    description: 'Get an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_history',
+    description: 'Get history for an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_list',
+    description: 'List an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_pause',
+    description: 'Pause an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_resume',
+    description: 'Resume an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_trigger',
+    description: 'Trigger an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_schedule_update',
+    description: 'Update an agent schedule.',
+    tags: ['agent', 'scheduler'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_status',
+    description: 'Get agent execution status.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'agent_stepback',
+    description: 'Step an agent back.',
+    tags: ['agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'browser_artifacts',
+    description: 'List persistent browser coding artifacts.',
+    tags: ['tool', 'browser'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'browser_open_url',
+    description: 'Open a URL in a browser session.',
+    tags: ['tool', 'browser'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'browser_screenshot',
+    description: 'Capture a browser screenshot.',
+    tags: ['tool', 'browser'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'browser_session',
+    description: 'Open or inspect a browser session.',
+    tags: ['tool', 'browser'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_click',
+    description: 'Click with the computer controller.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_drag',
+    description: 'Drag with the computer controller.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_key',
+    description: 'Send a key with the computer controller.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_move',
+    description: 'Move the computer cursor.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_screenshot',
+    description: 'Capture a computer screenshot.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_scroll',
+    description: 'Scroll with the computer controller.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'computer_type',
+    description: 'Type with the computer controller.',
+    tags: ['tool', 'computer'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_calculator',
+    description: 'Run the default calculator tool.',
+    tags: ['tool', 'math'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_consent_check',
+    description: 'Check tool consent.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_consent_confirm',
+    description: 'Confirm tool consent.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_create',
+    description: 'Create a dynamic tool.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_delete',
+    description: 'Delete a dynamic tool.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_export',
+    description: 'Export a dynamic tool.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_file_reader',
+    description: 'Run the default file reader tool.',
+    tags: ['tool', 'file'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_invoke',
+    description: 'Invoke a registered tool.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_list',
+    description: 'List registered tools.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_mcp_connect',
+    description: 'Connect an MCP server.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_mcp_list',
+    description: 'List MCP servers.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_mcp_registry',
+    description: 'Manage registered MCP servers.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_names',
+    description: 'List registered tool names only.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_reddit_search',
+    description: 'Run the default reddit search tool.',
+    tags: ['tool', 'research'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_schema',
+    description: 'Get a registered tool schema.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_subagent',
+    description: 'Run the default delegation tool.',
+    tags: ['tool', 'agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_task_board',
+    description:
+        'Create and update Kanban workspace task cards from the Task Board tool.',
+    tags: ['tool', 'planning', 'task_board'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_task_board_agent_session',
+    description:
+        'Link Kanban-backed task board cards to defaultspack coding agent sessions.',
+    tags: ['tool', 'planning', 'task_board', 'agent'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_todo',
+    description: 'Run the default todo tool.',
+    tags: ['tool', 'planning'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_update',
+    description: 'Update a dynamic tool.',
+    tags: ['tool'],
+  ),
+  _DefaultspackCatalogEntry(
+    id: 'tool_web_search',
+    description: 'Run the default web search tool.',
+    tags: ['tool', 'research'],
+  ),
+];
+
 class MobileToolCall {
   const MobileToolCall({
     required this.id,
@@ -853,43 +1236,28 @@ class MobileToolRuntime {
         ? math.max(1, math.min(12, (args['limit'] as num).toInt()))
         : 6;
     final records = <Map<String, dynamic>>[];
-    for (final tool in [...supportedTools, ...unavailableDefaultspackTools]) {
+    for (final record in _catalogRecords(includeUnavailable: true)) {
       final haystack = [
-        tool.name,
-        tool.description,
-        ...tool.tags,
-        ...tool.aliases,
+        record['function_id'],
+        record['tool_id'],
+        record['requested_name'],
+        record['summary'],
+        ...(record['tags'] as List? ?? const []),
+        ...(record['aliases'] as List? ?? const []),
       ].join(' ').toLowerCase();
       if (query.isEmpty || haystack.contains(query)) {
-        records.add({
-          'tool_id': tool.name,
-          'aliases': tool.aliases,
-          'tags': tool.tags,
-          'mobile_compatible': tool.available,
-          'execution_location': tool.available ? 'phone' : 'pc',
-          'unavailable_reason': tool.unavailableReason,
-          'summary': tool.description,
-        });
+        records.add(record);
       }
       if (records.length >= limit) break;
     }
     if (records.isEmpty) {
-      records.add({
-        'tool_id': query,
-        'mobile_compatible': false,
-        'execution_location': 'unsupported',
-        'unavailable_reason': _unsupportedReason(query),
-      });
+      records.add(_unsupportedToolRecord(query));
     }
     return MobileToolResult(
       ok: true,
       summary: '${records.length} tools',
       output: jsonEncode({
-        'agent_template': {
-          'template_id': mobileAgentTemplateId,
-          'ai_input_id': mobileAgentAiInputId,
-          'tool_policy_id': mobileAgentToolPolicyId,
-        },
+        'agent_template': _agentTemplateRecord(),
         'tools': records,
       }),
     );
@@ -898,14 +1266,19 @@ class MobileToolRuntime {
   MobileToolResult _toolNames(Map<String, dynamic> args) {
     final includeAliases = args['include_aliases'] != false;
     final includeUnavailable = args['include_unavailable'] != false;
-    final tools = includeUnavailable
-        ? [...supportedTools, ...unavailableDefaultspackTools]
-        : supportedTools;
     final names = <String>[];
-    for (final tool in tools) {
-      names.add(tool.name);
+    for (final record
+        in _catalogRecords(includeUnavailable: includeUnavailable)) {
+      for (final key in ['function_id', 'tool_id', 'requested_name']) {
+        final value = '${record[key] ?? ''}'.trim();
+        if (value.isNotEmpty && _isOpenAiFunctionName(value)) names.add(value);
+      }
       if (includeAliases) {
-        names.addAll(tool.aliases.where(_isOpenAiFunctionName));
+        names.addAll(
+          (record['aliases'] as List? ?? const [])
+              .map((alias) => '$alias')
+              .where(_isOpenAiFunctionName),
+        );
       }
     }
     return MobileToolResult(
@@ -924,12 +1297,10 @@ class MobileToolRuntime {
   MobileToolResult _toolList(Map<String, dynamic> args) {
     final includeUnavailable = args['include_unavailable'] != false;
     final limit = (args['limit'] is num)
-        ? math.max(1, math.min(100, (args['limit'] as num).toInt()))
-        : 50;
-    final tools = includeUnavailable
-        ? [...supportedTools, ...unavailableDefaultspackTools]
-        : supportedTools;
-    final records = tools.take(limit).map(_toolRecord).toList();
+        ? math.max(1, math.min(200, (args['limit'] as num).toInt()))
+        : 120;
+    final allRecords = _catalogRecords(includeUnavailable: includeUnavailable);
+    final records = allRecords.take(limit).toList();
     return MobileToolResult(
       ok: true,
       summary: '${records.length} tools',
@@ -938,7 +1309,9 @@ class MobileToolRuntime {
         'data': {
           'agent_template': _agentTemplateRecord(),
           'tools': records,
-          'truncated': tools.length > records.length,
+          'manifest_tool_agent_count':
+              _defaultspackToolAgentManifestCatalog.length,
+          'truncated': allRecords.length > records.length,
         },
       }),
     );
@@ -955,10 +1328,14 @@ class MobileToolRuntime {
       );
     }
     final canonical = _canonicalToolName(requested);
+    final entry = _findDefaultspackCatalogEntry(requested) ??
+        _findDefaultspackCatalogEntry(canonical);
     final tool = _findToolDefinition(canonical);
-    final record = tool == null
-        ? _unsupportedToolRecord(canonical)
-        : _toolRecord(tool, requestedName: requested);
+    final record = entry != null
+        ? _catalogEntryRecord(entry, requestedName: requested)
+        : tool == null
+            ? _unsupportedToolRecord(canonical)
+            : _toolRecord(tool, requestedName: requested);
     return MobileToolResult(
       ok: true,
       summary: '${record['tool_id']} schema',
@@ -1145,11 +1522,89 @@ MobileToolDefinition? _findToolDefinition(String name) {
   return null;
 }
 
+_DefaultspackCatalogEntry? _findDefaultspackCatalogEntry(String name) {
+  final normalized = name.trim().toLowerCase();
+  if (normalized.isEmpty) return null;
+  for (final entry in _defaultspackToolAgentManifestCatalog) {
+    if (entry.id == normalized) return entry;
+  }
+  return null;
+}
+
+List<Map<String, dynamic>> _catalogRecords({
+  required bool includeUnavailable,
+}) {
+  final records = <Map<String, dynamic>>[];
+  final seenFunctionIds = <String>{};
+  for (final entry in _defaultspackToolAgentManifestCatalog) {
+    final record = _catalogEntryRecord(entry);
+    if (includeUnavailable || record['mobile_compatible'] == true) {
+      records.add(record);
+    }
+    seenFunctionIds.add(entry.id);
+  }
+
+  for (final tool in MobileToolRuntime.supportedTools) {
+    final coveredByManifest = seenFunctionIds.contains(tool.name) ||
+        tool.aliases.any((alias) => seenFunctionIds.contains(alias));
+    if (coveredByManifest) continue;
+    records.add(_toolRecord(tool, functionId: tool.name));
+    seenFunctionIds.add(tool.name);
+  }
+
+  if (includeUnavailable) {
+    for (final tool in MobileToolRuntime.unavailableDefaultspackTools) {
+      final coveredByManifest = seenFunctionIds.contains(tool.name) ||
+          tool.aliases.any((alias) => seenFunctionIds.contains(alias));
+      if (coveredByManifest) continue;
+      records.add(_toolRecord(tool, functionId: tool.name));
+      seenFunctionIds.add(tool.name);
+    }
+  }
+
+  return records;
+}
+
+Map<String, dynamic> _catalogEntryRecord(
+  _DefaultspackCatalogEntry entry, {
+  String requestedName = '',
+}) {
+  final canonical = _canonicalToolName(entry.id);
+  final tool = _findToolDefinition(canonical);
+  if (tool != null) {
+    final record = _toolRecord(
+      tool,
+      functionId: entry.id,
+      requestedName: requestedName.isEmpty ? entry.id : requestedName,
+    );
+    record['summary'] =
+        entry.description.isEmpty ? record['summary'] : entry.description;
+    record['manifest_tags'] = entry.tags;
+    record['tags'] = {
+      ...entry.tags,
+      ...(record['tags'] as List? ?? const []),
+    }.toList();
+    return record;
+  }
+  final record = _unsupportedToolRecord(entry.id);
+  record['function_id'] = entry.id;
+  if (requestedName.trim().isNotEmpty) {
+    record['requested_name'] = requestedName.trim();
+  }
+  record['summary'] =
+      entry.description.isEmpty ? record['summary'] : entry.description;
+  record['manifest_tags'] = entry.tags;
+  record['tags'] = entry.tags;
+  return record;
+}
+
 Map<String, dynamic> _toolRecord(
   MobileToolDefinition tool, {
+  String functionId = '',
   String requestedName = '',
 }) {
   return {
+    'function_id': functionId.trim().isEmpty ? tool.name : functionId.trim(),
     'tool_id': tool.name,
     if (requestedName.trim().isNotEmpty) 'requested_name': requestedName,
     'aliases': tool.aliases,
@@ -1165,6 +1620,7 @@ Map<String, dynamic> _toolRecord(
 Map<String, dynamic> _unsupportedToolRecord(String name) {
   final normalized = name.trim();
   return {
+    'function_id': normalized,
     'tool_id': normalized,
     'aliases': const <String>[],
     'tags': _inferredDefaultspackTags(normalized),

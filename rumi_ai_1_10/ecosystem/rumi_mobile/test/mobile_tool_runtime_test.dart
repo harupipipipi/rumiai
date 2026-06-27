@@ -182,6 +182,7 @@ void main() {
     });
 
     test('defaultspack catalog tools list names and schemas on phone', () {
+      final manifestIds = _defaultspackToolAgentIds();
       final names = runtime.execute(
         const MobileToolCall(
           id: 'names_1',
@@ -193,6 +194,23 @@ void main() {
       final namesPayload = jsonDecode(names.output) as Map<String, dynamic>;
       final nameData = namesPayload['data'] as Map<String, dynamic>;
       expect(nameData['names'], containsAll(['tool_todo', 'agent_plan']));
+      expect(nameData['names'], containsAll(manifestIds));
+
+      final list = runtime.execute(
+        const MobileToolCall(
+          id: 'list_1',
+          name: 'tool_list',
+          arguments: {},
+        ),
+      );
+      expect(list.ok, isTrue);
+      final listPayload = jsonDecode(list.output) as Map<String, dynamic>;
+      final listData = listPayload['data'] as Map<String, dynamic>;
+      expect(listData['truncated'], isFalse);
+      final functionIds = (listData['tools'] as List)
+          .map((entry) => '${entry['function_id'] ?? entry['tool_id']}')
+          .toSet();
+      expect(functionIds, containsAll(manifestIds));
 
       final schema = runtime.execute(
         const MobileToolCall(
@@ -287,22 +305,7 @@ void main() {
 
     test('returns schema or reason for every defaultspack tool or agent id',
         () {
-      final functionsRoot = Directory('../defaultspack/functions');
-      final manifests = functionsRoot
-          .listSync(recursive: true)
-          .whereType<File>()
-          .where((file) => file.path.endsWith('/manifest.json'));
-      final ids = <String>[];
-      for (final file in manifests) {
-        final manifest = jsonDecode(file.readAsStringSync());
-        if (manifest is! Map<String, dynamic>) continue;
-        final tags = (manifest['tags'] as List? ?? const [])
-            .map((tag) => '$tag')
-            .toSet();
-        if (!tags.contains('tool') && !tags.contains('agent')) continue;
-        final functionId = '${manifest['function_id'] ?? ''}'.trim();
-        if (functionId.isNotEmpty) ids.add(functionId);
-      }
+      final ids = _defaultspackToolAgentIds();
       expect(ids, isNotEmpty);
 
       for (final id in ids) {
@@ -334,4 +337,25 @@ void main() {
       }
     });
   });
+}
+
+List<String> _defaultspackToolAgentIds() {
+  final functionsRoot = Directory('../defaultspack/functions');
+  expect(functionsRoot.existsSync(), isTrue);
+  final manifests = functionsRoot
+      .listSync(recursive: true)
+      .whereType<File>()
+      .where((file) => file.path.endsWith('/manifest.json'));
+  final ids = <String>[];
+  for (final file in manifests) {
+    final manifest = jsonDecode(file.readAsStringSync());
+    if (manifest is! Map<String, dynamic>) continue;
+    final tags =
+        (manifest['tags'] as List? ?? const []).map((tag) => '$tag').toSet();
+    if (!tags.contains('tool') && !tags.contains('agent')) continue;
+    final functionId = '${manifest['function_id'] ?? ''}'.trim();
+    if (functionId.isNotEmpty) ids.add(functionId);
+  }
+  ids.sort();
+  return ids;
 }
