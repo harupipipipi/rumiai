@@ -75,6 +75,48 @@ def test_fallback_http_ambient_event_uses_long_running_timeout():
     assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
 
 
+def test_sandbox_api_function_route_uses_in_process_block_for_runtime_operations():
+    from transport import http
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch("domain.function_runtime.bridge.invoke_function") as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={
+            "status": "ok",
+            "data": {"operation_id": "runtime-ensure-1", "status": "running"},
+        },
+    ) as legacy:
+        result = server._invoke_function_route(
+            "managed_runtime_ensure",
+            {
+                http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+                "_handler": "runtime_ensure",
+                "provider_id": "windows_wsl",
+            },
+            {},
+            {},
+            fallback_block_module="blocks.sandbox.api",
+        )
+
+    assert result == {
+        "status": "ok",
+        "data": {"operation_id": "runtime-ensure-1", "status": "running"},
+    }
+    invoke.assert_not_called()
+    legacy.assert_called_once()
+    assert legacy.call_args.args[0] == "blocks.sandbox.api"
+    assert legacy.call_args.args[1] == {
+        "_handler": "runtime_ensure",
+        "provider_id": "windows_wsl",
+    }
+    assert legacy.call_args.args[2]["_tool_server_approved"] is True
+    assert legacy.call_args.args[2]["source"] == "defaultspack_local_ui"
+    assert legacy.call_args.args[2]["_defaultspack_http_route_adapter"] is True
+
+
 def test_fallback_http_explicit_timeout_overrides_default():
     from transport.http import DefaultsHttpServer
 

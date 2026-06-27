@@ -64,6 +64,10 @@ _LONG_RUNNING_FALLBACK_BLOCKS = {
 }
 _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
 
+_IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
+    "blocks.sandbox.api",
+}
+
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
     (
@@ -387,6 +391,9 @@ class DefaultsHttpServer:
         _apply_authenticated_principal_context(context, payload)
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
+        if module_name in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
         # Standalone live-server scripts start transport with no kernel facade.
         # In that mode, capability bridge resolution can block while trying to
         # discover runtime services that do not exist. Call the block directly.
@@ -509,6 +516,8 @@ class DefaultsHttpServer:
                 context.get("source"),
                 context.get("approval_id"),
             )
+        if fallback_block_module in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            return invoke_block(fallback_block_module, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
 
