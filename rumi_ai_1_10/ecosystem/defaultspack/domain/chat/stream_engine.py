@@ -1135,6 +1135,37 @@ class ChatRunEngine:
                     )
                     draft_completed = True
                 yield cancelled_event
+                if not stream_mode:
+                    final_text = "".join(self._text_parts).strip() or "Cancelled."
+                    finalized_response = self._final_response(
+                        prepared,
+                        {
+                            "content": [{"type": "text", "text": final_text}],
+                            "finish_reason": "cancelled",
+                            "usage": {},
+                            "metadata": {"cancelled": True},
+                        },
+                    )
+                    assistant_message = build_assistant_message(
+                        conversation_id=prepared.conversation_id,
+                        parent_id=prepared.user_message["id"],
+                        sequence_number=assistant_seq,
+                        response=finalized_response,
+                        model=prepared.model,
+                    )
+                    stored = self._store.add_message(prepared.conversation_id, assistant_message)
+                    if stored is not None:
+                        sync_conversation_kanban(prepared.conversation_id, reason="stream_cancelled")
+                        yield self._emit(
+                            "assistant_message_completed",
+                            data={"message": stored},
+                            message="assistant message completed",
+                        )
+                        yield self._emit(
+                            "done",
+                            data={"message": stored},
+                            message="done",
+                        )
                 return
             except RuntimeError as exc:
                 task_failed_event = self._emit(
@@ -2658,6 +2689,8 @@ class ChatRunEngine:
         model_warnings: list[str] = []
         if isinstance(prepared.model_routing, dict) and isinstance(prepared.model_routing.get("warnings"), list):
             model_warnings = [str(item) for item in prepared.model_routing.get("warnings", [])]
+        finish_reason = str(finalized.get("finish_reason") or "")
+        thinking_state = "failed" if finish_reason == "error" else "cancelled" if finish_reason == "cancelled" else "completed"
         metadata.update(
             {
                 "model": prepared.model,
@@ -2669,7 +2702,7 @@ class ChatRunEngine:
                 "unattached_requested_tools": unattached_requested_tools,
                 "unknown_selected_tools": unknown_selected_tools,
                 "thinking": {
-                    "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
+                    "state": thinking_state,
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
                 },
                 "thinking_level": prepared.params.get("thinking_level"),
