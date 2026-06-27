@@ -195,6 +195,25 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
         for schedule in first["schedules"]
         if schedule["task"]["metadata"]["loop_key"] == "qa_loop"
     )
+    stale_heartbeat = Scheduler().create_schedule(
+        "interval",
+        {
+            "message": "Stale heartbeat should not keep firing.",
+            "model": "stub/default",
+            "conversation_id": first["conversation_id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "scheduler",
+            "tools": ["rumi_api", "todo", "subagent"],
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": first["conversation_id"],
+                "loop_key": "heartbeat",
+            },
+        },
+        {"value": 30, "unit": "minutes"},
+        name="MiMo Coding Company heartbeat",
+    )
 
     second = runtime.bootstrap(
         start_nonstop=True,
@@ -235,9 +254,11 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     assert assignment["qa_target"] == "http://127.0.0.1:3001"
     assert "http://127.0.0.1:3001" in compose_text
     assert "rumi.project_name" in compose_text
+    assert Scheduler().get_schedule(stale_heartbeat["id"])["status"] == "paused"
 
     for schedule in second["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    Scheduler().delete_schedule(stale_heartbeat["id"])
     _reset_defaultspack_singletons()
 
 

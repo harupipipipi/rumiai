@@ -37,7 +37,8 @@ COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
 DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
-DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
+DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5"
+SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 DEFAULT_DOCKER_WORKER_COUNT = 3
 DEFAULT_MAX_TOOL_CALLS = 80
 MAX_TOOL_CALLS_LIMIT = 200
@@ -664,6 +665,7 @@ class MimoCodingCompanyRuntime:
                 tools=["rumi_api", "todo", "browser_use", "browser_computer", "browser_companion", "computer_use", "web_search"],
                 description="Persona-based browser/computer-use QA loop.",
             )
+            self._pause_stale_mimo_schedules(state)
         state["last_bootstrapped_at"] = timestamp()
         self._save_state(state)
         return self.status()
@@ -1728,6 +1730,7 @@ class MimoCodingCompanyRuntime:
             "model_allowlist": current_model_allowlist(),
             "schedule_auto_approve_tool_requests": True,
             "schedule_auto_approve_tool_allowlist": [
+                "todo",
                 "browser_use",
                 "browser_computer",
                 "browser_companion",
@@ -1853,6 +1856,36 @@ class MimoCodingCompanyRuntime:
             if schedule:
                 schedules.append(schedule)
         return schedules
+
+    def _pause_stale_mimo_schedules(self, state: dict[str, Any]) -> list[str]:
+        schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        keep_by_loop = {
+            str(loop_key): str(schedule_id)
+            for loop_key, schedule_id in schedule_ids.items()
+            if str(loop_key) in SCHEDULE_LOOP_KEYS and str(schedule_id or "").strip()
+        }
+        if not keep_by_loop:
+            return []
+
+        scheduler = Scheduler()
+        paused: list[str] = []
+        for schedule in scheduler.list_schedules():
+            if not isinstance(schedule, dict):
+                continue
+            schedule_id = str(schedule.get("id") or "")
+            task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+            metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+            if str(metadata.get("profile_id") or "") != PROFILE_ID:
+                continue
+            if str(metadata.get("company_id") or "") != COMPANY_ID:
+                continue
+            loop_key = str(metadata.get("loop_key") or "")
+            if loop_key not in keep_by_loop or keep_by_loop[loop_key] == schedule_id:
+                continue
+            if schedule.get("status") == "active":
+                scheduler.pause_schedule(schedule_id)
+                paused.append(schedule_id)
+        return paused
 
     def _refresh_schedule(
         self,

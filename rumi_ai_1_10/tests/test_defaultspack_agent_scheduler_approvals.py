@@ -31,21 +31,30 @@ def _setup_approval_store(tmp_path, monkeypatch):
     return approval
 
 
-def _approval_required_response(approval, *, conversation_id: str, tool_name: str = "browser_use") -> dict:
-    arguments = {
-        "url": "http://127.0.0.1:8766/chat",
-        "profile_id": "default",
-        "persistent": True,
-        "target_app": "",
-    }
+def _approval_required_response(
+    approval,
+    *,
+    conversation_id: str,
+    tool_name: str = "browser_use",
+    operation: str = "browser.open_url",
+    risk_level: str = "high",
+    arguments: dict | None = None,
+) -> dict:
+    if arguments is None:
+        arguments = {
+            "url": "http://127.0.0.1:8766/chat",
+            "profile_id": "default",
+            "persistent": True,
+            "target_app": "",
+        }
     request = approval.create_approval_request(
-        "browser.open_url",
-        "high",
+        operation,
+        risk_level,
         arguments,
         details={
             "tool_name": tool_name,
-            "action": "browser.open_url",
-            "function_id": "browser.open_url",
+            "action": operation,
+            "function_id": operation,
             "pack_id": "defaultspack",
             "conversation_id": conversation_id,
             "arguments": arguments,
@@ -53,9 +62,9 @@ def _approval_required_response(approval, *, conversation_id: str, tool_name: st
     )
     pending = {
         "tool_name": tool_name,
-        "tool_call_id": "call_browser_open",
-        "action": "browser.open_url",
-        "operation": "browser.open_url",
+        "tool_call_id": f"call_{tool_name}",
+        "action": operation,
+        "operation": operation,
         "payload": arguments,
         "approval_required": True,
         "approval_request_id": request["request_id"],
@@ -141,6 +150,84 @@ def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkey
         }
     ]
     assert "approval_token" not in history["auto_approvals"][0]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_auto_approves_mimo_scheduled_todo_request(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) == 1:
+            return _approval_required_response(
+                approval,
+                conversation_id="conv-mimo",
+                tool_name="todo",
+                operation="tool.todo",
+                risk_level="medium",
+                arguments={"action": "list"},
+            )
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "todo list checked and task continued"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run MiMo QA loop.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "qa_loop",
+            "tools": ["todo"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["todo"],
+                "schedule_auto_approve_max_followups": 2,
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "todo list checked and task continued"
+    assert len(calls) == 2
+    followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
+    assert followup["tool_name"] == "todo"
+    assert followup["operation"] == "tool.todo"
+    assert followup["approval_token"]
+    assert history["auto_approvals"] == [
+        {
+            "request_id": followup["request_id"],
+            "tool_name": "todo",
+            "operation": "tool.todo",
+            "status": "approved",
+        }
+    ]
 
     scheduler.delete_schedule(schedule["id"])
     _reset_scheduler_singleton()
