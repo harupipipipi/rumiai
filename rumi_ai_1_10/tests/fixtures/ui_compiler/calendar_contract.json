@@ -1,0 +1,89 @@
+{
+  "id": "calendar-page-frame",
+  "purpose": "Coordinate a weekly schedule with overlap-safe layout.",
+  "density": "compact",
+  "implementationMode": "component-with-slots",
+  "importance": "pageFrame",
+  "responsibilities": {"responsiveTopologies": ["calendar-shell"]},
+  "slots": [
+    {"id": "toolbar", "acceptsNodeId": "calendar-toolbar", "purpose": "Calendar controls", "minWidth": 280},
+    {"id": "week-header", "acceptsNodeId": "week-header", "purpose": "Day labels", "minWidth": 280},
+    {"id": "week-grid", "acceptsNodeId": "week-grid", "purpose": "Week grid", "minWidth": 320},
+    {"id": "mobile-agenda", "acceptsNodeId": "mobile-agenda", "purpose": "Mobile agenda", "minWidth": 280}
+  ],
+  "children": [
+    {
+      "id": "calendar-toolbar",
+      "purpose": "Navigate dates and change calendar views.",
+      "importance": "secondaryRegion",
+      "responsibilities": {"visualRoles": ["toolbar"], "controls": ["prev", "next", "view"], "states": ["default"]},
+      "requiredStates": ["default"],
+      "allowedPrimitives": ["Button", "Tabs"],
+      "visibleActionBudget": 3
+    },
+    {
+      "id": "week-header",
+      "purpose": "Show day names and dates.",
+      "importance": "secondaryRegion",
+      "responsibilities": {"visualRoles": ["week-header"], "states": ["default"]},
+      "requiredStates": ["default"],
+      "allowedPrimitives": ["Badge"],
+      "visibleActionBudget": 1
+    },
+    {
+      "id": "week-grid",
+      "purpose": "Lay out time-axis events with overlap rules.",
+      "implementationMode": "component-with-slots",
+      "importance": "primaryRegion",
+      "responsibilities": {"responsiveTopologies": ["desktop-week-grid"]},
+      "slots": [
+        {"id": "time-axis", "acceptsNodeId": "time-axis", "purpose": "Time axis", "minWidth": 80},
+        {"id": "event-block", "acceptsNodeId": "event-block", "purpose": "Overlapping events", "minWidth": 220},
+        {"id": "event-editor", "acceptsNodeId": "event-editor", "purpose": "Event editing surface", "minWidth": 280}
+      ],
+      "children": [
+        {
+          "id": "time-axis",
+          "purpose": "Render hour labels.",
+          "importance": "secondaryRegion",
+          "responsibilities": {"visualRoles": ["time-axis"], "states": ["default"]},
+          "requiredStates": ["default"],
+          "allowedPrimitives": ["Badge"],
+          "visibleActionBudget": 1
+        },
+        {
+          "id": "event-block",
+          "purpose": "Render event cards with overlap-layout evidence.",
+          "implementationMode": "repeated-component",
+          "importance": "repeatedCoreComponent",
+          "responsibilities": {
+            "visualRoles": ["event-block"],
+            "layoutAlgorithms": ["overlap-layout"],
+            "states": ["default", "selected"]
+          },
+          "requiredStates": ["default", "selected"],
+          "allowedPrimitives": ["Surface", "Badge"],
+          "visibleActionBudget": 1
+        },
+        {
+          "id": "event-editor",
+          "purpose": "Edit the selected event.",
+          "importance": "primaryRegion",
+          "responsibilities": {"visualRoles": ["event-editor"], "controls": ["title", "save"], "states": ["default", "saving"]},
+          "requiredStates": ["default", "saving"],
+          "allowedPrimitives": ["TextInput", "Button", "Dialog"],
+          "visibleActionBudget": 2
+        }
+      ]
+    },
+    {
+      "id": "mobile-agenda",
+      "purpose": "Stack events as a mobile agenda.",
+      "importance": "secondaryRegion",
+      "responsibilities": {"visualRoles": ["mobile-agenda"], "responsiveTopologies": ["mobile-agenda"], "states": ["default"]},
+      "requiredStates": ["default"],
+      "allowedPrimitives": ["Surface", "Badge"],
+      "visibleActionBudget": 1
+    }
+  ]
+}

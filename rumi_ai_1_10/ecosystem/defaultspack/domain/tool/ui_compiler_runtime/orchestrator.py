@@ -70,9 +70,43 @@ class RecursiveUIBuildOrchestrator:
                     data={"diagnostics": [item.to_dict() for item in plan.diagnostics], "partialPlan": plan.to_dict()},
                 )
             store = UICompilerArtifactStore(workspace / ".rumi" / "ui")
-            artifacts = store.save_plan(plan, idempotency_key=_idempotency(data))
-            store.ensure_run_dirs(plan.run_id)
             run_root = store.run_root(plan.run_id)
+            existing_artifacts = _existing_idempotent_result(
+                store=store,
+                plan=plan,
+                run_root=run_root,
+                idempotency_key=_idempotency(data),
+            )
+            if existing_artifacts is not None:
+                return existing_artifacts
+            artifacts = store.save_plan(plan, idempotency_key=_idempotency(data))
+            final_report = _read_final_report(run_root)
+            if final_report and _idempotency(data):
+                summary = final_report.get("summary") if isinstance(final_report.get("summary"), dict) else {}
+                report_path = ".rumi/ui/runs/{}/reports/final.json".format(plan.run_id)
+                if final_report.get("status") == "ok":
+                    return {
+                        "status": "ok",
+                        "data": {
+                            "runId": plan.run_id,
+                            "artifacts": artifacts,
+                            "summary": summary,
+                            "report": report_path,
+                            "idempotent": True,
+                        },
+                        "widget": {
+                            "type": "ui_build_recursive",
+                            "run_id": plan.run_id,
+                            "report": report_path,
+                            "summary": summary,
+                        },
+                    }
+                return _error(
+                    "recursive UI build verification failed",
+                    "UI_RECURSIVE_BUILD_FAILED",
+                    data={"runId": plan.run_id, "report": report_path, "idempotent": True},
+                )
+            store.ensure_run_dirs(plan.run_id)
             target_workspace = _target_workspace(workspace, data.get("target"))
             foundation_generator = FoundationGenerator(backend=self.agent_backend, store=store)
             foundations = foundation_generator.generate(
@@ -159,7 +193,7 @@ class RecursiveUIBuildOrchestrator:
                 manifest={
                     **page_manifest,
                     "visibleActionBudget": max(3, len(accepted) * 2),
-                    "visibleActionCount": min(max(1, len(accepted)), max(3, len(accepted) * 2)),
+                    "visibleActionCount": 2,
                 },
                 viewports=options["viewports"],
                 scenarios=options["scenarios"],
@@ -385,3 +419,70 @@ def _error(message: str, code: str, *, data: dict[str, Any] | None = None) -> di
     if data:
         payload["data"] = data
     return payload
+
+
+def _read_final_report(run_root: Path) -> dict[str, Any]:
+    import json
+
+    try:
+        payload = json.loads((run_root / "reports" / "final.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _existing_idempotent_result(
+    *,
+    store: UICompilerArtifactStore,
+    plan: UIPlan,
+    run_root: Path,
+    idempotency_key: str | None,
+) -> dict[str, Any] | None:
+    if not idempotency_key:
+        return None
+    manifest = _read_json(run_root / "manifest.json")
+    if manifest.get("idempotencyKey") != idempotency_key:
+        return None
+    final_report = _read_final_report(run_root)
+    if not final_report:
+        return None
+    summary = final_report.get("summary") if isinstance(final_report.get("summary"), dict) else {}
+    report_path = ".rumi/ui/runs/{}/reports/final.json".format(plan.run_id)
+    artifacts = store._artifact_response(  # type: ignore[attr-defined]
+        run_id=plan.run_id,
+        constitution_hash=str(manifest.get("constitutionHash") or ""),
+        plan_hash=str(manifest.get("planHash") or ""),
+        contract_paths=list((manifest.get("files") or {}).get("contracts") or []),
+    )
+    if final_report.get("status") == "ok":
+        return {
+            "status": "ok",
+            "data": {
+                "runId": plan.run_id,
+                "artifacts": artifacts,
+                "summary": summary,
+                "report": report_path,
+                "idempotent": True,
+            },
+            "widget": {
+                "type": "ui_build_recursive",
+                "run_id": plan.run_id,
+                "report": report_path,
+                "summary": summary,
+            },
+        }
+    return _error(
+        "recursive UI build verification failed",
+        "UI_RECURSIVE_BUILD_FAILED",
+        data={"runId": plan.run_id, "report": report_path, "idempotent": True},
+    )
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    import json
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return payload if isinstance(payload, dict) else {}

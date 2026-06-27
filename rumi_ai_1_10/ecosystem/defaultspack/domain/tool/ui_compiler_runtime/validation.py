@@ -14,7 +14,7 @@ REQUIRED_COMPONENT_FILES = {
     "source/Component.stories.tsx",
 }
 REQUIRED_FIXTURES = {"default", "long", "empty", "loading", "error"}
-HEX_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\\b")
+HEX_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 
 
 def validate_candidate_bundle(root: Path, contract: dict[str, Any]) -> dict[str, Any]:

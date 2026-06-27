@@ -233,7 +233,7 @@ class UICompilerArtifactStore:
             / canonical_id(node_id)
             / canonical_id(candidate_id)
         )
-        _atomic_write_json(root / "component.manifest.json", dict(bundle))
+        _atomic_write_json(root / "runtime.bundle.json", dict(bundle))
         _atomic_write_json(root / "status.json", dict(status or {"status": "generated"}))
         return _relative_to_root(root, self.root.parent.parent)
 
@@ -325,8 +325,10 @@ class UICompilerArtifactStore:
         payload["nodeId"] = node_id
         payload["candidateId"] = candidate_id
         root = self.root / "runs" / run_segment / "accepted" / node_segment
-        _atomic_write_json(root / "component.manifest.json", payload)
-        return _relative_to_root(root / "component.manifest.json", self.root.parent.parent)
+        if not (root / "component.manifest.json").exists():
+            _atomic_write_json(root / "component.manifest.json", payload)
+        _atomic_write_json(root / "runtime.accepted.json", payload)
+        return _relative_to_root(root / "runtime.accepted.json", self.root.parent.parent)
 
     def _write_staged_contract(self, staging: Path, contract: ComponentContract) -> str:
         contract_id = canonical_id(contract.id)
