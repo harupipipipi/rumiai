@@ -390,8 +390,12 @@ class ChatStore:
                 msg["parent_id"] = conv["current_node_id"]
             if "children_ids" not in msg:
                 msg["children_ids"] = []
-            if "sequence_number" not in msg or msg["sequence_number"] is None:
-                msg["sequence_number"] = len(conv["messages"]) + 1
+            next_sequence = self._next_append_sequence_number(conv["messages"])
+            requested_sequence = self._coerce_positive_int(msg.get("sequence_number"))
+            if requested_sequence != next_sequence:
+                msg["sequence_number"] = next_sequence
+            else:
+                msg["sequence_number"] = requested_sequence
             if "created_at" not in msg or msg["created_at"] is None:
                 msg["created_at"] = _now_ms()
             if "raw_text" not in msg or msg["raw_text"] is None:
@@ -844,6 +848,49 @@ class ChatStore:
             conversation.get("title") or "New Conversation",
             conversation.get("id") or conversation_id,
         )
+        ChatStore._normalize_message_sequence_numbers(conversation["messages"])
+
+    @staticmethod
+    def _coerce_positive_int(value):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    @staticmethod
+    def _next_append_sequence_number(messages):
+        if not isinstance(messages, list):
+            return 1
+        max_sequence = 0
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            sequence = ChatStore._coerce_positive_int(message.get("sequence_number"))
+            if sequence is not None:
+                max_sequence = max(max_sequence, sequence)
+        return max(len(messages), max_sequence) + 1
+
+    @staticmethod
+    def _normalize_message_sequence_numbers(messages):
+        if not isinstance(messages, list):
+            return
+        expected = 1
+        needs_repair = False
+        for message in messages:
+            if not isinstance(message, dict):
+                expected += 1
+                continue
+            sequence = ChatStore._coerce_positive_int(message.get("sequence_number"))
+            if sequence != expected:
+                needs_repair = True
+                break
+            expected += 1
+        if not needs_repair:
+            return
+        for index, message in enumerate(messages, start=1):
+            if isinstance(message, dict):
+                message["sequence_number"] = index
 
     @staticmethod
     def _set_metadata_icon(metadata, title, conversation_id):
