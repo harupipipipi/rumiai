@@ -116,6 +116,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["company"]["id"] == "mimo-coding-company"
     assert status["conversation_id"]
     assert status["harness"]["qa_targets"] == ["http://127.0.0.1:3000"]
+    assert status["harness"]["max_tool_calls"] is None
+    assert status["company"]["metadata"]["max_tool_calls"] is None
     assert len(status["harness"]["seeded_task_ids"]) == 6
     assert status["harness"]["docker_swarm"]["worker_count"] == 4
     assert status["harness"]["docker_swarm"]["personas"] == ["first_time_user", "power_user"]
@@ -158,6 +160,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert any(schedule["task"]["agent_id"] == "browser_qa" for schedule in status["schedules"])
     heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
     qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    assert heartbeat_schedule["task"]["tool_policy"]["max_tool_calls"] is None
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
@@ -450,6 +453,18 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
             "result": "subagent delegation timed out; rumi_api returned Handler execution failed",
         },
     )
+    append_history(
+        heartbeat_schedule["id"],
+        {
+            "schedule_id": heartbeat_schedule["id"],
+            "execution_id": "exec_text_tool_call",
+            "trigger": "heartbeat",
+            "status": "completed",
+            "started_at": "2026-06-27T00:01:00Z",
+            "completed_at": "2026-06-27T00:01:05Z",
+            "result": "<tool_call>\n<function=todo>\n<parameter=action>list</parameter>\n</function>\n</tool_call>",
+        },
+    )
 
     chat_store = ChatStore()
     child = chat_store.create_conversation(
@@ -495,7 +510,8 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     observability = observed["harness"]["observability"]
     messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
 
-    assert observability["schedule_history"]["signals"][0]["signal"] == "subagent_timeout"
+    signals = {item["signal"] for item in observability["schedule_history"]["signals"]}
+    assert {"subagent_timeout", "text_tool_call_not_executed"} <= signals
     assert observability["subagents"]["unanswered_count"] == 1
     assert observability["desktop_monitoring"]["status"] in {"empty", "ok", "error"}
     assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
@@ -505,7 +521,13 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         for message in messages
         if isinstance(message.get("metadata"), dict)
     }
-    assert total == 3
+    message_signals = {
+        message["metadata"].get("signal")
+        for message in messages
+        if isinstance(message.get("metadata"), dict)
+    }
+    assert "text_tool_call_not_executed" in message_signals
+    assert total == 4
     assert {message["metadata"]["sync_source"] for message in messages} == {
         "mimo_schedule_history",
         "mimo_subagent_monitor",

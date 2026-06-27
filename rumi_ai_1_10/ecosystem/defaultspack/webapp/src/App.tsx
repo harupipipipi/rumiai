@@ -4538,7 +4538,9 @@ function ChatApp() {
   const mimoCodingMaxToolCalls = () => {
     const raw = settingsValues.mimo_coding_company?.max_tool_calls;
     if (raw === null || raw === undefined || raw === "" || raw === false) return null;
-    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+    const numeric = settingNumber(raw, 0);
+    if (numeric <= 0) return null;
+    return Math.max(1, Math.min(200, numeric));
   };
   const mimoCodingMaxToolCallsPayload = () => {
     const value = mimoCodingMaxToolCalls();

@@ -40,7 +40,6 @@ DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
 DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 DEFAULT_DOCKER_WORKER_COUNT = 3
-DEFAULT_MAX_TOOL_CALLS = 80
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
 
@@ -548,11 +547,18 @@ class MimoCodingCompanyRuntime:
         }
 
     @staticmethod
-    def _max_tool_calls(value: int | None) -> int:
+    def _max_tool_calls(value: int | str | None) -> int | None:
+        if value in (None, ""):
+            return None
+        text = str(value).strip().lower()
+        if text in {"none", "null", "unlimited", "infinite", "infinity"}:
+            return None
         try:
-            parsed = int(value if value not in (None, "") else DEFAULT_MAX_TOOL_CALLS)
+            parsed = int(value)
         except (TypeError, ValueError):
-            parsed = DEFAULT_MAX_TOOL_CALLS
+            return None
+        if parsed <= 0:
+            return None
         return max(1, min(parsed, MAX_TOOL_CALLS_LIMIT))
 
     @staticmethod
@@ -586,7 +592,7 @@ class MimoCodingCompanyRuntime:
         qa_targets: list[str] | None = None,
         docker_worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
         docker_personas: list[str] | None = None,
-        max_tool_calls: int | None = DEFAULT_MAX_TOOL_CALLS,
+        max_tool_calls: int | None = None,
         workspace_id: str | None = None,
         workspace_label: str | None = None,
         workspace_root: str | None = None,
@@ -1519,6 +1525,11 @@ class MimoCodingCompanyRuntime:
             signal = "tool_handler_failure"
         elif "browser_companion" in text or "0 clients paired" in text:
             signal = "browser_companion_unpaired"
+        elif (
+            ("<tool_call" in text and "<function=" in text)
+            or ("<tool_use" in text and '"name"' in text)
+        ):
+            signal = "text_tool_call_not_executed"
         elif "approval" in text or "permission" in text:
             signal = "approval_wait"
         elif str(entry.get("status") or "").lower() == "error" or entry.get("error"):

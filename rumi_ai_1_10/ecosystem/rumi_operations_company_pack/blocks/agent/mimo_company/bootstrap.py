@@ -23,6 +23,15 @@ def _as_int(value, default):
     return int(value)
 
 
+def _as_optional_int(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower()
+    if text in {"none", "null", "unlimited", "infinite", "infinity"}:
+        return None
+    return int(value)
+
+
 def _as_string_list(value):
     if value is None:
         return []
@@ -56,7 +65,7 @@ def run(input_data, context):
             qa_targets=_as_string_list(input_data.get("qa_targets")),
             docker_worker_count=max(1, min(_as_int(input_data.get("docker_worker_count"), 3), 16)),
             docker_personas=_as_string_list(input_data.get("docker_personas")),
-            max_tool_calls=max(1, min(_as_int(input_data.get("max_tool_calls"), 80), 200)),
+            max_tool_calls=_as_optional_int(input_data.get("max_tool_calls")),
             workspace_id=str(input_data.get("workspace_id") or "").strip() or None,
             workspace_label=str(input_data.get("workspace_label") or "").strip() or None,
             workspace_root=str(input_data.get("workspace_root") or "").strip() or None,
