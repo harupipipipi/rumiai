@@ -82,31 +82,49 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final api = await widget.configStore.loadApi();
-    final savedProviderConfigs = await widget.configStore.loadProviderConfigs();
-    final providerConfigs = _mergeDefaultProviderConfigs(savedProviderConfigs);
-    final modelFavorites = await widget.configStore.loadModelFavorites();
-    final pc = await widget.configStore.loadPc();
-    final notificationSettings =
-        await widget.configStore.loadNotificationSettings();
-    final paired = await widget.deviceStore.loadPairedDevice();
-    final pairedDevices = await widget.deviceStore.loadPairedDevices();
-    final identity = await widget.deviceStore.loadOrCreateIdentity();
-    if (!mounted) return;
-    setState(() {
-      _config = api;
-      _providerConfigs = providerConfigs;
-      _modelFavorites = modelFavorites;
-      _pc = pc;
-      _notificationSettings = notificationSettings;
-      _pairedDevices = pairedDevices;
-      if (_pc == null && paired != null) {
-        _pc = paired.toPcConnection();
-      }
-      _deviceIdentity = identity;
-      _syncControllers();
-      _loading = false;
-    });
+    try {
+      final api = await widget.configStore.loadApi();
+      final savedProviderConfigs =
+          await widget.configStore.loadProviderConfigs();
+      final providerConfigs =
+          _mergeDefaultProviderConfigs(savedProviderConfigs);
+      final modelFavorites = await widget.configStore.loadModelFavorites();
+      final pc = await widget.configStore.loadPc();
+      final notificationSettings =
+          await widget.configStore.loadNotificationSettings();
+      final paired = await widget.deviceStore.loadPairedDevice();
+      final pairedDevices = await widget.deviceStore.loadPairedDevices();
+      final identity = await widget.deviceStore.loadOrCreateIdentity();
+      if (!mounted) return;
+      setState(() {
+        _config = api;
+        _providerConfigs = providerConfigs;
+        _modelFavorites = modelFavorites;
+        _pc = pc;
+        _notificationSettings = notificationSettings;
+        _pairedDevices = pairedDevices;
+        if (_pc == null && paired != null) {
+          _pc = paired.toPcConnection();
+        }
+        _deviceIdentity = identity;
+        _syncControllers();
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _config = ApiConfig.defaults;
+        _providerConfigs =
+            _mergeDefaultProviderConfigs(const <MobileProviderConfig>[]);
+        _modelFavorites = const [];
+        _pc = null;
+        _notificationSettings = MobileNotificationSettings.defaults;
+        _pairedDevices = const [];
+        _deviceIdentity = null;
+        _syncControllers();
+        _loading = false;
+      });
+    }
   }
 
   void _syncControllers() {

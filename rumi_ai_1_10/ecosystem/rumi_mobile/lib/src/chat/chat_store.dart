@@ -48,18 +48,27 @@ class ChatStore {
       : _firstWhere(_conversations, (c) => c.id == _activeId);
 
   Future<void> load() async {
-    final raw = await _storage.read(_kConversationsKey);
+    String? raw;
+    try {
+      raw = await _storage.read(_kConversationsKey);
+    } catch (_) {
+      raw = null;
+    }
     if (raw != null && raw.trim().isNotEmpty) {
       try {
-        final list = jsonDecode(raw) as List;
-        _conversations = list
-            .map((m) => Conversation.fromJson(m as Map<String, dynamic>))
-            .toList();
+        final decoded = jsonDecode(raw);
+        final list = decoded is List ? decoded : const [];
+        _conversations =
+            list.map(_conversationFromRaw).whereType<Conversation>().toList();
       } catch (_) {
         _conversations = const [];
       }
     }
-    _activeId = await _storage.read(_kActiveConversationKey);
+    try {
+      _activeId = await _storage.read(_kActiveConversationKey);
+    } catch (_) {
+      _activeId = null;
+    }
     if (_activeId != null && !_conversations.any((c) => c.id == _activeId)) {
       _activeId = _conversations.isEmpty ? null : _conversations.first.id;
     }
@@ -69,12 +78,16 @@ class ChatStore {
   }
 
   Future<void> _persist() async {
-    final raw = jsonEncode(_conversations.map((c) => c.toJson()).toList());
-    await _storage.write(_kConversationsKey, raw);
-    if (_activeId != null) {
-      await _storage.write(_kActiveConversationKey, _activeId!);
-    } else {
-      await _storage.delete(_kActiveConversationKey);
+    try {
+      final raw = jsonEncode(_conversations.map((c) => c.toJson()).toList());
+      await _storage.write(_kConversationsKey, raw);
+      if (_activeId != null) {
+        await _storage.write(_kActiveConversationKey, _activeId!);
+      } else {
+        await _storage.delete(_kActiveConversationKey);
+      }
+    } catch (_) {
+      // Keep the in-memory conversation usable even if platform storage fails.
     }
   }
 
@@ -171,5 +184,17 @@ class ChatStore {
       if (test(item)) return item;
     }
     return null;
+  }
+
+  Conversation? _conversationFromRaw(Object? raw) {
+    if (raw is! Map) return null;
+    try {
+      final conversation = Conversation.fromJson(
+        Map<String, dynamic>.from(raw),
+      );
+      return conversation.id.trim().isEmpty ? null : conversation;
+    } catch (_) {
+      return null;
+    }
   }
 }
