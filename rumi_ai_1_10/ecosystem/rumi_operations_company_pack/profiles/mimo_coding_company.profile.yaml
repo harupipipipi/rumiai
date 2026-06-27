@@ -89,6 +89,10 @@ node_settings:
       - browser_computer
       - browser_companion
       - computer_use
+      - desktop_list
+      - desktop_create
+      - desktop_frame
+      - desktop_input
       - coding_file_read
       - coding_file_search
       - coding_file_list
@@ -155,6 +159,10 @@ policy:
     - browser_computer
     - browser_companion
     - computer_use
+    - desktop_list
+    - desktop_create
+    - desktop_frame
+    - desktop_input
     - coding_file_read
     - coding_file_search
     - coding_file_list

@@ -160,6 +160,18 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
+    assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
+    assert {"desktop_create", "desktop_input"} <= set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
+    assert "managed desktop" in qa_schedule["task"]["message"]
+    browser_qa_role = next(role for role in status["manifest"]["roles"] if role["agent_id"] == "browser_qa")
+    assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(browser_qa_role["allowed_tools"])
+    assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(status["manifest"]["tool_policy"]["allowlist"])
+    assert status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["tools"] == [
+        "desktop_list",
+        "desktop_create",
+        "desktop_frame",
+        "desktop_input",
+    ]
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
@@ -242,6 +254,7 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     assert qa_schedule["id"] == qa_schedule_id
     assert "http://127.0.0.1:3001" in qa_schedule["task"]["message"]
     assert "Power user" in qa_schedule["task"]["message"]
+    assert "desktop_create" in qa_schedule["task"]["tools"]
     assert qa_schedule["config"] == {"value": 90, "unit": "minutes"}
     assert improvement_schedule["config"] == {"value": 120, "unit": "minutes"}
     assert second["harness"]["qa_swarm_plan"]["workers"][0]["persona_id"] == "power_user"

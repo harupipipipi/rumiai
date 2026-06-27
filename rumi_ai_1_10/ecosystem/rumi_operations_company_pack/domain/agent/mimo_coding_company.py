@@ -91,7 +91,16 @@ IMPROVEMENT_STREAMS = [
         "title": "Frontend QA swarm",
         "description": "Run browser and computer-use QA with multiple personas and log only evidence-backed bugs.",
         "target_agent_ids": ["browser_qa", "reviewer"],
-        "preferred_tools": ["browser_use", "browser_companion", "computer_use", "todo"],
+        "preferred_tools": [
+            "browser_use",
+            "browser_companion",
+            "computer_use",
+            "desktop_list",
+            "desktop_create",
+            "desktop_frame",
+            "desktop_input",
+            "todo",
+        ],
         "owner_role": "browser_qa",
         "preferred_model_role": "vision",
     },
@@ -205,6 +214,10 @@ TOOL_ALLOWLIST = [
     "browser_computer",
     "browser_companion",
     "computer_use",
+    "desktop_list",
+    "desktop_create",
+    "desktop_frame",
+    "desktop_input",
     "coding_file_read",
     "coding_file_search",
     "coding_file_list",
@@ -297,9 +310,24 @@ ROLE_DEFINITIONS = [
         "agent_name": "Browser QA",
         "display_name": "Browser QA",
         "model": DEFAULT_VISION_MODEL,
-        "allowed_tools": ["rumi_api", "todo", "browser_use", "browser_computer", "browser_companion", "computer_use", "web_search"],
+        "allowed_tools": [
+            "rumi_api",
+            "todo",
+            "browser_use",
+            "browser_computer",
+            "browser_companion",
+            "computer_use",
+            "desktop_list",
+            "desktop_create",
+            "desktop_frame",
+            "desktop_input",
+            "web_search",
+        ],
         "context_limit": 96000,
-        "system_prompt": "Act like a real user. Click around, break things, and file only evidence-backed bugs.",
+        "system_prompt": (
+            "Act like a real user. Click around, break things, and file only evidence-backed bugs. "
+            "If browser tools are unpaired or unavailable, create/use a managed desktop seat before stopping."
+        ),
     },
     {
         "agent_id": "toolsmith",
@@ -662,7 +690,19 @@ class MimoCodingCompanyRuntime:
                 message=self._qa_message(state),
                 model=selected_vision_model,
                 agent_id="browser_qa",
-                tools=["rumi_api", "todo", "browser_use", "browser_computer", "browser_companion", "computer_use", "web_search"],
+                tools=[
+                    "rumi_api",
+                    "todo",
+                    "browser_use",
+                    "browser_computer",
+                    "browser_companion",
+                    "computer_use",
+                    "desktop_list",
+                    "desktop_create",
+                    "desktop_frame",
+                    "desktop_input",
+                    "web_search",
+                ],
                 description="Persona-based browser/computer-use QA loop.",
             )
             self._pause_stale_mimo_schedules(state)
@@ -1012,6 +1052,7 @@ class MimoCodingCompanyRuntime:
             "prompt_style": "Keep prompts short, concrete, and evidence-first.",
             "reporting_policy": "Report only evidence-backed bugs with exact repro steps or screenshots.",
             "tools_hint": ["browser_use", "browser_companion", "computer_use"],
+            "desktop_tools_hint": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
             "model_hint": DEFAULT_VISION_MODEL,
         }
 
@@ -1735,6 +1776,8 @@ class MimoCodingCompanyRuntime:
                 "browser_computer",
                 "browser_companion",
                 "computer_use",
+                "desktop_create",
+                "desktop_input",
             ],
             "schedule_auto_approve_max_followups": 5,
         }
@@ -1957,11 +2000,21 @@ class MimoCodingCompanyRuntime:
                     "mission": str(persona_meta.get("mission") or str(persona_spec.get("goal") or "")),
                     "probe_areas": list(persona_meta.get("probe_areas") or []),
                     "evidence_required": "Screenshots or exact repro steps before filing a bug.",
+                    "fallback": "If browser_use, computer_use, or browser_companion cannot control a browser, use desktop_list/create/frame/input to continue in a managed desktop seat.",
                 }
             )
         return {
             "coordinator_agent_id": "browser_qa",
             "reporting_policy": "Report only evidence-backed bugs. Stay quiet if the assigned path passes.",
+            "managed_desktop_fallback": {
+                "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
+                "create_defaults": {
+                    "template_id": "desktop.linux_native",
+                    "starter": "browser_url",
+                    "assigned_agent": "browser_qa",
+                    "resolution": {"width": 1280, "height": 800},
+                },
+            },
             "workers": assignments,
         }
 
@@ -2015,7 +2068,8 @@ class MimoCodingCompanyRuntime:
             "Run a QA swarm with short prompts."
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " Click around, use browser_use, browser_companion, or computer_use as needed, and prioritize workers missing status or browser launch before broad exploration. "
+            + " First call desktop_list. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using starter=browser_url, assigned_agent=browser_qa, and the assigned target URL, then continue with desktop_frame and desktop_input. "
+            "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."
         )
