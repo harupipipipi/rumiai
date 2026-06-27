@@ -227,6 +227,39 @@ void main() {
       expect(data['unavailable_reason'], contains('PC側'));
     });
 
+    test('defaultspack generated manifest aliases and schemas are exposed', () {
+      final aliasSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_alias_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'defaultspack.agent.execute'},
+        ),
+      );
+      expect(aliasSchema.ok, isTrue);
+      final aliasPayload =
+          jsonDecode(aliasSchema.output) as Map<String, dynamic>;
+      final aliasData = aliasPayload['data'] as Map<String, dynamic>;
+      expect(aliasData['function_id'], 'agent_execute');
+      expect(aliasData['requested_name'], 'defaultspack.agent.execute');
+      expect(aliasData['aliases'], contains('defaults.agent.execute'));
+
+      final webSearchSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_web_search_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tool_web_search'},
+        ),
+      );
+      expect(webSearchSchema.ok, isTrue);
+      final webPayload =
+          jsonDecode(webSearchSchema.output) as Map<String, dynamic>;
+      final webData = webPayload['data'] as Map<String, dynamic>;
+      final parameters = webData['parameters'] as Map<String, dynamic>;
+      expect(parameters['required'], contains('query'));
+      expect(parameters['properties'], contains('query'));
+      expect(webData['aliases'], contains('defaultspack.tool.web_search'));
+    });
+
     test('runs phone-local defaultspack agent plan and status tools', () {
       final plan = runtime.execute(
         const MobileToolCall(
