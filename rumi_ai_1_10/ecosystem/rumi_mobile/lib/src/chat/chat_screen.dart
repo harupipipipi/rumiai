@@ -33,11 +33,13 @@ class ChatScreen extends StatefulWidget {
     required this.store,
     required this.configStore,
     required this.deviceStore,
+    this.localBackend,
   });
 
   final ChatStore store;
   final ApiConfigStore configStore;
   final MobileDeviceStore deviceStore;
+  final LocalConversationBackend? localBackend;
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -78,10 +80,11 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _router = ConversationRouter(
-      local: LocalConversationBackend(
-        store: widget.store,
-        configStore: widget.configStore,
-      ),
+      local: widget.localBackend ??
+          LocalConversationBackend(
+            store: widget.store,
+            configStore: widget.configStore,
+          ),
     );
     _initFuture = _init();
     _scrollController.addListener(_onScroll);

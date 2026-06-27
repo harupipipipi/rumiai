@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -8,8 +10,11 @@ import 'package:rumi_remote_app/src/chat/chat_screen.dart';
 import 'package:rumi_remote_app/src/chat/chat_store.dart';
 import 'package:rumi_remote_app/src/chat/composer_bar.dart';
 import 'package:rumi_remote_app/src/chat/message_view.dart';
+import 'package:rumi_remote_app/src/data/local/local_chat_backend.dart';
 import 'package:rumi_remote_app/src/data/pc/device_store.dart';
+import 'package:rumi_remote_app/src/domain/chat_event.dart';
 import 'package:rumi_remote_app/src/domain/connection_state.dart';
+import 'package:rumi_remote_app/src/domain/conversation_locator.dart';
 import 'package:rumi_remote_app/src/domain/space.dart';
 import 'package:rumi_remote_app/src/features/chat/connection_chip.dart';
 import 'package:rumi_remote_app/src/settings/api_config_store.dart';
@@ -49,6 +54,91 @@ class _FakeChatStorage implements ChatKeyValueStorage {
   @override
   Future<void> delete(String key) async {
     _values.remove(key);
+  }
+}
+
+class _FakeActivityBackend extends LocalConversationBackend {
+  _FakeActivityBackend({
+    required super.store,
+    required super.configStore,
+  }) : _store = store;
+
+  final ChatStore _store;
+  final started = Completer<void>();
+  final releaseTool = Completer<void>();
+  final releaseFinal = Completer<void>();
+
+  @override
+  Stream<ChatEvent> sendMessage({
+    required ConversationLocator locator,
+    required String text,
+    required String clientMessageId,
+    required int expectedRevision,
+    String? model,
+    String? profileId,
+    Map<String, dynamic>? params,
+  }) async* {
+    const runId = 'run-activity-test';
+    const assistantId = 'assistant-activity-test';
+    await _store.addMessage(
+      locator.conversationId,
+      ChatMessage(
+        id: clientMessageId,
+        role: ChatRole.user,
+        content: text,
+        createdAt: DateTime.now(),
+      ),
+    );
+    await _store.addMessage(
+      locator.conversationId,
+      ChatMessage(
+        id: assistantId,
+        role: ChatRole.assistant,
+        content: '',
+        createdAt: DateTime.now(),
+        pending: true,
+      ),
+    );
+
+    if (!started.isCompleted) started.complete();
+    yield ChatRunStarted(
+      locator: locator,
+      runId: runId,
+      assistantMessageId: assistantId,
+    );
+    yield ChatStatusEvent(
+      locator: locator,
+      runId: runId,
+      message: '考えています',
+      phase: 'thinking',
+    );
+
+    await releaseTool.future.timeout(const Duration(seconds: 2));
+    yield ToolCallEvent(
+      locator: locator,
+      runId: runId,
+      toolId: 'tool-todo',
+      toolName: 'todo',
+      status: 'completed',
+      arguments: {'action': 'add', 'title': 'Write UI activity test'},
+      summary: 'Write UI activity test',
+    );
+
+    await releaseFinal.future.timeout(const Duration(seconds: 2));
+    await _store.updateMessage(
+      locator.conversationId,
+      assistantId,
+      'できました',
+      pending: false,
+    );
+    yield ChatMessageCommitted(
+      locator: locator,
+      runId: runId,
+      messageId: assistantId,
+      content: 'できました',
+      error: false,
+    );
+    yield ChatRunCompleted(locator: locator, runId: runId);
   }
 }
 
@@ -205,6 +295,64 @@ void main() {
     await tester.pump();
     expect(find.text('処理中...'), findsOneWidget);
     expect(find.byIcon(Icons.auto_awesome), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('chat screen renders thinking and tool activity while streaming',
+      (tester) async {
+    await tester.binding.setSurfaceSize(const Size(393, 852));
+    final store = ChatStore(storage: _FakeChatStorage());
+    final fakeStorage = _FakeSecureStorage();
+    final configStore = ApiConfigStore(storage: fakeStorage);
+    await configStore.saveApi(const ApiConfig(
+      baseUrl: 'http://127.0.0.1:8765/v1',
+      apiKey: 'sk-test',
+      model: 'gpt-test',
+    ));
+    final backend = _FakeActivityBackend(
+      store: store,
+      configStore: configStore,
+    );
+    final deviceStore = MobileDeviceStore(storage: fakeStorage);
+    await tester.pumpWidget(wrap(ChatScreen(
+      store: store,
+      configStore: configStore,
+      deviceStore: deviceStore,
+      localBackend: backend,
+    )));
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'todoを作って');
+    await tester.pump();
+    final sendBtn = find.ancestor(
+      of: find.byIcon(Icons.arrow_upward_rounded),
+      matching: find.bySubtype<IconButton>(),
+    );
+    await tester.tap(sendBtn);
+    await tester.runAsync(
+      () => backend.started.future.timeout(const Duration(seconds: 2)),
+    );
+    await tester.pump();
+
+    expect(find.text('考えています'), findsOneWidget);
+
+    backend.releaseTool.complete();
+    await tester.pump();
+    await tester
+        .runAsync(() => Future<void>.delayed(const Duration(milliseconds: 30)));
+    await tester.pump();
+
+    expect(find.text('todo'), findsOneWidget);
+    expect(find.textContaining('Write UI activity test'), findsOneWidget);
+
+    backend.releaseFinal.complete();
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('できました'), findsOneWidget);
+    expect(find.text('todo'), findsOneWidget);
+    expect(find.text('考えています'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
