@@ -1925,6 +1925,46 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     assert docker_isolation["sandbox_cgroup_scope"] == "docker_container"
 
 
+def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch) -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers import managed_ubuntu
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+        GuestCommandResult,
+        WindowsWslProvider,
+    )
+
+    commands: list[tuple[str, ...]] = []
+
+    def runner(command, input_text, timeout):
+        del input_text, timeout
+        argv = tuple(command)
+        commands.append(argv)
+        if argv == ("wsl.exe", "--version"):
+            return GuestCommandResult(returncode=0, stdout="WSL version: 2.5.0\n")
+        if argv == ("wsl.exe", "-l", "-q"):
+            return GuestCommandResult(
+                returncode=0,
+                stdout="d\x00o\x00c\x00k\x00e\x00r\x00-\x00d\x00e\x00s\x00k\x00t\x00o\x00p\x00\n\x00R\x00u\x00m\x00i\x00U\x00b\x00u\x00n\x00t\x00u\x00\n\x00",
+            )
+        if argv[:5] == ("wsl.exe", "-d", "RumiUbuntu", "--", "bash"):
+            return GuestCommandResult(returncode=0, stdout="")
+        return GuestCommandResult(returncode=1, stderr=f"unexpected command: {argv!r}")
+
+    monkeypatch.setattr(managed_ubuntu.platform, "system", lambda: "Windows")
+    provider = WindowsWslProvider(command_path="wsl.exe", runner=runner)
+
+    status = provider.doctor(
+        RuntimeRequirements(provider_id="windows_wsl", required_capabilities=frozenset())
+    )
+
+    dependency_checks = [
+        command for command in commands if command[:5] == ("wsl.exe", "-d", "RumiUbuntu", "--", "bash")
+    ]
+    assert status.ready is True
+    assert "managed_guest" not in status.missing_requirements
+    assert dependency_checks
+    assert "command -v Xvfb" in dependency_checks[0][-1]
+
+
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 

@@ -120,6 +120,11 @@ RootfsDownloader = Callable[[str, str], None]
 ChecksumFetcher = Callable[[str], str]
 
 
+def _wsl_distribution_names(output: str) -> tuple[str, ...]:
+    normalized = str(output or "").replace("\x00", "").replace("\ufeff", "")
+    return tuple(line.strip() for line in normalized.splitlines() if line.strip())
+
+
 class ManagedUbuntuProvider:
     """Command-backed managed Ubuntu runtime used by Lima and WSL providers."""
 
@@ -760,7 +765,9 @@ class WindowsWslProvider(ManagedUbuntuProvider):
 
     def _guest_exists(self, command_path: str) -> bool:
         result = self._run((command_path, "-l", "-q"), timeout=10)
-        return result.returncode == 0 and self._runtime_name.casefold() in {line.strip().casefold() for line in result.stdout.splitlines()}
+        return result.returncode == 0 and self._runtime_name.casefold() in {
+            name.casefold() for name in _wsl_distribution_names(result.stdout)
+        }
 
     def _ensure_guest(self, command_path: str) -> None:
         if self._guest_exists(command_path):
