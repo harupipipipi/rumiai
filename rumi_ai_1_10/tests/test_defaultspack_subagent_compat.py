@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -100,6 +102,45 @@ def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
 
     assert result["status"] == "ok"
     assert result["data"]["widget"]["type"] == "subagent"
+
+
+def test_tool_subagent_manifest_timeout_is_forwarded_to_capability_executor():
+    manifest = json.loads(
+        (ROOT / "ecosystem" / "rumi_default_tools_pack" / "tools" / "subagent" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    tool_def = {**manifest["config"], "source_pack_id": "rumi_default_tools_pack"}
+    seen: dict[str, object] = {}
+
+    class FakeCapabilityExecutor:
+        def execute(self, principal_id, request):
+            seen["principal_id"] = principal_id
+            seen["request"] = dict(request)
+            return SimpleNamespace(
+                success=True,
+                output={
+                    "status": "ok",
+                    "data": {
+                        "result": "subagent completed",
+                        "is_error": False,
+                        "widget": {"type": "subagent"},
+                    },
+                },
+                error=None,
+                error_type=None,
+            )
+
+    result = ToolExecutor()._execute_rumi_function(
+        tool_def,
+        {"task": "hello from child"},
+        {"capability_executor": FakeCapabilityExecutor()},
+    )
+
+    assert result["is_error"] is False
+    assert seen["principal_id"] == "rumi_default_tools_pack"
+    assert seen["request"]["qualified_name"] == "defaultspack:tool_subagent"
+    assert seen["request"]["timeout_seconds"] == 240
 
 
 def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_path):

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,10 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
     source_path = component_manifest.get("source_path")
     if not isinstance(source_path, str) or not source_path:
         return None
-    path = (Path(source_path).parent / rel_path).resolve()
+    base = _lexical_absolute_path(Path(source_path).parent)
+    path = _lexical_absolute_path(Path(source_path).parent / rel_path)
+    if not _path_is_within(path, base):
+        return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -28,7 +32,23 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
 
 
 def _trusted_provider_component_root() -> Path:
-    return Path(__file__).resolve().parents[3] / "domain" / "providers"
+    return Path(__file__).parents[3] / "domain" / "providers"
+
+
+def _lexical_absolute_path(path: str | os.PathLike[str]) -> Path:
+    return Path(os.path.abspath(os.path.normpath(os.fspath(path))))
+
+
+def _normalized_path_text(path: str | os.PathLike[str]) -> str:
+    return os.path.normcase(str(_lexical_absolute_path(path)))
+
+
+def _path_is_within(path: Path, root: Path) -> bool:
+    candidate = _normalized_path_text(path)
+    boundary = _normalized_path_text(root)
+    if candidate == boundary:
+        return True
+    return candidate.startswith(boundary.rstrip("\\/") + os.sep)
 
 
 def _is_trusted_runtime_provider_component(component: Any) -> bool:
@@ -41,11 +61,10 @@ def _is_trusted_runtime_provider_component(component: Any) -> bool:
     are trusted to contribute those runtime manifests.
     """
     try:
-        manifest_path = Path(component.manifest_path).resolve()
-        manifest_path.relative_to(_trusted_provider_component_root().resolve())
-    except (AttributeError, OSError, ValueError):
+        manifest_path = Path(component.manifest_path)
+    except (AttributeError, TypeError, ValueError):
         return False
-    return True
+    return _path_is_within(manifest_path, _trusted_provider_component_root())
 
 
 def provider_component_metadata_map() -> dict[str, dict[str, Any]]:

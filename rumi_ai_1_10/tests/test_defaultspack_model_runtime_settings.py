@@ -88,6 +88,46 @@ def test_model_runtime_settings_utility_models_and_groups(tmp_path):
     assert settings["model_groups"]["custom"]["allowed_models"] == ["stub/default"]
 
 
+def test_get_settings_refreshes_models_once(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+    service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL
+    calls = 0
+    original_refresh = service.refresh_models_settings
+
+    def counted_refresh(values):
+        nonlocal calls
+        calls += 1
+        return original_refresh(values)
+
+    service.refresh_models_settings = counted_refresh
+
+    settings = service.get_settings()
+
+    assert settings["preferred_model"] == "stub/default"
+    assert calls == 1
+
+
+def test_runtime_rumi_base_model_uses_cached_builtin_base_without_catalog(tmp_path):
+    service = ModelRuntimeSettingsService(tmp_path)
+
+    def fail_catalog(settings=None):
+        raise AssertionError("cached Rumi base model should not need provider catalog")
+
+    service._base_profile_catalog = fail_catalog
+
+    assert service._runtime_rumi_base_model(
+        {
+            "model_packs": [
+                {
+                    "id": "rumi",
+                    "metadata": {"resolved_base_model": RUMI_BASE_MODEL},
+                    "members": [{"model": RUMI_BASE_MODEL}, {"model": RUMI_BASE_MODEL}],
+                }
+            ]
+        }
+    ) == RUMI_BASE_MODEL
+
+
 def test_model_runtime_settings_includes_builtin_rumi_model_pack(tmp_path):
     service = ModelRuntimeSettingsService(tmp_path)
     service._runtime_rumi_base_model = lambda settings=None: RUMI_BASE_MODEL

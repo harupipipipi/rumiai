@@ -274,6 +274,9 @@ class ToolExecutor:
             "qualified_name": qualified_name,
             "args": arguments or {},
         }
+        timeout_seconds = _execution_timeout_seconds(tool_def)
+        if timeout_seconds is not None:
+            request["timeout_seconds"] = timeout_seconds
         if isinstance(context, dict) and context.get("request_id"):
             request["request_id"] = context.get("request_id")
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
@@ -2505,6 +2508,26 @@ def _function_call_context(context, tool_def):
             if isinstance(value, (str, int, float)) and str(value).strip():
                 forwarded[key] = value
     return forwarded
+
+
+def _execution_timeout_seconds(tool_def):
+    if not isinstance(tool_def, dict):
+        return None
+    execution = tool_def.get("execution")
+    if not isinstance(execution, dict):
+        return None
+    raw = execution.get("timeout_seconds")
+    if raw is None:
+        raw = execution.get("timeout")
+    if raw is None:
+        return None
+    try:
+        timeout = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if timeout <= 0:
+        return None
+    return min(timeout, 300.0)
 
 
 def _sandbox_function_call_context(context):
