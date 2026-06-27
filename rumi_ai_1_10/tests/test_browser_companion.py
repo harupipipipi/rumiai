@@ -57,6 +57,44 @@ def test_browser_companion_store_accepts_tabs_summary_alias(tmp_path):
     assert record["active_tab_id"] == 17
 
 
+def test_browser_companion_no_client_returns_actionable_setup_state(tmp_path):
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
+    from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore
+
+    store = BrowserCompanionBridgeStore(root=tmp_path / "bridge")
+    controller = BrowserCompanionController(
+        artifact_root=tmp_path / "artifacts",
+        bridge_store=store,
+    )
+
+    session = controller.run("session", context={"base_url": "http://rumi.local"})
+    setup_state = session["setup_state"]
+
+    assert session["setup_required"] is True
+    assert setup_state["status"] == "missing"
+    assert "browser_companion_client" in setup_state["missing"]
+    assert setup_state["ui"]["sidebar_item_id"] == "browser_companion"
+    assert setup_state["ui"]["settings_field_id"] == "browser_companion_setup_guide"
+    extension_path = setup_state["extension"]["path"]
+    assert extension_path.endswith("browser_extensions\\rumi_browser_companion") or extension_path.endswith(
+        "browser_extensions/rumi_browser_companion"
+    )
+    assert "http://rumi.local" in setup_state["server_urls"]
+
+    result = controller.run(
+        "page.snapshot",
+        {"include_capture": True},
+        context={"profile_policy": {"yolo_mode": True}},
+    )
+
+    assert result["is_error"] is True
+    assert result["error_code"] == "BROWSER_COMPANION_CLIENT_MISSING"
+    assert result["setup_required"] is True
+    assert result["retry_after_setup"] is True
+    assert result["setup_state"]["tool_actions"]["refresh_pairing"]["args"] == {"action": "bridge.pairing"}
+    assert list((tmp_path / "bridge" / "commands").glob("*.json")) == []
+
+
 def test_browser_companion_controller_round_trip_uses_active_tab_and_saves_capture(tmp_path):
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion import BrowserCompanionController
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import BrowserCompanionBridgeStore

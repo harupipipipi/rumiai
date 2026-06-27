@@ -98,6 +98,27 @@
       "widget_kind": "tool_toggle",
       "settings_fields": [
         {
+          "id": "browser_companion_setup_guide",
+          "label": "Setup Guide",
+          "type": "readonly",
+          "default": "1. Open a Chromium extensions page and enable Developer mode.\n2. Choose Load unpacked and select rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion.\n3. Run browser_companion with action bridge.pairing to copy a Server URL and Pairing Token.\n4. Open the Rumi Browser Companion extension options page, paste those values, then click Poll Bridge Now.\n5. Run browser_companion with action session and verify clients is not empty.",
+          "help": "Use this setup flow when browser_companion reports setup_required=true or zero paired clients."
+        },
+        {
+          "id": "extension_folder",
+          "label": "Extension Folder",
+          "type": "readonly",
+          "default": "rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion",
+          "help": "Folder to select with Load unpacked in Chrome, Edge, Brave, or another Chromium browser."
+        },
+        {
+          "id": "default_server_url",
+          "label": "Default Server URL",
+          "type": "readonly",
+          "default": "http://127.0.0.1:8766",
+          "help": "Paste this URL in the extension options page unless bridge.pairing returns a public_base_url or base_url."
+        },
+        {
           "id": "preferred_browser",
           "label": "Preferred Browser",
           "type": "text",

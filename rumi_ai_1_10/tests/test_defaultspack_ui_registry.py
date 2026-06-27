@@ -152,6 +152,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn(
             "Runtime arguments: action, url", " ".join(browser_use_item["panel"]["notes"])
         )
+        browser_companion_item = next(
+            item for item in catalog["sidebar"]["items"] if item["id"] == "browser_companion"
+        )
+        browser_companion_fields = {
+            field["id"]: field for field in browser_companion_item["panel"]["fields"]
+        }
+        self.assertEqual(
+            browser_companion_fields["browser_companion_setup_guide"]["type"], "readonly"
+        )
+        self.assertEqual(browser_companion_fields["extension_folder"]["type"], "readonly")
+        self.assertEqual(browser_companion_fields["default_server_url"]["type"], "readonly")
+        self.assertIn(
+            "bridge.pairing",
+            browser_companion_fields["browser_companion_setup_guide"]["default"],
+        )
         web_search_item = next(
             item for item in catalog["sidebar"]["items"] if item["id"] == "web_search"
         )
