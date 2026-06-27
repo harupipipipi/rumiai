@@ -2490,6 +2490,7 @@ def _function_call_context(context, tool_def):
         forwarded["workspace_root"] = str(Path.cwd())
     policy = policy_from_context(context)
     if _truthy(policy.get("yolo_mode")) or _is_policy_allow_context(context):
+        forwarded["yolo_mode"] = True
         forwarded["_tool_server_approved"] = True
     if tool_server_approval_context_is_internal(context):
         forwarded["_tool_server_approved"] = True

@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_PACK_ROOT = str(Path(__file__).resolve().parents[2])
+if _PACK_ROOT not in sys.path:
+    sys.path.append(_PACK_ROOT)
 from functions._tool_common import tool_result
 
 _SEQUENCE_ID_KEYS = (
@@ -18,7 +20,10 @@ _SEQUENCE_ID_KEYS = (
 
 
 def run(context, args):
-    from domain.host_bridge.computer_router import run_computer_action
+    try:
+        from domain.host_bridge.computer_router import run_computer_action
+    except ImportError:
+        from ecosystem.defaultspack.domain.host_bridge.computer_router import run_computer_action
 
     action = str(args.get("action", "browser.session"))
     payload = dict(args.get("payload") or {})

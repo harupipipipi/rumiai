@@ -274,6 +274,30 @@ def test_browser_computer_run_passes_context_sequence_to_controller(monkeypatch)
     assert captured["payload"]["computer_use_haze_sequence_id"] == "req_ctx"
 
 
+def test_browser_computer_run_honors_yolo_context(monkeypatch):
+    with _default_tools_function_imports():
+        from browser_computer import main as browser_computer_main
+        from ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import BrowserComputerController
+
+        captured: dict[str, object] = {}
+
+        def fake_controller_run(self, action, payload, *, yolo_mode=False):
+            captured["action"] = action
+            captured["yolo_mode"] = yolo_mode
+            return {"action": action}
+
+        monkeypatch.setattr(BrowserComputerController, "run", fake_controller_run)
+        monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
+
+        browser_computer_main.run(
+            {"yolo_mode": True},
+            {"action": "browser.open_url", "payload": {"url": "http://127.0.0.1:8766/chat"}},
+        )
+
+    assert captured["action"] == "browser.open_url"
+    assert captured["yolo_mode"] is True
+
+
 def test_browser_use_and_computer_use_preserve_sequence_payload(monkeypatch):
     with _default_tools_function_imports():
         from browser_use import main as browser_use_main

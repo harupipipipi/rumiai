@@ -397,6 +397,46 @@ def test_tool_executor_profile_allow_attaches_safe_auto_approval_token(monkeypat
     assert replay["widget"]["stale_approval_token"] is True
 
 
+def test_tool_executor_profile_allow_forwards_yolo_to_computer_function(monkeypatch):
+    from domain.safety import approval
+    from domain.tool import executor as executor_module
+
+    approval.reset_approval_state_for_tests()
+    seen = {}
+
+    class Registry:
+        def get(self, name):
+            return {
+                "tool_id": name,
+                "name": name,
+                "requires_approval": True,
+                "risk": "high",
+                "execution": {
+                    "type": "rumi_function",
+                    "qualified_name": "rumi_default_tools_pack:computer_use",
+                },
+                "metadata": {"source_pack_id": "rumi_default_tools_pack"},
+            }
+
+    def fake_execute_rumi_function(self, tool_def, arguments, context):
+        seen["forwarded"] = executor_module._function_call_context(context, tool_def)
+        return {"result": "ran", "is_error": False, "widget": None}
+
+    executor = ToolExecutor()
+    executor._registry = Registry()
+    monkeypatch.setattr(ToolExecutor, "_execute_rumi_function", fake_execute_rumi_function)
+
+    result = executor.execute(
+        "computer_use",
+        {"action": "open_url", "url": "http://127.0.0.1:8766/chat"},
+        {"profile_policy": {"tool_permission_policy": {"tools": {"computer_use": "allow"}}}},
+    )
+
+    assert result["is_error"] is False
+    assert seen["forwarded"]["yolo_mode"] is True
+    assert seen["forwarded"]["_tool_server_approved"] is True
+
+
 def test_tool_executor_profile_allow_consumes_handler_auto_approval_token(monkeypatch):
     from domain.safety import approval
 
