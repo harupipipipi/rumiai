@@ -221,6 +221,22 @@ TOOL_ALLOWLIST = [
     "knowledge_search",
     "knowledge_update",
 ]
+SCHEDULE_TOOL_PERMISSION_POLICY = {
+    "default_mode": "allow",
+    "risk_defaults": {
+        "low": "allow",
+        "medium": "allow",
+        "high": "allow",
+    },
+    "unknown_tool_mode": "ask",
+    "untrusted_tool_mode": "ask",
+    "missing_capability_mode": "deny",
+    "audit": True,
+    "tools": {
+        "coding_file_delete": "ask",
+        "coding_file_restore": "ask",
+    },
+}
 
 ROLE_DEFINITIONS = [
     {
@@ -1370,6 +1386,7 @@ class MimoCodingCompanyRuntime:
             "normal_status_silent": True,
             "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
             "tool_allowlist": TOOL_ALLOWLIST,
+            "tool_permission_policy": deepcopy(SCHEDULE_TOOL_PERMISSION_POLICY),
             "model_allowlist": current_model_allowlist(),
         }
         if state.get("workspace_id"):

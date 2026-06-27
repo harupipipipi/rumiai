@@ -476,6 +476,12 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
+        grant_config = self._merged_persistent_grant_config(
+            manager,
+            grant_principal,
+            request.permission_id,
+            grant_config,
+        )
         manager.grant_permission(grant_principal, request.permission_id, grant_config)
         related = self._approve_related_persistent(
             request,
@@ -609,6 +615,12 @@ class AuthorityService:
         for permission_id in self._normalized_related_permissions(request, related_permissions):
             related_request = self._create_related_request(request, permission_id)
             grant_config = self._grant_config_for_persistent_approval(related_request.resource, config)
+            grant_config = self._merged_persistent_grant_config(
+                manager,
+                grant_principal,
+                permission_id,
+                grant_config,
+            )
             manager.grant_permission(grant_principal, permission_id, grant_config)
             self._request_store.set_request_status(related_request.request_id, "approved")
             self._request_store.audit(
@@ -1140,6 +1152,75 @@ class AuthorityService:
         return grant_config
 
     @staticmethod
+    def _merged_persistent_grant_config(
+        manager: Any,
+        principal_id: str,
+        permission_id: str,
+        grant_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            next_config = authority_constraints_from_config(grant_config)
+        except AuthorityConfigError:
+            return grant_config
+        if manager is None or not callable(getattr(manager, "get_grant", None)):
+            return next_config
+        try:
+            grant = manager.get_grant(principal_id)
+        except Exception:
+            return next_config
+        if grant is None or not getattr(grant, "enabled", False):
+            return next_config
+        permission = getattr(grant, "permissions", {}).get(permission_id)
+        if permission is None or not getattr(permission, "enabled", False):
+            return next_config
+        try:
+            existing_config = authority_constraints_from_config(getattr(permission, "config", {}) or {})
+        except AuthorityConfigError:
+            return next_config
+        return AuthorityService._union_authority_configs(existing_config, next_config)
+
+    @staticmethod
+    def _union_authority_configs(
+        first: dict[str, Any],
+        second: dict[str, Any],
+    ) -> dict[str, Any]:
+        first_config = authority_constraints_from_config(first)
+        second_config = authority_constraints_from_config(second)
+        if not first_config or not second_config:
+            return {}
+
+        merged: dict[str, Any] = {}
+        for key in AuthorityService._resource_config_keys():
+            if key not in first_config or key not in second_config:
+                continue
+            merged[key] = AuthorityService._unique_values(
+                [
+                    *AuthorityService._string_values(first_config.get(key)),
+                    *AuthorityService._string_values(second_config.get(key)),
+                ]
+            )
+
+        if "ports" in first_config and "ports" in second_config:
+            merged["ports"] = AuthorityService._unique_values(
+                [
+                    *AuthorityService._port_values(first_config.get("ports")),
+                    *AuthorityService._port_values(second_config.get("ports")),
+                ]
+            )
+
+        if "allow_stream" in first_config and "allow_stream" in second_config:
+            merged["allow_stream"] = bool(first_config.get("allow_stream")) or bool(
+                second_config.get("allow_stream")
+            )
+
+        first_tokens = AuthorityService._positive_int(first_config.get("max_input_tokens"))
+        second_tokens = AuthorityService._positive_int(second_config.get("max_input_tokens"))
+        if first_tokens is not None and second_tokens is not None:
+            merged["max_input_tokens"] = max(first_tokens, second_tokens)
+
+        return merged
+
+    @staticmethod
     def _resource_config_keys() -> tuple[str, ...]:
         return tuple(dict.fromkeys(config_key for _, config_key in RESOURCE_CONFIG_FIELDS))
 
@@ -1149,6 +1230,17 @@ class AuthorityService:
         for resource_key, config_key in RESOURCE_CONFIG_FIELDS:
             fields.setdefault(config_key, []).append(resource_key)
         return {config_key: tuple(resource_keys) for config_key, resource_keys in fields.items()}
+
+    @staticmethod
+    def _unique_values(values: list[Any]) -> list[Any]:
+        seen: set[Any] = set()
+        result: list[Any] = []
+        for value in values:
+            if value in seen:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result
 
     @staticmethod
     def _principal_for_scope(request: AuthorityRequest, scope: str) -> str:

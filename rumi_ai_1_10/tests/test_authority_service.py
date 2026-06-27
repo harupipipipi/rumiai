@@ -526,6 +526,84 @@ def test_authority_persistent_approval_can_bundle_model_api_key_and_network_gran
     assert "network.egress" in grant.permissions
 
 
+def test_authority_persistent_approval_merges_same_profile_model_grants(tmp_path, monkeypatch):
+    service, grants, _ = _service(tmp_path, monkeypatch)
+
+    def model_resource(model_id: str) -> dict:
+        return {
+            "kind": "model",
+            "provider_id": "xiaomi-token-plan-sgp",
+            "api_id": "legacy",
+            "model_id": model_id,
+            "pack_id": "defaultspack",
+            "domain": "api.xiaomi.example",
+            "port": 443,
+        }
+
+    first_resource = model_resource("mimo-v2.5-pro")
+    first_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=first_resource,
+        profile_id="work",
+    )
+    first_approval = service.approve_request(
+        first_decision.request_id,
+        scope="profile",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(first_decision.request_id),
+    )
+
+    assert first_approval["success"] is True
+
+    second_resource = model_resource("mimo-v2-omni")
+    second_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=second_resource,
+        profile_id="work",
+    )
+    second_approval = service.approve_request(
+        second_decision.request_id,
+        scope="profile",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(second_decision.request_id),
+    )
+
+    assert second_approval["success"] is True
+
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    for permission_id in ("model.invoke", "api_key.use", "network.egress"):
+        config = grant.permissions[permission_id].config
+        assert config["provider_ids"] == ["xiaomi-token-plan-sgp"]
+        assert config["api_ids"] == ["legacy"]
+        assert config["model_ids"] == ["mimo-v2.5-pro", "mimo-v2-omni"]
+        assert config["pack_ids"] == ["defaultspack"]
+        assert config["domains"] == ["api.xiaomi.example"]
+        assert config["ports"] == [443]
+
+    for resource in (first_resource, second_resource):
+        assert service.preflight_check(
+            principal_id="profile:work",
+            permission_id="model.invoke",
+            resource=resource,
+            profile_id="work",
+        ).allowed is True
+        assert service.preflight_check(
+            principal_id="profile:work",
+            permission_id="api_key.use",
+            resource={**resource, "kind": "api_key"},
+            profile_id="work",
+        ).allowed is True
+        assert service.preflight_check(
+            principal_id="profile:work",
+            permission_id="network.egress",
+            resource={**resource, "kind": "network"},
+            profile_id="work",
+        ).allowed is True
+
+
 def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {

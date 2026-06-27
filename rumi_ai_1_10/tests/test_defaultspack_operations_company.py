@@ -198,7 +198,15 @@ def test_mimo_coding_company_bootstrap_allows_non_docker_and_unlimited_tool_call
     assert status["harness"]["qa_swarm_plan"]["workers"][0]["worker_id"] == "local-1"
     assert status["harness"]["qa_swarm_plan"]["workers"][0]["qa_target"] == "http://127.0.0.1:3000"
     for schedule in status["schedules"]:
-        assert schedule["task"]["tool_policy"]["max_tool_calls"] is None
+        tool_policy = schedule["task"]["tool_policy"]
+        permission_policy = tool_policy["tool_permission_policy"]
+        assert tool_policy["max_tool_calls"] is None
+        assert permission_policy["audit"] is True
+        assert permission_policy["risk_defaults"]["high"] == "allow"
+        assert permission_policy["unknown_tool_mode"] == "ask"
+        assert permission_policy["missing_capability_mode"] == "deny"
+        assert permission_policy["tools"]["coding_file_delete"] == "ask"
+        assert permission_policy["tools"]["coding_file_restore"] == "ask"
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
