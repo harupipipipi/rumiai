@@ -41,6 +41,7 @@ DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
 DEFAULT_DOCKER_WORKER_COUNT = 3
 DEFAULT_MAX_TOOL_CALLS = 80
 MAX_TOOL_CALLS_LIMIT = 200
+SUBAGENT_GAP_GRACE_SECONDS = 300
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -1539,6 +1540,9 @@ class MimoCodingCompanyRuntime:
                 )
                 if has_assistant_text:
                     continue
+                age_seconds = self._conversation_age_seconds(child)
+                if age_seconds is not None and age_seconds < SUBAGENT_GAP_GRACE_SECONDS:
+                    continue
                 unanswered.append(
                     {
                         "child_conversation_id": child_id,
@@ -1558,6 +1562,49 @@ class MimoCodingCompanyRuntime:
             return {"checked_ids": child_ids, "unanswered": unanswered}
         except Exception:
             return {"checked_ids": [], "unanswered": []}
+
+    @staticmethod
+    def _conversation_age_seconds(conversation: dict[str, Any]) -> float | None:
+        candidates = [
+            conversation.get("updated_at"),
+            conversation.get("created_at"),
+        ]
+        newest: float | None = None
+        for candidate in candidates:
+            timestamp_seconds = MimoCodingCompanyRuntime._coerce_epoch_seconds(candidate)
+            if timestamp_seconds is None:
+                continue
+            newest = timestamp_seconds if newest is None else max(newest, timestamp_seconds)
+        if newest is None:
+            return None
+        return max(0.0, datetime.now(timezone.utc).timestamp() - newest)
+
+    @staticmethod
+    def _coerce_epoch_seconds(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            number = float(value)
+            if number <= 0:
+                return None
+            if number > 100000000000:
+                return number / 1000.0
+            return number
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            number = float(text)
+            if number > 100000000000:
+                return number / 1000.0
+            return number if number > 0 else None
+        except ValueError:
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
 
     @staticmethod
     def _desktop_monitoring_observation() -> dict[str, Any]:

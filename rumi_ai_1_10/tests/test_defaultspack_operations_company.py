@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -434,6 +435,27 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
             "content": [{"type": "text", "text": "Simple test: List 3 things you can do as a subagent."}],
         },
     )
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
+    chat_store._conversations[child["id"]]["created_at"] = old_timestamp
+    chat_store._conversations[child["id"]]["updated_at"] = old_timestamp
+    chat_store._save_conversations()
+    recent_child = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        parent_conversation_id=status["conversation_id"],
+        conversation_kind="subagent",
+        agent_id="subagent",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    chat_store.update_conversation(recent_child["id"], {"title": "Recently started subagent probe"})
+    chat_store.add_message(
+        recent_child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "This subagent was just started and may still be running."}],
+        },
+    )
 
     observed = runtime.status()
     observability = observed["harness"]["observability"]
@@ -443,6 +465,12 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     assert observability["subagents"]["unanswered_count"] == 1
     assert observability["desktop_monitoring"]["status"] in {"empty", "ok", "error"}
     assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
+    assert observability["subagents"]["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert recent_child["id"] not in {
+        str(message["metadata"].get("child_conversation_id") or "")
+        for message in messages
+        if isinstance(message.get("metadata"), dict)
+    }
     assert total == 3
     assert {message["metadata"]["sync_source"] for message in messages} == {
         "mimo_schedule_history",
