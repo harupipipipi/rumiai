@@ -1086,6 +1086,7 @@ def _run_text_tool_call_response(
     *,
     metadata=None,
     request_context=None,
+    tool_context=None,
     tool_names=("rumi_api",),
 ):
     from domain.chat.store import ChatStore
@@ -1167,7 +1168,7 @@ def _run_text_tool_call_response(
         model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
         params={},
         request_context=request_context or {},
-        tool_context={},
+        tool_context=tool_context or {},
         standard_messages=[{"role": "user", "content": "check routes"}],
         user_text="check routes",
         system_prompt="",
@@ -1261,6 +1262,115 @@ def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler_follo
     assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "desktop_frame"
     assert stored["raw_text"] == "routes checked"
     assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
+def test_stream_engine_suppresses_text_tool_recovery_after_approval_replay(tmp_path, monkeypatch):
+    raw_text = (
+        "<tool_call>\n"
+        "<function=desktop_frame>\n"
+        "<parameter=owner_id>local-user</parameter>\n"
+        "<parameter=seat_id>seat-1</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        raw_text,
+        metadata={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={
+            "approval_replayed": {
+                "tool_name": "desktop_frame",
+                "tool_call_id": "call-approved",
+                "request_id": "apr-approved",
+            },
+            "tool_approval_tokens": {"desktop_frame": "spent-token"},
+        },
+        tool_names=("desktop_frame",),
+    )
+
+    assert calls == []
+    assert len(gateway.complete_requests) == 1
+    assert stored["raw_text"] == raw_text
+    assert not any(event.get("type") == "tool_call_started" for event in events)
+
+
+def test_stream_engine_treats_consumed_approval_followup_as_idempotent_duplicate(tmp_path, monkeypatch):
+    from domain.safety import approval
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+
+    approved_args = {"owner_id": "local-user", "seat_id": "seat-1"}
+    request = approval.create_approval_request(
+        "tool.desktop_frame",
+        "high",
+        approved_args,
+        details={
+            "tool_name": "desktop_frame",
+            "action": "tool.desktop_frame",
+            "arguments": approved_args,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+    token = decision["token"]
+    consumed = approval.verify_execution_token(
+        token,
+        "tool.desktop_frame",
+        approval.hash_arguments(approved_args),
+        consume=True,
+    )
+    assert consumed.valid is True
+
+    raw_text = (
+        "<tool_call>\n"
+        "<function=desktop_frame>\n"
+        "<parameter=owner_id>local-user</parameter>\n"
+        "<parameter=seat_id>seat-1</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        raw_text,
+        metadata={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "approval_followup": {
+                "approval_token": token,
+                "request_id": request["request_id"],
+                "tool_name": "desktop_frame",
+            },
+        },
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={"tool_approval_tokens": {"desktop_frame": token}},
+        tool_names=("desktop_frame",),
+    )
+
+    assert calls == []
+    assert len(gateway.complete_requests) == 1
+    assert stored["raw_text"] == raw_text
+    assert not any(event.get("type") == "tool_call_started" for event in events)
+    replay = approval.verify_execution_token(
+        token,
+        "tool.desktop_frame",
+        approval.hash_arguments(approved_args),
+        consume=False,
+    )
+    assert replay.valid is False
+    assert replay.code == "APPROVAL_TOKEN_USED"
 
 
 def test_stream_engine_recovers_multiple_text_tool_calls_for_mimo_scheduler(tmp_path, monkeypatch):

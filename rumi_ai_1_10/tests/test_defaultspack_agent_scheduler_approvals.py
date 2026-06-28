@@ -97,6 +97,230 @@ def test_schedule_auto_approval_limit_accepts_unlimited_policy():
     assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": 999}}) == 64
 
 
+def test_scheduler_ensure_loaded_rearms_missing_active_timer(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "keep testing", "conversation_id": "conv-mimo"},
+        {"value": 30, "unit": "minutes"},
+    )
+
+    assert len(FakeTimer.created) == 1
+    assert FakeTimer.created[0].started is True
+
+    with scheduler._lock:
+        missing = scheduler._timers.pop(schedule["id"])
+    missing.cancel()
+
+    scheduler.ensure_loaded()
+
+    assert len(FakeTimer.created) == 2
+    assert FakeTimer.created[1].started is True
+    with scheduler._lock:
+        assert scheduler._timers[schedule["id"]] is FakeTimer.created[1]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_ensure_loaded_rearms_dead_active_timer(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "keep testing", "conversation_id": "conv-mimo"},
+        {"value": 30, "unit": "minutes"},
+    )
+    dead_timer = FakeTimer.created[0]
+    dead_timer.cancel()
+
+    scheduler.ensure_loaded()
+
+    assert len(FakeTimer.created) == 2
+    assert FakeTimer.created[1].started is True
+    with scheduler._lock:
+        assert scheduler._timers[schedule["id"]] is FakeTimer.created[1]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_ensure_loaded_does_not_duplicate_live_active_timer(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "keep testing", "conversation_id": "conv-mimo"},
+        {"value": 30, "unit": "minutes"},
+    )
+
+    scheduler.ensure_loaded()
+    scheduler.ensure_loaded()
+
+    assert len(FakeTimer.created) == 1
+    with scheduler._lock:
+        assert scheduler._timers[schedule["id"]] is FakeTimer.created[0]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_marks_interval_running_until_task_completes(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def fake_send_chat(payload, context):
+        started.set()
+        assert release.wait(5)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "interval done"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+    from domain.agent import scheduler as scheduler_module
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "keep testing", "conversation_id": "conv-mimo"},
+        {"value": 30, "unit": "minutes"},
+    )
+
+    worker = threading.Thread(target=scheduler._on_timer_fire, args=(schedule["id"],))
+    worker.start()
+    assert started.wait(5)
+
+    running = scheduler.get_schedule(schedule["id"])
+    assert running["running_execution"]["execution_id"].startswith("sexec_")
+    assert running["running_execution"]["schedule_id"] == schedule["id"]
+    assert running["running_execution"]["trigger"] == "scheduled"
+    assert running["running_started_at"] == running["running_execution"]["started_at"]
+
+    release.set()
+    worker.join(5)
+    assert not worker.is_alive()
+
+    completed = scheduler.get_schedule(schedule["id"])
+    assert "running_execution" not in completed
+    assert "running_started_at" not in completed
+    assert completed["execution_count"] == 1
+    assert completed["last_executed_at"]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

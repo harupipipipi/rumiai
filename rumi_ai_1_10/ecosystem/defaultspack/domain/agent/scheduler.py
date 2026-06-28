@@ -403,20 +403,21 @@ class Scheduler:
     # ---- public API ----
 
     def ensure_loaded(self):
-        """Load all schedules from disk and arm timers for active ones."""
+        """Load schedules once and keep active schedule timers armed."""
+        should_load = False
         with self._lock:
-            if self._loaded:
-                return
-            self._loaded = True
-        all_scheds = load_all_schedules()
-        for sd in all_scheds:
-            sid = sd.get("id")
-            if not sid:
-                continue
-            with self._lock:
-                self._schedules[sid] = sd
-            if sd.get("status") == "active":
-                self._arm_timer(sid)
+            if not self._loaded:
+                self._loaded = True
+                should_load = True
+        if should_load:
+            all_scheds = load_all_schedules()
+            for sd in all_scheds:
+                sid = sd.get("id")
+                if not sid:
+                    continue
+                with self._lock:
+                    self._schedules[sid] = sd
+        self._ensure_active_timers()
 
     def create_schedule(self, schedule_type, task_config, schedule_config, name="", description=""):
         """Create and persist a new schedule.
@@ -717,6 +718,35 @@ class Scheduler:
             self._timers[schedule_id] = timer
         timer.start()
 
+    def _timer_needs_arm(self, schedule_id):
+        with self._lock:
+            timer = self._timers.get(schedule_id)
+        if timer is None:
+            return True
+        is_alive = getattr(timer, "is_alive", None)
+        if not callable(is_alive):
+            return False
+        return not is_alive()
+
+    def _ensure_active_timers(self):
+        with self._lock:
+            active_ids = [
+                sid
+                for sid, sched in self._schedules.items()
+                if sched.get("status") == "active"
+            ]
+            inactive_ids = [
+                sid
+                for sid, sched in self._schedules.items()
+                if sched.get("status") != "active"
+            ]
+
+        for schedule_id in inactive_ids:
+            self._cancel_timer(schedule_id)
+        for schedule_id in active_ids:
+            if self._timer_needs_arm(schedule_id):
+                self._arm_timer(schedule_id)
+
     def _recheck_and_arm(self, schedule_id):
         """Called when delay was capped; re-compute and re-arm."""
         with self._lock:
@@ -731,6 +761,23 @@ class Scheduler:
             timer = self._timers.pop(schedule_id, None)
         if timer is not None:
             timer.cancel()
+
+    def _mark_schedule_running(self, schedule_id, execution_id, started_at, trigger):
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+        if sched is None:
+            return
+        sched["running_execution"] = {
+            "execution_id": execution_id,
+            "schedule_id": schedule_id,
+            "started_at": started_at,
+            "trigger": trigger,
+        }
+        sched["running_started_at"] = started_at
+        sched["updated_at"] = timestamp()
+        save_schedule(sched)
+        with self._lock:
+            self._schedules[schedule_id] = sched
 
     def _conversation_execution_lock(self, conversation_id):
         key = str(conversation_id or "").strip()
@@ -797,6 +844,8 @@ class Scheduler:
             "error": None,
         }
         auto_approvals = []
+        trigger = _scheduler_trigger_name(manual)
+        self._mark_schedule_running(schedule_id, exec_id, started_at, trigger)
 
         try:
             if conversation_id:
@@ -816,7 +865,6 @@ class Scheduler:
                         initial_tool_choice = _initial_tool_choice(task_cfg)
                         if initial_tool_choice is not None:
                             params["tool_choice"] = initial_tool_choice
-                    trigger = _scheduler_trigger_name(manual)
                     result = chat_send_run(
                         _scheduler_chat_payload(
                             conversation_id=conversation_id,
@@ -896,6 +944,8 @@ class Scheduler:
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is not None:
+            sched.pop("running_execution", None)
+            sched.pop("running_started_at", None)
             sched["execution_count"] = sched.get("execution_count", 0) + 1
             sched["last_executed_at"] = history_entry["completed_at"]
             sched["updated_at"] = timestamp()

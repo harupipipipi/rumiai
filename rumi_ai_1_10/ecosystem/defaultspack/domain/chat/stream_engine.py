@@ -417,6 +417,20 @@ def _text_tool_call_blocks(
     return tool_uses
 
 
+def _text_tool_call_blocks_for_prepared(
+    response: dict[str, Any],
+    prepared: PreparedChatRun,
+) -> list[dict[str, Any]]:
+    tool_context = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
+    if tool_context.get("approval_replayed"):
+        return []
+    return _text_tool_call_blocks(
+        response,
+        prepared.connected_tool_names,
+        allow_preface=_prefaced_text_tool_calls_allowed(prepared),
+    )
+
+
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(metadata, dict):
         return None
@@ -2095,11 +2109,7 @@ class ChatRunEngine:
                 "metadata": {},
             }
         if not tool_uses:
-            tool_uses = _text_tool_call_blocks(
-                response,
-                prepared.connected_tool_names,
-                allow_preface=_prefaced_text_tool_calls_allowed(prepared),
-            )
+            tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
         return response, tool_uses
 
     def _model_turn_via_complete(
@@ -2111,11 +2121,7 @@ class ChatRunEngine:
         response = self._complete_turn(prepared, messages)
         tool_uses = _tool_use_blocks(response)
         if not tool_uses:
-            tool_uses = _text_tool_call_blocks(
-                response,
-                prepared.connected_tool_names,
-                allow_preface=_prefaced_text_tool_calls_allowed(prepared),
-            )
+            tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
         if not tool_uses and self._stream_mode:
             text = self._response_text(response)
             if text:
@@ -2142,11 +2148,7 @@ class ChatRunEngine:
             response = self._complete_turn(prepared, sealed.messages)
             tool_uses = _tool_use_blocks(response)
             if not tool_uses:
-                tool_uses = _text_tool_call_blocks(
-                    response,
-                    prepared.connected_tool_names,
-                    allow_preface=_prefaced_text_tool_calls_allowed(prepared),
-                )
+                tool_uses = _text_tool_call_blocks_for_prepared(response, prepared)
             if tool_uses:
                 return response, tool_uses
             check = service.verify_and_strip(
@@ -2450,9 +2452,11 @@ class ChatRunEngine:
         if not isinstance(request, dict):
             return None
         # Replay only when the request was approved by the user. ``consumed``
-        # is excluded because the one-shot token has already burnt and would
-        # not pass verify_execution_token below.
-        if str(request.get("status") or "") != "approved":
+        # can happen when the same scheduler followup is retried after the
+        # deterministic replay already executed the one-shot token; that path
+        # is handled below as an idempotent duplicate and never re-executes.
+        request_status = str(request.get("status") or "")
+        if request_status not in {"approved", "consumed"}:
             return None
 
         details = request.get("details") if isinstance(request.get("details"), dict) else {}
@@ -2487,6 +2491,12 @@ class ChatRunEngine:
         except Exception:
             return None
         if not getattr(verification, "valid", False):
+            if (
+                str(request.get("status") or "") == "consumed"
+                and str(getattr(verification, "code", "") or "") == "APPROVAL_TOKEN_USED"
+                and str(getattr(verification, "request_id", "") or "") == request_id
+            ):
+                self._suppress_consumed_approval_followup(prepared, tool_name, request_id, token)
             return None
 
         invoke_args = dict(stored_args)
@@ -2674,6 +2684,45 @@ class ChatRunEngine:
                 "request_id": request_id,
             }
         return None
+
+    def _suppress_consumed_approval_followup(
+        self,
+        prepared: PreparedChatRun,
+        tool_name: str,
+        request_id: str,
+        token: str,
+    ) -> None:
+        if not isinstance(prepared.tool_context, dict):
+            prepared.tool_context = {}
+        prepared.tool_context["_approval_followup_block_legacy"] = True
+        prepared.tool_context["approval_replayed"] = {
+            "tool_name": tool_name,
+            "request_id": request_id,
+            "duplicate": True,
+        }
+        tokens = prepared.tool_context.get("tool_approval_tokens")
+        if isinstance(tokens, dict):
+            prepared.tool_context["tool_approval_tokens"] = {
+                key: value
+                for key, value in tokens.items()
+                if str(value or "").strip() != token
+            }
+        if str(prepared.tool_context.get("_tool_server_approval_token") or "").strip() == token:
+            for key in (
+                "_tool_server_approval_token",
+                "_tool_server_approval_operation",
+                "_tool_server_approval_args_hash",
+                "_tool_server_approval_pack_id",
+                "_tool_server_approval_conversation_id",
+            ):
+                prepared.tool_context.pop(key, None)
+            prepared.tool_context.pop("_tool_server_approval_token_valid", None)
+        prepared.tool_context.setdefault(
+            "_attached_provider_tools_snapshot",
+            list(prepared.provider_tools or []),
+        )
+        prepared.provider_tools = []
+
     def _execute_tool(
         self,
         prepared: PreparedChatRun,
