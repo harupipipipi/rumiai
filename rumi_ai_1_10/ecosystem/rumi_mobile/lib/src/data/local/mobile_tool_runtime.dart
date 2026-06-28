@@ -31,6 +31,8 @@ const mobileAssistantProgressSystemInstruction =
 const _assistantProgressTextLimit = 120;
 const _assistantProgressRelatedToolLimit = 4;
 const _toolBatchMaxCalls = 8;
+const _workflowMaxSteps = 20;
+const _workflowStepOutputPreviewLimit = 2000;
 const _assistantProgressPhases = <String>{
   'inspect',
   'change',
@@ -350,6 +352,23 @@ const _phoneMediaArtifactToolIds = <String>{
   'audio_transcribe',
   'audio_transcribe_local',
 };
+const _phoneWorkflowToolIds = <String>{
+  'workflow_define',
+  'workflow_run',
+  'workflow_status',
+  'workflow_cancel',
+  'workflow_retry',
+};
+const _phoneWorkflowMutationToolIds = <String>{
+  'workflow_run',
+  'workflow_cancel',
+  'workflow_retry',
+};
+const _phoneWorkflowRuntimeLayers = <String>[
+  'flutter',
+  'dart',
+  'mobile-workflow-record',
+];
 const _mobileThinkingLevels = <String>{
   'none',
   'low',
@@ -3936,6 +3955,126 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'workflow_define',
+      description:
+          'Persist a phone-local workflow definition. Steps later run through the same unified phone/PC tool surface.',
+      tags: ['tool', 'workflow', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_workflow_define',
+        'defaultspack_workflow_define',
+        'defaults.workflow.define',
+        'defaultspack.workflow.define',
+      ],
+      implementationStatus: 'implemented_phone_workflow_record',
+      runtimeLayers: _phoneWorkflowRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'workflow_id': {'type': 'string'},
+          'name': {'type': 'string'},
+          'steps': {
+            'type': 'array',
+            'items': {'type': 'object'},
+          },
+        },
+        'required': ['steps'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'workflow_run',
+      description:
+          'Run a persisted or inline phone-local workflow after mobile approval. Each step uses the unified tool surface.',
+      tags: ['tool', 'workflow', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_workflow_run',
+        'defaultspack_workflow_run',
+        'defaults.workflow.run',
+        'defaultspack.workflow.run',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_workflow_record',
+      runtimeLayers: _phoneWorkflowRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'workflow_id': {'type': 'string'},
+          'steps': {
+            'type': 'array',
+            'items': {'type': 'object'},
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'workflow_status',
+      description: 'Read a phone-local workflow run record.',
+      tags: ['tool', 'workflow', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_workflow_status',
+        'defaultspack_workflow_status',
+        'defaults.workflow.status',
+        'defaultspack.workflow.status',
+      ],
+      implementationStatus: 'implemented_phone_workflow_record',
+      runtimeLayers: _phoneWorkflowRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'run_id': {'type': 'string'},
+        },
+        'required': ['run_id'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'workflow_cancel',
+      description:
+          'Cancel a phone-local workflow run record after mobile approval.',
+      tags: ['tool', 'workflow', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_workflow_cancel',
+        'defaultspack_workflow_cancel',
+        'defaults.workflow.cancel',
+        'defaultspack.workflow.cancel',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_workflow_record',
+      runtimeLayers: _phoneWorkflowRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'run_id': {'type': 'string'},
+        },
+        'required': ['run_id'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'workflow_retry',
+      description:
+          'Retry a persisted phone-local workflow after mobile approval.',
+      tags: ['tool', 'workflow', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_workflow_retry',
+        'defaultspack_workflow_retry',
+        'defaults.workflow.retry',
+        'defaultspack.workflow.retry',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_workflow_record',
+      runtimeLayers: _phoneWorkflowRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'workflow_id': {'type': 'string'},
+          'run_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'job_create',
       description:
           'Create a phone-local artifact-backed job record. run_immediately marks the local record completed and writes a result artifact without PC execution.',
@@ -4538,6 +4677,14 @@ class MobileToolRuntime {
         return _asyncOnlyTool(name);
       case 'package_install_plan':
         return _packageInstallPlan(call.arguments);
+      case 'workflow_define':
+        return _workflowDefine(call.arguments);
+      case 'workflow_status':
+        return _workflowStatus(call.arguments);
+      case 'workflow_run':
+      case 'workflow_cancel':
+      case 'workflow_retry':
+        return _asyncOnlyTool(name);
       case 'job_create':
         return _jobCreate(call.arguments);
       case 'job_status':
@@ -4632,6 +4779,12 @@ class MobileToolRuntime {
       case 'job_cancel':
       case 'job_resume':
         return _jobMutation(name, call.arguments);
+      case 'workflow_run':
+        return _workflowRun(call.arguments);
+      case 'workflow_cancel':
+        return _workflowCancel(call.arguments);
+      case 'workflow_retry':
+        return _workflowRetry(call.arguments);
       case 'webapp_build':
         return _webappBuild(call.arguments);
       case 'tool_batch':
@@ -4879,6 +5032,11 @@ class MobileToolRuntime {
       'tool_list',
       'tool_schema',
       'tool_batch',
+      'workflow_define',
+      'workflow_run',
+      'workflow_status',
+      'workflow_cancel',
+      'workflow_retry',
       'job_create',
       'job_status',
       'job_history',
@@ -9217,6 +9375,417 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _workflowDefine(Map<String, dynamic> args) {
+    final generatedId = _nextToolId('workflow');
+    final workflowId = _slugifyPhoneArtifactName(
+      _workflowIdArg(args).isEmpty ? generatedId : _workflowIdArg(args),
+      fallback: generatedId,
+    );
+    final steps = _normalizeWorkflowSteps(args['steps'] ?? args['workflow']);
+    if (steps.isEmpty) {
+      return _phoneWorkflowError(
+        'INVALID_INPUT',
+        "'steps' must contain at least one executable workflow step.",
+        workflowId: workflowId,
+      );
+    }
+    if (steps.length > _workflowMaxSteps) {
+      return _phoneWorkflowError(
+        'TOO_MANY_STEPS',
+        'Phone-local workflows support at most $_workflowMaxSteps steps.',
+        workflowId: workflowId,
+      );
+    }
+    final invalidStep = steps.where((step) {
+      return '${step['tool_name'] ?? ''}'.trim().isEmpty;
+    }).toList();
+    if (invalidStep.isNotEmpty) {
+      return _phoneWorkflowError(
+        'INVALID_STEP',
+        "Every workflow step must include 'tool', 'tool_name', or 'name'.",
+        workflowId: workflowId,
+      );
+    }
+    final existing = _mobileWorkflows[workflowId];
+    final now = DateTime.now().toUtc().toIso8601String();
+    _mobileWorkflows[workflowId] = {
+      'workflow_id': workflowId,
+      'name': '${args['name'] ?? args['title'] ?? workflowId}'.trim(),
+      'description': '${args['description'] ?? ''}'.trim(),
+      'steps': steps,
+      'created_at': existing?['created_at'] ?? now,
+      'updated_at': now,
+      'workspace': 'phone',
+      'execution_location': 'phone',
+      'runtime_layers': _phoneWorkflowRuntimeLayers,
+    };
+    _persistPhoneWorkflow(workflowId);
+    return MobileToolResult(
+      ok: true,
+      summary: 'defined phone-local workflow $workflowId',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneWorkflowRecord(workflowId),
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _workflowRun(Map<String, dynamic> args) {
+    return _workflowRunInternal(
+      args,
+      approvalToolName: 'workflow_run',
+      requireApproval: true,
+    );
+  }
+
+  MobileToolResult _workflowStatus(Map<String, dynamic> args) {
+    final runId = _requiredWorkflowRunId(args);
+    if (runId == null) {
+      final runs = _mobileWorkflowRuns.keys
+          .map(_phoneWorkflowRunRecord)
+          .toList()
+        ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+      return MobileToolResult(
+        ok: true,
+        summary: '${runs.length} phone-local workflow runs',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'runs': runs,
+            'count': runs.length,
+            'workspace': 'phone',
+            'execution_location': 'phone',
+            'runtime_layers': _phoneWorkflowRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    }
+    if (!_mobileWorkflowRuns.containsKey(runId)) {
+      return _phoneWorkflowError(
+        'RUN_NOT_FOUND',
+        'phone-local workflow run not found',
+        runId: runId,
+      );
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: 'workflow run $runId ${_mobileWorkflowRuns[runId]?['status']}',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneWorkflowRunRecord(runId),
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _workflowCancel(Map<String, dynamic> args) async {
+    final runId = _requiredWorkflowRunId(args);
+    if (runId == null) {
+      return _phoneWorkflowError(
+        'INVALID_INPUT',
+        "'run_id' is required for workflow_cancel.",
+      );
+    }
+    final run = _mobileWorkflowRuns[runId];
+    if (run == null) {
+      return _phoneWorkflowError(
+        'RUN_NOT_FOUND',
+        'phone-local workflow run not found',
+        runId: runId,
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'workflow_cancel',
+      prompt: 'このスマホ内のworkflow runをcancelします。対象: $runId',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('workflow_cancel');
+    final now = DateTime.now().toUtc().toIso8601String();
+    run['status'] = 'cancelled';
+    run['cancelled_at'] = now;
+    run['updated_at'] = now;
+    _appendPhoneWorkflowEvent(runId, 'cancelled', const {});
+    _persistPhoneWorkflowRun(runId);
+    return MobileToolResult(
+      ok: true,
+      summary: 'cancelled workflow run $runId',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneWorkflowRunRecord(runId),
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _workflowRetry(Map<String, dynamic> args) async {
+    final requestedRunId = _requiredWorkflowRunId(args);
+    final requestedWorkflowId =
+        '${args['workflow_id'] ?? args['workflowId'] ?? ''}'.trim();
+    Map<String, dynamic>? priorRun;
+    if (requestedRunId != null) {
+      priorRun = _mobileWorkflowRuns[requestedRunId];
+      if (priorRun == null) {
+        return _phoneWorkflowError(
+          'RUN_NOT_FOUND',
+          'phone-local workflow run not found',
+          runId: requestedRunId,
+        );
+      }
+    }
+    final workflowId = requestedWorkflowId.isNotEmpty
+        ? _slugifyPhoneArtifactName(
+            requestedWorkflowId,
+            fallback: requestedWorkflowId,
+          )
+        : '${priorRun?['workflow_id'] ?? ''}'.trim();
+    final steps = _cloneWorkflowSteps(priorRun?['steps']);
+    if (workflowId.isEmpty && steps.isEmpty) {
+      return _phoneWorkflowError(
+        'INVALID_INPUT',
+        "'workflow_id' or 'run_id' is required for workflow_retry.",
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'workflow_retry',
+      prompt:
+          'このスマホ内のworkflowを再実行します。対象: ${workflowId.isEmpty ? requestedRunId : workflowId}',
+      arguments: args,
+      risk: 'high',
+    );
+    if (!approved) return _mobileApprovalRequired('workflow_retry');
+    return _workflowRunInternal(
+      {
+        ...args,
+        if (workflowId.isNotEmpty) 'workflow_id': workflowId,
+        if (steps.isNotEmpty) 'steps': steps,
+      },
+      approvalToolName: 'workflow_retry',
+      requireApproval: false,
+      retryOfRunId: requestedRunId,
+    );
+  }
+
+  Future<MobileToolResult> _workflowRunInternal(
+    Map<String, dynamic> args, {
+    required String approvalToolName,
+    required bool requireApproval,
+    String? retryOfRunId,
+  }) async {
+    final rawWorkflowId = _workflowIdArg(args);
+    final workflowId = rawWorkflowId.isEmpty
+        ? ''
+        : _slugifyPhoneArtifactName(rawWorkflowId, fallback: rawWorkflowId);
+    final workflow = workflowId.isEmpty ? null : _mobileWorkflows[workflowId];
+    var steps = _normalizeWorkflowSteps(args['steps'] ?? args['workflow']);
+    if (steps.isEmpty && workflow != null) {
+      steps = _cloneWorkflowSteps(workflow['steps']);
+    }
+    if (steps.isEmpty) {
+      return _phoneWorkflowError(
+        'INVALID_INPUT',
+        workflowId.isEmpty
+            ? "'workflow_id' or inline 'steps' is required for workflow_run."
+            : 'phone-local workflow not found or has no steps',
+        workflowId: workflowId.isEmpty ? null : workflowId,
+      );
+    }
+    if (steps.length > _workflowMaxSteps) {
+      return _phoneWorkflowError(
+        'TOO_MANY_STEPS',
+        'Phone-local workflows support at most $_workflowMaxSteps steps.',
+        workflowId: workflowId.isEmpty ? null : workflowId,
+      );
+    }
+    final invalidStep = steps.where((step) {
+      return '${step['tool_name'] ?? ''}'.trim().isEmpty;
+    }).toList();
+    if (invalidStep.isNotEmpty) {
+      return _phoneWorkflowError(
+        'INVALID_STEP',
+        "Every workflow step must include 'tool', 'tool_name', or 'name'.",
+        workflowId: workflowId.isEmpty ? null : workflowId,
+      );
+    }
+    if (requireApproval) {
+      final approved = await _requestMobileApproval(
+        toolName: approvalToolName,
+        prompt:
+            'このスマホ内でworkflowを実行します。step数: ${steps.length}${workflowId.isEmpty ? '' : ' / workflow: $workflowId'}',
+        arguments: args,
+        risk: 'high',
+      );
+      if (!approved) return _mobileApprovalRequired(approvalToolName);
+    }
+
+    final requestedRunId = '${args['run_id'] ?? args['id'] ?? ''}'.trim();
+    final generatedRunId = _nextToolId('workflow_run');
+    final runId = _slugifyPhoneArtifactName(
+      requestedRunId.isEmpty ? generatedRunId : requestedRunId,
+      fallback: generatedRunId,
+    );
+    if (_mobileWorkflowRuns.containsKey(runId)) {
+      return _phoneWorkflowError(
+        'RUN_ALREADY_EXISTS',
+        'phone-local workflow run already exists',
+        runId: runId,
+      );
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    _mobileWorkflowRuns[runId] = {
+      'run_id': runId,
+      if (workflowId.isNotEmpty) 'workflow_id': workflowId,
+      if (retryOfRunId != null) 'retry_of_run_id': retryOfRunId,
+      'name': '${workflow?['name'] ?? args['name'] ?? workflowId}'.trim(),
+      'status': 'running',
+      'steps': steps,
+      'results': <Map<String, dynamic>>[],
+      'created_at': now,
+      'updated_at': now,
+      'workspace': 'phone',
+      'execution_location': 'phone',
+      'runtime_layers': _phoneWorkflowRuntimeLayers,
+    };
+    _appendPhoneWorkflowEvent(runId, 'started', {
+      'workflow_id': workflowId,
+      'step_count': steps.length,
+      if (retryOfRunId != null) 'retry_of_run_id': retryOfRunId,
+    });
+    _persistPhoneWorkflowRun(runId);
+
+    final run = _mobileWorkflowRuns[runId]!;
+    final results = run['results'] as List<Map<String, dynamic>>;
+    var allOk = true;
+    for (var index = 0; index < steps.length; index++) {
+      final step = steps[index];
+      final stepId = '${step['id'] ?? 'step-${index + 1}'}';
+      final toolName = '${step['tool_name'] ?? ''}'.trim();
+      final canonical = _canonicalToolName(toolName);
+      final stepArgs = _workflowStepArgs(step);
+      final blockedReason = _workflowStepBlockedReason(canonical, stepArgs);
+      _appendPhoneWorkflowEvent(runId, 'step_started', {
+        'step_id': stepId,
+        'tool_name': canonical,
+      });
+      final startedAt = DateTime.now().toUtc().toIso8601String();
+      if (blockedReason != null) {
+        allOk = false;
+        final result = {
+          'step_id': stepId,
+          'tool_name': canonical,
+          'ok': false,
+          'summary': blockedReason,
+          'error': {
+            'code': 'WORKFLOW_STEP_NOT_ALLOWED',
+            'message': blockedReason,
+          },
+          'arguments_keys': stepArgs.keys.toList(),
+          'started_at': startedAt,
+          'completed_at': DateTime.now().toUtc().toIso8601String(),
+          'execution_location': 'phone',
+        };
+        results.add(result);
+        run['status'] = 'failed';
+        run['failed_step_id'] = stepId;
+        run['updated_at'] = DateTime.now().toUtc().toIso8601String();
+        _appendPhoneWorkflowEvent(runId, 'step_failed', result);
+        _persistPhoneWorkflowRun(runId);
+        break;
+      }
+
+      try {
+        final result = await executeAsync(
+          MobileToolCall(
+            id: 'workflow:$runId:$stepId',
+            name: toolName,
+            arguments: stepArgs,
+          ),
+        );
+        final parsed = _decodeObject(result.output);
+        final stepResult = {
+          'step_id': stepId,
+          'tool_name': canonical,
+          'requested_tool_name': toolName,
+          'ok': result.ok,
+          'summary': result.summary,
+          'output_preview': _workflowOutputPreview(result.output),
+          if (parsed.isNotEmpty) 'parsed_status': parsed['status'],
+          'arguments_keys': stepArgs.keys.toList(),
+          'started_at': startedAt,
+          'completed_at': DateTime.now().toUtc().toIso8601String(),
+          'execution_location': _workflowStepExecutionLocation(parsed),
+        };
+        results.add(stepResult);
+        if (!result.ok) {
+          allOk = false;
+          run['status'] = 'failed';
+          run['failed_step_id'] = stepId;
+          _appendPhoneWorkflowEvent(runId, 'step_failed', stepResult);
+          run['updated_at'] = DateTime.now().toUtc().toIso8601String();
+          _persistPhoneWorkflowRun(runId);
+          break;
+        }
+        _appendPhoneWorkflowEvent(runId, 'step_completed', stepResult);
+        run['updated_at'] = DateTime.now().toUtc().toIso8601String();
+        _persistPhoneWorkflowRun(runId);
+      } catch (error) {
+        allOk = false;
+        final stepResult = {
+          'step_id': stepId,
+          'tool_name': canonical,
+          'ok': false,
+          'summary': '$error',
+          'error': {
+            'code': 'WORKFLOW_STEP_EXCEPTION',
+            'message': '$error',
+          },
+          'arguments_keys': stepArgs.keys.toList(),
+          'started_at': startedAt,
+          'completed_at': DateTime.now().toUtc().toIso8601String(),
+          'execution_location': 'phone',
+        };
+        results.add(stepResult);
+        run['status'] = 'failed';
+        run['failed_step_id'] = stepId;
+        run['updated_at'] = DateTime.now().toUtc().toIso8601String();
+        _appendPhoneWorkflowEvent(runId, 'step_failed', stepResult);
+        _persistPhoneWorkflowRun(runId);
+        break;
+      }
+    }
+    final finishedAt = DateTime.now().toUtc().toIso8601String();
+    run['status'] = allOk ? 'completed' : run['status'];
+    run['completed_at'] = finishedAt;
+    run['updated_at'] = finishedAt;
+    _appendPhoneWorkflowEvent(runId, allOk ? 'completed' : 'failed', {
+      'ok': allOk,
+      'completed_steps': results.length,
+      'step_count': steps.length,
+    });
+    _persistPhoneWorkflowRun(runId);
+    return MobileToolResult(
+      ok: allOk,
+      summary: allOk
+          ? 'workflow run $runId completed'
+          : 'workflow run $runId failed',
+      output: jsonEncode({
+        'status': allOk ? 'ok' : 'error',
+        'data': {
+          ..._phoneWorkflowRunRecord(runId),
+          'requires_mobile_approval': requireApproval,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _jobCreate(Map<String, dynamic> args) {
     final requestedId = '${args['job_id'] ?? args['id'] ?? ''}'.trim();
     final generatedId = _nextToolId('job');
@@ -12602,6 +13171,7 @@ bool _isAsyncPhoneToolName(String name) {
   if (_phonePromptToolIds.contains(normalized)) return true;
   if (_phoneMemoryToolIds.contains(normalized)) return true;
   if (_phoneKnowledgeToolIds.contains(normalized)) return true;
+  if (_phoneWorkflowMutationToolIds.contains(normalized)) return true;
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
@@ -13284,6 +13854,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPhoneKnowledgeTool = _phoneKnowledgeToolIds.contains(normalized);
   final isPhoneMediaArtifactTool =
       _phoneMediaArtifactToolIds.contains(normalized);
+  final isPhoneWorkflowTool = _phoneWorkflowToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -13598,6 +14169,16 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': status,
+    };
+  }
+  if (isPhoneWorkflowTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _phoneWorkflowRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval':
+          _phoneWorkflowMutationToolIds.contains(normalized),
+      'implementation_status': 'implemented_phone_workflow_record',
     };
   }
   if (isPhoneArtifactWorkspaceTool) {
@@ -15827,6 +16408,9 @@ final List<Map<String, dynamic>> _mobileTaskCards = [];
 final List<Map<String, dynamic>> _mobileAgentPlans = [];
 final Map<String, Map<String, dynamic>> _mobileArtifactFiles = {};
 final Map<String, Map<String, dynamic>> _mobileConsents = {};
+final Map<String, Map<String, dynamic>> _mobileWorkflows = {};
+final Map<String, Map<String, dynamic>> _mobileWorkflowRuns = {};
+final Map<String, List<Map<String, dynamic>>> _mobileWorkflowEvents = {};
 final Map<String, Map<String, dynamic>> _mobileJobs = {};
 final Map<String, List<Map<String, dynamic>>> _mobileJobEvents = {};
 int _mobileToolIdSequence = 0;
@@ -16911,6 +17495,210 @@ String? _phoneReportContentFromArgs(Map<String, dynamic> args) {
     }
   }
   return null;
+}
+
+String _workflowIdArg(Map<String, dynamic> args) {
+  return '${args['workflow_id'] ?? args['workflowId'] ?? args['id'] ?? ''}'
+      .trim();
+}
+
+String? _requiredWorkflowRunId(Map<String, dynamic> args) {
+  final raw = '${args['run_id'] ?? args['runId'] ?? args['id'] ?? ''}'.trim();
+  if (raw.isEmpty) return null;
+  return _slugifyPhoneArtifactName(raw, fallback: raw);
+}
+
+List<Map<String, dynamic>> _normalizeWorkflowSteps(Object? raw) {
+  final source = raw is List ? raw : const [];
+  final steps = <Map<String, dynamic>>[];
+  for (var index = 0; index < source.length; index++) {
+    final item = source[index];
+    if (item is! Map) continue;
+    final map = item.map((key, value) => MapEntry('$key', value));
+    final rawStepId =
+        '${map['step_id'] ?? map['id'] ?? map['key'] ?? 'step-${index + 1}'}'
+            .trim();
+    final stepId = _slugifyPhoneArtifactName(
+      rawStepId.isEmpty ? 'step-${index + 1}' : rawStepId,
+      fallback: 'step-${index + 1}',
+    );
+    final toolName =
+        '${map['tool_name'] ?? map['tool_id'] ?? map['tool'] ?? map['name'] ?? ''}'
+            .trim();
+    steps.add({
+      'id': stepId,
+      'title': '${map['title'] ?? map['description'] ?? stepId}'.trim(),
+      'tool_name': toolName,
+      'arguments': _workflowStepArguments(map),
+    });
+  }
+  return steps;
+}
+
+List<Map<String, dynamic>> _cloneWorkflowSteps(Object? raw) {
+  if (raw is! List) return <Map<String, dynamic>>[];
+  return raw.whereType<Map>().map((item) {
+    return item.map((key, value) => MapEntry('$key', value));
+  }).toList();
+}
+
+Map<String, dynamic> _workflowStepArguments(Map<String, dynamic> step) {
+  for (final key in ['arguments', 'args', 'input', 'params']) {
+    final value = step[key];
+    if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);
+    if (value is Map) return value.map((key, value) => MapEntry('$key', value));
+  }
+  const metadataKeys = {
+    'id',
+    'key',
+    'step_id',
+    'tool',
+    'tool_id',
+    'tool_name',
+    'name',
+    'title',
+    'description',
+  };
+  return {
+    for (final entry in step.entries)
+      if (!metadataKeys.contains(entry.key)) entry.key: entry.value,
+  };
+}
+
+Map<String, dynamic> _workflowStepArgs(Map<String, dynamic> step) {
+  final value = step['arguments'];
+  if (value is Map<String, dynamic>) return Map<String, dynamic>.from(value);
+  if (value is Map) return value.map((key, value) => MapEntry('$key', value));
+  return const {};
+}
+
+String? _workflowStepBlockedReason(
+  String canonicalToolName,
+  Map<String, dynamic> args,
+) {
+  if (_phoneWorkflowToolIds.contains(canonicalToolName)) {
+    return 'workflow tools cannot be nested inside phone-local workflow steps.';
+  }
+  if (canonicalToolName == 'tool_batch') {
+    final calls = args['calls'];
+    if (calls is List) {
+      for (final call in calls) {
+        if (call is! Map) continue;
+        final requested =
+            '${call['tool_name'] ?? call['tool_id'] ?? call['name'] ?? ''}'
+                .trim();
+        if (_phoneWorkflowToolIds.contains(_canonicalToolName(requested))) {
+          return 'tool_batch inside a phone-local workflow cannot call workflow tools.';
+        }
+      }
+    }
+  }
+  return null;
+}
+
+String _workflowOutputPreview(String raw) {
+  if (raw.length <= _workflowStepOutputPreviewLimit) return raw;
+  return '${raw.substring(0, _workflowStepOutputPreviewLimit)}...';
+}
+
+String _workflowStepExecutionLocation(Map<String, dynamic> parsed) {
+  final data = parsed['data'];
+  if (data is Map) {
+    final location = '${data['execution_location'] ?? ''}'.trim();
+    if (location.isNotEmpty) return location;
+  }
+  final location = '${parsed['execution_location'] ?? ''}'.trim();
+  return location.isEmpty ? 'phone' : location;
+}
+
+void _persistPhoneWorkflow(String workflowId) {
+  final workflow = _mobileWorkflows[workflowId];
+  if (workflow == null) return;
+  _putPhoneArtifactContent(
+    'workflows/$workflowId/workflow.json',
+    '${const JsonEncoder.withIndent('  ').convert(_phoneWorkflowRecord(workflowId))}\n',
+    source: 'workflow_define',
+    mimeType: 'application/json',
+    metadata: {'workflow_id': workflowId, 'artifact_role': 'workflow_record'},
+  );
+}
+
+void _persistPhoneWorkflowRun(String runId) {
+  final run = _mobileWorkflowRuns[runId];
+  if (run == null) return;
+  _putPhoneArtifactContent(
+    'workflows/runs/$runId.json',
+    '${const JsonEncoder.withIndent('  ').convert(_phoneWorkflowRunRecord(runId))}\n',
+    source: 'workflow_run',
+    mimeType: 'application/json',
+    metadata: {'run_id': runId, 'artifact_role': 'workflow_run_record'},
+  );
+}
+
+void _appendPhoneWorkflowEvent(
+  String runId,
+  String type,
+  Map<String, dynamic> data,
+) {
+  final events = _mobileWorkflowEvents.putIfAbsent(runId, () => []);
+  events.add({
+    'id': _nextToolId('workflow_event'),
+    'run_id': runId,
+    'type': type,
+    'data': data,
+    'created_at': DateTime.now().toUtc().toIso8601String(),
+    'workspace': 'phone',
+  });
+}
+
+Map<String, dynamic> _phoneWorkflowRecord(String workflowId) {
+  final workflow = _mobileWorkflows[workflowId];
+  if (workflow == null) return {'workflow_id': workflowId, 'status': 'missing'};
+  return {
+    ...workflow,
+    'workspace': 'phone',
+    'execution_location': 'phone',
+    'runtime_layers': _phoneWorkflowRuntimeLayers,
+  };
+}
+
+Map<String, dynamic> _phoneWorkflowRunRecord(String runId) {
+  final run = _mobileWorkflowRuns[runId];
+  if (run == null) return {'run_id': runId, 'status': 'missing'};
+  return {
+    ...run,
+    'event_count': _mobileWorkflowEvents[runId]?.length ?? 0,
+    'events': List<Map<String, dynamic>>.from(
+      _mobileWorkflowEvents[runId] ?? const [],
+    ),
+    'workspace': 'phone',
+    'execution_location': 'phone',
+    'runtime_layers': _phoneWorkflowRuntimeLayers,
+  };
+}
+
+MobileToolResult _phoneWorkflowError(
+  String code,
+  String message, {
+  String? workflowId,
+  String? runId,
+}) {
+  return MobileToolResult(
+    ok: false,
+    summary: message,
+    output: jsonEncode({
+      'status': 'error',
+      'error': {
+        'code': code,
+        'message': message,
+        if (workflowId != null && workflowId.isNotEmpty)
+          'workflow_id': workflowId,
+        if (runId != null && runId.isNotEmpty) 'run_id': runId,
+        'workspace': 'phone',
+        'execution_location': 'phone',
+      },
+    }),
+  );
 }
 
 Map<String, dynamic> _phoneJobInput(Map<String, dynamic> args) {

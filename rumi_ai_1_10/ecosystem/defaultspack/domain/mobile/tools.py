@@ -131,6 +131,13 @@ _PHONE_MEDIA_ARTIFACT_TOOLS = {
     "tool_file_reader": "implemented_phone_artifact_file_reader",
     "file_reader": "implemented_phone_artifact_file_reader",
 }
+_PHONE_WORKFLOW_TOOLS = {
+    "workflow_define": ("implemented_phone_workflow_record", False),
+    "workflow_run": ("implemented_phone_workflow_record", True),
+    "workflow_status": ("implemented_phone_workflow_record", False),
+    "workflow_cancel": ("implemented_phone_workflow_record", True),
+    "workflow_retry": ("implemented_phone_workflow_record", True),
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -396,6 +403,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": False,
             "implementation_status": _PHONE_MEDIA_ARTIFACT_TOOLS[tool_id],
+        }
+    if tool_id in _PHONE_WORKFLOW_TOOLS:
+        status, requires_approval = _PHONE_WORKFLOW_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-workflow-record"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
         }
     if tool_id in _PHONE_ARTIFACT_WORKSPACE_TOOLS:
         return {

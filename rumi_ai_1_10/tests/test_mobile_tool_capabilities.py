@@ -544,6 +544,36 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["knowledge"],
             },
             {
+                "tool_id": "workflow_define",
+                "name": "workflow_define",
+                "summary": "Define a phone-local workflow",
+                "tags": ["workflow", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "workflow_run",
+                "name": "workflow_run",
+                "summary": "Run a phone-local workflow",
+                "tags": ["workflow", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "workflow_status",
+                "name": "workflow_status",
+                "summary": "Read phone-local workflow status",
+                "tags": ["workflow", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "workflow_cancel",
+                "name": "workflow_cancel",
+                "summary": "Cancel a phone-local workflow",
+                "tags": ["workflow", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "workflow_retry",
+                "name": "workflow_retry",
+                "summary": "Retry a phone-local workflow",
+                "tags": ["workflow", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -1042,6 +1072,28 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "mobile-knowledge-store" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, requires_approval in {
+        "workflow_define": False,
+        "workflow_run": True,
+        "workflow_status": False,
+        "workflow_cancel": True,
+        "workflow_retry": True,
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert (
+            by_id[tool_id]["mobile"]["implementation_status"]
+            == "implemented_phone_workflow_record"
+        )
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-workflow-record" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "ios-swift" not in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "android-kotlin" not in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-swift-native" not in by_id[tool_id]["tags"]
+        assert "mobile-kotlin-native" not in by_id[tool_id]["tags"]
 
     for tool_id, requires_approval in {
         "job_create": False,

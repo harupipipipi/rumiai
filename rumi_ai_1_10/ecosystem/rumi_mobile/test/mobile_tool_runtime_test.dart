@@ -242,6 +242,11 @@ void main() {
           'tool_invoke',
           'tool_batch',
           'package_install_plan',
+          'workflow_define',
+          'workflow_run',
+          'workflow_status',
+          'workflow_cancel',
+          'workflow_retry',
           'job_create',
           'job_status',
           'job_history',
@@ -3202,6 +3207,110 @@ void main() {
       expect(listedData['count'], greaterThanOrEqualTo(1));
     });
 
+    test('runs phone-local workflow records through unified tool surface',
+        () async {
+      final workflowRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(true),
+      );
+
+      final defined = workflowRuntime.execute(
+        const MobileToolCall(
+          id: 'workflow_define_1',
+          name: 'workflow_define',
+          arguments: {
+            'workflow_id': 'Daily Check',
+            'name': 'Daily Check',
+            'steps': [
+              {
+                'id': 'calc',
+                'tool': 'calculator',
+                'arguments': {'expression': '2+2'},
+              },
+              {
+                'id': 'write',
+                'tool': 'artifact_file_write',
+                'arguments': {
+                  'path': 'workflow/daily.txt',
+                  'content': 'done',
+                },
+              },
+            ],
+          },
+        ),
+      );
+      expect(defined.ok, isTrue);
+      final definedPayload = jsonDecode(defined.output) as Map<String, dynamic>;
+      final definedData = definedPayload['data'] as Map<String, dynamic>;
+      expect(definedData['workflow_id'], 'daily-check');
+      expect(definedData['runtime_layers'],
+          containsAll(['flutter', 'dart', 'mobile-workflow-record']));
+
+      final run = await workflowRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'workflow_run_1',
+          name: 'workflow_run',
+          arguments: {'workflow_id': 'daily-check'},
+        ),
+      );
+      expect(run.ok, isTrue);
+      final runPayload = jsonDecode(run.output) as Map<String, dynamic>;
+      final runData = runPayload['data'] as Map<String, dynamic>;
+      final runId = runData['run_id'] as String;
+      final results = runData['results'] as List;
+      expect(runData['status'], 'completed');
+      expect(runData['requires_mobile_approval'], isTrue);
+      expect(results, hasLength(2));
+      expect(results.every((result) => result['ok'] == true), isTrue);
+      expect(runData['runtime_layers'],
+          containsAll(['flutter', 'dart', 'mobile-workflow-record']));
+
+      final status = workflowRuntime.execute(
+        MobileToolCall(
+          id: 'workflow_status_1',
+          name: 'workflow_status',
+          arguments: {'run_id': runId},
+        ),
+      );
+      final statusPayload = jsonDecode(status.output) as Map<String, dynamic>;
+      final statusData = statusPayload['data'] as Map<String, dynamic>;
+      expect(statusData['status'], 'completed');
+      expect(statusData['event_count'], greaterThanOrEqualTo(5));
+
+      final record = workflowRuntime.execute(
+        MobileToolCall(
+          id: 'workflow_record_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'workflows/runs/$runId.json'},
+        ),
+      );
+      expect(record.ok, isTrue);
+
+      final cancel = await workflowRuntime.executeAsync(
+        MobileToolCall(
+          id: 'workflow_cancel_1',
+          name: 'workflow_cancel',
+          arguments: {'run_id': runId},
+        ),
+      );
+      expect(cancel.ok, isTrue);
+      final cancelPayload = jsonDecode(cancel.output) as Map<String, dynamic>;
+      final cancelData = cancelPayload['data'] as Map<String, dynamic>;
+      expect(cancelData['status'], 'cancelled');
+      expect(cancelData['requires_mobile_approval'], isTrue);
+
+      final retry = await workflowRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'workflow_retry_1',
+          name: 'workflow_retry',
+          arguments: {'workflow_id': 'daily-check'},
+        ),
+      );
+      expect(retry.ok, isTrue);
+      final retryPayload = jsonDecode(retry.output) as Map<String, dynamic>;
+      final retryData = retryPayload['data'] as Map<String, dynamic>;
+      expect(retryData['status'], 'completed');
+    });
+
     test('runs connector dry-run plans on phone', () {
       final github = runtime.execute(
         const MobileToolCall(
@@ -3891,6 +4000,36 @@ void main() {
         expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
         expect(mobile['runtime_layers'], contains('mobile-knowledge-store'));
         expect(data['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'workflow_define': false,
+        'workflow_run': true,
+        'workflow_status': false,
+        'workflow_cancel': true,
+        'workflow_retry': true,
+      }.entries) {
+        final workflowSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final workflowPayload =
+            jsonDecode(workflowSchema.output) as Map<String, dynamic>;
+        final workflowData = workflowPayload['data'] as Map<String, dynamic>;
+        final workflowMobile = workflowData['mobile'] as Map<String, dynamic>;
+        expect(workflowData['mobile_compatible'], isTrue);
+        expect(workflowData['execution_route'], 'phone');
+        expect(workflowMobile['implementation_status'],
+            'implemented_phone_workflow_record');
+        expect(workflowMobile['requires_mobile_approval'], entry.value);
+        expect(workflowMobile['runtime_layers'],
+            containsAll(['flutter', 'dart', 'mobile-workflow-record']));
+        expect(workflowData['tags'], contains(mobileFlutterTag));
+        expect(workflowData['tags'], isNot(contains(mobileSwiftNativeTag)));
+        expect(workflowData['tags'], isNot(contains(mobileKotlinNativeTag)));
       }
 
       for (final entry in const {
