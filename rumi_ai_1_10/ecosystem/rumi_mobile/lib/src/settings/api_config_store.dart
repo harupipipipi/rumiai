@@ -462,6 +462,7 @@ class ApiConfigStore {
   static const _memoryRecordsKey = 'rumi.mobile_memory_records.v1';
   static const _memoFoldersKey = 'rumi.mobile_memo_folders.v1';
   static const _memoNotesKey = 'rumi.mobile_memo_notes.v1';
+  static const _knowledgeRecordsKey = 'rumi.mobile_knowledge_records.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
   static const _notificationKey = 'rumi.mobile_notifications.v1';
 
@@ -714,6 +715,22 @@ class ApiConfigStore {
 
   Future<void> deleteMemoNote(String id) async {
     await _deleteRecord(_memoNotesKey, id);
+  }
+
+  Future<List<Map<String, dynamic>>> loadKnowledgeRecords() {
+    return _loadRecordList(_knowledgeRecordsKey);
+  }
+
+  Future<void> saveKnowledgeRecords(List<Map<String, dynamic>> records) {
+    return _saveRecordList(_knowledgeRecordsKey, records);
+  }
+
+  Future<void> upsertKnowledgeRecord(Map<String, dynamic> record) async {
+    await _upsertRecord(_knowledgeRecordsKey, record);
+  }
+
+  Future<void> deleteKnowledgeRecord(String id) async {
+    await _deleteRecord(_knowledgeRecordsKey, id);
   }
 
   Future<PcConnection?> loadPc() async {

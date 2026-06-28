@@ -348,6 +348,17 @@ void main() {
           'memory_memo',
           'memory_memo_folders',
           'memory_memo_notes',
+          'knowledge_create',
+          'knowledge_get',
+          'knowledge_list',
+          'knowledge_update',
+          'knowledge_delete',
+          'knowledge_search',
+          'knowledge_import_file',
+          'knowledge_import_url',
+          'knowledge_attach_to_project',
+          'knowledge_index',
+          'knowledge_reindex',
           'browser_open_url',
           'agent_plan',
           'agent_progress',
@@ -654,6 +665,82 @@ void main() {
       final notesData = (jsonDecode(notes.output)
           as Map<String, dynamic>)['data'] as Map<String, dynamic>;
       expect(notesData['notes'], hasLength(1));
+    });
+
+    test('runs phone-local knowledge store search and import tools', () async {
+      final storage = _FakeSecureStorage();
+      final approval = _FakeMobileToolApproval(true);
+      final runtime = MobileToolRuntime(
+        configStore: ApiConfigStore(storage: storage),
+        approvalDelegate: approval,
+      );
+
+      final created = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'knowledge_create',
+          name: 'knowledge_create',
+          arguments: {
+            'id': 'mobile-tools',
+            'title': 'Mobile tools',
+            'content': 'Phone tools should keep the same names as PC tools.',
+            'tags': ['mobile', 'tools'],
+            'project_id': 'rumi',
+          },
+        ),
+      );
+      expect(created.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'knowledge_create');
+      final createdData = (jsonDecode(created.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(createdData['knowledge']['index_terms'], contains('mobile'));
+
+      final search = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'knowledge_search',
+          name: 'knowledge_search',
+          arguments: {'query': 'same names', 'project_id': 'rumi'},
+        ),
+      );
+      expect(search.ok, isTrue);
+      final searchData = (jsonDecode(search.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(searchData['results'], isNotEmpty);
+      expect(searchData['runtime_layers'], contains('mobile-knowledge-store'));
+
+      final imported = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'knowledge_import_url',
+          name: 'knowledge_import_url',
+          arguments: {
+            'url': 'https://example.com/rumi-mobile',
+            'content': 'Rumi mobile imports URL references as knowledge.',
+          },
+        ),
+      );
+      expect(imported.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'knowledge_import_url');
+
+      final attach = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'knowledge_attach',
+          name: 'knowledge_attach_to_project',
+          arguments: {'id': 'mobile-tools', 'project_id': 'mobile'},
+        ),
+      );
+      expect(attach.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'knowledge_attach_to_project');
+
+      final index = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'knowledge_index',
+          name: 'knowledge_index',
+          arguments: {'id': 'mobile-tools'},
+        ),
+      );
+      expect(index.ok, isTrue);
+      final indexData = (jsonDecode(index.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(indexData['indexed_count'], 1);
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -3645,6 +3732,41 @@ void main() {
       }
 
       for (final entry in const {
+        'knowledge_create': ['implemented_phone_knowledge_store', true],
+        'knowledge_get': ['implemented_phone_knowledge_store', false],
+        'knowledge_list': ['implemented_phone_knowledge_store', false],
+        'knowledge_update': ['implemented_phone_knowledge_store', true],
+        'knowledge_delete': ['implemented_phone_knowledge_store', true],
+        'knowledge_search': ['implemented_phone_knowledge_search', false],
+        'knowledge_import_file': ['implemented_phone_knowledge_import', true],
+        'knowledge_import_url': ['implemented_phone_knowledge_import', true],
+        'knowledge_attach_to_project': [
+          'implemented_phone_knowledge_store',
+          true
+        ],
+        'knowledge_index': ['implemented_phone_knowledge_index', true],
+        'knowledge_reindex': ['implemented_phone_knowledge_index', true],
+      }.entries) {
+        final schema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final mobile = data['mobile'] as Map<String, dynamic>;
+        expect(data['mobile_compatible'], isTrue);
+        expect(data['execution_route'], 'phone');
+        expect(mobile['implementation_status'], entry.value[0]);
+        expect(mobile['requires_mobile_approval'], entry.value[1]);
+        expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(mobile['runtime_layers'], contains('mobile-knowledge-store'));
+        expect(data['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
         'job_create': false,
         'job_status': false,
         'job_history': false,
@@ -4110,7 +4232,7 @@ void main() {
         const MobileToolCall(
           id: 'list_1',
           name: 'tool_list',
-          arguments: {},
+          arguments: {'limit': 400},
         ),
       );
       expect(list.ok, isTrue);

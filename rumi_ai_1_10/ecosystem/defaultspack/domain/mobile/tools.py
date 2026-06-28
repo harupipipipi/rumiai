@@ -110,6 +110,19 @@ _PHONE_MEMORY_TOOLS = {
     "memory_memo_folders": ("implemented_phone_memo_store", True),
     "memory_memo_notes": ("implemented_phone_memo_store", True),
 }
+_PHONE_KNOWLEDGE_TOOLS = {
+    "knowledge_create": ("implemented_phone_knowledge_store", True),
+    "knowledge_get": ("implemented_phone_knowledge_store", False),
+    "knowledge_list": ("implemented_phone_knowledge_store", False),
+    "knowledge_update": ("implemented_phone_knowledge_store", True),
+    "knowledge_delete": ("implemented_phone_knowledge_store", True),
+    "knowledge_search": ("implemented_phone_knowledge_search", False),
+    "knowledge_import_file": ("implemented_phone_knowledge_import", True),
+    "knowledge_import_url": ("implemented_phone_knowledge_import", True),
+    "knowledge_attach_to_project": ("implemented_phone_knowledge_store", True),
+    "knowledge_index": ("implemented_phone_knowledge_index", True),
+    "knowledge_reindex": ("implemented_phone_knowledge_index", True),
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -355,6 +368,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart", "mobile-memory-store"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
+        }
+    if tool_id in _PHONE_KNOWLEDGE_TOOLS:
+        status, requires_approval = _PHONE_KNOWLEDGE_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-knowledge-store"],
             "native_layers": [],
             "requires_mobile_approval": requires_approval,
             "implementation_status": status,

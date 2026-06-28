@@ -316,6 +316,29 @@ const _phoneMemoryMutationToolIds = <String>{
   'memory_memo_folders',
   'memory_memo_notes',
 };
+const _phoneKnowledgeToolIds = <String>{
+  'knowledge_create',
+  'knowledge_get',
+  'knowledge_list',
+  'knowledge_update',
+  'knowledge_delete',
+  'knowledge_search',
+  'knowledge_import_file',
+  'knowledge_import_url',
+  'knowledge_attach_to_project',
+  'knowledge_index',
+  'knowledge_reindex',
+};
+const _phoneKnowledgeMutationToolIds = <String>{
+  'knowledge_create',
+  'knowledge_update',
+  'knowledge_delete',
+  'knowledge_import_file',
+  'knowledge_import_url',
+  'knowledge_attach_to_project',
+  'knowledge_index',
+  'knowledge_reindex',
+};
 const _mobileThinkingLevels = <String>{
   'none',
   'low',
@@ -1505,6 +1528,220 @@ class MobileToolRuntime {
           'title': {'type': 'string'},
           'content': {'type': 'string'},
           'folder_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_create',
+      description:
+          'Create a phone-local knowledge record after mobile approval.',
+      tags: ['tool', 'knowledge', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_create', 'defaultspack_knowledge_create'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'tags': {},
+          'project_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_get',
+      description: 'Get a phone-local knowledge record.',
+      tags: ['tool', 'knowledge', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_get', 'defaultspack_knowledge_get'],
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'knowledge_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_list',
+      description: 'List phone-local knowledge records.',
+      tags: ['tool', 'knowledge', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_list', 'defaultspack_knowledge_list'],
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'project_id': {'type': 'string'},
+          'tag': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_update',
+      description:
+          'Update a phone-local knowledge record after mobile approval.',
+      tags: ['tool', 'knowledge', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_update', 'defaultspack_knowledge_update'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'knowledge_id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'tags': {},
+          'project_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_delete',
+      description:
+          'Delete a phone-local knowledge record after mobile approval.',
+      tags: ['tool', 'knowledge', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_delete', 'defaultspack_knowledge_delete'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'knowledge_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_search',
+      description:
+          'Search phone-local knowledge records with lightweight lexical ranking.',
+      tags: ['tool', 'knowledge', 'search', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_search', 'defaultspack_knowledge_search'],
+      implementationStatus: 'implemented_phone_knowledge_search',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'project_id': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_import_file',
+      description:
+          'Import provided text or a phone-local artifact file into phone knowledge after mobile approval.',
+      tags: [
+        'tool',
+        'knowledge',
+        'import',
+        'artifact_workspace',
+        mobileCompatibleTag
+      ],
+      aliases: [
+        'defaults_knowledge_import_file',
+        'defaultspack_knowledge_import_file',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_import',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'project_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_import_url',
+      description:
+          'Import a URL reference and optional provided content into phone knowledge after mobile approval.',
+      tags: ['tool', 'knowledge', 'import', mobileCompatibleTag],
+      aliases: [
+        'defaults_knowledge_import_url',
+        'defaultspack_knowledge_import_url',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_import',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'url': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'project_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_attach_to_project',
+      description:
+          'Attach a phone-local knowledge record to a project id after mobile approval.',
+      tags: ['tool', 'knowledge', 'project', mobileCompatibleTag],
+      aliases: [
+        'defaults_knowledge_attach_to_project',
+        'defaultspack_knowledge_attach_to_project',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'knowledge_id': {'type': 'string'},
+          'project_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_index',
+      description:
+          'Build a lightweight phone-local keyword index for knowledge records after mobile approval.',
+      tags: ['tool', 'knowledge', 'index', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_index', 'defaultspack_knowledge_index'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_index',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'knowledge_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'knowledge_reindex',
+      description:
+          'Rebuild lightweight phone-local keyword indexes after mobile approval.',
+      tags: ['tool', 'knowledge', 'index', mobileCompatibleTag],
+      aliases: ['defaults_knowledge_reindex', 'defaultspack_knowledge_reindex'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_knowledge_index',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'project_id': {'type': 'string'},
         },
       },
     ),
@@ -3995,6 +4232,18 @@ class MobileToolRuntime {
       case 'memory_memo_folders':
       case 'memory_memo_notes':
         return _asyncOnlyTool(name);
+      case 'knowledge_create':
+      case 'knowledge_get':
+      case 'knowledge_list':
+      case 'knowledge_update':
+      case 'knowledge_delete':
+      case 'knowledge_search':
+      case 'knowledge_import_file':
+      case 'knowledge_import_url':
+      case 'knowledge_attach_to_project':
+      case 'knowledge_index':
+      case 'knowledge_reindex':
+        return _asyncOnlyTool(name);
       case 'artifact_file_list':
         return _artifactFileList(call.arguments);
       case 'artifact_file_read':
@@ -4246,6 +4495,18 @@ class MobileToolRuntime {
       case 'memory_memo_folders':
       case 'memory_memo_notes':
         return _memoryTool(name, call.arguments);
+      case 'knowledge_create':
+      case 'knowledge_get':
+      case 'knowledge_list':
+      case 'knowledge_update':
+      case 'knowledge_delete':
+      case 'knowledge_search':
+      case 'knowledge_import_file':
+      case 'knowledge_import_url':
+      case 'knowledge_attach_to_project':
+      case 'knowledge_index':
+      case 'knowledge_reindex':
+        return _knowledgeTool(name, call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -11193,6 +11454,624 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _knowledgeTool(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    switch (toolName) {
+      case 'knowledge_create':
+        return _knowledgeCreate(args);
+      case 'knowledge_get':
+        return _knowledgeGet(args);
+      case 'knowledge_list':
+        return _knowledgeList(args);
+      case 'knowledge_update':
+        return _knowledgeUpdate(args);
+      case 'knowledge_delete':
+        return _knowledgeDelete(args);
+      case 'knowledge_search':
+        return _knowledgeSearch(args);
+      case 'knowledge_import_file':
+        return _knowledgeImportFile(args);
+      case 'knowledge_import_url':
+        return _knowledgeImportUrl(args);
+      case 'knowledge_attach_to_project':
+        return _knowledgeAttachToProject(args);
+      case 'knowledge_index':
+        return _knowledgeIndex(args);
+      case 'knowledge_reindex':
+        return _knowledgeReindex(args);
+      default:
+        return _knowledgeToolError(
+          toolName,
+          'UNSUPPORTED_KNOWLEDGE_TOOL',
+          '$toolName is not a phone knowledge tool.',
+        );
+    }
+  }
+
+  Future<MobileToolResult> _knowledgeCreate(Map<String, dynamic> args) async {
+    final content = _knowledgeContentArg(args);
+    if (content.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_create',
+        'MISSING_KNOWLEDGE_CONTENT',
+        "'content' or 'text' is required.",
+      );
+    }
+    final title = _knowledgeTitleArg(args, content);
+    final id = _knowledgeIdArg(args).isEmpty
+        ? _slugifyPhoneArtifactName(title, fallback: _nextToolId('kn'))
+        : _knowledgeIdArg(args);
+    final now = DateTime.now().toUtc().toIso8601String();
+    final record = {
+      'id': id,
+      'title': title,
+      'content': content,
+      'tags': _memoryTags(args['tags'] ?? args['tag']),
+      'project_id': _firstText(args, const ['project_id', 'project']),
+      'source': 'phone',
+      'created_at': now,
+      'updated_at': now,
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_create',
+      prompt: 'このスマホにknowledge recordを作成します。対象: $title',
+      arguments: {
+        ...args,
+        'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_create');
+    await _store.upsertKnowledgeRecord(_withKnowledgeIndex(record));
+    return _knowledgeToolOk(
+      'knowledge_create',
+      'created phone knowledge $id',
+      {
+        'knowledge': _normalizeKnowledgeRecord(_withKnowledgeIndex(record)),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeGet(Map<String, dynamic> args) async {
+    final id = _knowledgeIdArg(args);
+    if (id.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_get',
+        'MISSING_KNOWLEDGE_ID',
+        "'id' or 'knowledge_id' is required.",
+      );
+    }
+    final record = await _findKnowledgeRecord(id);
+    if (record == null) {
+      return _knowledgeToolError(
+        'knowledge_get',
+        'KNOWLEDGE_NOT_FOUND',
+        'Phone-local knowledge not found: $id.',
+      );
+    }
+    return _knowledgeToolOk(
+      'knowledge_get',
+      'got phone knowledge $id',
+      {'knowledge': _normalizeKnowledgeRecord(record)},
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeList(Map<String, dynamic> args) async {
+    final records = await _filteredKnowledgeRecords(args);
+    return _knowledgeToolOk(
+      'knowledge_list',
+      '${records.length} phone knowledge records',
+      {'knowledge': records, 'count': records.length},
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeUpdate(Map<String, dynamic> args) async {
+    final id = _knowledgeIdArg(args);
+    if (id.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_update',
+        'MISSING_KNOWLEDGE_ID',
+        "'id' or 'knowledge_id' is required.",
+      );
+    }
+    final records = await _store.loadKnowledgeRecords();
+    final index =
+        records.indexWhere((record) => '${record['id'] ?? ''}'.trim() == id);
+    if (index < 0) {
+      return _knowledgeToolError(
+        'knowledge_update',
+        'KNOWLEDGE_NOT_FOUND',
+        'Phone-local knowledge not found: $id.',
+      );
+    }
+    final content = _knowledgeContentArg(args);
+    final title = _firstText(args, const ['title', 'name']);
+    final updated = {
+      ...records[index],
+      if (title.isNotEmpty) 'title': title,
+      if (content.isNotEmpty) 'content': content,
+      if (args.containsKey('tags') || args.containsKey('tag'))
+        'tags': _memoryTags(args['tags'] ?? args['tag']),
+      if (args.containsKey('project_id') || args.containsKey('project'))
+        'project_id': _firstText(args, const ['project_id', 'project']),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_update',
+      prompt: 'このスマホのknowledge recordを更新します。対象: $id',
+      arguments: {
+        ...args,
+        if (content.isNotEmpty) 'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_update');
+    records[index] = _withKnowledgeIndex(updated);
+    await _store.saveKnowledgeRecords(records);
+    return _knowledgeToolOk(
+      'knowledge_update',
+      'updated phone knowledge $id',
+      {
+        'knowledge': _normalizeKnowledgeRecord(records[index]),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeDelete(Map<String, dynamic> args) async {
+    final id = _knowledgeIdArg(args);
+    if (id.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_delete',
+        'MISSING_KNOWLEDGE_ID',
+        "'id' or 'knowledge_id' is required.",
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_delete',
+      prompt: 'このスマホのknowledge recordを削除します。対象: $id',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_delete');
+    await _store.deleteKnowledgeRecord(id);
+    return _knowledgeToolOk(
+      'knowledge_delete',
+      'deleted phone knowledge $id',
+      {'deleted': id, 'requires_mobile_approval': true},
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeSearch(Map<String, dynamic> args) async {
+    final records = await _rankedKnowledgeRecords(args);
+    return _knowledgeToolOk(
+      'knowledge_search',
+      '${records.length} phone knowledge results',
+      {
+        'results': records,
+        'count': records.length,
+        'query': _firstText(args, const ['query', 'search', 'text']),
+      },
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeImportFile(
+    Map<String, dynamic> args,
+  ) async {
+    var content = _knowledgeContentArg(args);
+    final path = _normalizePhoneArtifactPath(args['path'], allowRoot: false);
+    if (content.isEmpty && path != null) {
+      final artifact = _mobileArtifactFiles[path];
+      if (artifact != null) content = '${artifact['content'] ?? ''}';
+    }
+    if (content.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_import_file',
+        'MISSING_PHONE_FILE_CONTENT',
+        'Provide content/text or a path inside the phone artifact workspace.',
+      );
+    }
+    final title = _knowledgeTitleArg(args, path ?? content);
+    final nextArgs = {
+      ...args,
+      'title': title,
+      'content': content,
+      if (path != null) 'source_path': path,
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_import_file',
+      prompt: 'このスマホのartifact/textをknowledgeへ取り込みます。対象: $title',
+      arguments: {
+        ...args,
+        'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_import_file');
+    return _knowledgeCreateWithApprovalAlreadyGranted(
+      'knowledge_import_file',
+      nextArgs,
+      source: 'phone-file',
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeImportUrl(
+    Map<String, dynamic> args,
+  ) async {
+    final url = _firstText(args, const ['url', 'href']);
+    if (!_looksLikeHttpUrl(url)) {
+      return _knowledgeToolError(
+        'knowledge_import_url',
+        'INVALID_URL',
+        "'url' must be an http or https URL.",
+      );
+    }
+    final content =
+        _knowledgeContentArg(args).isEmpty ? url : _knowledgeContentArg(args);
+    final title = _knowledgeTitleArg(args, url);
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_import_url',
+      prompt: 'このURL参照をスマホ内knowledgeへ取り込みます。対象: $title',
+      arguments: {
+        ...args,
+        'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_import_url');
+    return _knowledgeCreateWithApprovalAlreadyGranted(
+      'knowledge_import_url',
+      {
+        ...args,
+        'title': title,
+        'content': content,
+        'url': url,
+      },
+      source: 'phone-url',
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeAttachToProject(
+    Map<String, dynamic> args,
+  ) async {
+    final id = _knowledgeIdArg(args);
+    final projectId = _firstText(args, const ['project_id', 'project']);
+    if (id.isEmpty || projectId.isEmpty) {
+      return _knowledgeToolError(
+        'knowledge_attach_to_project',
+        'MISSING_INPUT',
+        "'id'/'knowledge_id' and 'project_id' are required.",
+      );
+    }
+    final records = await _store.loadKnowledgeRecords();
+    final index =
+        records.indexWhere((record) => '${record['id'] ?? ''}'.trim() == id);
+    if (index < 0) {
+      return _knowledgeToolError(
+        'knowledge_attach_to_project',
+        'KNOWLEDGE_NOT_FOUND',
+        'Phone-local knowledge not found: $id.',
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_attach_to_project',
+      prompt: 'このスマホのknowledgeをprojectへ紐付けます。対象: $id -> $projectId',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) {
+      return _mobileApprovalRequired('knowledge_attach_to_project');
+    }
+    records[index] = {
+      ...records[index],
+      'project_id': projectId,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    await _store.saveKnowledgeRecords(records);
+    return _knowledgeToolOk(
+      'knowledge_attach_to_project',
+      'attached phone knowledge $id to $projectId',
+      {
+        'knowledge': _normalizeKnowledgeRecord(records[index]),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeIndex(Map<String, dynamic> args) async {
+    final id = _knowledgeIdArg(args);
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_index',
+      prompt: id.isEmpty
+          ? 'このスマホのknowledge indexを作成します。'
+          : 'このスマホのknowledge indexを作成します。対象: $id',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_index');
+    final records = await _store.loadKnowledgeRecords();
+    var changed = 0;
+    final next = [
+      for (final record in records)
+        if (id.isEmpty || '${record['id'] ?? ''}'.trim() == id)
+          (() {
+            changed += 1;
+            return _withKnowledgeIndex(record);
+          })()
+        else
+          record,
+    ];
+    await _store.saveKnowledgeRecords(next);
+    return _knowledgeToolOk(
+      'knowledge_index',
+      'indexed $changed phone knowledge records',
+      {'indexed_count': changed, 'requires_mobile_approval': true},
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeReindex(Map<String, dynamic> args) async {
+    final projectId = _firstText(args, const ['project_id', 'project']);
+    final approved = await _requestMobileApproval(
+      toolName: 'knowledge_reindex',
+      prompt: projectId.isEmpty
+          ? 'このスマホのknowledge indexを再作成します。'
+          : 'このスマホのknowledge indexを再作成します。project: $projectId',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('knowledge_reindex');
+    final records = await _store.loadKnowledgeRecords();
+    var changed = 0;
+    final next = [
+      for (final record in records)
+        if (projectId.isEmpty || '${record['project_id'] ?? ''}' == projectId)
+          (() {
+            changed += 1;
+            return _withKnowledgeIndex(record);
+          })()
+        else
+          record,
+    ];
+    await _store.saveKnowledgeRecords(next);
+    return _knowledgeToolOk(
+      'knowledge_reindex',
+      'reindexed $changed phone knowledge records',
+      {'indexed_count': changed, 'requires_mobile_approval': true},
+    );
+  }
+
+  Future<MobileToolResult> _knowledgeCreateWithApprovalAlreadyGranted(
+    String toolName,
+    Map<String, dynamic> args, {
+    required String source,
+  }) async {
+    final content = _knowledgeContentArg(args);
+    final title = _knowledgeTitleArg(args, content);
+    final id = _knowledgeIdArg(args).isEmpty
+        ? _slugifyPhoneArtifactName(title, fallback: _nextToolId('kn'))
+        : _knowledgeIdArg(args);
+    final now = DateTime.now().toUtc().toIso8601String();
+    final record = _withKnowledgeIndex({
+      'id': id,
+      'title': title,
+      'content': content,
+      'tags': _memoryTags(args['tags'] ?? args['tag']),
+      'project_id': _firstText(args, const ['project_id', 'project']),
+      'url': _firstText(args, const ['url', 'href']),
+      'source_path': _firstText(args, const ['source_path', 'path']),
+      'source': source,
+      'created_at': now,
+      'updated_at': now,
+    });
+    await _store.upsertKnowledgeRecord(record);
+    return _knowledgeToolOk(
+      toolName,
+      'imported phone knowledge $id',
+      {
+        'knowledge': _normalizeKnowledgeRecord(record),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>?> _findKnowledgeRecord(String id) async {
+    for (final record in await _store.loadKnowledgeRecords()) {
+      if ('${record['id'] ?? ''}'.trim() == id) return record;
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _filteredKnowledgeRecords(
+    Map<String, dynamic> args,
+  ) async {
+    final query = _firstText(args, const ['query', 'search', 'text']);
+    final tag = _firstText(args, const ['tag']).toLowerCase();
+    final projectId = _firstText(args, const ['project_id', 'project']);
+    final limit = _boundedInt(args['limit'], 50, 1, 500);
+    var records = (await _store.loadKnowledgeRecords())
+        .map(_normalizeKnowledgeRecord)
+        .toList();
+    if (projectId.isNotEmpty) {
+      records = records
+          .where((record) => '${record['project_id'] ?? ''}' == projectId)
+          .toList();
+    }
+    if (tag.isNotEmpty) {
+      records = records
+          .where((record) => (record['tags'] as List? ?? const [])
+              .map((item) => '$item'.toLowerCase())
+              .contains(tag))
+          .toList();
+    }
+    if (query.isNotEmpty) {
+      records = records
+          .where((record) => _knowledgeRecordScore(record, query) > 0)
+          .toList();
+    }
+    records.sort((a, b) =>
+        '${b['updated_at'] ?? ''}'.compareTo('${a['updated_at'] ?? ''}'));
+    return records.take(limit).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _rankedKnowledgeRecords(
+    Map<String, dynamic> args,
+  ) async {
+    final query = _firstText(args, const ['query', 'search', 'text']);
+    final limit = _boundedInt(args['limit'], 8, 1, 100);
+    final projectId = _firstText(args, const ['project_id', 'project']);
+    var records = (await _store.loadKnowledgeRecords())
+        .map(_normalizeKnowledgeRecord)
+        .toList();
+    if (projectId.isNotEmpty) {
+      records = records
+          .where((record) => '${record['project_id'] ?? ''}' == projectId)
+          .toList();
+    }
+    final scored = [
+      for (final record in records)
+        {
+          ...record,
+          'score': query.isEmpty ? 1.0 : _knowledgeRecordScore(record, query),
+        }
+    ]..sort((a, b) {
+        final score = ((b['score'] as num?)?.toDouble() ?? 0)
+            .compareTo((a['score'] as num?)?.toDouble() ?? 0);
+        if (score != 0) return score;
+        return '${b['updated_at'] ?? ''}'.compareTo('${a['updated_at'] ?? ''}');
+      });
+    return scored
+        .where(
+            (record) => query.isEmpty || ((record['score'] as num?) ?? 0) > 0)
+        .take(limit)
+        .toList();
+  }
+
+  Map<String, dynamic> _normalizeKnowledgeRecord(Map<String, dynamic> record) {
+    final content = '${record['content'] ?? record['text'] ?? ''}';
+    final id = '${record['id'] ?? record['knowledge_id'] ?? ''}'.trim();
+    return {
+      'id': id,
+      'title': '${record['title'] ?? record['name'] ?? id}'.trim(),
+      'content': content,
+      'tags': _memoryTags(record['tags'] ?? record['tag']),
+      'project_id': '${record['project_id'] ?? record['project'] ?? ''}'.trim(),
+      'source': '${record['source'] ?? 'phone'}',
+      'url': '${record['url'] ?? ''}'.trim(),
+      'source_path': '${record['source_path'] ?? record['path'] ?? ''}'.trim(),
+      'index_terms': _knowledgeTerms(record['index_terms'] ?? content),
+      'indexed_at': '${record['indexed_at'] ?? ''}'.trim(),
+      'char_count': content.length,
+      if (record['created_at'] != null) 'created_at': record['created_at'],
+      if (record['updated_at'] != null) 'updated_at': record['updated_at'],
+    };
+  }
+
+  Map<String, dynamic> _withKnowledgeIndex(Map<String, dynamic> record) {
+    final normalized = _normalizeKnowledgeRecord(record);
+    return {
+      ...record,
+      'index_terms': _knowledgeTerms(
+        '${normalized['title']} ${normalized['content']} ${(normalized['tags'] as List).join(' ')}',
+      ),
+      'indexed_at': DateTime.now().toUtc().toIso8601String(),
+    };
+  }
+
+  String _knowledgeContentArg(Map<String, dynamic> args) {
+    return _firstText(args, const ['content', 'text', 'body', 'summary']);
+  }
+
+  String _knowledgeTitleArg(Map<String, dynamic> args, String fallbackText) {
+    final title = _firstText(args, const ['title', 'name', 'label']);
+    if (title.isNotEmpty) return title;
+    final compact = fallbackText.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (_looksLikeHttpUrl(compact)) return Uri.parse(compact).host;
+    return compact.isEmpty ? 'Phone knowledge' : _clampText(compact, 60);
+  }
+
+  String _knowledgeIdArg(Map<String, dynamic> args) {
+    final raw = _firstText(args, const ['id', 'knowledge_id']);
+    if (raw.isEmpty) return '';
+    return _slugifyPhoneArtifactName(raw, fallback: raw);
+  }
+
+  List<String> _knowledgeTerms(Object? value) {
+    final text = value is List ? value.join(' ') : '${value ?? ''}';
+    final terms = text
+        .toLowerCase()
+        .split(RegExp(r'[^a-z0-9ぁ-んァ-ヶ一-龠ー]+'))
+        .map((term) => term.trim())
+        .where((term) => term.length >= 2)
+        .take(80);
+    return _orderedStrings(terms);
+  }
+
+  double _knowledgeRecordScore(Map<String, dynamic> record, String query) {
+    final indexed = (record['index_terms'] as List? ?? const []).join(' ');
+    final text = [
+      record['title'],
+      record['content'],
+      indexed,
+      ...(record['tags'] as List? ?? const []),
+    ].join(' ');
+    return _memorySearchScore(text, query);
+  }
+
+  MobileToolResult _knowledgeToolOk(
+    String toolName,
+    String summary,
+    Map<String, dynamic> data, {
+    bool ok = true,
+  }) {
+    return MobileToolResult(
+      ok: ok,
+      summary: summary,
+      output: jsonEncode({
+        'status': ok ? 'ok' : 'error',
+        'data': {
+          ...data,
+          'tool': toolName,
+          'mobile_compatible': true,
+          'requires_pc': false,
+          'execution_location': 'phone',
+          'runtime_layers': [
+            ..._flutterRuntimeLayers,
+            'mobile-knowledge-store',
+          ],
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _knowledgeToolError(
+    String toolName,
+    String code,
+    String message,
+  ) {
+    return MobileToolResult(
+      ok: false,
+      summary: message,
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': code,
+          'message': message,
+          'tool': toolName,
+          'execution_location': 'phone',
+          'runtime_layers': [
+            ..._flutterRuntimeLayers,
+            'mobile-knowledge-store',
+          ],
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -11270,6 +12149,7 @@ bool _isAsyncPhoneToolName(String name) {
   if (_phoneAiModelToolIds.contains(normalized)) return true;
   if (_phonePromptToolIds.contains(normalized)) return true;
   if (_phoneMemoryToolIds.contains(normalized)) return true;
+  if (_phoneKnowledgeToolIds.contains(normalized)) return true;
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
@@ -11849,7 +12729,12 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
           ? _orderedStrings([...tool.runtimeLayers, 'mobile-prompt-store'])
           : _phoneMemoryToolIds.contains(tool.name)
               ? _orderedStrings([...tool.runtimeLayers, 'mobile-memory-store'])
-              : tool.runtimeLayers;
+              : _phoneKnowledgeToolIds.contains(tool.name)
+                  ? _orderedStrings([
+                      ...tool.runtimeLayers,
+                      'mobile-knowledge-store',
+                    ])
+                  : tool.runtimeLayers;
   return {
     'compatible': true,
     'available': true,
@@ -11944,6 +12829,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPhoneAiModelTool = _phoneAiModelToolIds.contains(normalized);
   final isPhonePromptTool = _phonePromptToolIds.contains(normalized);
   final isPhoneMemoryTool = _phoneMemoryToolIds.contains(normalized);
+  final isPhoneKnowledgeTool = _phoneKnowledgeToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -12222,6 +13108,26 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval':
           _phoneMemoryMutationToolIds.contains(normalized),
+      'implementation_status': status,
+    };
+  }
+  if (isPhoneKnowledgeTool) {
+    final status = switch (normalized) {
+      'knowledge_search' => 'implemented_phone_knowledge_search',
+      'knowledge_import_file' ||
+      'knowledge_import_url' =>
+        'implemented_phone_knowledge_import',
+      'knowledge_index' ||
+      'knowledge_reindex' =>
+        'implemented_phone_knowledge_index',
+      _ => 'implemented_phone_knowledge_store',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': [..._flutterRuntimeLayers, 'mobile-knowledge-store'],
+      'native_layers': [],
+      'requires_mobile_approval':
+          _phoneKnowledgeMutationToolIds.contains(normalized),
       'implementation_status': status,
     };
   }

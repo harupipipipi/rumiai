@@ -472,6 +472,72 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["memory", "memo"],
             },
             {
+                "tool_id": "knowledge_create",
+                "name": "knowledge_create",
+                "summary": "Create knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_get",
+                "name": "knowledge_get",
+                "summary": "Get knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_list",
+                "name": "knowledge_list",
+                "summary": "List knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_update",
+                "name": "knowledge_update",
+                "summary": "Update knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_delete",
+                "name": "knowledge_delete",
+                "summary": "Delete knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_search",
+                "name": "knowledge_search",
+                "summary": "Search knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_import_file",
+                "name": "knowledge_import_file",
+                "summary": "Import knowledge from a phone file",
+                "tags": ["knowledge", "artifact_workspace"],
+            },
+            {
+                "tool_id": "knowledge_import_url",
+                "name": "knowledge_import_url",
+                "summary": "Import knowledge from a URL reference",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_attach_to_project",
+                "name": "knowledge_attach_to_project",
+                "summary": "Attach knowledge to a project",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_index",
+                "name": "knowledge_index",
+                "summary": "Index knowledge",
+                "tags": ["knowledge"],
+            },
+            {
+                "tool_id": "knowledge_reindex",
+                "name": "knowledge_reindex",
+                "summary": "Reindex knowledge",
+                "tags": ["knowledge"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -925,6 +991,27 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "mobile-memory-store" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "knowledge_create": ("implemented_phone_knowledge_store", True),
+        "knowledge_get": ("implemented_phone_knowledge_store", False),
+        "knowledge_list": ("implemented_phone_knowledge_store", False),
+        "knowledge_update": ("implemented_phone_knowledge_store", True),
+        "knowledge_delete": ("implemented_phone_knowledge_store", True),
+        "knowledge_search": ("implemented_phone_knowledge_search", False),
+        "knowledge_import_file": ("implemented_phone_knowledge_import", True),
+        "knowledge_import_url": ("implemented_phone_knowledge_import", True),
+        "knowledge_attach_to_project": ("implemented_phone_knowledge_store", True),
+        "knowledge_index": ("implemented_phone_knowledge_index", True),
+        "knowledge_reindex": ("implemented_phone_knowledge_index", True),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-knowledge-store" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, requires_approval in {
         "job_create": False,
