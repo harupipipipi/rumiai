@@ -2014,9 +2014,19 @@ class MimoCodingCompanyRuntime:
         scheduler = Scheduler()
         schedules: list[dict[str, Any]] = []
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
-        for schedule_id in schedule_ids.values():
+        seen: set[str] = set()
+        for raw_schedule_id in schedule_ids.values():
+            schedule_id = str(raw_schedule_id or "").strip()
+            if not schedule_id or schedule_id in seen:
+                continue
+            seen.add(schedule_id)
             schedule = scheduler.get_schedule(schedule_id)
             if schedule:
+                try:
+                    scheduler.recover_scheduled_chat_approval(schedule_id)
+                    schedule = scheduler.get_schedule(schedule_id) or schedule
+                except Exception:
+                    pass
                 schedules.append(schedule)
         return schedules
 

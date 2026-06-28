@@ -1636,6 +1636,149 @@ def test_scheduler_auto_approves_route_listing_without_broad_rumi_api_allowlist(
     _reset_scheduler_singleton()
 
 
+def test_mimo_status_recovers_externally_approved_scheduled_approval(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        conversation_kind="mimo_coding_company",
+        metadata={
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    )
+    conversation_id = conversation["id"]
+
+    from domain.agent.scheduler import Scheduler
+    from domain.agent.schedule_store import load_history
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run browser QA.",
+            "model": "stub/default",
+            "conversation_id": conversation_id,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["browser_use"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_initial_tool_choice": "required",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["browser_use"],
+                "schedule_auto_approve_max_followups": "unlimited",
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": conversation_id,
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+    approval_response = _approval_required_response(
+        approval,
+        conversation_id=conversation_id,
+        tool_name="browser_use",
+        operation="tool.browser_use",
+    )
+    pending = approval_response["data"]["metadata"]["pending_approval"]
+    request_id = pending["request_id"]
+    scheduler_message = store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "Run browser QA.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": schedule["id"],
+                "schedule_execution_id": "sexec-original",
+                "trigger": "scheduled",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    approval_message = store.add_message(conversation_id, approval_response["data"])
+    assert scheduler_message is not None
+    assert approval_message is not None
+    store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "A later stored branch message should not be treated as current.",
+            "metadata": {"source": "manual"},
+        },
+    )
+    store.update_conversation(conversation_id, {"current_node_id": approval_message["id"]})
+
+    external_decision = approval.approve(request_id)
+    assert external_decision["approved"] is True
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "continued after approval"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    try:
+        runtime = MimoCodingCompanyRuntime()
+        schedules = runtime._schedules_for_state({"schedule_ids": {"qa_loop": schedule["id"]}})
+
+        assert [item["id"] for item in schedules] == [schedule["id"]]
+        assert len(calls) == 1
+        payload = calls[0]["payload"]
+        metadata = payload["message"]["metadata"]
+        assert metadata["source"] == "scheduler_approval_followup"
+        assert metadata["schedule_id"] == schedule["id"]
+        assert metadata["schedule_execution_id"] == "sexec-original"
+        assert metadata["approval_followup"]["request_id"] == request_id
+        assert metadata["approval_followup"]["approval_token"]
+        assert "tool_choice" not in payload["params"]
+        assert calls[0]["context"]["owner_pack"] == "defaultspack"
+
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        history = entries[0]
+        assert history["status"] == "completed"
+        assert history["result"] == "continued after approval"
+        assert history["recovered_scheduled_approval"] is True
+        assert history["recovered_execution_id"] == "sexec-original"
+        assert history["auto_approvals"] == [
+            {
+                "request_id": request_id,
+                "tool_name": "browser_use",
+                "operation": "tool.browser_use",
+                "status": "approved",
+            }
+        ]
+        assert "approval_token" not in history["auto_approvals"][0]
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

@@ -239,6 +239,22 @@ def _followup_params(params: dict[str, Any]) -> dict[str, Any]:
     return followup
 
 
+def _scheduler_chat_params_and_tools(task_cfg: dict[str, Any]) -> tuple[dict[str, Any], list[Any] | None]:
+    params: dict[str, Any] = {}
+    if task_cfg.get("model"):
+        params["model"] = task_cfg.get("model")
+    if isinstance(task_cfg.get("tool_policy"), dict):
+        params["tool_policy"] = task_cfg["tool_policy"]
+    if task_cfg.get("thinking_level"):
+        params["thinking_level"] = task_cfg.get("thinking_level")
+    tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
+    if tools and "tool_choice" not in params:
+        initial_tool_choice = _initial_tool_choice(task_cfg)
+        if initial_tool_choice is not None:
+            params["tool_choice"] = initial_tool_choice
+    return params, tools
+
+
 def _scheduler_chat_context(task_cfg: dict[str, Any]) -> dict[str, Any]:
     policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
     context: dict[str, Any] = {"profile_policy": policy}
@@ -300,6 +316,47 @@ def _resume_scheduled_chat_approvals(
             _scheduler_chat_context(task_cfg),
         )
     return result, auto_approvals
+
+
+def _current_scheduled_approval_result(
+    conversation: dict[str, Any] | None,
+    *,
+    schedule_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(conversation, dict):
+        return None
+    messages = conversation.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return None
+    messages_by_id = {
+        str(message.get("id") or ""): message
+        for message in messages
+        if isinstance(message, dict) and str(message.get("id") or "").strip()
+    }
+    current_id = str(conversation.get("current_node_id") or "").strip()
+    current = messages_by_id.get(current_id)
+    if not isinstance(current, dict):
+        return None
+    if str(current.get("role") or "") != "assistant":
+        return None
+    if str(current.get("finish_reason") or "").strip() not in _APPROVAL_REQUIRED_FINISH_REASONS:
+        return None
+
+    result = {"status": "ok", "data": current}
+    if not isinstance(_pending_approval_from_chat_result(result), dict):
+        return None
+
+    parent_id = str(current.get("parent_id") or "").strip()
+    parent = messages_by_id.get(parent_id)
+    if not isinstance(parent, dict) or str(parent.get("role") or "") != "user":
+        return None
+    source_metadata = parent.get("metadata") if isinstance(parent.get("metadata"), dict) else {}
+    source = str(source_metadata.get("source") or "").strip()
+    if source not in {"scheduler", "scheduler_approval_followup"}:
+        return None
+    if str(source_metadata.get("schedule_id") or "").strip() != str(schedule_id or "").strip():
+        return None
+    return {"result": result, "source_metadata": dict(source_metadata)}
 
 
 # ---------------------------------------------------------------------------
@@ -821,6 +878,132 @@ class Scheduler:
         entries, total = load_history(schedule_id, limit=limit, offset=offset)
         return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
+    def recover_scheduled_chat_approval(self, schedule_id):
+        """Continue the current scheduled chat approval node after external approval."""
+        self.ensure_loaded()
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+        if sched is None:
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "not_found"}
+
+        task_cfg = sched.get("task", {}) if isinstance(sched.get("task"), dict) else {}
+        conversation_id = str(task_cfg.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "no_conversation"}
+
+        try:
+            from domain.chat.store import ChatStore
+        except Exception:
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "chat_store_unavailable"}
+
+        conversation = ChatStore().get_conversation(conversation_id)
+        current = _current_scheduled_approval_result(conversation, schedule_id=schedule_id)
+        if not isinstance(current, dict):
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "no_current_approval"}
+
+        conversation_lock = self._conversation_execution_lock(conversation_id)
+        if conversation_lock is None:
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "no_conversation_lock"}
+        if not conversation_lock.acquire(blocking=False):
+            return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "conversation_running"}
+
+        started_at = timestamp()
+        recovered_exec_id = "sexec_recovery_" + gen_id()
+        source_metadata = current.get("source_metadata") if isinstance(current.get("source_metadata"), dict) else {}
+        exec_id = str(source_metadata.get("schedule_execution_id") or recovered_exec_id).strip()
+        trigger = str(source_metadata.get("trigger") or "scheduled").strip() or "scheduled"
+        params, tools = _scheduler_chat_params_and_tools(task_cfg)
+        timeout_seconds = _task_timeout_seconds(task_cfg.get("timeout", 300))
+        deadline = time.monotonic() + timeout_seconds
+        cancel_event = threading.Event()
+        auto_approvals: list[dict[str, Any]] = []
+        result = current["result"]
+        history_entry = {
+            "execution_id": recovered_exec_id,
+            "schedule_id": schedule_id,
+            "started_at": started_at,
+            "completed_at": None,
+            "status": "running",
+            "trigger": "approval_recovery",
+            "result": None,
+            "error": None,
+            "recovered_scheduled_approval": True,
+            "recovered_execution_id": exec_id,
+        }
+
+        try:
+            from blocks.chat.send import run as chat_send_run
+
+            def run_recovery():
+                return _resume_scheduled_chat_approvals(
+                    result=result,
+                    send_chat=chat_send_run,
+                    conversation_id=conversation_id,
+                    task_cfg=task_cfg,
+                    schedule_id=schedule_id,
+                    exec_id=exec_id,
+                    trigger=trigger,
+                    params=params,
+                    tools=tools,
+                    cancel_event=cancel_event,
+                )
+
+            result, auto_approvals = _run_with_timeout(
+                run_recovery,
+                _remaining_timeout_seconds(deadline),
+                task_timeout_seconds=timeout_seconds,
+                cancel_event=cancel_event,
+            )
+            if not auto_approvals:
+                return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "not_approved"}
+
+            if isinstance(result, dict) and result.get("status") == "ok":
+                data = result.get("data", {})
+                if isinstance(data, dict):
+                    content = _chat_result_content(result)
+                    finish_reason = _chat_result_finish_reason(result)
+                elif isinstance(data, str):
+                    content = data
+                    finish_reason = ""
+                else:
+                    content = str(data)
+                    finish_reason = ""
+                if finish_reason in _APPROVAL_REQUIRED_FINISH_REASONS:
+                    content = (finish_reason + "\n" + content).strip()
+                    history_entry["status"] = finish_reason
+                else:
+                    history_entry["status"] = "completed"
+                history_entry["result"] = content
+                if finish_reason:
+                    history_entry["finish_reason"] = finish_reason
+            else:
+                err = result.get("error", {}) if isinstance(result, dict) else result
+                if isinstance(err, dict):
+                    err_msg = err.get("message", str(err))
+                else:
+                    err_msg = str(err)
+                history_entry["status"] = "error"
+                history_entry["error"] = err_msg
+        except Exception as exc:
+            history_entry["status"] = "error"
+            history_entry["error"] = str(exc)
+            if isinstance(exc, _SchedulerTaskTimedOut):
+                history_entry["timeout_seconds"] = exc.timeout_seconds
+        finally:
+            conversation_lock.release()
+
+        if auto_approvals:
+            history_entry["auto_approvals"] = auto_approvals
+            history_entry["completed_at"] = timestamp()
+            append_history(schedule_id, history_entry)
+            return {
+                "schedule_id": schedule_id,
+                "continued_count": len(auto_approvals),
+                "continued": auto_approvals,
+                "status": history_entry["status"],
+            }
+        return {"schedule_id": schedule_id, "continued_count": 0, "continued": [], "status": "not_approved"}
+
     # ---- internal ----
 
     def _compute_next_execution(self, sched):
@@ -1140,18 +1323,7 @@ class Scheduler:
                 try:
                     from blocks.chat.send import run as chat_send_run
 
-                    params = {}
-                    if task_cfg.get("model"):
-                        params["model"] = task_cfg.get("model")
-                    if isinstance(task_cfg.get("tool_policy"), dict):
-                        params["tool_policy"] = task_cfg["tool_policy"]
-                    if task_cfg.get("thinking_level"):
-                        params["thinking_level"] = task_cfg.get("thinking_level")
-                    tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
-                    if tools and "tool_choice" not in params:
-                        initial_tool_choice = _initial_tool_choice(task_cfg)
-                        if initial_tool_choice is not None:
-                            params["tool_choice"] = initial_tool_choice
+                    params, tools = _scheduler_chat_params_and_tools(task_cfg)
 
                     def run_chat_task():
                         chat_result = chat_send_run(
