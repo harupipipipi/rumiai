@@ -1119,6 +1119,205 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'artifact_zip',
+      description:
+          'Create a ZIP archive from phone-local artifact files or folders. ZIP bytes are stored as base64 content in the phone artifact workspace.',
+      tags: [
+        'tool',
+        'artifact',
+        'archive',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_artifact_zip',
+        'defaultspack_artifact_zip',
+        'defaults.artifact.zip',
+        'defaultspack.artifact.zip',
+      ],
+      implementationStatus: 'implemented_phone_zip_base64',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'source_path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'artifact_export',
+      description:
+          'Export phone-local artifacts to zip/base64, HTML, text, Markdown, JSON, CSV, or TSV. Binary PDF/PNG/DOCX/PPTX/XLSX output remains PC-delegated.',
+      tags: [
+        'tool',
+        'artifact',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_artifact_export',
+        'defaultspack_artifact_export',
+        'defaults.artifact.export',
+        'defaultspack.artifact.export',
+      ],
+      implementationStatus: 'implemented_phone_artifact_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'format': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path', 'format'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'static_site_export',
+      description:
+          'Export a phone-local static site artifact folder as a base64 ZIP artifact.',
+      tags: [
+        'tool',
+        'webapp',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_static_site_export',
+        'defaultspack_static_site_export',
+        'defaults.static_site.export',
+        'defaultspack.static_site.export',
+      ],
+      implementationStatus: 'implemented_phone_zip_base64',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'webapp_export_static',
+      description:
+          'Export a phone-local webapp artifact folder as a base64 ZIP artifact.',
+      tags: [
+        'tool',
+        'webapp',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_webapp_export_static',
+        'defaultspack_webapp_export_static',
+        'defaults.webapp.export_static',
+        'defaultspack.webapp.export_static',
+      ],
+      implementationStatus: 'implemented_phone_zip_base64',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'doc_export',
+      description:
+          'Export a phone-local document artifact to HTML, Markdown, text, or JSON. Binary DOCX/PDF output remains PC-delegated.',
+      tags: [
+        'tool',
+        'document',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_doc_export',
+        'defaultspack_doc_export',
+        'defaults.doc.export',
+        'defaultspack.doc.export',
+      ],
+      implementationStatus: 'implemented_phone_document_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'format': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'pdf_export',
+      description:
+          'Explain that PDF export requires the connected PC runtime; phone-local export cannot generate real PDF bytes.',
+      tags: [
+        'tool',
+        'export',
+        'pdf',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_pdf_export',
+        'defaultspack_pdf_export',
+        'defaults.pdf.export',
+        'defaultspack.pdf.export',
+      ],
+      implementationStatus: 'pc_delegation_required_binary_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'doc_to_pdf',
+      description:
+          'Explain that document-to-PDF export requires the connected PC runtime; phone-local export cannot generate real PDF bytes.',
+      tags: [
+        'tool',
+        'document',
+        'pdf',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_doc_to_pdf',
+        'defaultspack_doc_to_pdf',
+        'defaults.doc.to_pdf',
+        'defaultspack.doc.to_pdf',
+      ],
+      implementationStatus: 'pc_delegation_required_binary_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'mobile_url_open',
       description:
           'Open an http/https URL visibly on this phone. Implemented through Flutter with iOS Swift and Android Kotlin native bridges.',
@@ -2569,6 +2768,20 @@ class MobileToolRuntime {
         return _sheetExport(call.arguments);
       case 'sheet_update':
         return _asyncOnlyTool(name);
+      case 'artifact_zip':
+        return _artifactZip(call.arguments);
+      case 'artifact_export':
+        return _artifactExport(call.arguments);
+      case 'static_site_export':
+        return _staticSiteExport(call.arguments);
+      case 'webapp_export_static':
+        return _webappExportStatic(call.arguments);
+      case 'doc_export':
+        return _docExport(call.arguments);
+      case 'pdf_export':
+        return _binaryExportRequiresPc(name, 'pdf');
+      case 'doc_to_pdf':
+        return _binaryExportRequiresPc(name, 'pdf');
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
@@ -2906,6 +3119,11 @@ class MobileToolRuntime {
       'sheet_analyze',
       'sheet_export',
       'sheet_update',
+      'artifact_zip',
+      'artifact_export',
+      'static_site_export',
+      'webapp_export_static',
+      'doc_export',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -2934,13 +3152,18 @@ class MobileToolRuntime {
               .trim();
       final requestedCanonical = _canonicalToolName(requested);
       final requestedTool = _findToolDefinition(requestedCanonical);
-      if (requestedTool != null && requestedTool.available) return false;
+      final output = result.output.toLowerCase();
+      if (requestedTool != null && requestedTool.available) {
+        return output.contains('pc_delegation_required') ||
+            output.contains('pc runtime');
+      }
       return true;
     }
     final output = result.output.toLowerCase();
     return result.summary == 'unsupported tool' ||
         result.summary.contains('unavailable on phone') ||
         output.contains('tool_unavailable_on_phone') ||
+        output.contains('pc_delegation_required') ||
         output.contains('pc側') ||
         output.contains('pc runtime') ||
         output.contains('pc接続時');
@@ -4805,7 +5028,10 @@ class MobileToolRuntime {
         'data': {
           'path': path,
           'content': content,
-          'size': utf8.encode(content).length,
+          'size': file['size'] ?? utf8.encode(content).length,
+          'encoding': file['encoding'] ?? 'utf8',
+          if (file['mime_type'] != null) 'mime_type': file['mime_type'],
+          if (file['metadata'] != null) 'metadata': file['metadata'],
           'workspace': 'phone',
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
@@ -5606,6 +5832,186 @@ class MobileToolRuntime {
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
           'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _artifactZip(Map<String, dynamic> args) {
+    final sourcePath = _normalizePhoneArtifactPath(
+      args['path'] ?? args['source_path'] ?? '.',
+      allowRoot: true,
+    );
+    final outputPath =
+        _normalizePhoneArtifactPath(args['output_path'] ?? 'artifact.zip');
+    if (sourcePath == null || outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' and 'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final entries = _phoneZipSourceEntries(sourcePath);
+    if (entries.isEmpty) {
+      return _phoneArtifactError(
+        'ZIP_FAILED',
+        'No phone-local artifact files matched the requested path.',
+        path: sourcePath,
+      );
+    }
+    final zipBytes = _buildStoredZip(entries);
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      base64Encode(zipBytes),
+      source: 'artifact_zip',
+      encoding: 'base64',
+      mimeType: 'application/zip',
+      sizeOverride: zipBytes.length,
+      metadata: {
+        'source_path': sourcePath,
+        'archived_files': entries.map((entry) => entry.path).toList(),
+        'archive_format': 'zip',
+        'compression': 'store',
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'created zip archive $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'source_path': sourcePath,
+          'files': entries.length,
+          'base64': base64Encode(zipBytes),
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _artifactExport(Map<String, dynamic> args) {
+    final sourcePath =
+        _normalizePhoneArtifactPath(args['path'], allowRoot: true);
+    if (sourcePath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final format =
+        '${args['format'] ?? args['output_format'] ?? ''}'.trim().toLowerCase();
+    if (format.isEmpty) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'format' is required for phone-local artifact_export.",
+        path: sourcePath,
+      );
+    }
+    final normalizedFormat = format.replaceFirst(RegExp(r'^\.'), '');
+    if (normalizedFormat == 'zip') {
+      return _artifactZip({
+        ...args,
+        'path': sourcePath,
+        'output_path': args['output_path'] ??
+            'exports/${_phoneArtifactStem(sourcePath == '.' ? 'artifact' : sourcePath)}.zip',
+      });
+    }
+    final unsupported = _unsupportedPhoneArtifactExportFormat(normalizedFormat);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_EXPORT_FORMAT',
+        unsupported,
+        path: sourcePath,
+      );
+    }
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ??
+          'exports/${_phoneArtifactStem(sourcePath == '.' ? 'artifact' : sourcePath)}.$normalizedFormat',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final exportContent = _phoneArtifactExportContent(
+      sourcePath,
+      normalizedFormat,
+    );
+    if (exportContent.error != null) return exportContent.error!;
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      exportContent.content,
+      source: 'artifact_export',
+      mimeType: exportContent.mimeType,
+      metadata: {
+        'source_path': sourcePath,
+        'format': normalizedFormat,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'exported artifact $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'source_path': sourcePath,
+          'format': normalizedFormat,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _staticSiteExport(Map<String, dynamic> args) {
+    return _artifactZip({
+      ...args,
+      'path': args['path'],
+      'output_path': args['output_path'] ?? 'exports/static-site.zip',
+    });
+  }
+
+  MobileToolResult _webappExportStatic(Map<String, dynamic> args) {
+    return _staticSiteExport(args);
+  }
+
+  MobileToolResult _docExport(Map<String, dynamic> args) {
+    final format = '${args['format'] ?? 'html'}'.trim().toLowerCase();
+    final normalizedFormat = format.replaceFirst(RegExp(r'^\.'), '');
+    if ({'docx', 'pdf', 'pptx', 'xlsx', 'png'}.contains(normalizedFormat)) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_EXPORT_FORMAT',
+        'Phone-local doc_export supports HTML, Markdown, text, and JSON only. Use PC delegation for $normalizedFormat output.',
+        path: _normalizePhoneArtifactPath(args['path']) ?? '',
+      );
+    }
+    return _artifactExport({
+      ...args,
+      'format': normalizedFormat,
+      'output_path': args['output_path'] ??
+          'exports/${_phoneArtifactStem('${args['path'] ?? 'document'}')}.$normalizedFormat',
+    });
+  }
+
+  MobileToolResult _binaryExportRequiresPc(String toolName, String format) {
+    return MobileToolResult(
+      ok: false,
+      summary: '$toolName requires PC runtime',
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': 'PC_DELEGATION_REQUIRED',
+          'message':
+              'Phone-local $toolName cannot generate real $format bytes. Use the connected PC defaultspack runtime for this export.',
+          'execution_location': 'pc',
+          'runtime_layers': ['pc-defaultspack-runtime'],
         },
       }),
     );
@@ -7169,6 +7575,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'sheet_update',
     'sheet_export',
   }.contains(normalized);
+  final isPhoneExportTool = const {
+    'artifact_zip',
+    'artifact_export',
+    'static_site_export',
+    'webapp_export_static',
+    'doc_export',
+    'pdf_export',
+    'doc_to_pdf',
+  }.contains(normalized);
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -7368,6 +7783,25 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
           : 'implemented_phone_sheet_text',
     };
   }
+  if (isPhoneExportTool) {
+    final status = switch (normalized) {
+      'artifact_zip' ||
+      'static_site_export' ||
+      'webapp_export_static' =>
+        'implemented_phone_zip_base64',
+      'artifact_export' => 'implemented_phone_artifact_export',
+      'doc_export' => 'implemented_phone_document_export',
+      'pdf_export' || 'doc_to_pdf' => 'pc_delegation_required_binary_export',
+      _ => 'implemented_phone_artifact_export',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': status,
+    };
+  }
   if (tagSet.contains('media') ||
       normalized.startsWith('audio_') ||
       normalized.startsWith('image_') ||
@@ -7509,8 +7943,10 @@ String? _normalizePlatformFilter(Object? value) {
   final text = '${value ?? ''}'.trim().toLowerCase();
   if (text.isEmpty || text == 'all') return null;
   return switch (text) {
-    'ios' || 'iphone' || 'ipad' || 'swift' || 'swift-native' => 'ios',
-    'android' || 'kotlin' || 'kotlin-native' => 'android',
+    'ios' || 'iphone' || 'ipad' => 'ios',
+    'swift' || 'swift-native' || 'ios-swift' => 'swift',
+    'android' => 'android',
+    'kotlin' || 'kotlin-native' || 'android-kotlin' => 'kotlin',
     'flutter' || 'dart' => 'flutter',
     'pc' || 'desktop' || 'host' || 'defaultspack' => 'pc',
     _ => text,
@@ -7546,10 +7982,26 @@ bool _recordMatchesPlatform(Map<String, dynamic> record, String? platform) {
         values.any((value) => value.contains('swift')) ||
         values.contains(mobileIosTag);
   }
+  if (platform == 'swift') {
+    return values.contains('ios-swift') ||
+        values.contains('swift') ||
+        values.contains('swift-native') ||
+        values.contains(mobileSwiftNativeTag) ||
+        values.any((value) => value.contains('swift ')) ||
+        values.any((value) => value.contains(':swift'));
+  }
   if (platform == 'android') {
     return values.contains('android') ||
         values.any((value) => value.contains('kotlin')) ||
         values.contains(mobileAndroidTag);
+  }
+  if (platform == 'kotlin') {
+    return values.contains('android-kotlin') ||
+        values.contains('kotlin') ||
+        values.contains('kotlin-native') ||
+        values.contains(mobileKotlinNativeTag) ||
+        values.any((value) => value.contains('kotlin ')) ||
+        values.any((value) => value.contains(':kotlin'));
   }
   return values.contains(platform);
 }
@@ -7581,7 +8033,9 @@ Map<String, dynamic> _platformSummary(List<Map<String, dynamic>> records) {
   return {
     'flutter': count('flutter'),
     'ios': count('ios'),
+    'swift': count('swift'),
     'android': count('android'),
+    'kotlin': count('kotlin'),
     'pc': count('pc'),
   };
 }
@@ -9361,13 +9815,20 @@ Map<String, dynamic> _putPhoneArtifactContent(
   String path,
   String content, {
   required String source,
+  String encoding = 'utf8',
+  String? mimeType,
+  int? sizeOverride,
+  Map<String, dynamic>? metadata,
 }) {
   final now = DateTime.now().toUtc().toIso8601String();
-  final size = utf8.encode(content).length;
+  final size = sizeOverride ?? utf8.encode(content).length;
   _mobileArtifactFiles[path] = {
     'path': path,
     'content': content,
     'size': size,
+    'encoding': encoding,
+    if (mimeType != null) 'mime_type': mimeType,
+    if (metadata != null) 'metadata': metadata,
     'created_at': _mobileArtifactFiles[path]?['created_at'] ?? now,
     'updated_at': now,
     'source': source,
@@ -9375,6 +9836,9 @@ Map<String, dynamic> _putPhoneArtifactContent(
   return {
     'path': path,
     'size': size,
+    'encoding': encoding,
+    if (mimeType != null) 'mime_type': mimeType,
+    if (metadata != null) 'metadata': metadata,
   };
 }
 
@@ -9770,6 +10234,313 @@ class _PhoneSheetReadResult {
   final List<List<String>> rows;
   final String format;
   final MobileToolResult? error;
+}
+
+String? _unsupportedPhoneArtifactExportFormat(String format) {
+  if (const {
+    'html',
+    'htm',
+    'txt',
+    'text',
+    'md',
+    'markdown',
+    'json',
+    'csv',
+    'tsv'
+  }.contains(format)) {
+    return null;
+  }
+  if (const {'pdf', 'png', 'docx', 'pptx', 'xlsx', 'xls'}.contains(format)) {
+    return 'Phone-local artifact_export supports zip/base64 plus HTML, text, Markdown, JSON, CSV, and TSV only. Use PC delegation for $format output.';
+  }
+  return 'Unsupported phone-local artifact export format: $format';
+}
+
+_PhoneArtifactExportContent _phoneArtifactExportContent(
+  String sourcePath,
+  String format,
+) {
+  final exact = _mobileArtifactFiles[sourcePath];
+  final entries = _phoneZipSourceEntries(sourcePath);
+  if (exact == null && entries.isEmpty) {
+    return _PhoneArtifactExportContent(
+      error: _phoneArtifactError(
+        'EXPORT_FAILED',
+        'artifact source not found in phone artifact workspace',
+        path: sourcePath,
+      ),
+    );
+  }
+  if (exact == null) {
+    return _phoneDirectoryExportContent(sourcePath, entries, format);
+  }
+  final content = '${exact['content'] ?? ''}';
+  if (format == 'csv' || format == 'tsv') {
+    final parsed = _readPhoneSheetRows(sourcePath);
+    if (parsed.error != null) {
+      return _phoneFileExportContent(sourcePath, content, format);
+    }
+    return _PhoneArtifactExportContent(
+      content: _phoneSheetContentForFormat(parsed.rows, format),
+      mimeType: format == 'csv' ? 'text/csv' : 'text/tab-separated-values',
+    );
+  }
+  return _phoneFileExportContent(sourcePath, content, format);
+}
+
+_PhoneArtifactExportContent _phoneDirectoryExportContent(
+  String sourcePath,
+  List<_ZipSourceEntry> entries,
+  String format,
+) {
+  final records = [
+    for (final entry in entries)
+      {'path': entry.path, 'size': entry.bytes.length},
+  ];
+  return switch (format) {
+    'json' => _PhoneArtifactExportContent(
+        content: '${const JsonEncoder.withIndent('  ').convert({
+              'source_path': sourcePath,
+              'files': records,
+            })}\n',
+        mimeType: 'application/json',
+      ),
+    'csv' => _PhoneArtifactExportContent(
+        content: _rowsToDelimitedText([
+          const ['path', 'size'],
+          for (final record in records)
+            ['${record['path']}', '${record['size']}'],
+        ], delimiter: ','),
+        mimeType: 'text/csv',
+      ),
+    'tsv' => _PhoneArtifactExportContent(
+        content: _rowsToDelimitedText([
+          const ['path', 'size'],
+          for (final record in records)
+            ['${record['path']}', '${record['size']}'],
+        ], delimiter: '\t'),
+        mimeType: 'text/tab-separated-values',
+      ),
+    'html' || 'htm' => _PhoneArtifactExportContent(
+        content: '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>Artifact Export</title></head><body><h1>${_escapeHtmlText(sourcePath)}</h1>'
+            '<ul>${records.map((record) => '<li>${_escapeHtmlText(record['path'])} (${record['size']} bytes)</li>').join()}</ul>'
+            '</body></html>\n',
+        mimeType: 'text/html',
+      ),
+    _ => _PhoneArtifactExportContent(
+        content:
+            '${records.map((record) => '${record['path']}\t${record['size']}').join('\n')}\n',
+        mimeType: 'text/plain',
+      ),
+  };
+}
+
+_PhoneArtifactExportContent _phoneFileExportContent(
+  String sourcePath,
+  String content,
+  String format,
+) {
+  return switch (format) {
+    'html' || 'htm' => _PhoneArtifactExportContent(
+        content: _looksLikeHtmlFragment(content)
+            ? content
+            : '<!doctype html><html><head><meta charset="utf-8">'
+                '<meta name="viewport" content="width=device-width,initial-scale=1">'
+                '<title>${_escapeHtmlText(sourcePath)}</title></head><body><pre>${_escapeHtmlText(content)}</pre></body></html>\n',
+        mimeType: 'text/html',
+      ),
+    'json' => _PhoneArtifactExportContent(
+        content: _looksLikeJsonText(content)
+            ? '${content.trimRight()}\n'
+            : '${const JsonEncoder.withIndent('  ').convert({
+                    'path': sourcePath,
+                    'content': content,
+                  })}\n',
+        mimeType: 'application/json',
+      ),
+    'md' || 'markdown' => _PhoneArtifactExportContent(
+        content: '${content.trimRight()}\n',
+        mimeType: 'text/markdown',
+      ),
+    _ => _PhoneArtifactExportContent(
+        content: '${content.trimRight()}\n',
+        mimeType: 'text/plain',
+      ),
+  };
+}
+
+bool _looksLikeJsonText(String content) {
+  final text = content.trim();
+  if (text.isEmpty) return false;
+  if (!text.startsWith('{') && !text.startsWith('[')) return false;
+  try {
+    jsonDecode(text);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+class _PhoneArtifactExportContent {
+  const _PhoneArtifactExportContent({
+    this.content = '',
+    this.mimeType,
+    this.error,
+  });
+
+  final String content;
+  final String? mimeType;
+  final MobileToolResult? error;
+}
+
+List<_ZipSourceEntry> _phoneZipSourceEntries(String sourcePath) {
+  final exact = _mobileArtifactFiles[sourcePath];
+  if (sourcePath != '.' && exact != null) {
+    return [
+      _ZipSourceEntry(
+        path: sourcePath.split('/').last,
+        bytes: _phoneArtifactStoredBytes(exact),
+      ),
+    ];
+  }
+  final entries = <_ZipSourceEntry>[];
+  for (final entry in _mobileArtifactFiles.entries) {
+    final path = entry.key;
+    if (!_artifactPathInBase(path, sourcePath, recursive: true)) continue;
+    final archivePath =
+        sourcePath == '.' ? path : path.substring(sourcePath.length + 1);
+    if (archivePath.isEmpty) continue;
+    entries.add(
+      _ZipSourceEntry(
+        path: archivePath,
+        bytes: _phoneArtifactStoredBytes(entry.value),
+      ),
+    );
+  }
+  entries.sort((a, b) => a.path.compareTo(b.path));
+  return entries;
+}
+
+Uint8List _phoneArtifactStoredBytes(Map<String, dynamic> file) {
+  final content = '${file['content'] ?? ''}';
+  if ('${file['encoding'] ?? ''}'.trim().toLowerCase() == 'base64') {
+    try {
+      return base64Decode(content.trim());
+    } catch (_) {
+      return Uint8List.fromList(utf8.encode(content));
+    }
+  }
+  return Uint8List.fromList(utf8.encode(content));
+}
+
+Uint8List _buildStoredZip(List<_ZipSourceEntry> entries) {
+  final local = BytesBuilder(copy: false);
+  final central = BytesBuilder(copy: false);
+  final centralRecords = <_ZipCentralRecord>[];
+  for (final entry in entries) {
+    final nameBytes = utf8.encode(entry.path);
+    final crc = _crc32(entry.bytes);
+    final offset = local.length;
+    _zipWriteUint32(local, 0x04034b50);
+    _zipWriteUint16(local, 20);
+    _zipWriteUint16(local, 0x0800);
+    _zipWriteUint16(local, 0);
+    _zipWriteUint16(local, 0);
+    _zipWriteUint16(local, 0);
+    _zipWriteUint32(local, crc);
+    _zipWriteUint32(local, entry.bytes.length);
+    _zipWriteUint32(local, entry.bytes.length);
+    _zipWriteUint16(local, nameBytes.length);
+    _zipWriteUint16(local, 0);
+    local.add(nameBytes);
+    local.add(entry.bytes);
+    centralRecords.add(_ZipCentralRecord(entry, nameBytes, crc, offset));
+  }
+  for (final record in centralRecords) {
+    _zipWriteUint32(central, 0x02014b50);
+    _zipWriteUint16(central, 20);
+    _zipWriteUint16(central, 20);
+    _zipWriteUint16(central, 0x0800);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint32(central, record.crc);
+    _zipWriteUint32(central, record.entry.bytes.length);
+    _zipWriteUint32(central, record.entry.bytes.length);
+    _zipWriteUint16(central, record.nameBytes.length);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint16(central, 0);
+    _zipWriteUint32(central, 0);
+    _zipWriteUint32(central, record.offset);
+    central.add(record.nameBytes);
+  }
+  final localBytes = local.takeBytes();
+  final centralBytes = central.takeBytes();
+  final zip = BytesBuilder(copy: false)
+    ..add(localBytes)
+    ..add(centralBytes);
+  _zipWriteUint32(zip, 0x06054b50);
+  _zipWriteUint16(zip, 0);
+  _zipWriteUint16(zip, 0);
+  _zipWriteUint16(zip, entries.length);
+  _zipWriteUint16(zip, entries.length);
+  _zipWriteUint32(zip, centralBytes.length);
+  _zipWriteUint32(zip, localBytes.length);
+  _zipWriteUint16(zip, 0);
+  return zip.takeBytes();
+}
+
+void _zipWriteUint16(BytesBuilder builder, int value) {
+  builder.add([value & 0xff, (value >> 8) & 0xff]);
+}
+
+void _zipWriteUint32(BytesBuilder builder, int value) {
+  builder.add([
+    value & 0xff,
+    (value >> 8) & 0xff,
+    (value >> 16) & 0xff,
+    (value >> 24) & 0xff,
+  ]);
+}
+
+int _crc32(Uint8List bytes) {
+  var crc = 0xffffffff;
+  for (final byte in bytes) {
+    crc ^= byte;
+    for (var bit = 0; bit < 8; bit++) {
+      final mask = -(crc & 1);
+      crc = (crc >> 1) ^ (0xedb88320 & mask);
+    }
+  }
+  return (crc ^ 0xffffffff) & 0xffffffff;
+}
+
+class _ZipSourceEntry {
+  const _ZipSourceEntry({
+    required this.path,
+    required this.bytes,
+  });
+
+  final String path;
+  final Uint8List bytes;
+}
+
+class _ZipCentralRecord {
+  const _ZipCentralRecord(
+    this.entry,
+    this.nameBytes,
+    this.crc,
+    this.offset,
+  );
+
+  final _ZipSourceEntry entry;
+  final List<int> nameBytes;
+  final int crc;
+  final int offset;
 }
 
 bool _artifactPathInBase(

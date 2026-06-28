@@ -238,6 +238,13 @@ void main() {
           'sheet_analyze',
           'sheet_update',
           'sheet_export',
+          'artifact_zip',
+          'artifact_export',
+          'static_site_export',
+          'webapp_export_static',
+          'doc_export',
+          'pdf_export',
+          'doc_to_pdf',
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
@@ -848,6 +855,136 @@ void main() {
       );
       expect(export.ok, isFalse);
       expect(export.output, contains('UNSUPPORTED_PHONE_SHEET_FORMAT'));
+    });
+
+    test('exports phone-local artifacts and webapps as text or base64 zip', () {
+      final scaffold = runtime.execute(
+        const MobileToolCall(
+          id: 'export_scaffold_1',
+          name: 'project_scaffold',
+          arguments: {'name': 'Export Demo'},
+        ),
+      );
+      expect(scaffold.ok, isTrue);
+
+      final zip = runtime.execute(
+        const MobileToolCall(
+          id: 'artifact_zip_1',
+          name: 'artifact_zip',
+          arguments: {
+            'path': 'webapps/export-demo',
+            'output_path': 'exports/export-demo.zip',
+          },
+        ),
+      );
+      expect(zip.ok, isTrue);
+      final zipPayload = jsonDecode(zip.output) as Map<String, dynamic>;
+      final zipData = zipPayload['data'] as Map<String, dynamic>;
+      expect(zipData['path'], 'exports/export-demo.zip');
+      expect(zipData['encoding'], 'base64');
+      expect(zipData['mime_type'], 'application/zip');
+      final zipBytes = base64Decode(zipData['base64'] as String);
+      expect(zipBytes.take(4).toList(), [0x50, 0x4b, 0x03, 0x04]);
+
+      final readZip = runtime.execute(
+        const MobileToolCall(
+          id: 'artifact_zip_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'exports/export-demo.zip'},
+        ),
+      );
+      final readPayload = jsonDecode(readZip.output) as Map<String, dynamic>;
+      final readData = readPayload['data'] as Map<String, dynamic>;
+      expect(readData['encoding'], 'base64');
+      expect(readData['mime_type'], 'application/zip');
+
+      final htmlExport = runtime.execute(
+        const MobileToolCall(
+          id: 'artifact_export_html_1',
+          name: 'artifact_export',
+          arguments: {
+            'path': 'webapps/export-demo/index.html',
+            'format': 'html',
+            'output_path': 'exports/index.html',
+          },
+        ),
+      );
+      expect(htmlExport.ok, isTrue);
+      final htmlPayload = jsonDecode(htmlExport.output) as Map<String, dynamic>;
+      final htmlData = htmlPayload['data'] as Map<String, dynamic>;
+      expect(htmlData['path'], 'exports/index.html');
+      expect(htmlData['format'], 'html');
+
+      final staticZip = runtime.execute(
+        const MobileToolCall(
+          id: 'static_site_export_1',
+          name: 'static_site_export',
+          arguments: {'path': 'webapps/export-demo'},
+        ),
+      );
+      expect(staticZip.ok, isTrue);
+      expect(staticZip.output, contains('exports/static-site.zip'));
+
+      final webappZip = runtime.execute(
+        const MobileToolCall(
+          id: 'webapp_export_static_1',
+          name: 'webapp_export_static',
+          arguments: {
+            'path': 'webapps/export-demo',
+            'output_path': 'exports/webapp.zip',
+          },
+        ),
+      );
+      expect(webappZip.ok, isTrue);
+      expect(webappZip.output, contains('exports/webapp.zip'));
+    });
+
+    test('phone-local document export supports text formats and rejects PDF',
+        () {
+      final doc = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_export_source_1',
+          name: 'doc_create',
+          arguments: {
+            'title': 'Exported Doc',
+            'content': 'phone export',
+          },
+        ),
+      );
+      expect(doc.ok, isTrue);
+
+      final html = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_export_html_1',
+          name: 'doc_export',
+          arguments: {
+            'path': 'documents/exported-doc.md',
+            'format': 'html',
+          },
+        ),
+      );
+      expect(html.ok, isTrue);
+      expect(html.output, contains('exports/exported-doc.html'));
+
+      final pdf = runtime.execute(
+        const MobileToolCall(
+          id: 'pdf_export_1',
+          name: 'pdf_export',
+          arguments: {'path': 'documents/exported-doc.md'},
+        ),
+      );
+      expect(pdf.ok, isFalse);
+      expect(pdf.output, contains('PC_DELEGATION_REQUIRED'));
+
+      final docPdf = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_to_pdf_1',
+          name: 'doc_to_pdf',
+          arguments: {'path': 'documents/exported-doc.md'},
+        ),
+      );
+      expect(docPdf.ok, isFalse);
+      expect(docPdf.output, contains('PC_DELEGATION_REQUIRED'));
     });
 
     test('runs mobile clipboard tools after explicit phone approval', () async {
@@ -2130,6 +2267,37 @@ void main() {
       expect(data['execution_location'], 'pc');
     });
 
+    test('executeAsync delegates binary export tools to PC when enabled',
+        () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final direct = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'pdf_export_pc_1',
+          name: 'pdf_export',
+          arguments: {'path': 'documents/report.md'},
+        ),
+      );
+
+      expect(direct.ok, isTrue);
+      expect(delegate.lastCall?.name, 'pdf_export');
+
+      final viaInvoke = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'doc_to_pdf_pc_1',
+          name: 'tool_invoke',
+          arguments: {
+            'tool_name': 'doc_to_pdf',
+            'arguments': {'path': 'documents/report.md'},
+          },
+        ),
+      );
+
+      expect(viaInvoke.ok, isTrue);
+      expect(delegate.lastCall?.name, 'tool_invoke');
+    });
+
     test(
         'tool_batch runs phone tools and delegates PC tools through one surface',
         () async {
@@ -2715,6 +2883,35 @@ void main() {
         expect(sheetData['tags'], contains(mobileFlutterTag));
       }
 
+      for (final entry in const {
+        'artifact_zip': 'implemented_phone_zip_base64',
+        'artifact_export': 'implemented_phone_artifact_export',
+        'static_site_export': 'implemented_phone_zip_base64',
+        'webapp_export_static': 'implemented_phone_zip_base64',
+        'doc_export': 'implemented_phone_document_export',
+        'pdf_export': 'pc_delegation_required_binary_export',
+        'doc_to_pdf': 'pc_delegation_required_binary_export',
+      }.entries) {
+        final exportSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final exportPayload =
+            jsonDecode(exportSchema.output) as Map<String, dynamic>;
+        final exportData = exportPayload['data'] as Map<String, dynamic>;
+        final exportMobile = exportData['mobile'] as Map<String, dynamic>;
+        expect(exportData['mobile_compatible'], isTrue);
+        expect(exportData['execution_route'], 'phone');
+        expect(exportMobile['implementation_status'], entry.value);
+        expect(exportMobile['requires_mobile_approval'], isFalse);
+        expect(
+            exportMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(exportData['tags'], contains(mobileFlutterTag));
+      }
+
       for (final toolName in const ['html_preview', 'pdf_preview']) {
         final previewSchema = runtime.execute(
           MobileToolCall(
@@ -2876,6 +3073,42 @@ void main() {
     });
 
     test('filters catalog by mobile platform layer', () {
+      Set<String> namesFor(String platform) {
+        final result = runtime.execute(
+          MobileToolCall(
+            id: 'names_$platform',
+            name: 'tool_names',
+            arguments: {'platform': platform, 'include_aliases': false},
+          ),
+        );
+        final payload = jsonDecode(result.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        expect(data['platform_filter'], platform);
+        return (data['names'] as List).map((entry) => '$entry').toSet();
+      }
+
+      final flutterNames = namesFor('flutter');
+      expect(flutterNames, contains('artifact_export'));
+      expect(flutterNames, contains('doc_export'));
+
+      final iosNames = namesFor('ios');
+      expect(iosNames, contains('artifact_export'));
+      expect(iosNames, contains('browser_open_url'));
+
+      final androidNames = namesFor('android');
+      expect(androidNames, contains('artifact_export'));
+      expect(androidNames, contains('browser_open_url'));
+
+      final swiftNames = namesFor('swift');
+      expect(swiftNames, contains('browser_open_url'));
+      expect(swiftNames, isNot(contains('artifact_export')));
+      expect(swiftNames, isNot(contains('doc_export')));
+
+      final kotlinNames = namesFor('kotlin');
+      expect(kotlinNames, contains('browser_open_url'));
+      expect(kotlinNames, isNot(contains('artifact_export')));
+      expect(kotlinNames, isNot(contains('doc_export')));
+
       final swiftTools = runtime.execute(
         const MobileToolCall(
           id: 'list_swift_1',
@@ -2889,10 +3122,15 @@ void main() {
       final surface = swiftData['tool_surface'] as Map<String, dynamic>;
       expect(surface['mode'], 'unified');
       expect(surface['one_tool_surface'], isTrue);
+      expect(swiftData['platform_filter'], 'swift');
+      final summary = swiftData['platform_summary'] as Map<String, dynamic>;
+      expect(summary['swift'], greaterThan(0));
+      expect(summary['ios'], greaterThanOrEqualTo(summary['swift'] as int));
       final swiftIds = (swiftData['tools'] as List)
           .map((entry) => '${entry['function_id'] ?? entry['tool_id']}')
           .toSet();
       expect(swiftIds, contains('browser_open_url'));
+      expect(swiftIds, isNot(contains('artifact_export')));
 
       final pcTools = runtime.execute(
         const MobileToolCall(

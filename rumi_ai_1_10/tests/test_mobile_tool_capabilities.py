@@ -262,6 +262,48 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["export", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "artifact_zip",
+                "name": "artifact_zip",
+                "summary": "Create artifact zip",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "artifact_export",
+                "name": "artifact_export",
+                "summary": "Export artifact",
+                "tags": ["export", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "static_site_export",
+                "name": "static_site_export",
+                "summary": "Export static site",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "webapp_export_static",
+                "name": "webapp_export_static",
+                "summary": "Export webapp static",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "doc_export",
+                "name": "doc_export",
+                "summary": "Export document artifact",
+                "tags": ["document", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "pdf_export",
+                "name": "pdf_export",
+                "summary": "Export PDF artifact",
+                "tags": ["export", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "doc_to_pdf",
+                "name": "doc_to_pdf",
+                "summary": "Export document to PDF",
+                "tags": ["document", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "html_preview",
                 "name": "html_preview",
                 "summary": "Preview HTML payload",
@@ -470,6 +512,10 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert by_id[tool_id]["mobile"]["implementation_status"] == status
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "ios-swift" not in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "android-kotlin" not in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-swift-native" not in by_id[tool_id]["tags"]
+        assert "mobile-kotlin-native" not in by_id[tool_id]["tags"]
 
     for tool_id, (status, requires_approval) in {
         "sheet_create": ("implemented_phone_sheet_text", False),
@@ -481,6 +527,22 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert by_id[tool_id]["mobile_compatible"] is True
         assert by_id[tool_id]["execution_route"] == "phone"
         assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, status in {
+        "artifact_zip": "implemented_phone_zip_base64",
+        "artifact_export": "implemented_phone_artifact_export",
+        "static_site_export": "implemented_phone_zip_base64",
+        "webapp_export_static": "implemented_phone_zip_base64",
+        "doc_export": "implemented_phone_document_export",
+        "pdf_export": "pc_delegation_required_binary_export",
+        "doc_to_pdf": "pc_delegation_required_binary_export",
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is False
         assert by_id[tool_id]["mobile"]["implementation_status"] == status
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
@@ -562,5 +624,8 @@ def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:
     assert summary["agent_template"]["template_id"] == "rumi.composer.default"
     assert summary["agent_template"]["ai_input_id"] == "rumi.composer.default:default_ai_input"
     assert summary["platform_tags"]["ios"] == "mobile-ios"
+    assert summary["platform_tags"]["android"] == "mobile-android"
+    assert summary["platform_tags"]["swift"] == "mobile-swift-native"
+    assert summary["platform_tags"]["kotlin"] == "mobile-kotlin-native"
     assert summary["tool_surface"]["mode"] == "unified"
     assert summary["tool_surface"]["one_tool_surface"] is True

@@ -87,6 +87,15 @@ _PHONE_SHEET_TOOLS = {
     "sheet_update": ("implemented_phone_sheet_text", True),
     "sheet_export": ("implemented_phone_sheet_export", False),
 }
+_PHONE_EXPORT_TOOLS = {
+    "artifact_zip": "implemented_phone_zip_base64",
+    "artifact_export": "implemented_phone_artifact_export",
+    "static_site_export": "implemented_phone_zip_base64",
+    "webapp_export_static": "implemented_phone_zip_base64",
+    "doc_export": "implemented_phone_document_export",
+    "pdf_export": "pc_delegation_required_binary_export",
+    "doc_to_pdf": "pc_delegation_required_binary_export",
+}
 
 
 def mobile_agent_template() -> dict[str, str]:
@@ -289,6 +298,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": requires_approval,
             "implementation_status": status,
+        }
+    if tool_id in _PHONE_EXPORT_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": _PHONE_EXPORT_TOOLS[tool_id],
         }
     if tool_id == "tool_batch":
         return {
