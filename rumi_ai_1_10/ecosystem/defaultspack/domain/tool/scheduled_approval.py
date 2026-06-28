@@ -199,6 +199,37 @@ def _approval_summary_operation(
     return stored_operation
 
 
+def _without_approval_token(value: dict[str, Any]) -> dict[str, Any]:
+    cleaned = dict(value or {})
+    cleaned.pop("approval_token", None)
+    return cleaned
+
+
+def _approval_followup_arguments(
+    *,
+    tool_name: str,
+    action: str,
+    details: dict[str, Any],
+    pending: dict[str, Any],
+) -> dict[str, Any]:
+    for source in (details.get("arguments"), pending.get("arguments")):
+        if isinstance(source, dict):
+            return _without_approval_token(source)
+
+    payload = pending.get("payload")
+    if not isinstance(payload, dict):
+        payload = details.get("payload")
+    if not isinstance(payload, dict):
+        return {}
+
+    cleaned_payload = _without_approval_token(payload)
+    if tool_name == "browser_computer":
+        return {"action": action, "payload": cleaned_payload}
+    if tool_name in {"browser_use", "computer_use"}:
+        return {"action": action, **cleaned_payload}
+    return cleaned_payload
+
+
 def approve_schedule_pending_approval(
     task_cfg: dict[str, Any],
     pending: dict[str, Any],
@@ -256,6 +287,7 @@ def approve_schedule_pending_approval(
         details=details,
         pending=pending,
     )
+    action = str(pending.get("action") or stored_operation or "").strip()
     return {
         "summary": {
             "request_id": request_id,
@@ -269,7 +301,13 @@ def approve_schedule_pending_approval(
             "approval_token": token,
             "tool_name": tool_name,
             "tool_call_id": pending.get("tool_call_id"),
-            "action": pending.get("action") or stored_operation,
+            "action": action,
             "operation": stored_operation,
+            "arguments": _approval_followup_arguments(
+                tool_name=tool_name,
+                action=action,
+                details=details,
+                pending=pending,
+            ),
         },
     }

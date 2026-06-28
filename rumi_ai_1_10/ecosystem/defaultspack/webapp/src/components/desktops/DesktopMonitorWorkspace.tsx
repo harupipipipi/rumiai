@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Trash2, X } from "lucide-react";
 
 import { sandboxesApi } from "../../features/sandboxes/api";
@@ -38,11 +38,19 @@ export function resolveVisibleSelectedDesktop(
     ?? null;
 }
 
+export function resolveVisibleSelectedSeatId(
+  visibleDesktops: DesktopInstance[],
+  selectedSeatId: string | null,
+): string | null {
+  return resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId)?.seat_id ?? null;
+}
+
 export function DesktopMonitorWorkspace() {
   const runtime = useRuntimeDoctor({ autoRunDoctor: true });
   const runtimeReady = runtime.availability.status === "ready";
   const templates = useSandboxTemplates({ enabled: runtimeReady });
   const desktopInstances = useDesktopInstances({ pollIntervalMs: 2500 });
+  const processedLinkedSeatIdRef = useRef<string | null>(null);
   const [filter, setFilter] = useState<DesktopFilter>("all");
   const [density, setDensity] = useState<DesktopDensity>("comfortable");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
@@ -56,8 +64,6 @@ export function DesktopMonitorWorkspace() {
   const [diagnosticsCopied, setDiagnosticsCopied] = useState(false);
   const [stopTargetSeatId, setStopTargetSeatId] = useState<string | null>(null);
   const [deleteTargetSeatId, setDeleteTargetSeatId] = useState<string | null>(null);
-  const selectedAccessKey = selectedSeatId ? accessKeys[selectedSeatId] || "" : "";
-  const control = useDesktopControlLease(selectedSeatId, sandboxesApi, selectedAccessKey);
 
   const runningCount = useMemo(
     () => desktopInstances.desktops.filter((desktop) => desktop.status === "running").length,
@@ -70,6 +76,9 @@ export function DesktopMonitorWorkspace() {
     [desktopInstances.desktops, filter],
   );
   const selectedDesktop = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId);
+  const visibleSelectedSeatId = selectedDesktop?.seat_id ?? null;
+  const selectedAccessKey = visibleSelectedSeatId ? accessKeys[visibleSelectedSeatId] || "" : "";
+  const control = useDesktopControlLease(visibleSelectedSeatId, sandboxesApi, selectedAccessKey);
   const stopTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === stopTargetSeatId) ?? null;
   const deleteTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === deleteTargetSeatId) ?? null;
 
@@ -78,6 +87,7 @@ export function DesktopMonitorWorkspace() {
     const query = new URLSearchParams(window.location.search);
     const linkedSeatId = query.get("desktop");
     if (!linkedSeatId) return;
+    if (processedLinkedSeatIdRef.current === linkedSeatId) return;
     const linkedAccessKey = query.get("desktop_access_key") || query.get("access_key") || "";
     if (linkedAccessKey) {
       query.delete("desktop_access_key");
@@ -93,12 +103,13 @@ export function DesktopMonitorWorkspace() {
       ));
     }
     if (desktopInstances.desktops.some((desktop) => desktop.seat_id === linkedSeatId)) {
+      processedLinkedSeatIdRef.current = linkedSeatId;
       setSelectedSeatId(linkedSeatId);
     }
   }, [desktopInstances.desktops]);
 
   useEffect(() => {
-    const nextSelectedSeatId = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId)?.seat_id ?? null;
+    const nextSelectedSeatId = resolveVisibleSelectedSeatId(visibleDesktops, selectedSeatId);
     if (nextSelectedSeatId === selectedSeatId) return;
     setSelectedSeatId(nextSelectedSeatId);
   }, [selectedSeatId, visibleDesktops]);
@@ -166,7 +177,7 @@ export function DesktopMonitorWorkspace() {
       if (action === "stop") await sandboxesApi.stopDesktop(seatId, accessKey);
       if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
       if (action === "stop") setStopTargetSeatId(null);
-      if (action === "delete" && seatId === selectedSeatId) {
+      if (action === "delete" && seatId === visibleSelectedSeatId) {
         setSelectedSeatId(null);
         setDeleteTargetSeatId(null);
       }
@@ -174,21 +185,21 @@ export function DesktopMonitorWorkspace() {
     } catch (error) {
       setActionError(error instanceof Error ? error.message : `Desktop ${action} failed.`);
     }
-  }, [accessKeys, desktopInstances, selectedSeatId]);
+  }, [accessKeys, desktopInstances, visibleSelectedSeatId]);
 
   const handleTakeOver = useCallback((seatId: string) => {
     setActionError(null);
-    if (seatId !== selectedSeatId) {
+    if (seatId !== visibleSelectedSeatId) {
       setSelectedSeatId(seatId);
       setPendingTakeoverSeatId(seatId);
       return;
     }
     void control.acquire();
-  }, [control, selectedSeatId]);
+  }, [control, visibleSelectedSeatId]);
 
   const handleDesktopInput = useCallback((seatId: string, input: DesktopInputAction) => {
     const token = control.lease?.lease_token;
-    if (!token || seatId !== selectedSeatId) return;
+    if (!token || seatId !== visibleSelectedSeatId) return;
     void sandboxesApi.sendDesktopInput(seatId, {
       ...input,
       lease_token: token,
@@ -199,7 +210,7 @@ export function DesktopMonitorWorkspace() {
       setActionError(error instanceof Error ? error.message : "Desktop input failed.");
       void desktopInstances.refresh();
     });
-  }, [accessKeys, control.lease?.lease_token, desktopInstances, selectedSeatId]);
+  }, [accessKeys, control.lease?.lease_token, desktopInstances, visibleSelectedSeatId]);
 
   const handleAccessKeyChange = useCallback((seatId: string, accessKey: string) => {
     setAccessKeys((current) => ({
@@ -292,7 +303,7 @@ export function DesktopMonitorWorkspace() {
               <DesktopGrid
                 desktops={visibleDesktops}
                 loading={desktopInstances.loading}
-                selectedSeatId={selectedSeatId}
+                selectedSeatId={visibleSelectedSeatId}
                 density={density}
                 leaseSeatId={control.lease?.seat_id ?? null}
                 accessKeys={accessKeys}
