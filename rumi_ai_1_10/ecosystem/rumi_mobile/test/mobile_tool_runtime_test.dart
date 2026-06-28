@@ -73,6 +73,26 @@ class _FakeMediaPicker extends PlatformMediaPicker {
   }
 }
 
+class _FakeScreenshotCapture extends PlatformScreenshotCapture {
+  _FakeScreenshotCapture(this.screenshot);
+
+  final PlatformCapturedScreenshot screenshot;
+  bool called = false;
+  int? lastMaxBytes;
+  int? lastMaxDimension;
+
+  @override
+  Future<PlatformCapturedScreenshot> capture({
+    required int maxBytes,
+    required int maxDimension,
+  }) async {
+    called = true;
+    lastMaxBytes = maxBytes;
+    lastMaxDimension = maxDimension;
+    return screenshot;
+  }
+}
+
 class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
   _FakeMobileToolApproval(this.approved);
 
@@ -148,6 +168,7 @@ void main() {
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
+          'media_screenshot',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -438,6 +459,81 @@ void main() {
       expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
     });
 
+    test('runs phone app screenshot tool after explicit phone approval',
+        () async {
+      final approval = _FakeMobileToolApproval(true);
+      final capture = _FakeScreenshotCapture(
+        const PlatformCapturedScreenshot(
+          mimeType: 'image/png',
+          size: 12,
+          width: 320,
+          height: 640,
+          base64Data: 'iVBORw0KGgo=',
+        ),
+      );
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        screenshotCapture: capture,
+      );
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'screenshot_1',
+          name: 'defaultspack.media.screenshot',
+          arguments: {
+            'reason': 'Inspect the current Rumi app screen',
+            'max_bytes': 2048,
+            'max_dimension': 900,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'media_screenshot');
+      expect(capture.called, isTrue);
+      expect(capture.lastMaxBytes, 2048);
+      expect(capture.lastMaxDimension, 900);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['mime_type'], 'image/png');
+      expect(data['base64'], 'iVBORw0KGgo=');
+      expect(data['capture_scope'], 'app_window');
+      expect(data['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(data['requires_mobile_approval'], isTrue);
+    });
+
+    test('phone app screenshot fails closed without approval', () async {
+      final approval = _FakeMobileToolApproval(false);
+      final capture = _FakeScreenshotCapture(
+        const PlatformCapturedScreenshot(
+          mimeType: 'image/png',
+          size: 8,
+          width: 100,
+          height: 100,
+          base64Data: 'ignored',
+        ),
+      );
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        screenshotCapture: capture,
+      );
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'screenshot_denied_1',
+          name: 'media_screenshot',
+          arguments: {},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(capture.called, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -659,6 +755,25 @@ void main() {
           containsAll(['flutter', 'ios-swift', 'android-kotlin']));
       expect(pickerData['tags'], contains(mobileSwiftNativeTag));
       expect(pickerData['tags'], contains(mobileKotlinNativeTag));
+
+      final screenshotSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_screenshot_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_screenshot'},
+        ),
+      );
+      final screenshotPayload =
+          jsonDecode(screenshotSchema.output) as Map<String, dynamic>;
+      final screenshotData = screenshotPayload['data'] as Map<String, dynamic>;
+      final screenshotMobile = screenshotData['mobile'] as Map<String, dynamic>;
+      expect(screenshotData['mobile_compatible'], isTrue);
+      expect(screenshotData['execution_route'], 'phone');
+      expect(screenshotMobile['requires_mobile_approval'], isTrue);
+      expect(screenshotMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(screenshotData['tags'], contains(mobileSwiftNativeTag));
+      expect(screenshotData['tags'], contains(mobileKotlinNativeTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(

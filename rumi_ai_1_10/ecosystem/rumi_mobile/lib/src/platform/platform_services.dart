@@ -88,6 +88,53 @@ class PlatformMediaPicker {
   }
 }
 
+class PlatformCapturedScreenshot {
+  const PlatformCapturedScreenshot({
+    required this.mimeType,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.base64Data,
+  });
+
+  final String mimeType;
+  final int size;
+  final int width;
+  final int height;
+  final String base64Data;
+}
+
+class PlatformScreenshotCapture {
+  const PlatformScreenshotCapture();
+
+  static const _channel = MethodChannel('ai.rumi.remote/screenshot');
+
+  Future<PlatformCapturedScreenshot> capture({
+    required int maxBytes,
+    required int maxDimension,
+  }) async {
+    final raw = await _channel.invokeMapMethod<String, dynamic>('capture', {
+      'max_bytes': maxBytes,
+      'max_dimension': maxDimension,
+    });
+    final map = raw ?? const <String, dynamic>{};
+    final errorCode = '${map['error_code'] ?? ''}'.trim();
+    if (errorCode.isNotEmpty) {
+      throw PlatformException(
+        code: errorCode,
+        message: '${map['message'] ?? 'Screenshot capture failed'}',
+      );
+    }
+    return PlatformCapturedScreenshot(
+      mimeType: '${map['mime_type'] ?? 'image/png'}',
+      size: map['size'] is num ? (map['size'] as num).toInt() : 0,
+      width: map['width'] is num ? (map['width'] as num).toInt() : 0,
+      height: map['height'] is num ? (map['height'] as num).toInt() : 0,
+      base64Data: '${map['base64'] ?? ''}',
+    );
+  }
+}
+
 class PlatformNotifications {
   const PlatformNotifications();
 

@@ -172,8 +172,17 @@ const _nativeMediaPickerRuntimeLayers = <String>[
   'ios-swift',
   'android-kotlin',
 ];
+const _nativeScreenshotRuntimeLayers = <String>[
+  'flutter',
+  'ios-swift',
+  'android-kotlin',
+];
 const _defaultMediaPickMaxBytes = 4 * 1024 * 1024;
 const _hardMediaPickMaxBytes = 8 * 1024 * 1024;
+const _defaultScreenshotMaxBytes = 6 * 1024 * 1024;
+const _hardScreenshotMaxBytes = 12 * 1024 * 1024;
+const _defaultScreenshotMaxDimension = 1600;
+const _hardScreenshotMaxDimension = 4096;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -281,17 +290,21 @@ class MobileToolRuntime {
     PlatformUrlLauncher urlLauncher = const PlatformUrlLauncher(),
     PlatformClipboard clipboard = const PlatformClipboard(),
     PlatformMediaPicker mediaPicker = const PlatformMediaPicker(),
+    PlatformScreenshotCapture screenshotCapture =
+        const PlatformScreenshotCapture(),
   })  : _pcDelegate = pcDelegate,
         _approvalDelegate = approvalDelegate,
         _urlLauncher = urlLauncher,
         _clipboard = clipboard,
-        _mediaPicker = mediaPicker;
+        _mediaPicker = mediaPicker,
+        _screenshotCapture = screenshotCapture;
 
   final MobileToolDelegate? _pcDelegate;
   final MobileToolApprovalDelegate? _approvalDelegate;
   final PlatformUrlLauncher _urlLauncher;
   final PlatformClipboard _clipboard;
   final PlatformMediaPicker _mediaPicker;
+  final PlatformScreenshotCapture _screenshotCapture;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -690,6 +703,48 @@ class MobileToolRuntime {
           'reason': {
             'type': 'string',
             'description': 'Why this phone file is needed.',
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'media_screenshot',
+      description:
+          'Capture a PNG screenshot of the visible Rumi app window on this phone after explicit mobile approval.',
+      tags: ['tool', 'media', 'screenshot', mobileCompatibleTag],
+      aliases: [
+        'screenshot',
+        'mobile_screenshot',
+        'defaults_media_screenshot',
+        'defaultspack_media_screenshot',
+        'defaults.media.screenshot',
+        'defaultspack.media.screenshot',
+      ],
+      runtimeLayers: _nativeScreenshotRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIWindow screenshot capture',
+        'android:Kotlin View drawing cache capture',
+      ],
+      requiresMobileApproval: true,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'reason': {
+            'type': 'string',
+            'description': 'Why the current app screen should be captured.',
+          },
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardScreenshotMaxBytes,
+            'default': _defaultScreenshotMaxBytes,
+          },
+          'max_dimension': {
+            'type': 'integer',
+            'minimum': 320,
+            'maximum': _hardScreenshotMaxDimension,
+            'default': _defaultScreenshotMaxDimension,
           },
         },
       },
@@ -1130,6 +1185,7 @@ class MobileToolRuntime {
       case 'media_clipboard_read':
       case 'media_clipboard_write':
       case 'media_file_pick':
+      case 'media_screenshot':
         return _asyncOnlyTool(name);
       case 'tool_search':
         return _toolSearch(call.arguments);
@@ -1193,6 +1249,8 @@ class MobileToolRuntime {
         return _mediaClipboardWrite(call.arguments);
       case 'media_file_pick':
         return _mediaFilePick(call.arguments);
+      case 'media_screenshot':
+        return _mediaScreenshot(call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -1262,6 +1320,7 @@ class MobileToolRuntime {
       'media_clipboard_read',
       'media_clipboard_write',
       'media_file_pick',
+      'media_screenshot',
     }.contains(name)) {
       return false;
     }
@@ -2010,6 +2069,80 @@ class MobileToolRuntime {
     }
   }
 
+  Future<MobileToolResult> _mediaScreenshot(Map<String, dynamic> args) async {
+    final maxBytes = _boundedScreenshotMaxBytes(args['max_bytes']);
+    final maxDimension = _boundedScreenshotMaxDimension(args['max_dimension']);
+    final approved = await _requestMobileApproval(
+      toolName: 'media_screenshot',
+      risk: 'high',
+      arguments: {
+        ...args,
+        'max_bytes': maxBytes,
+        'max_dimension': maxDimension,
+        'capture_scope': 'app_window',
+      },
+      prompt: 'このスマホで表示中のRumiアプリ画面をPNG画像として取得します。画面内の会話や設定がAIのtool結果として渡されます。',
+    );
+    if (!approved) return _mobileApprovalRequired('media_screenshot');
+
+    try {
+      final screenshot = await _screenshotCapture.capture(
+        maxBytes: maxBytes,
+        maxDimension: maxDimension,
+      );
+      if (screenshot.size > maxBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'screenshot is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'MEDIA_SCREENSHOT_TOO_LARGE',
+              'message': 'Captured screenshot is larger than max_bytes.',
+              'size': screenshot.size,
+              'max_bytes': maxBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      return MobileToolResult(
+        ok: true,
+        summary:
+            'captured app screenshot ${screenshot.width}x${screenshot.height}',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'name': 'rumi-app-screenshot.png',
+            'mime_type': screenshot.mimeType,
+            'size': screenshot.size,
+            'width': screenshot.width,
+            'height': screenshot.height,
+            'base64': screenshot.base64Data,
+            'encoding': 'base64',
+            'capture_scope': 'app_window',
+            'execution_location': 'phone',
+            'runtime_layers': _nativeScreenshotRuntimeLayers,
+            'requires_mobile_approval': true,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'screenshot capture failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'MEDIA_SCREENSHOT_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
   Future<bool> _requestMobileApproval({
     required String toolName,
     required String prompt,
@@ -2488,6 +2621,7 @@ bool _isAsyncPhoneToolName(String name) {
     'media_clipboard_read',
     'media_clipboard_write',
     'media_file_pick',
+    'media_screenshot',
     'mobile_url_open',
   }.contains(name.trim().toLowerCase());
 }
@@ -2703,6 +2837,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isClipboard = normalized == 'media_clipboard_read' ||
       normalized == 'media_clipboard_write';
   final isMediaPicker = normalized == 'media_file_pick';
+  final isScreenshot = normalized == 'media_screenshot';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -2722,6 +2857,18 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [
         'ios:Swift UIDocumentPickerViewController',
         'android:Kotlin Intent.ACTION_OPEN_DOCUMENT',
+      ],
+      'requires_mobile_approval': true,
+      'implementation_status': 'implemented',
+    };
+  }
+  if (isScreenshot) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _nativeScreenshotRuntimeLayers,
+      'native_layers': [
+        'ios:Swift UIWindow screenshot capture',
+        'android:Kotlin View drawing cache capture',
       ],
       'requires_mobile_approval': true,
       'implementation_status': 'implemented',
@@ -2975,6 +3122,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   if (normalized == 'media_file_pick') {
     return 'このdefaultspack-compatible toolはiOS Swift/Android KotlinのOSファイルピッカーでスマホ実装済みです。';
   }
+  if (normalized == 'media_screenshot') {
+    return 'このdefaultspack-compatible toolはiOS Swift/Android KotlinのRumiアプリ画面captureでスマホ実装済みです。';
+  }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
   }
@@ -3132,6 +3282,28 @@ int _boundedMediaPickMaxBytes(Object? value) {
     return math.max(1, math.min(_hardMediaPickMaxBytes, parsed));
   }
   return _defaultMediaPickMaxBytes;
+}
+
+int _boundedScreenshotMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardScreenshotMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardScreenshotMaxBytes, parsed));
+  }
+  return _defaultScreenshotMaxBytes;
+}
+
+int _boundedScreenshotMaxDimension(Object? value) {
+  if (value is num) {
+    return math.max(320, math.min(_hardScreenshotMaxDimension, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(320, math.min(_hardScreenshotMaxDimension, parsed));
+  }
+  return _defaultScreenshotMaxDimension;
 }
 
 final List<Map<String, dynamic>> _mobileTodos = [];

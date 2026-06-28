@@ -23,6 +23,7 @@ import UserNotifications
     registerNotificationsChannel()
     registerQrScannerChannel()
     registerMediaPickerChannel()
+    registerScreenshotChannel()
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -323,6 +324,77 @@ import UserNotifications
     } catch {
       return mediaPickerError(code: "read_failed", message: error.localizedDescription)
     }
+  }
+
+  private func registerScreenshotChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "ai.rumi.remote/screenshot",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result([
+          "error_code": "not_available",
+          "message": "App delegate is not available",
+        ])
+        return
+      }
+      guard call.method == "capture" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let args = call.arguments as? [String: Any]
+      let maxBytes = max(1, min((args?["max_bytes"] as? NSNumber)?.intValue ?? 6 * 1024 * 1024, 12 * 1024 * 1024))
+      let maxDimension = max(320, min((args?["max_dimension"] as? NSNumber)?.intValue ?? 1600, 4096))
+      result(captureScreenshotPayload(maxBytes: maxBytes, maxDimension: maxDimension))
+    }
+  }
+
+  private func captureScreenshotPayload(maxBytes: Int, maxDimension: Int) -> [String: Any] {
+    guard let targetWindow = window else {
+      return mediaPickerError(code: "not_available", message: "No app window is available")
+    }
+    let bounds = targetWindow.bounds
+    guard bounds.width > 0, bounds.height > 0 else {
+      return mediaPickerError(code: "not_available", message: "App window has no drawable size")
+    }
+
+    let screenScale = max(1, targetWindow.screen.scale)
+    let pixelWidth = bounds.width * screenScale
+    let pixelHeight = bounds.height * screenScale
+    let longest = max(pixelWidth, pixelHeight)
+    let resizeScale = min(1, CGFloat(maxDimension) / max(1, longest))
+    let outputSize = CGSize(
+      width: max(1, bounds.width * resizeScale),
+      height: max(1, bounds.height * resizeScale)
+    )
+
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = screenScale
+    let renderer = UIGraphicsImageRenderer(size: outputSize, format: format)
+    let image = renderer.image { _ in
+      targetWindow.drawHierarchy(
+        in: CGRect(origin: .zero, size: outputSize),
+        afterScreenUpdates: true
+      )
+    }
+    guard let data = image.pngData() else {
+      return mediaPickerError(code: "encode_failed", message: "Could not encode screenshot as PNG")
+    }
+    if data.count > maxBytes {
+      return mediaPickerError(code: "too_large", message: "Captured screenshot is larger than max_bytes")
+    }
+
+    return [
+      "mime_type": "image/png",
+      "size": data.count,
+      "width": Int(image.size.width * image.scale),
+      "height": Int(image.size.height * image.scale),
+      "base64": data.base64EncodedString(),
+    ]
   }
 
   override func userNotificationCenter(

@@ -250,6 +250,16 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             ],
             "requires_mobile_approval": True,
         }
+    if tool_id == "media_screenshot":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIWindow screenshot capture",
+                "android:Kotlin View drawing cache capture",
+            ],
+            "requires_mobile_approval": True,
+        }
     return None
 
 
@@ -287,6 +297,17 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             "native_layers": [
                 "ios:Swift UIDocumentPickerViewController",
                 "android:Kotlin Intent.ACTION_OPEN_DOCUMENT",
+            ],
+            "requires_mobile_approval": True,
+            "implementation_status": "implemented",
+        }
+    if tool_id == "media_screenshot":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIWindow screenshot capture",
+                "android:Kotlin View drawing cache capture",
             ],
             "requires_mobile_approval": True,
             "implementation_status": "implemented",

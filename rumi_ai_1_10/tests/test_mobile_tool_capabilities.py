@@ -81,6 +81,12 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "summary": "Pick a phone file",
                 "tags": ["media", "tool"],
             },
+            {
+                "tool_id": "media_screenshot",
+                "name": "media_screenshot",
+                "summary": "Capture a phone screenshot",
+                "tags": ["media", "tool"],
+            },
         ]
     )
 
@@ -101,6 +107,13 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["media_file_pick"]["mobile"]["implementation_status"] == "implemented"
     assert "ios-swift" in by_id["media_file_pick"]["mobile"]["runtime_layers"]
     assert "android-kotlin" in by_id["media_file_pick"]["mobile"]["runtime_layers"]
+
+    assert by_id["media_screenshot"]["mobile_compatible"] is True
+    assert by_id["media_screenshot"]["execution_route"] == "phone"
+    assert by_id["media_screenshot"]["mobile"]["requires_mobile_approval"] is True
+    assert by_id["media_screenshot"]["mobile"]["implementation_status"] == "implemented"
+    assert "ios-swift" in by_id["media_screenshot"]["mobile"]["runtime_layers"]
+    assert "android-kotlin" in by_id["media_screenshot"]["mobile"]["runtime_layers"]
 
 
 def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:

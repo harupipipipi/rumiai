@@ -9,6 +9,8 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
@@ -38,6 +40,7 @@ class MainActivity : FlutterActivity() {
         registerUrlLauncherChannel(flutterEngine)
         registerNotificationsChannel(flutterEngine)
         registerMediaPickerChannel(flutterEngine)
+        registerScreenshotChannel(flutterEngine)
     }
 
     private fun registerSecureStorageChannel(flutterEngine: FlutterEngine) {
@@ -206,6 +209,26 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun registerScreenshotChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "ai.rumi.remote/screenshot",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "capture") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val args = call.arguments as? Map<*, *>
+            val maxBytes = ((args?.get("max_bytes") as? Number)?.toLong()
+                ?: DEFAULT_SCREENSHOT_MAX_BYTES)
+                .coerceIn(1L, HARD_SCREENSHOT_MAX_BYTES)
+            val maxDimension = ((args?.get("max_dimension") as? Number)?.toInt()
+                ?: DEFAULT_SCREENSHOT_MAX_DIMENSION)
+                .coerceIn(320, HARD_SCREENSHOT_MAX_DIMENSION)
+            result.success(captureScreenshotPayload(maxBytes, maxDimension))
+        }
+    }
+
     private fun requestNotificationAuthorization(callback: (Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             callback(true)
@@ -357,6 +380,42 @@ class MainActivity : FlutterActivity() {
         )
     }
 
+    private fun captureScreenshotPayload(maxBytes: Long, maxDimension: Int): Map<String, Any> {
+        return try {
+            val view = window?.decorView?.rootView
+                ?: return mediaPickerError("not_available", "No app view is available")
+            val width = view.width
+            val height = view.height
+            if (width <= 0 || height <= 0) {
+                return mediaPickerError("not_available", "App view has no drawable size")
+            }
+            val longest = maxOf(width, height).coerceAtLeast(1)
+            val scale = minOf(1f, maxDimension.toFloat() / longest.toFloat())
+            val outputWidth = maxOf(1, (width * scale).toInt())
+            val outputHeight = maxOf(1, (height * scale).toInt())
+            val bitmap = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bitmap)
+            canvas.scale(scale, scale)
+            view.draw(canvas)
+            val output = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            bitmap.recycle()
+            val bytes = output.toByteArray()
+            if (bytes.size.toLong() > maxBytes) {
+                return mediaPickerError("too_large", "Captured screenshot is larger than max_bytes")
+            }
+            mapOf(
+                "mime_type" to "image/png",
+                "size" to bytes.size,
+                "width" to outputWidth,
+                "height" to outputHeight,
+                "base64" to Base64.encodeToString(bytes, Base64.NO_WRAP),
+            )
+        } catch (e: Exception) {
+            mediaPickerError("capture_failed", e.message ?: "Could not capture screenshot")
+        }
+    }
+
     private fun immutablePendingIntentFlag(): Int {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE
@@ -371,6 +430,10 @@ class MainActivity : FlutterActivity() {
         const val NOTIFICATION_CHANNEL_ID = "rumi_pc_tasks"
         const val DEFAULT_MEDIA_PICK_MAX_BYTES = 4L * 1024L * 1024L
         const val HARD_MEDIA_PICK_MAX_BYTES = 8L * 1024L * 1024L
+        const val DEFAULT_SCREENSHOT_MAX_BYTES = 6L * 1024L * 1024L
+        const val HARD_SCREENSHOT_MAX_BYTES = 12L * 1024L * 1024L
+        const val DEFAULT_SCREENSHOT_MAX_DIMENSION = 1600
+        const val HARD_SCREENSHOT_MAX_DIMENSION = 4096
     }
 }
 
