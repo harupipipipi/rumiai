@@ -1,10 +1,17 @@
 {
   "function_id": "ambient_event_submit",
   "description": "Submit a sanitized ambient trigger event to the ambient trigger router.",
-  "tags": ["ambient", "input"],
+  "tags": [
+    "ambient",
+    "input"
+  ],
   "risk": "high",
-  "requires": ["ambient.trigger.dispatch"],
-  "caller_requires": ["user.approved.high_risk"],
+  "requires": [
+    "ambient.trigger.dispatch"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
@@ -21,7 +28,16 @@
     "additionalProperties": true
   },
   "output_schema": {
-    "type": "object"
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
   },
   "extensions": {
     "defaultspack": {

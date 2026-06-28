@@ -7,12 +7,16 @@
     "webhook"
   ],
   "risk": "medium",
-  "requires": [],
+  "requires": [
+    "input.endpoint.create"
+  ],
   "caller_requires": [],
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
   "vocab_aliases": [
+    "defaults.input.endpoint_create",
+    "defaultspack.input.endpoint_create",
     "defaults.input.endpoint.create",
     "defaultspack.input.endpoint.create"
   ],

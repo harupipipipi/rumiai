@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_operating_profiles_activate",
+  "description": "Activate an Operating Profile.",
+  "tags": [
+    "adaptive",
+    "profile"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.operating.profiles.activate"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.operating_profiles_activate",
+    "defaultspack.adaptive.operating_profiles_activate",
+    "defaults.adaptive.operating.profiles.activate",
+    "defaultspack.adaptive.operating.profiles.activate"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "operating_profiles_activate"
+      }
+    }
+  }
+}

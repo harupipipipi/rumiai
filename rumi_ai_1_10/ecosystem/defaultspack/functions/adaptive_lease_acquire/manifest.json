@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_lease_acquire",
+  "description": "Acquire an adaptive path or resource lease.",
+  "tags": [
+    "adaptive",
+    "orchestration"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.lease.acquire"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.lease_acquire",
+    "defaultspack.adaptive.lease_acquire",
+    "defaults.adaptive.lease.acquire",
+    "defaultspack.adaptive.lease.acquire"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "lease_acquire"
+      }
+    }
+  }
+}

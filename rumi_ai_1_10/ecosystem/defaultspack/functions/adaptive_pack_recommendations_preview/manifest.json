@@ -1,0 +1,44 @@
+{
+  "function_id": "adaptive_pack_recommendations_preview",
+  "description": "Preview Pack onboarding recommendations.",
+  "tags": [
+    "adaptive",
+    "pack"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.pack_recommendations_preview",
+    "defaultspack.adaptive.pack_recommendations_preview",
+    "defaults.adaptive.pack.recommendations.preview",
+    "defaultspack.adaptive.pack.recommendations.preview"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "pack_recommendations_preview"
+      }
+    }
+  }
+}
