@@ -100,6 +100,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["media", "tool"],
             },
             {
+                "tool_id": "image_resize",
+                "name": "image_resize",
+                "summary": "Resize image bytes",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "image_convert",
+                "name": "image_convert",
+                "summary": "Convert image bytes",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "media_doc_parse",
                 "name": "media_doc_parse",
                 "summary": "Parse a text document",
@@ -164,6 +176,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["media_image_transform"]["mobile"]["implementation_status"] == "implemented"
     assert "ios-swift" in by_id["media_image_transform"]["mobile"]["runtime_layers"]
     assert "android-kotlin" in by_id["media_image_transform"]["mobile"]["runtime_layers"]
+
+    assert by_id["image_resize"]["mobile_compatible"] is True
+    assert by_id["image_resize"]["execution_route"] == "phone"
+    assert by_id["image_resize"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["image_resize"]["mobile"]["implementation_status"] == "implemented_payload_only"
+    assert "ios-swift" in by_id["image_resize"]["mobile"]["runtime_layers"]
+    assert "android-kotlin" in by_id["image_resize"]["mobile"]["runtime_layers"]
+
+    assert by_id["image_convert"]["mobile_compatible"] is True
+    assert by_id["image_convert"]["execution_route"] == "phone"
+    assert by_id["image_convert"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["image_convert"]["mobile"]["implementation_status"] == "implemented_payload_only"
+    assert "ios-swift" in by_id["image_convert"]["mobile"]["runtime_layers"]
+    assert "android-kotlin" in by_id["image_convert"]["mobile"]["runtime_layers"]
 
     assert by_id["media_doc_parse"]["mobile_compatible"] is True
     assert by_id["media_doc_parse"]["execution_route"] == "phone"

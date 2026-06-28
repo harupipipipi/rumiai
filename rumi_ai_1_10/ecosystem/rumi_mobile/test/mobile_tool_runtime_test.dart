@@ -203,6 +203,8 @@ void main() {
           'media_screenshot',
           'media_image_read',
           'media_image_transform',
+          'image_resize',
+          'image_convert',
           'media_doc_parse',
           'media_pdf_parse',
           'source_extract',
@@ -745,6 +747,130 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('runs image_resize through the phone native image bridge', () async {
+      final pngHeader = base64Encode([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+      ]);
+      final transformedBase64 = base64Encode([9, 8, 7]);
+      final transformer = _FakeImageTransformer(
+        PlatformTransformedImage(
+          mimeType: 'image/png',
+          size: 3,
+          width: 320,
+          height: 200,
+          base64Data: transformedBase64,
+        ),
+      );
+      final runtime = MobileToolRuntime(imageTransformer: transformer);
+
+      final result = await runtime.executeAsync(
+        MobileToolCall(
+          id: 'image_resize_1',
+          name: 'image_resize',
+          arguments: {
+            'base64': 'data:image/png;base64,$pngHeader',
+            'width': 320,
+            'height': 200,
+            'format': 'png',
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(transformer.called, isTrue);
+      expect(transformer.lastMaxWidth, 320);
+      expect(transformer.lastMaxHeight, 200);
+      expect(transformer.lastOutputFormat, 'png');
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['base64'], transformedBase64);
+      expect(data['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+    });
+
+    test('runs image_convert through the phone native image bridge', () async {
+      final pngHeader = base64Encode([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+      ]);
+      final transformedBase64 = base64Encode([4, 5, 6]);
+      final transformer = _FakeImageTransformer(
+        PlatformTransformedImage(
+          mimeType: 'image/jpeg',
+          size: 3,
+          width: 100,
+          height: 50,
+          base64Data: transformedBase64,
+        ),
+      );
+      final runtime = MobileToolRuntime(imageTransformer: transformer);
+
+      final result = await runtime.executeAsync(
+        MobileToolCall(
+          id: 'image_convert_1',
+          name: 'image_convert',
+          arguments: {
+            'base64': 'data:image/png;base64,$pngHeader',
+            'output_path': 'converted.jpg',
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(transformer.called, isTrue);
+      expect(transformer.lastOutputFormat, 'jpeg');
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['mime_type'], 'image/jpeg');
+      expect(data['format'], 'jpeg');
+      expect(data['base64'], transformedBase64);
+    });
+
     test('parses phone-provided text documents through media_doc_parse', () {
       final markdown = '# Hello\n\nmobile docs';
       final result = runtime.execute(
@@ -1237,6 +1363,52 @@ void main() {
           containsAll(['flutter', 'ios-swift', 'android-kotlin']));
       expect(imageTransformData['tags'], contains(mobileSwiftNativeTag));
       expect(imageTransformData['tags'], contains(mobileKotlinNativeTag));
+
+      final imageResizeSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_image_resize_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'image_resize'},
+        ),
+      );
+      final imageResizePayload =
+          jsonDecode(imageResizeSchema.output) as Map<String, dynamic>;
+      final imageResizeData =
+          imageResizePayload['data'] as Map<String, dynamic>;
+      final imageResizeMobile =
+          imageResizeData['mobile'] as Map<String, dynamic>;
+      expect(imageResizeData['mobile_compatible'], isTrue);
+      expect(imageResizeData['execution_route'], 'phone');
+      expect(imageResizeMobile['requires_mobile_approval'], isFalse);
+      expect(imageResizeMobile['implementation_status'],
+          'implemented_payload_only');
+      expect(imageResizeMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(imageResizeData['tags'], contains(mobileSwiftNativeTag));
+      expect(imageResizeData['tags'], contains(mobileKotlinNativeTag));
+
+      final imageConvertSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_image_convert_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'image_convert'},
+        ),
+      );
+      final imageConvertPayload =
+          jsonDecode(imageConvertSchema.output) as Map<String, dynamic>;
+      final imageConvertData =
+          imageConvertPayload['data'] as Map<String, dynamic>;
+      final imageConvertMobile =
+          imageConvertData['mobile'] as Map<String, dynamic>;
+      expect(imageConvertData['mobile_compatible'], isTrue);
+      expect(imageConvertData['execution_route'], 'phone');
+      expect(imageConvertMobile['requires_mobile_approval'], isFalse);
+      expect(imageConvertMobile['implementation_status'],
+          'implemented_payload_only');
+      expect(imageConvertMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(imageConvertData['tags'], contains(mobileSwiftNativeTag));
+      expect(imageConvertData['tags'], contains(mobileKotlinNativeTag));
 
       final docParseSchema = runtime.execute(
         const MobileToolCall(

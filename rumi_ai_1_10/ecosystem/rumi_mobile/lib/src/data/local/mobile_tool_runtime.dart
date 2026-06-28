@@ -879,6 +879,92 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'image_resize',
+      description:
+          'Resize image bytes already provided to this phone runtime using the native iOS Swift / Android Kotlin image bridge. Does not read or write PC artifact paths.',
+      tags: ['tool', 'media', 'image', 'resize', mobileCompatibleTag],
+      aliases: [
+        'defaults_image_resize',
+        'defaultspack_image_resize',
+        'defaults.image.resize',
+        'defaultspack.image.resize',
+      ],
+      runtimeLayers: _nativeImageTransformRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIImage resize/encode',
+        'android:Kotlin Bitmap resize/encode',
+      ],
+      implementationStatus: 'implemented_payload_only',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'width': {'type': 'integer', 'minimum': 1},
+          'height': {'type': 'integer', 'minimum': 1},
+          'format': {
+            'type': 'string',
+            'enum': ['jpeg', 'jpg', 'png'],
+            'default': 'png',
+          },
+          'quality': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 100,
+            'default': 90,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'image_convert',
+      description:
+          'Convert image bytes already provided to this phone runtime using the native iOS Swift / Android Kotlin image bridge. Does not read or write PC artifact paths.',
+      tags: ['tool', 'media', 'image', 'convert', mobileCompatibleTag],
+      aliases: [
+        'defaults_image_convert',
+        'defaultspack_image_convert',
+        'defaults.image.convert',
+        'defaultspack.image.convert',
+      ],
+      runtimeLayers: _nativeImageTransformRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIImage resize/encode',
+        'android:Kotlin Bitmap resize/encode',
+      ],
+      implementationStatus: 'implemented_payload_only',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'format': {
+            'type': 'string',
+            'enum': ['jpeg', 'jpg', 'png'],
+            'default': 'png',
+          },
+          'quality': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 100,
+            'default': 90,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'media_doc_parse',
       description:
           'Parse text-like document bytes or text already provided to this phone runtime. Supports txt, markdown, json, csv, html, xml, and similar UTF text; does not read host file paths.',
@@ -1470,6 +1556,8 @@ class MobileToolRuntime {
       case 'media_file_pick':
       case 'media_screenshot':
       case 'media_image_transform':
+      case 'image_resize':
+      case 'image_convert':
         return _asyncOnlyTool(name);
       case 'media_image_read':
         return _mediaImageRead(call.arguments);
@@ -1547,6 +1635,11 @@ class MobileToolRuntime {
         return _mediaScreenshot(call.arguments);
       case 'media_image_transform':
         return _mediaImageTransform(call.arguments);
+      case 'image_resize':
+      case 'image_convert':
+        return _mediaImageTransform(
+          _imageToolTransformArguments(call.arguments, toolName: name),
+        );
       default:
         return Future.value(execute(call));
     }
@@ -3540,6 +3633,8 @@ bool _isAsyncPhoneToolName(String name) {
     'media_file_pick',
     'media_screenshot',
     'media_image_transform',
+    'image_resize',
+    'image_convert',
     'mobile_url_open',
   }.contains(name.trim().toLowerCase());
 }
@@ -3758,6 +3853,8 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isScreenshot = normalized == 'media_screenshot';
   final isImageRead = normalized == 'media_image_read';
   final isImageTransform = normalized == 'media_image_transform';
+  final isImagePayloadTool =
+      normalized == 'image_resize' || normalized == 'image_convert';
   final isDocParse = normalized == 'media_doc_parse';
   final isPdfParse = normalized == 'media_pdf_parse';
   final isSourcePayloadTool =
@@ -3817,6 +3914,18 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       ],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented',
+    };
+  }
+  if (isImagePayloadTool) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _nativeImageTransformRuntimeLayers,
+      'native_layers': [
+        'ios:Swift UIImage resize/encode',
+        'android:Kotlin Bitmap resize/encode',
+      ],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_payload_only',
     };
   }
   if (isDocParse) {
@@ -4104,6 +4213,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'media_image_transform') {
     return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinの画像resize/encode bridgeでスマホ実装済みです。';
+  }
+  if (normalized == 'image_resize' || normalized == 'image_convert') {
+    return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinの画像resize/encode bridgeで渡されたimage bytesのpayload-only変換にスマホ対応済みです。PC artifact path入出力はPC runtimeへ委譲してください。';
   }
   if (normalized == 'media_doc_parse') {
     return 'このdefaultspack-compatible toolはDartでtext/markdown/json/csv/html/xml等のテキスト系document parseをスマホ実装済みです。PDF/docx等はPC runtimeへ委譲してください。';
@@ -4410,6 +4522,29 @@ _ImageTransformDimensions _imageTransformDimensions(Map<String, dynamic> args) {
   maxWidth ??= defaultDimension;
   maxHeight ??= defaultDimension;
   return _ImageTransformDimensions(maxWidth: maxWidth, maxHeight: maxHeight);
+}
+
+Map<String, dynamic> _imageToolTransformArguments(
+  Map<String, dynamic> args, {
+  required String toolName,
+}) {
+  final normalized = Map<String, dynamic>.from(args);
+  if (toolName == 'image_convert' &&
+      _stringOrNull(normalized['format']) == null) {
+    final inferred = _imageFormatFromPath(
+      _stringOrNull(normalized['output_path']),
+    );
+    if (inferred != null) normalized['format'] = inferred;
+  }
+  return normalized;
+}
+
+String? _imageFormatFromPath(String? path) {
+  if (path == null) return null;
+  final lower = path.trim().toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'jpeg';
+  if (lower.endsWith('.png')) return 'png';
+  return null;
 }
 
 List<String> _imageTransformOperationsApplied(
