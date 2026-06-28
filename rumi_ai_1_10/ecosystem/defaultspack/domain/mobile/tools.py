@@ -74,6 +74,12 @@ _PHONE_ARTIFACT_HTML_TOOLS = {
     "webapp_preview",
     "webapp_lint",
 }
+_PHONE_ARTIFACT_GENERATOR_TOOLS = {
+    "project_scaffold": "implemented_phone_artifact_scaffold",
+    "doc_create": "implemented_phone_document_text",
+    "slides_from_markdown": "implemented_phone_slide_outline",
+    "chart_create": "implemented_phone_svg_chart",
+}
 
 
 def mobile_agent_template() -> dict[str, str]:
@@ -259,6 +265,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": False,
             "implementation_status": "implemented_phone_artifact_html",
+        }
+    if tool_id in _PHONE_ARTIFACT_GENERATOR_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": _PHONE_ARTIFACT_GENERATOR_TOOLS[tool_id],
         }
     if tool_id == "tool_batch":
         return {

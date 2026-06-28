@@ -843,6 +843,130 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'project_scaffold',
+      description:
+          'Create a phone-local static webapp scaffold in the artifact workspace. Static HTML, plain JS, and Vite React file layouts are supported; package install/build still delegates to PC.',
+      tags: [
+        'tool',
+        'webapp',
+        'project',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_project_scaffold',
+        'defaultspack_project_scaffold',
+        'defaults.project.scaffold',
+        'defaultspack.project.scaffold',
+      ],
+      implementationStatus: 'implemented_phone_artifact_scaffold',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'name': {'type': 'string'},
+          'path': {'type': 'string'},
+          'template': {
+            'type': 'string',
+            'enum': ['static_html', 'plain_js', 'vite_react'],
+            'default': 'static_html',
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'doc_create',
+      description:
+          'Create a phone-local Markdown, text, HTML, or JSON document artifact. Binary DOCX/PDF output remains PC-delegated.',
+      tags: [
+        'tool',
+        'document',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_doc_create',
+        'defaultspack_doc_create',
+        'defaults.doc.create',
+        'defaultspack.doc.create',
+      ],
+      implementationStatus: 'implemented_phone_document_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'markdown': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'format': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'slides_from_markdown',
+      description:
+          'Create a phone-local slide outline artifact from markdown headings and bullets. Binary PPTX export remains PC-delegated.',
+      tags: [
+        'tool',
+        'presentation',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_slides_from_markdown',
+        'defaultspack_slides_from_markdown',
+        'defaults.slides.from_markdown',
+        'defaultspack.slides.from_markdown',
+      ],
+      implementationStatus: 'implemented_phone_slide_outline',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'markdown': {'type': 'string'},
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'chart_create',
+      description:
+          'Create a phone-local SVG chart artifact from title and optional series data. PNG rendering remains PC-delegated.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'chart',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_chart_create',
+        'defaultspack_chart_create',
+        'defaults.chart.create',
+        'defaultspack.chart.create',
+      ],
+      implementationStatus: 'implemented_phone_svg_chart',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'title': {'type': 'string'},
+          'path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'values': {
+            'type': 'array',
+            'items': {'type': 'number'},
+          },
+          'labels': {
+            'type': 'array',
+            'items': {'type': 'string'},
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'mobile_url_open',
       description:
           'Open an http/https URL visibly on this phone. Implemented through Flutter with iOS Swift and Android Kotlin native bridges.',
@@ -2275,6 +2399,14 @@ class MobileToolRuntime {
         return _webappPreview(call.arguments);
       case 'webapp_lint':
         return _webappLint(call.arguments);
+      case 'project_scaffold':
+        return _projectScaffold(call.arguments);
+      case 'doc_create':
+        return _docCreate(call.arguments);
+      case 'slides_from_markdown':
+        return _slidesFromMarkdown(call.arguments);
+      case 'chart_create':
+        return _chartCreate(call.arguments);
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
@@ -2601,6 +2733,10 @@ class MobileToolRuntime {
       'browser_save_page',
       'webapp_preview',
       'webapp_lint',
+      'project_scaffold',
+      'doc_create',
+      'slides_from_markdown',
+      'chart_create',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -4819,6 +4955,271 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _projectScaffold(Map<String, dynamic> args) {
+    final name = _slugifyPhoneArtifactName(
+      '${args['name'] ?? 'webapp'}',
+      fallback: 'webapp',
+    );
+    final template = '${args['template'] ?? 'static_html'}'.trim();
+    if (!{'static_html', 'plain_js', 'vite_react'}.contains(template)) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_TEMPLATE',
+        'Phone-local project_scaffold supports static_html, plain_js, and vite_react layouts.',
+      );
+    }
+    final root = _normalizePhoneArtifactPath(args['path'] ?? 'webapps/$name');
+    if (root == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final files = <String>[];
+
+    void write(String relativePath, String content) {
+      final path = '$root/$relativePath';
+      _putPhoneArtifactContent(path, content, source: 'project_scaffold');
+      files.add(path);
+    }
+
+    if (template == 'vite_react') {
+      write(
+        'index.html',
+        '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>${_escapeHtmlText(name)}</title></head>'
+            '<body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>\n',
+      );
+      write(
+        'src/main.jsx',
+        "import React from 'react';\n"
+            "import { createRoot } from 'react-dom/client';\n\n"
+            "createRoot(document.getElementById('root')).render(<h1>$name</h1>);\n",
+      );
+      write(
+        'package.json',
+        const JsonEncoder.withIndent('  ').convert({
+          'scripts': {'build': 'vite'},
+          'dependencies': {
+            '@vitejs/plugin-react': 'latest',
+            'vite': 'latest',
+            'react': 'latest',
+            'react-dom': 'latest',
+          },
+        }),
+      );
+    } else {
+      write(
+        'index.html',
+        '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<title>${_escapeHtmlText(name)}</title></head>'
+            '<body><main id="app"><h1>${_escapeHtmlText(name)}</h1></main>'
+            '<script src="app.js"></script></body></html>\n',
+      );
+      write('app.js', "document.body.dataset.rumiWebapp = 'ready';\n");
+    }
+
+    return MobileToolResult(
+      ok: true,
+      summary: 'scaffolded $root',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': root,
+          'template': template,
+          'files': files,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+          'note': template == 'vite_react'
+              ? 'Files are created on this phone; package install and build still require PC delegation.'
+              : '',
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _docCreate(Map<String, dynamic> args) {
+    final title = '${args['title'] ?? 'Document'}'.trim();
+    final content = '${args['content'] ?? args['markdown'] ?? ''}';
+    final explicitFormat = '${args['format'] ?? ''}'.trim().toLowerCase();
+    final defaultPath =
+        'documents/${_slugifyPhoneArtifactName(title, fallback: 'document')}.md';
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ?? defaultPath,
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final ext = _phoneArtifactExtension(outputPath);
+    final format = explicitFormat.isNotEmpty
+        ? explicitFormat.trim().replaceFirst(RegExp(r'^\.'), '')
+        : (ext.isEmpty ? 'md' : ext);
+    if ({'docx', 'pdf', 'png', 'pptx', 'xlsx'}.contains(format)) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_DOCUMENT_FORMAT',
+        'Phone-local doc_create can write Markdown, text, HTML, or JSON only. Use PC delegation for $format output.',
+        path: outputPath,
+      );
+    }
+    final documentTitle = title.isEmpty ? 'Document' : title;
+    final rendered = switch (format) {
+      'html' => '<!doctype html><html><head><meta charset="utf-8">'
+          '<meta name="viewport" content="width=device-width,initial-scale=1">'
+          '<title>${_escapeHtmlText(documentTitle)}</title></head><body>'
+          '<main><h1>${_escapeHtmlText(documentTitle)}</h1><pre>${_escapeHtmlText(content)}</pre></main>'
+          '</body></html>\n',
+      'json' => '${const JsonEncoder.withIndent('  ').convert({
+              'title': documentTitle,
+              'content': content,
+            })}\n',
+      'txt' || 'text' => '$documentTitle\n\n$content\n',
+      _ => '${'# $documentTitle\n\n$content'.trim()}\n',
+    };
+    final data =
+        _putPhoneArtifactContent(outputPath, rendered, source: 'doc_create');
+    return MobileToolResult(
+      ok: true,
+      summary: 'created document $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'title': documentTitle,
+          'format': format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _slidesFromMarkdown(Map<String, dynamic> args) {
+    var markdown = '${args['markdown'] ?? ''}';
+    final sourcePathRaw = '${args['path'] ?? ''}'.trim();
+    String? sourcePath;
+    if (sourcePathRaw.isNotEmpty) {
+      sourcePath = _normalizePhoneArtifactPath(sourcePathRaw);
+      if (sourcePath == null) {
+        return _phoneArtifactError(
+          'INVALID_INPUT',
+          "'path' must stay inside the phone artifact workspace.",
+        );
+      }
+      final file = _mobileArtifactFiles[sourcePath];
+      if (file == null) {
+        return _phoneArtifactError(
+          'SLIDES_FROM_MARKDOWN_FAILED',
+          'markdown source not found in phone artifact workspace',
+          path: sourcePath,
+        );
+      }
+      markdown = '${file['content'] ?? ''}';
+    }
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ?? 'slides/deck.slides.json',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    if (_phoneArtifactExtension(outputPath) == 'pptx') {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_SLIDE_FORMAT',
+        'Phone-local slides_from_markdown creates slide outline JSON/Markdown only. Use PC delegation for PPTX output.',
+        path: outputPath,
+      );
+    }
+    final slides = _slidesFromMarkdownText(markdown);
+    final payload = const JsonEncoder.withIndent('  ').convert({
+      'source_path': sourcePath,
+      'slides': slides,
+      'format': 'slide_outline',
+      'pc_export_note': 'Use PC delegation to export this outline to PPTX.',
+    });
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      '$payload\n',
+      source: 'slides_from_markdown',
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'created ${slides.length} slide outlines',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'slides': slides.length,
+          'format': 'slide_outline_json',
+          'source_path': sourcePath,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _chartCreate(Map<String, dynamic> args) {
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ?? 'charts/chart.svg',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    if (_phoneArtifactExtension(outputPath) == 'png') {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_CHART_FORMAT',
+        'Phone-local chart_create writes SVG. Use PC delegation for PNG rendering.',
+        path: outputPath,
+      );
+    }
+    final title = '${args['title'] ?? 'Chart'}'.trim();
+    final values = _phoneChartValues(args);
+    final labels = _phoneChartLabels(args, values.length);
+    final svg = _phoneChartSvg(
+      title: title.isEmpty ? 'Chart' : title,
+      values: values,
+      labels: labels,
+    );
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      svg,
+      source: 'chart_create',
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'created SVG chart $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'title': title.isEmpty ? 'Chart' : title,
+          'format': 'svg',
+          'values': values,
+          'labels': labels,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   Future<MobileToolResult> _mobileUrlOpen(Map<String, dynamic> args) async {
     final raw = '${args['url'] ?? args['href'] ?? args['input'] ?? ''}'.trim();
     if (raw.isEmpty) {
@@ -6363,6 +6764,12 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'webapp_preview',
     'webapp_lint',
   }.contains(normalized);
+  final isPhoneArtifactGeneratorTool = const {
+    'project_scaffold',
+    'doc_create',
+    'slides_from_markdown',
+    'chart_create',
+  }.contains(normalized);
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -6533,6 +6940,22 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_phone_artifact_html',
+    };
+  }
+  if (isPhoneArtifactGeneratorTool) {
+    final status = switch (normalized) {
+      'project_scaffold' => 'implemented_phone_artifact_scaffold',
+      'doc_create' => 'implemented_phone_document_text',
+      'slides_from_markdown' => 'implemented_phone_slide_outline',
+      'chart_create' => 'implemented_phone_svg_chart',
+      _ => 'implemented_phone_artifact_generator',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': status,
     };
   }
   if (tagSet.contains('media') ||
@@ -8522,6 +8945,160 @@ String? _phoneWebappIndexPath(Object? value, {bool allowRoot = false}) {
   if (lower.endsWith('.html') || lower.endsWith('.htm')) return path;
   if (path == '.') return 'index.html';
   return '$path/index.html';
+}
+
+Map<String, dynamic> _putPhoneArtifactContent(
+  String path,
+  String content, {
+  required String source,
+}) {
+  final now = DateTime.now().toUtc().toIso8601String();
+  final size = utf8.encode(content).length;
+  _mobileArtifactFiles[path] = {
+    'path': path,
+    'content': content,
+    'size': size,
+    'created_at': _mobileArtifactFiles[path]?['created_at'] ?? now,
+    'updated_at': now,
+    'source': source,
+  };
+  return {
+    'path': path,
+    'size': size,
+  };
+}
+
+String _phoneArtifactExtension(String path) {
+  final name = path.split('/').last;
+  final index = name.lastIndexOf('.');
+  if (index <= 0 || index == name.length - 1) return '';
+  return name.substring(index + 1).toLowerCase();
+}
+
+String _slugifyPhoneArtifactName(String value, {required String fallback}) {
+  final lower = value.trim().toLowerCase();
+  final slug = lower
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+      .replaceAll(RegExp(r'^-+|-+$'), '');
+  return slug.isEmpty ? fallback : slug;
+}
+
+String _escapeHtmlText(Object? value) =>
+    const HtmlEscape(HtmlEscapeMode.element).convert('${value ?? ''}');
+
+List<Map<String, dynamic>> _slidesFromMarkdownText(String markdown) {
+  final slides = <Map<String, dynamic>>[];
+  Map<String, dynamic>? current;
+  for (final rawLine in const LineSplitter().convert(markdown)) {
+    final line = rawLine.trim();
+    if (line.startsWith('#')) {
+      if (current != null) slides.add(current);
+      current = {
+        'title': line.replaceFirst(RegExp(r'^#+'), '').trim().isEmpty
+            ? 'Slide'
+            : line.replaceFirst(RegExp(r'^#+'), '').trim(),
+        'bullets': <String>[],
+      };
+    } else if (line.startsWith('-') || line.startsWith('*')) {
+      current ??= {
+        'title': 'Slide',
+        'bullets': <String>[],
+      };
+      (current['bullets'] as List<String>)
+          .add(line.replaceFirst(RegExp(r'^[-*]\s*'), '').trim());
+    }
+  }
+  if (current != null) slides.add(current);
+  return slides.isEmpty
+      ? [
+          {'title': 'Slide', 'bullets': <String>[]}
+        ]
+      : slides;
+}
+
+List<double> _phoneChartValues(Map<String, dynamic> args) {
+  final direct = args['values'] ?? args['data'];
+  final values = <double>[];
+  if (direct is List) {
+    for (final item in direct) {
+      final value = item is num ? item.toDouble() : double.tryParse('$item');
+      if (value != null && value.isFinite) values.add(value);
+    }
+  }
+  if (values.isEmpty) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    final content =
+        path == null ? null : _mobileArtifactFiles[path]?['content'];
+    if (content != null) {
+      for (final match in RegExp(r'-?\d+(?:\.\d+)?').allMatches('$content')) {
+        final value = double.tryParse(match.group(0) ?? '');
+        if (value != null && value.isFinite) values.add(value);
+        if (values.length >= 24) break;
+      }
+    }
+  }
+  return values.isEmpty ? const [3, 5, 2, 8] : values.take(24).toList();
+}
+
+List<String> _phoneChartLabels(Map<String, dynamic> args, int count) {
+  final raw = args['labels'];
+  final labels = <String>[];
+  if (raw is List) {
+    for (final item in raw) {
+      final label = '$item'.trim();
+      if (label.isNotEmpty) labels.add(label);
+    }
+  }
+  while (labels.length < count) {
+    labels.add('${labels.length + 1}');
+  }
+  return labels.take(count).toList();
+}
+
+String _phoneChartSvg({
+  required String title,
+  required List<double> values,
+  required List<String> labels,
+}) {
+  const width = 900.0;
+  const height = 520.0;
+  const left = 72.0;
+  const top = 72.0;
+  const bottom = 92.0;
+  const right = 48.0;
+  final chartWidth = width - left - right;
+  final chartHeight = height - top - bottom;
+  final maxValue = values.fold<double>(0, math.max);
+  final safeMax = maxValue <= 0 ? 1.0 : maxValue;
+  final gap = values.length <= 1 ? 0.0 : 10.0;
+  final barWidth =
+      math.max(8.0, (chartWidth - gap * (values.length - 1)) / values.length);
+  final buffer = StringBuffer()
+    ..writeln(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img">')
+    ..writeln('<rect width="900" height="520" fill="#f8fafc"/>')
+    ..writeln(
+        '<text x="72" y="44" font-family="Arial, sans-serif" font-size="28" fill="#111827">${_escapeHtmlText(title)}</text>')
+    ..writeln(
+        '<line x1="$left" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="#111827" stroke-width="2"/>')
+    ..writeln(
+        '<line x1="$left" y1="$top" x2="$left" y2="${height - bottom}" stroke="#111827" stroke-width="2"/>');
+  for (var index = 0; index < values.length; index++) {
+    final value = math.max(0.0, values[index]);
+    final barHeight = chartHeight * (value / safeMax);
+    final x = left + index * (barWidth + gap);
+    final y = height - bottom - barHeight;
+    final label = labels[index];
+    buffer
+      ..writeln(
+          '<rect x="${x.toStringAsFixed(1)}" y="${y.toStringAsFixed(1)}" width="${barWidth.toStringAsFixed(1)}" height="${barHeight.toStringAsFixed(1)}" fill="#2563eb" rx="3"/>')
+      ..writeln(
+          '<text x="${(x + barWidth / 2).toStringAsFixed(1)}" y="${(height - bottom + 24).toStringAsFixed(1)}" font-family="Arial, sans-serif" font-size="14" fill="#374151" text-anchor="middle">${_escapeHtmlText(label)}</text>')
+      ..writeln(
+          '<text x="${(x + barWidth / 2).toStringAsFixed(1)}" y="${(y - 8).toStringAsFixed(1)}" font-family="Arial, sans-serif" font-size="14" fill="#111827" text-anchor="middle">${value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 1)}</text>');
+  }
+  buffer.writeln('</svg>');
+  return buffer.toString();
 }
 
 bool _artifactPathInBase(

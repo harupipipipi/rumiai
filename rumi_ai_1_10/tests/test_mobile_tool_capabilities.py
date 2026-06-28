@@ -208,6 +208,30 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["tool", "broker", "batch"],
             },
             {
+                "tool_id": "project_scaffold",
+                "name": "project_scaffold",
+                "summary": "Create static webapp files",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "doc_create",
+                "name": "doc_create",
+                "summary": "Create document artifact",
+                "tags": ["document", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "slides_from_markdown",
+                "name": "slides_from_markdown",
+                "summary": "Create slides from markdown",
+                "tags": ["presentation", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "chart_create",
+                "name": "chart_create",
+                "summary": "Create chart artifact",
+                "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "html_preview",
                 "name": "html_preview",
                 "summary": "Preview HTML payload",
@@ -403,6 +427,19 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     )
     assert "flutter" in by_id["tool_batch"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["tool_batch"]["mobile"]["runtime_layers"]
+
+    for tool_id, status in {
+        "project_scaffold": "implemented_phone_artifact_scaffold",
+        "doc_create": "implemented_phone_document_text",
+        "slides_from_markdown": "implemented_phone_slide_outline",
+        "chart_create": "implemented_phone_svg_chart",
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is False
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id in ("html_preview", "pdf_preview"):
         assert by_id[tool_id]["mobile_compatible"] is True

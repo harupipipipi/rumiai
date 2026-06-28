@@ -229,6 +229,10 @@ void main() {
           'browser_save_page',
           'webapp_preview',
           'webapp_lint',
+          'project_scaffold',
+          'doc_create',
+          'slides_from_markdown',
+          'chart_create',
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
@@ -575,6 +579,122 @@ void main() {
       final data = payload['data'] as Map<String, dynamic>;
       expect(data['ok'], isFalse);
       expect(data['issues'], contains('missing index.html'));
+    });
+
+    test('creates phone-local project document slides and chart artifacts', () {
+      final scaffold = runtime.execute(
+        const MobileToolCall(
+          id: 'project_scaffold_1',
+          name: 'project_scaffold',
+          arguments: {'name': 'Phone Demo', 'template': 'plain_js'},
+        ),
+      );
+      expect(scaffold.ok, isTrue);
+      final scaffoldPayload =
+          jsonDecode(scaffold.output) as Map<String, dynamic>;
+      final scaffoldData = scaffoldPayload['data'] as Map<String, dynamic>;
+      expect(scaffoldData['path'], 'webapps/phone-demo');
+      expect(scaffoldData['files'], contains('webapps/phone-demo/index.html'));
+
+      final doc = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_create_1',
+          name: 'doc_create',
+          arguments: {
+            'title': 'Mobile Notes',
+            'content': 'hello docs',
+          },
+        ),
+      );
+      expect(doc.ok, isTrue);
+      final docPayload = jsonDecode(doc.output) as Map<String, dynamic>;
+      final docData = docPayload['data'] as Map<String, dynamic>;
+      expect(docData['path'], 'documents/mobile-notes.md');
+      expect(docData['format'], 'md');
+
+      final slides = runtime.execute(
+        const MobileToolCall(
+          id: 'slides_from_markdown_1',
+          name: 'slides_from_markdown',
+          arguments: {
+            'markdown': '# Intro\n- One\n# Next\n- Two',
+          },
+        ),
+      );
+      expect(slides.ok, isTrue);
+      final slidesPayload = jsonDecode(slides.output) as Map<String, dynamic>;
+      final slidesData = slidesPayload['data'] as Map<String, dynamic>;
+      expect(slidesData['path'], 'slides/deck.slides.json');
+      expect(slidesData['slides'], 2);
+      expect(slidesData['format'], 'slide_outline_json');
+
+      final chart = runtime.execute(
+        const MobileToolCall(
+          id: 'chart_create_1',
+          name: 'chart_create',
+          arguments: {
+            'title': 'Mobile Chart',
+            'values': [1, 3, 2],
+            'labels': ['A', 'B', 'C'],
+          },
+        ),
+      );
+      expect(chart.ok, isTrue);
+      final chartPayload = jsonDecode(chart.output) as Map<String, dynamic>;
+      final chartData = chartPayload['data'] as Map<String, dynamic>;
+      expect(chartData['path'], 'charts/chart.svg');
+      expect(chartData['format'], 'svg');
+      expect(chartData['runtime_layers'], containsAll(['flutter', 'dart']));
+
+      final readChart = runtime.execute(
+        const MobileToolCall(
+          id: 'chart_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'charts/chart.svg'},
+        ),
+      );
+      final readPayload = jsonDecode(readChart.output) as Map<String, dynamic>;
+      final readData = readPayload['data'] as Map<String, dynamic>;
+      expect(readData['content'], contains('<svg'));
+      expect(readData['content'], contains('Mobile Chart'));
+    });
+
+    test('phone-local document generators reject binary output formats', () {
+      final docx = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_create_docx_1',
+          name: 'doc_create',
+          arguments: {
+            'title': 'Binary',
+            'output_path': 'documents/binary.docx',
+          },
+        ),
+      );
+      expect(docx.ok, isFalse);
+      expect(docx.output, contains('UNSUPPORTED_PHONE_DOCUMENT_FORMAT'));
+
+      final pptx = runtime.execute(
+        const MobileToolCall(
+          id: 'slides_pptx_1',
+          name: 'slides_from_markdown',
+          arguments: {
+            'markdown': '# Slide',
+            'output_path': 'slides/deck.pptx',
+          },
+        ),
+      );
+      expect(pptx.ok, isFalse);
+      expect(pptx.output, contains('UNSUPPORTED_PHONE_SLIDE_FORMAT'));
+
+      final png = runtime.execute(
+        const MobileToolCall(
+          id: 'chart_png_1',
+          name: 'chart_create',
+          arguments: {'output_path': 'charts/chart.png'},
+        ),
+      );
+      expect(png.ok, isFalse);
+      expect(png.output, contains('UNSUPPORTED_PHONE_CHART_FORMAT'));
     });
 
     test('runs mobile clipboard tools after explicit phone approval', () async {
@@ -2389,6 +2509,32 @@ void main() {
           'implemented_mobile_batch_router');
       expect(batchMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(batchData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'project_scaffold': 'implemented_phone_artifact_scaffold',
+        'doc_create': 'implemented_phone_document_text',
+        'slides_from_markdown': 'implemented_phone_slide_outline',
+        'chart_create': 'implemented_phone_svg_chart',
+      }.entries) {
+        final generatorSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final generatorPayload =
+            jsonDecode(generatorSchema.output) as Map<String, dynamic>;
+        final generatorData = generatorPayload['data'] as Map<String, dynamic>;
+        final generatorMobile = generatorData['mobile'] as Map<String, dynamic>;
+        expect(generatorData['mobile_compatible'], isTrue);
+        expect(generatorData['execution_route'], 'phone');
+        expect(generatorMobile['requires_mobile_approval'], isFalse);
+        expect(generatorMobile['implementation_status'], entry.value);
+        expect(generatorMobile['runtime_layers'],
+            containsAll(['flutter', 'dart']));
+        expect(generatorData['tags'], contains(mobileFlutterTag));
+      }
 
       for (final toolName in const ['html_preview', 'pdf_preview']) {
         final previewSchema = runtime.execute(
