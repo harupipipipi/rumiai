@@ -53,6 +53,26 @@ class _FakeClipboard extends PlatformClipboard {
   }
 }
 
+class _FakeMediaPicker extends PlatformMediaPicker {
+  _FakeMediaPicker(this.file);
+
+  final PlatformPickedMediaFile? file;
+  bool called = false;
+  String? lastKind;
+  int? lastMaxBytes;
+
+  @override
+  Future<PlatformPickedMediaFile?> pick({
+    required String kind,
+    required int maxBytes,
+  }) async {
+    called = true;
+    lastKind = kind;
+    lastMaxBytes = maxBytes;
+    return file;
+  }
+}
+
 class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
   _FakeMobileToolApproval(this.approved);
 
@@ -127,6 +147,7 @@ void main() {
           'tool_consent_confirm',
           'media_clipboard_read',
           'media_clipboard_write',
+          'media_file_pick',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -344,6 +365,79 @@ void main() {
       expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
     });
 
+    test('runs phone media picker tool after explicit phone approval',
+        () async {
+      final approval = _FakeMobileToolApproval(true);
+      final picker = _FakeMediaPicker(
+        const PlatformPickedMediaFile(
+          name: 'voice-note.txt',
+          mimeType: 'text/plain',
+          size: 5,
+          base64Data: 'aGVsbG8=',
+        ),
+      );
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        mediaPicker: picker,
+      );
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'file_pick_1',
+          name: 'defaultspack_media_file_pick',
+          arguments: {
+            'kind': 'photo',
+            'reason': 'Use selected file in the answer',
+            'max_bytes': 1024,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'media_file_pick');
+      expect(picker.called, isTrue);
+      expect(picker.lastKind, 'image');
+      expect(picker.lastMaxBytes, 1024);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['name'], 'voice-note.txt');
+      expect(data['mime_type'], 'text/plain');
+      expect(data['base64'], 'aGVsbG8=');
+      expect(data['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(data['requires_mobile_approval'], isTrue);
+    });
+
+    test('phone media picker fails closed without approval', () async {
+      final approval = _FakeMobileToolApproval(false);
+      final picker = _FakeMediaPicker(
+        const PlatformPickedMediaFile(
+          name: 'ignored.txt',
+          mimeType: 'text/plain',
+          size: 7,
+          base64Data: 'aWdub3JlZA==',
+        ),
+      );
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        mediaPicker: picker,
+      );
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'file_pick_denied_1',
+          name: 'media_file_pick',
+          arguments: {'kind': 'file'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(picker.called, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -547,6 +641,24 @@ void main() {
       expect(clipboardMobile['requires_mobile_approval'], isTrue);
       expect(clipboardMobile['platforms'], containsAll(['ios', 'android']));
       expect(clipboardData['callable'], isTrue);
+
+      final pickerSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_file_pick_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_file_pick'},
+        ),
+      );
+      final pickerPayload =
+          jsonDecode(pickerSchema.output) as Map<String, dynamic>;
+      final pickerData = pickerPayload['data'] as Map<String, dynamic>;
+      final pickerMobile = pickerData['mobile'] as Map<String, dynamic>;
+      expect(pickerData['mobile_compatible'], isTrue);
+      expect(pickerData['execution_route'], 'phone');
+      expect(pickerMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(pickerData['tags'], contains(mobileSwiftNativeTag));
+      expect(pickerData['tags'], contains(mobileKotlinNativeTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(

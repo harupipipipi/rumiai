@@ -1,6 +1,7 @@
 package ai.rumi.remote
 
 import android.Manifest
+import android.app.Activity
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,12 +11,14 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.OpenableColumns
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.KeyStore
 import javax.crypto.Cipher
@@ -25,6 +28,8 @@ import javax.crypto.spec.GCMParameterSpec
 
 class MainActivity : FlutterActivity() {
     private var pendingNotificationPermissionResult: ((Boolean) -> Unit)? = null
+    private var pendingMediaPickerResult: MethodChannel.Result? = null
+    private var mediaPickerMaxBytes: Long = DEFAULT_MEDIA_PICK_MAX_BYTES
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -32,6 +37,7 @@ class MainActivity : FlutterActivity() {
         registerPreferencesChannel(flutterEngine)
         registerUrlLauncherChannel(flutterEngine)
         registerNotificationsChannel(flutterEngine)
+        registerMediaPickerChannel(flutterEngine)
     }
 
     private fun registerSecureStorageChannel(flutterEngine: FlutterEngine) {
@@ -163,6 +169,43 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun registerMediaPickerChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "ai.rumi.remote/media_picker",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "pick") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            if (pendingMediaPickerResult != null) {
+                result.success(mediaPickerError("pick_in_progress", "Media picker is already open"))
+                return@setMethodCallHandler
+            }
+            val args = call.arguments as? Map<*, *>
+            val kind = (args?.get("kind") as? String)?.trim()?.lowercase() ?: "file"
+            mediaPickerMaxBytes = ((args?.get("max_bytes") as? Number)?.toLong()
+                ?: DEFAULT_MEDIA_PICK_MAX_BYTES)
+                .coerceIn(1L, HARD_MEDIA_PICK_MAX_BYTES)
+            pendingMediaPickerResult = result
+
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = when (kind) {
+                    "image" -> "image/*"
+                    "audio" -> "audio/*"
+                    else -> "*/*"
+                }
+            }
+            try {
+                startActivityForResult(intent, REQUEST_PICK_MEDIA)
+            } catch (e: Exception) {
+                pendingMediaPickerResult = null
+                result.success(mediaPickerError("not_available", e.message ?: "Media picker is not available"))
+            }
+        }
+    }
+
     private fun requestNotificationAuthorization(callback: (Boolean) -> Unit) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
             callback(true)
@@ -194,6 +237,23 @@ class MainActivity : FlutterActivity() {
         val callback = pendingNotificationPermissionResult
         pendingNotificationPermissionResult = null
         callback?.invoke(granted)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQUEST_PICK_MEDIA) return
+        val result = pendingMediaPickerResult ?: return
+        pendingMediaPickerResult = null
+        if (resultCode != Activity.RESULT_OK) {
+            result.success(null)
+            return
+        }
+        val uri = data?.data
+        if (uri == null) {
+            result.success(null)
+            return
+        }
+        result.success(readPickedMediaPayload(uri))
     }
 
     private fun showPcTaskFinishedNotification(title: String, body: String) {
@@ -232,6 +292,71 @@ class MainActivity : FlutterActivity() {
         manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
     }
 
+    private fun readPickedMediaPayload(uri: Uri): Map<String, Any> {
+        return try {
+            val knownSize = queryOpenableSize(uri)
+            if (knownSize != null && knownSize > mediaPickerMaxBytes) {
+                return mediaPickerError("too_large", "Selected file is larger than max_bytes")
+            }
+            val bytes = readUriBytes(uri, mediaPickerMaxBytes)
+                ?: return mediaPickerError("read_failed", "Could not read selected file")
+            mapOf(
+                "name" to (queryOpenableName(uri) ?: uri.lastPathSegment ?: "selected-file"),
+                "mime_type" to (contentResolver.getType(uri) ?: "application/octet-stream"),
+                "size" to bytes.size,
+                "base64" to Base64.encodeToString(bytes, Base64.NO_WRAP),
+            )
+        } catch (tooLarge: MediaPickerTooLargeException) {
+            mediaPickerError("too_large", "Selected file is larger than max_bytes")
+        } catch (e: Exception) {
+            mediaPickerError("read_failed", e.message ?: "Could not read selected file")
+        }
+    }
+
+    private fun readUriBytes(uri: Uri, maxBytes: Long): ByteArray? {
+        val stream = contentResolver.openInputStream(uri) ?: return null
+        stream.use { input ->
+            val output = ByteArrayOutputStream()
+            val buffer = ByteArray(8192)
+            var total = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                total += read.toLong()
+                if (total > maxBytes) throw MediaPickerTooLargeException()
+                output.write(buffer, 0, read)
+            }
+            return output.toByteArray()
+        }
+    }
+
+    private fun queryOpenableName(uri: Uri): String? {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (index >= 0 && cursor.moveToFirst()) {
+                return cursor.getString(index)
+            }
+        }
+        return null
+    }
+
+    private fun queryOpenableSize(uri: Uri): Long? {
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val index = cursor.getColumnIndex(OpenableColumns.SIZE)
+            if (index >= 0 && cursor.moveToFirst() && !cursor.isNull(index)) {
+                return cursor.getLong(index)
+            }
+        }
+        return null
+    }
+
+    private fun mediaPickerError(code: String, message: String): Map<String, Any> {
+        return mapOf(
+            "error_code" to code,
+            "message" to message,
+        )
+    }
+
     private fun immutablePendingIntentFlag(): Int {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE
@@ -242,9 +367,14 @@ class MainActivity : FlutterActivity() {
 
     private companion object {
         const val REQUEST_POST_NOTIFICATIONS = 7401
+        const val REQUEST_PICK_MEDIA = 7402
         const val NOTIFICATION_CHANNEL_ID = "rumi_pc_tasks"
+        const val DEFAULT_MEDIA_PICK_MAX_BYTES = 4L * 1024L * 1024L
+        const val HARD_MEDIA_PICK_MAX_BYTES = 8L * 1024L * 1024L
     }
 }
+
+private class MediaPickerTooLargeException : Exception()
 
 private class RumiSecureStorage(context: Context) {
     private val prefs = context.getSharedPreferences("rumi_secure_storage", Context.MODE_PRIVATE)

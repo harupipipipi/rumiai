@@ -1,6 +1,7 @@
 import AVFoundation
 import Flutter
 import Security
+import UniformTypeIdentifiers
 import UIKit
 import UserNotifications
 
@@ -8,6 +9,8 @@ import UserNotifications
 @objc class AppDelegate: FlutterAppDelegate {
   private let secureStorage = RumiKeychainStorage()
   private var pendingQrScanResult: FlutterResult?
+  private var pendingMediaPickerResult: FlutterResult?
+  private var mediaPickerMaxBytes = 4 * 1024 * 1024
 
   override func application(
     _ application: UIApplication,
@@ -19,6 +22,7 @@ import UserNotifications
     registerUrlLauncherChannel()
     registerNotificationsChannel()
     registerQrScannerChannel()
+    registerMediaPickerChannel()
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -221,6 +225,106 @@ import UserNotifications
     }
   }
 
+  private func registerMediaPickerChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "ai.rumi.remote/media_picker",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result([
+          "error_code": "not_available",
+          "message": "App delegate is not available",
+        ])
+        return
+      }
+      guard call.method == "pick" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard pendingMediaPickerResult == nil else {
+        result(mediaPickerError(code: "pick_in_progress", message: "Media picker is already open"))
+        return
+      }
+      let args = call.arguments as? [String: Any]
+      let kind = ((args?["kind"] as? String) ?? "file").trimmingCharacters(in: .whitespacesAndNewlines)
+      let maxBytes = max(1, min((args?["max_bytes"] as? NSNumber)?.intValue ?? 4 * 1024 * 1024, 8 * 1024 * 1024))
+      pendingMediaPickerResult = result
+      mediaPickerMaxBytes = maxBytes
+
+      let picker = UIDocumentPickerViewController(
+        forOpeningContentTypes: mediaPickerContentTypes(kind: kind),
+        asCopy: true
+      )
+      picker.delegate = self
+      picker.allowsMultipleSelection = false
+      controller.present(picker, animated: true)
+    }
+  }
+
+  private func mediaPickerContentTypes(kind: String) -> [UTType] {
+    switch kind.lowercased() {
+    case "image":
+      return [.image]
+    case "audio":
+      return [.audio]
+    default:
+      return [.item]
+    }
+  }
+
+  private func finishMediaPicker(_ value: Any?) {
+    let result = pendingMediaPickerResult
+    pendingMediaPickerResult = nil
+    result?(value)
+  }
+
+  private func mediaPickerError(code: String, message: String) -> [String: Any] {
+    [
+      "error_code": code,
+      "message": message,
+    ]
+  }
+
+  private func selectedMediaPayload(url: URL) -> [String: Any] {
+    let access = url.startAccessingSecurityScopedResource()
+    defer {
+      if access {
+        url.stopAccessingSecurityScopedResource()
+      }
+    }
+
+    do {
+      let values = try? url.resourceValues(forKeys: [.fileSizeKey, .nameKey, .contentTypeKey])
+      if let knownSize = values?.fileSize, knownSize > mediaPickerMaxBytes {
+        return mediaPickerError(
+          code: "too_large",
+          message: "Selected file is larger than max_bytes"
+        )
+      }
+      let data = try Data(contentsOf: url)
+      if data.count > mediaPickerMaxBytes {
+        return mediaPickerError(
+          code: "too_large",
+          message: "Selected file is larger than max_bytes"
+        )
+      }
+      let fileName = values?.name ?? url.lastPathComponent
+      let mimeType = values?.contentType?.preferredMIMEType ?? "application/octet-stream"
+      return [
+        "name": fileName.isEmpty ? "selected-file" : fileName,
+        "mime_type": mimeType,
+        "size": data.count,
+        "base64": data.base64EncodedString(),
+      ]
+    } catch {
+      return mediaPickerError(code: "read_failed", message: error.localizedDescription)
+    }
+  }
+
   override func userNotificationCenter(
     _ center: UNUserNotificationCenter,
     willPresent notification: UNNotification,
@@ -231,6 +335,20 @@ import UserNotifications
     } else {
       completionHandler([.alert, .sound])
     }
+  }
+}
+
+extension AppDelegate: UIDocumentPickerDelegate {
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    guard let url = urls.first else {
+      finishMediaPicker(nil)
+      return
+    }
+    finishMediaPicker(selectedMediaPayload(url: url))
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    finishMediaPicker(nil)
   }
 }
 

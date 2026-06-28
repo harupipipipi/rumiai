@@ -167,6 +167,13 @@ const _nativeUrlRuntimeLayers = <String>[
   'ios-swift',
   'android-kotlin',
 ];
+const _nativeMediaPickerRuntimeLayers = <String>[
+  'flutter',
+  'ios-swift',
+  'android-kotlin',
+];
+const _defaultMediaPickMaxBytes = 4 * 1024 * 1024;
+const _hardMediaPickMaxBytes = 8 * 1024 * 1024;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -273,15 +280,18 @@ class MobileToolRuntime {
     MobileToolApprovalDelegate? approvalDelegate,
     PlatformUrlLauncher urlLauncher = const PlatformUrlLauncher(),
     PlatformClipboard clipboard = const PlatformClipboard(),
+    PlatformMediaPicker mediaPicker = const PlatformMediaPicker(),
   })  : _pcDelegate = pcDelegate,
         _approvalDelegate = approvalDelegate,
         _urlLauncher = urlLauncher,
-        _clipboard = clipboard;
+        _clipboard = clipboard,
+        _mediaPicker = mediaPicker;
 
   final MobileToolDelegate? _pcDelegate;
   final MobileToolApprovalDelegate? _approvalDelegate;
   final PlatformUrlLauncher _urlLauncher;
   final PlatformClipboard _clipboard;
+  final PlatformMediaPicker _mediaPicker;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -634,6 +644,54 @@ class MobileToolRuntime {
           },
         },
         'required': ['text'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'media_file_pick',
+      description:
+          'Pick one image, audio, or document from this phone after explicit mobile approval. Returns file metadata and base64 content.',
+      tags: ['tool', 'media', 'file', 'picker', mobileCompatibleTag],
+      aliases: [
+        'file_pick',
+        'media_pick_file',
+        'mobile_media_pick',
+        'defaults_media_file_pick',
+        'defaultspack_media_file_pick',
+        'defaults.media.file.pick',
+        'defaults.media.file_pick',
+        'defaultspack.media.file.pick',
+        'defaultspack.media.file_pick',
+      ],
+      runtimeLayers: _nativeMediaPickerRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIDocumentPickerViewController',
+        'android:Kotlin Intent.ACTION_OPEN_DOCUMENT',
+      ],
+      requiresMobileApproval: true,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'kind': {
+            'type': 'string',
+            'enum': ['image', 'audio', 'file'],
+            'default': 'file',
+          },
+          'type': {
+            'type': 'string',
+            'enum': ['image', 'audio', 'file'],
+          },
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardMediaPickMaxBytes,
+            'default': _defaultMediaPickMaxBytes,
+          },
+          'reason': {
+            'type': 'string',
+            'description': 'Why this phone file is needed.',
+          },
+        },
       },
     ),
     MobileToolDefinition(
@@ -1071,6 +1129,7 @@ class MobileToolRuntime {
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
+      case 'media_file_pick':
         return _asyncOnlyTool(name);
       case 'tool_search':
         return _toolSearch(call.arguments);
@@ -1132,6 +1191,8 @@ class MobileToolRuntime {
         return _mediaClipboardRead(call.arguments);
       case 'media_clipboard_write':
         return _mediaClipboardWrite(call.arguments);
+      case 'media_file_pick':
+        return _mediaFilePick(call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -1200,6 +1261,7 @@ class MobileToolRuntime {
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
+      'media_file_pick',
     }.contains(name)) {
       return false;
     }
@@ -1865,6 +1927,89 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _mediaFilePick(Map<String, dynamic> args) async {
+    final kind = _normalizeMediaPickKind(
+      args['kind'] ?? args['type'] ?? args['media_type'],
+    );
+    final maxBytes = _boundedMediaPickMaxBytes(args['max_bytes']);
+    final approved = await _requestMobileApproval(
+      toolName: 'media_file_pick',
+      risk: 'high',
+      arguments: {
+        ...args,
+        'kind': kind,
+        'max_bytes': maxBytes,
+      },
+      prompt: 'このスマホから1つのファイルを選択します。選択したファイル内容はAIのtool結果として会話に渡されます。',
+    );
+    if (!approved) return _mobileApprovalRequired('media_file_pick');
+
+    try {
+      final picked = await _mediaPicker.pick(kind: kind, maxBytes: maxBytes);
+      if (picked == null) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'file pick cancelled',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'MEDIA_PICK_CANCELLED',
+              'message': 'No file was selected on this phone.',
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      if (picked.size > maxBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'file is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'MEDIA_FILE_TOO_LARGE',
+              'message': 'Selected file is larger than max_bytes.',
+              'size': picked.size,
+              'max_bytes': maxBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      return MobileToolResult(
+        ok: true,
+        summary: 'picked ${picked.name} (${picked.size} bytes)',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'name': picked.name,
+            'mime_type': picked.mimeType,
+            'size': picked.size,
+            'kind': kind,
+            'base64': picked.base64Data,
+            'encoding': 'base64',
+            'execution_location': 'phone',
+            'runtime_layers': _nativeMediaPickerRuntimeLayers,
+            'requires_mobile_approval': true,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'file pick failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'MEDIA_PICK_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
   Future<bool> _requestMobileApproval({
     required String toolName,
     required String prompt,
@@ -2342,6 +2487,7 @@ bool _isAsyncPhoneToolName(String name) {
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
+    'media_file_pick',
     'mobile_url_open',
   }.contains(name.trim().toLowerCase());
 }
@@ -2556,6 +2702,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final tagSet = tags.map((tag) => tag.trim().toLowerCase()).toSet();
   final isClipboard = normalized == 'media_clipboard_read' ||
       normalized == 'media_clipboard_write';
+  final isMediaPicker = normalized == 'media_file_pick';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -2565,7 +2712,19 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
         'android:Kotlin ClipboardManager',
       ],
       'requires_mobile_approval': true,
-      'implementation_status': 'feasible_needs_mobile_approval_ui',
+      'implementation_status': 'implemented',
+    };
+  }
+  if (isMediaPicker) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _nativeMediaPickerRuntimeLayers,
+      'native_layers': [
+        'ios:Swift UIDocumentPickerViewController',
+        'android:Kotlin Intent.ACTION_OPEN_DOCUMENT',
+      ],
+      'requires_mobile_approval': true,
+      'implementation_status': 'implemented',
     };
   }
   if (tagSet.contains('media') ||
@@ -2811,7 +2970,10 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
 
   if (normalized == 'media_clipboard_read' ||
       normalized == 'media_clipboard_write') {
-    return 'このdefaultspack toolはiOS Swift/Android Kotlinのclipboard bridgeでスマホ実装可能ですが、clipboard読み書き用のモバイル承認UIがまだないため、このスマホ単体では実行しません。PC接続時はPC側runtimeへ委譲できます。';
+    return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinのclipboard bridgeとモバイル承認UIでスマホ実装済みです。';
+  }
+  if (normalized == 'media_file_pick') {
+    return 'このdefaultspack-compatible toolはiOS Swift/Android KotlinのOSファイルピッカーでスマホ実装済みです。';
   }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
@@ -2943,6 +3105,33 @@ String _clampText(Object? value, int limit) {
   if (text.isEmpty || text == 'null') return '';
   if (text.length <= limit) return text;
   return text.substring(0, limit);
+}
+
+String _normalizeMediaPickKind(Object? value) {
+  final raw = '${value ?? ''}'.trim().toLowerCase();
+  if (raw == 'image' ||
+      raw == 'photo' ||
+      raw == 'picture' ||
+      raw == 'png' ||
+      raw == 'jpg' ||
+      raw == 'jpeg') {
+    return 'image';
+  }
+  if (raw == 'audio' || raw == 'sound' || raw == 'voice') {
+    return 'audio';
+  }
+  return 'file';
+}
+
+int _boundedMediaPickMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardMediaPickMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardMediaPickMaxBytes, parsed));
+  }
+  return _defaultMediaPickMaxBytes;
 }
 
 final List<Map<String, dynamic>> _mobileTodos = [];
