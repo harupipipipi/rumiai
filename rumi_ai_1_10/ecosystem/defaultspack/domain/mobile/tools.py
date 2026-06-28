@@ -341,6 +341,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
                 "implemented_payload_only" if tool_id == "source_extract" else "implemented"
             ),
         }
+    if tool_id == "browser_extract_table":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_payload_only_html",
+        }
     if tool_id in {"tts_generate", "tts_generate_local"}:
         return {
             "platforms": ["ios", "android"],
@@ -483,6 +491,14 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             "implementation_status": (
                 "implemented_payload_only" if tool_id == "source_extract" else "implemented"
             ),
+        }
+    if tool_id == "browser_extract_table":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_payload_only_html",
         }
     if tool_id in {"tts_generate", "tts_generate_local"}:
         return {

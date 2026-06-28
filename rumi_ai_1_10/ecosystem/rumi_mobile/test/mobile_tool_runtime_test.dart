@@ -236,6 +236,7 @@ void main() {
           'pdf_extract_tables',
           'source_extract',
           'source_rank',
+          'browser_extract_table',
           'tts_generate',
           'tts_generate_local',
           'mobile_platform_info',
@@ -1264,6 +1265,53 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('extracts HTML tables from payload on phone', () {
+      const html = '''
+        <html><body>
+          <table>
+            <tr><th>Name</th><th>Score</th></tr>
+            <tr><td>Alice &amp; Bob</td><td><strong>9</strong></td></tr>
+          </table>
+          <table><tr><td>Only</td></tr></table>
+        </body></html>
+      ''';
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'browser_extract_table_1',
+          name: 'browser_extract_table',
+          arguments: {'html': html, 'table_index': 1},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final tables = data['tables'] as List<dynamic>;
+      final selected = data['selected_table'] as List<dynamic>;
+      expect(data['table_count'], 2);
+      expect((tables.first as List<dynamic>).first, ['Name', 'Score']);
+      expect((tables.first as List<dynamic>)[1], ['Alice & Bob', '9']);
+      expect(selected.single, ['Only']);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('browser_extract_table does not read browser URLs or host paths', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'browser_extract_table_path_1',
+          name: 'browser_extract_table',
+          arguments: {'path': '/tmp/page.html'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_SOURCE');
+      expect(error['source'], '/tmp/page.html');
+    });
+
     test('ranks provided source snippets on phone', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -1789,6 +1837,25 @@ void main() {
       expect(
           sourceRankMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(sourceRankData['tags'], contains(mobileFlutterTag));
+
+      final tableSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_browser_extract_table_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'browser_extract_table'},
+        ),
+      );
+      final tablePayload =
+          jsonDecode(tableSchema.output) as Map<String, dynamic>;
+      final tableData = tablePayload['data'] as Map<String, dynamic>;
+      final tableMobile = tableData['mobile'] as Map<String, dynamic>;
+      expect(tableData['mobile_compatible'], isTrue);
+      expect(tableData['execution_route'], 'phone');
+      expect(tableMobile['requires_mobile_approval'], isFalse);
+      expect(tableMobile['implementation_status'],
+          'implemented_payload_only_html');
+      expect(tableMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(tableData['tags'], contains(mobileFlutterTag));
 
       final ttsSchema = runtime.execute(
         const MobileToolCall(

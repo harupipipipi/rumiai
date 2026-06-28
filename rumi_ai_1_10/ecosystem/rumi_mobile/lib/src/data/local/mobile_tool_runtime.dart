@@ -213,6 +213,10 @@ const _defaultPdfParseMaxChars = 120000;
 const _hardPdfParseMaxChars = 400000;
 const _defaultSourceExtractMaxChars = 120000;
 const _hardSourceExtractMaxChars = 400000;
+const _defaultHtmlTableMaxRows = 200;
+const _hardHtmlTableMaxRows = 1000;
+const _defaultHtmlTableMaxTables = 20;
+const _hardHtmlTableMaxTables = 100;
 const _defaultTtsFallbackDurationMs = 100;
 const _hardTtsFallbackDurationMs = 30000;
 const _defaultTtsFallbackSampleRate = 16000;
@@ -1323,6 +1327,58 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'browser_extract_table',
+      description:
+          'Extract structured table rows from HTML already provided to this phone runtime. Does not read the PC browser session or artifact paths.',
+      tags: [
+        'tool',
+        'browser',
+        'html',
+        'table',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_browser_extract_table',
+        'defaultspack_browser_extract_table',
+        'defaults.browser.extract_table',
+        'defaultspack.browser.extract_table',
+      ],
+      implementationStatus: 'implemented_payload_only_html',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'html': {'type': 'string'},
+          'content': {'type': 'string'},
+          'source': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'path': {'type': 'string'},
+          'table_index': {'type': 'integer', 'minimum': 0, 'default': 0},
+          'max_tables': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardHtmlTableMaxTables,
+            'default': _defaultHtmlTableMaxTables,
+          },
+          'max_rows': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardHtmlTableMaxRows,
+            'default': _defaultHtmlTableMaxRows,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardSourceExtractMaxChars,
+            'default': _defaultSourceExtractMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'source_rank',
       description:
           'Rank provided source snippets by query term frequency locally on this phone.',
@@ -1812,6 +1868,8 @@ class MobileToolRuntime {
         return _ttsGenerate(call.arguments, toolName: name);
       case 'source_extract':
         return _sourceExtract(call.arguments);
+      case 'browser_extract_table':
+        return _browserExtractTable(call.arguments);
       case 'source_rank':
         return _sourceRank(call.arguments);
       case 'tool_search':
@@ -1965,6 +2023,8 @@ class MobileToolRuntime {
       'media_doc_parse',
       'media_pdf_parse',
       'source_rank',
+      'source_extract',
+      'browser_extract_table',
       'tts_generate',
       'tts_generate_local',
     }.contains(name)) {
@@ -3278,6 +3338,86 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _browserExtractTable(Map<String, dynamic> args) {
+    final payload = _extractHtmlTablePayload(args);
+    if (payload == null) {
+      final path = _stringOrNull(args['path']) ??
+          (_looksLikeHttpUrl('${args['source'] ?? ''}')
+              ? _stringOrNull(args['source'])
+              : null);
+      return MobileToolResult(
+        ok: false,
+        summary: 'HTML payload is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code':
+                path == null ? 'MISSING_HTML_PAYLOAD' : 'UNSUPPORTED_SOURCE',
+            'message': path == null
+                ? 'html, content, source, data_url, file.base64, or document.base64 is required.'
+                : 'Phone-local browser_extract_table cannot read PC browser pages, URLs, or artifact paths. Pass HTML payload or route this call to the connected PC runtime.',
+            if (path != null) 'source': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    final maxChars = _boundedSourceExtractMaxChars(args['max_chars']);
+    final maxTables = _boundedHtmlTableMaxTables(args['max_tables']);
+    final maxRows = _boundedHtmlTableMaxRows(args['max_rows']);
+    if (payload.html.length > maxChars) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'HTML payload is too large',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'HTML_TOO_LARGE',
+            'message': 'HTML payload is larger than max_chars.',
+            'length': payload.html.length,
+            'max_chars': maxChars,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    final tables = _extractHtmlTables(
+      payload.html,
+      maxTables: maxTables,
+      maxRows: maxRows,
+    );
+    final tableIndex = _boundedTableIndex(args['table_index'], tables.length);
+    final selectedTable =
+        tables.isEmpty ? const <List<String>>[] : tables[tableIndex];
+    return MobileToolResult(
+      ok: true,
+      summary: 'extracted ${tables.length} HTML table(s)',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'tables': tables,
+          'table_count': tables.length,
+          'selected_table_index': tables.isEmpty ? null : tableIndex,
+          'selected_table': selectedTable,
+          'rows': selectedTable,
+          'row_count': selectedTable.length,
+          'metadata': {
+            'source': payload.source,
+            'payload_only': true,
+            'max_tables': maxTables,
+            'max_rows': maxRows,
+            'html_length': payload.html.length,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _sourceRank(Map<String, dynamic> args) {
     final query = '${args['query'] ?? ''}'.toLowerCase();
     final rawSources = args['sources'];
@@ -4340,6 +4480,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       normalized == 'pdf_extract' || normalized == 'pdf_extract_tables';
   final isSourcePayloadTool =
       normalized == 'source_extract' || normalized == 'source_rank';
+  final isBrowserExtractTable = normalized == 'browser_extract_table';
   final isTtsFallbackTool =
       normalized == 'tts_generate' || normalized == 'tts_generate_local';
   if (isClipboard) {
@@ -4463,6 +4604,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'implementation_status': normalized == 'source_extract'
           ? 'implemented_payload_only'
           : 'implemented',
+    };
+  }
+  if (isBrowserExtractTable) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_payload_only_html',
     };
   }
   if (isTtsFallbackTool) {
@@ -4757,6 +4907,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'source_rank') {
     return 'このdefaultspack-compatible toolはDartで渡されたsource snippetsのterm frequency rankingにスマホ対応済みです。';
+  }
+  if (normalized == 'browser_extract_table') {
+    return 'このdefaultspack-compatible toolはDartで渡されたHTML payloadのtable抽出にスマホ対応済みです。PC browser sessionやartifact pathはPC runtimeへ委譲してください。';
   }
   if (normalized == 'tts_generate' || normalized == 'tts_generate_local') {
     return 'このdefaultspack-compatible toolはFlutter/Dartでsilent WAV fallback payload生成にスマホ対応済みです。実音声TTS合成とPC artifact保存はPC/native runtimeへ委譲してください。';
@@ -5180,6 +5333,40 @@ int _boundedSourceExtractMaxChars(Object? value) {
     return math.max(1, math.min(_hardSourceExtractMaxChars, parsed));
   }
   return _defaultSourceExtractMaxChars;
+}
+
+int _boundedHtmlTableMaxTables(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardHtmlTableMaxTables, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardHtmlTableMaxTables, parsed));
+  }
+  return _defaultHtmlTableMaxTables;
+}
+
+int _boundedHtmlTableMaxRows(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardHtmlTableMaxRows, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardHtmlTableMaxRows, parsed));
+  }
+  return _defaultHtmlTableMaxRows;
+}
+
+int _boundedTableIndex(Object? value, int tableCount) {
+  if (tableCount <= 0) return 0;
+  if (value is num) {
+    return math.max(0, math.min(tableCount - 1, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(0, math.min(tableCount - 1, parsed));
+  }
+  return 0;
 }
 
 int _boundedTtsFallbackDurationMs(Object? value) {
@@ -5825,6 +6012,88 @@ String _stripHtmlToText(String html) {
       .replaceAll(RegExp(r'\n{3,}'), '\n\n');
 }
 
+_HtmlTablePayload? _extractHtmlTablePayload(Map<String, dynamic> args) {
+  final inline = _stringOrNull(args['html']) ??
+      _stringOrNull(args['content']) ??
+      _sourceArgumentAsInlineText(args['source']);
+  if (inline != null) {
+    return _HtmlTablePayload(html: inline, source: 'arguments.inline');
+  }
+  try {
+    final payload = _extractDocumentPayload(args);
+    if (payload == null) return null;
+    final text = payload.text ??
+        (payload.bytes == null
+            ? null
+            : _decodeDocumentBytes(payload.bytes!, payload.bytes!.length).text);
+    if (text == null || text.trim().isEmpty) return null;
+    return _HtmlTablePayload(html: text, source: payload.source);
+  } catch (_) {
+    return null;
+  }
+}
+
+List<List<List<String>>> _extractHtmlTables(
+  String html, {
+  required int maxTables,
+  required int maxRows,
+}) {
+  final cleaned = html
+      .replaceAll(
+        RegExp(r'<!--.*?-->', caseSensitive: false, dotAll: true),
+        ' ',
+      )
+      .replaceAll(
+        RegExp(
+          r'<script\b[^>]*>.*?</script>',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        ' ',
+      )
+      .replaceAll(
+        RegExp(
+          r'<style\b[^>]*>.*?</style>',
+          caseSensitive: false,
+          dotAll: true,
+        ),
+        ' ',
+      );
+  final tables = <List<List<String>>>[];
+  final tablePattern = RegExp(
+    r'<table\b[^>]*>(.*?)</table>',
+    caseSensitive: false,
+    dotAll: true,
+  );
+  for (final tableMatch in tablePattern.allMatches(cleaned)) {
+    if (tables.length >= maxTables) break;
+    final rows = <List<String>>[];
+    final rowPattern = RegExp(
+      r'<tr\b[^>]*>(.*?)</tr>',
+      caseSensitive: false,
+      dotAll: true,
+    );
+    for (final rowMatch in rowPattern.allMatches(tableMatch.group(1) ?? '')) {
+      if (rows.length >= maxRows) break;
+      final cells = <String>[];
+      final cellPattern = RegExp(
+        r'<t[dh]\b[^>]*>(.*?)</t[dh]>',
+        caseSensitive: false,
+        dotAll: true,
+      );
+      for (final cellMatch in cellPattern.allMatches(rowMatch.group(1) ?? '')) {
+        final cell = _normalizeSourceText(
+          _stripHtmlToText(cellMatch.group(1) ?? ''),
+        );
+        cells.add(cell);
+      }
+      if (cells.isNotEmpty) rows.add(cells);
+    }
+    if (rows.isNotEmpty) tables.add(rows);
+  }
+  return tables;
+}
+
 String? _stringOrNull(Object? value) {
   if (value == null) return null;
   final text = '$value'.trim();
@@ -6102,6 +6371,16 @@ class _DocumentPayload {
       source: source,
     );
   }
+}
+
+class _HtmlTablePayload {
+  const _HtmlTablePayload({
+    required this.html,
+    required this.source,
+  });
+
+  final String html;
+  final String source;
 }
 
 class _DecodedDocumentText {

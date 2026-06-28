@@ -160,6 +160,12 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["research", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "browser_extract_table",
+                "name": "browser_extract_table",
+                "summary": "Extract HTML table rows",
+                "tags": ["browser", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "tts_generate",
                 "name": "tts_generate",
                 "summary": "Generate fallback audio",
@@ -282,6 +288,13 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["source_rank"]["mobile"]["implementation_status"] == "implemented"
     assert "flutter" in by_id["source_rank"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["source_rank"]["mobile"]["runtime_layers"]
+
+    assert by_id["browser_extract_table"]["mobile_compatible"] is True
+    assert by_id["browser_extract_table"]["execution_route"] == "phone"
+    assert by_id["browser_extract_table"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["browser_extract_table"]["mobile"]["implementation_status"] == "implemented_payload_only_html"
+    assert "flutter" in by_id["browser_extract_table"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["browser_extract_table"]["mobile"]["runtime_layers"]
 
     assert by_id["tts_generate"]["mobile_compatible"] is True
     assert by_id["tts_generate"]["execution_route"] == "phone"
