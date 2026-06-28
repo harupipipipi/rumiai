@@ -513,6 +513,23 @@ def _stale_running_execution(sched: dict[str, Any], *, now_dt: datetime | None =
     }
 
 
+def _active_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
+    running = _running_execution_details(sched)
+    if running is None:
+        return None
+    if _stale_running_execution(sched) is not None:
+        return None
+    started_at, _started_dt = _running_execution_started_at(sched)
+    execution_id = str(running.get("execution_id") or "").strip()
+    return {
+        "execution_id": execution_id,
+        "schedule_id": str(running.get("schedule_id") or sched.get("id") or "").strip(),
+        "started_at": started_at,
+        "trigger": _running_execution_trigger(sched),
+        "timeout_seconds": _running_execution_timeout_seconds(sched),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Scheduler singleton
 # ---------------------------------------------------------------------------
@@ -1004,6 +1021,45 @@ class Scheduler:
         with self._lock:
             self._schedules[schedule_id] = sched
 
+    def _already_running_entry(self, schedule_id, running, manual):
+        now = timestamp()
+        active_execution_id = str(running.get("execution_id") or "").strip()
+        active_started_at = running.get("started_at")
+        active_trigger = running.get("trigger")
+        detail = "schedule already has a running execution"
+        if active_execution_id:
+            detail += ": " + active_execution_id
+        return {
+            "execution_id": "sexec_skipped_" + gen_id(),
+            "schedule_id": schedule_id,
+            "started_at": now,
+            "completed_at": now,
+            "status": "skipped",
+            "trigger": "manual" if manual else "scheduled",
+            "result": None,
+            "error": detail,
+            "skipped_reason": "already_running",
+            "running_execution": {
+                "execution_id": active_execution_id,
+                "started_at": active_started_at,
+                "trigger": active_trigger,
+            },
+        }
+
+    def _advance_after_skipped_scheduled_execution(self, schedule_id):
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+            if sched is None:
+                return
+            if sched.get("type") == "once":
+                sched["status"] = "completed"
+                sched["next_execution_at"] = None
+            elif sched.get("status") == "active":
+                sched["next_execution_at"] = self._compute_next_execution(sched)
+            sched["updated_at"] = timestamp()
+            save_schedule(sched)
+            self._schedules[schedule_id] = sched
+
     def _conversation_execution_lock(self, conversation_id):
         key = str(conversation_id or "").strip()
         if not key:
@@ -1032,10 +1088,18 @@ class Scheduler:
 
     def _execute_task(self, schedule_id, manual=False):
         """Execute the agent task for a schedule and record history."""
+        self._recover_stale_running_execution(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
+            running = _active_running_execution(sched) if sched is not None else None
         if sched is None:
             return None
+        if running is not None:
+            history_entry = self._already_running_entry(schedule_id, running, manual)
+            if not manual:
+                append_history(schedule_id, history_entry)
+                self._advance_after_skipped_scheduled_execution(schedule_id)
+            return history_entry
 
         task_cfg = sched.get("task", {})
         message = task_cfg.get("message", "")
@@ -1190,8 +1254,14 @@ class Scheduler:
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is not None:
-            sched.pop("running_execution", None)
-            sched.pop("running_started_at", None)
+            current = _running_execution_details(sched)
+            if isinstance(current, dict):
+                current_execution_id = str(current.get("execution_id") or "").strip()
+                if not current_execution_id or current_execution_id == exec_id:
+                    sched.pop("running_execution", None)
+                    sched.pop("running_started_at", None)
+            else:
+                sched.pop("running_started_at", None)
             sched["execution_count"] = sched.get("execution_count", 0) + 1
             sched["last_executed_at"] = history_entry["completed_at"]
             if not manual:
