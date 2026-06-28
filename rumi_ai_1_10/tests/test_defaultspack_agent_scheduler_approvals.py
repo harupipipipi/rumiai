@@ -120,6 +120,7 @@ def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkey
             "tools": ["browser_use"],
             "tool_policy": {
                 "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_initial_tool_choice": "required",
                 "schedule_auto_approve_tool_requests": True,
                 "schedule_auto_approve_tool_allowlist": ["browser_use"],
                 "schedule_auto_approve_max_followups": 2,
@@ -137,6 +138,8 @@ def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkey
     assert history["status"] == "completed"
     assert history["result"] == "opened and inspected"
     assert len(calls) == 2
+    assert calls[0]["payload"]["params"]["tool_choice"] == "required"
+    assert "tool_choice" not in calls[1]["payload"]["params"]
     followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
     assert followup["tool_name"] == "browser_use"
     assert followup["request_id"].startswith("apr_")

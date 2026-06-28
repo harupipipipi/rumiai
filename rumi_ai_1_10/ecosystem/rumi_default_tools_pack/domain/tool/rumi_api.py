@@ -78,7 +78,7 @@ def run(arguments: dict[str, Any], context: dict[str, Any] | None = None):
         return error(
             "local API returned HTTP " + str(exc.code),
             "HTTP_ERROR",
-            {"status_code": exc.code, "response": parsed},
+            details={"status_code": exc.code, "response": parsed},
         )
     except Exception as exc:
         return error("local API request failed: " + str(exc), "REQUEST_FAILED")

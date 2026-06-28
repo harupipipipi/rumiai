@@ -126,6 +126,22 @@ def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int:
     return max(0, min(value, 8))
 
 
+def _initial_tool_choice(task_cfg: dict[str, Any]) -> Any:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    value = policy.get("schedule_initial_tool_choice")
+    if isinstance(value, dict):
+        return value
+    if str(value or "").strip().lower() in {"auto", "none", "required"}:
+        return str(value).strip().lower()
+    return None
+
+
+def _followup_params(params: dict[str, Any]) -> dict[str, Any]:
+    followup = dict(params)
+    followup.pop("tool_choice", None)
+    return followup
+
+
 def _resume_scheduled_chat_approvals(
     *,
     result: dict[str, Any],
@@ -160,7 +176,7 @@ def _resume_scheduled_chat_approvals(
                 schedule_id=schedule_id,
                 exec_id=exec_id,
                 trigger=trigger,
-                params=params,
+                params=_followup_params(params),
                 tools=tools,
                 metadata_extra={
                     "source": "scheduler_approval_followup",
@@ -747,6 +763,10 @@ class Scheduler:
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
                 tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
+                if tools and "tool_choice" not in params:
+                    initial_tool_choice = _initial_tool_choice(task_cfg)
+                    if initial_tool_choice is not None:
+                        params["tool_choice"] = initial_tool_choice
                 trigger = _scheduler_trigger_name(manual)
                 result = chat_send_run(
                     _scheduler_chat_payload(

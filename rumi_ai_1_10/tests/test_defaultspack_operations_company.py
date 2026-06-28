@@ -161,6 +161,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
     qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
     assert heartbeat_schedule["task"]["tool_policy"]["max_tool_calls"] is None
+    assert heartbeat_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
+    assert qa_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])

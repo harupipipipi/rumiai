@@ -1780,6 +1780,7 @@ class MimoCodingCompanyRuntime:
             "max_tool_calls": self._max_tool_calls(state.get("max_tool_calls")),
             "tool_allowlist": TOOL_ALLOWLIST,
             "model_allowlist": current_model_allowlist(),
+            "schedule_initial_tool_choice": "required",
             "schedule_auto_approve_tool_requests": True,
             "schedule_auto_approve_tool_allowlist": [
                 "rumi_api",
