@@ -43,6 +43,25 @@ _HOST_BOUND_TAGS = {
     "terminal",
     "workspace",
 }
+_CLI_DRY_RUN_TOOLS = {
+    "github_search",
+    "github_pr_create",
+    "github_issue_create",
+    "github_issue_update",
+    "github_issue_list",
+    "linear_issue_sync",
+    "jira_issue_sync",
+}
+_CONNECTOR_PAYLOAD_DRY_RUN_TOOLS = {
+    "gmail_search",
+    "gmail_draft",
+    "calendar_create",
+    "drive_create",
+    "drive_export",
+    "slack_send",
+    "discord_send",
+    "line_push",
+}
 
 
 def mobile_agent_template() -> dict[str, str]:
@@ -200,6 +219,18 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
 
 
 def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
+    if tool_id in _CLI_DRY_RUN_TOOLS | _CONNECTOR_PAYLOAD_DRY_RUN_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": (
+                "implemented_cli_dry_run_pc_execute"
+                if tool_id in _CLI_DRY_RUN_TOOLS
+                else "implemented_connector_dry_run"
+            ),
+        }
     if tool_id in {
         "agent_plan",
         "agent_progress",

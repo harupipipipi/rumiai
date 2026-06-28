@@ -226,6 +226,25 @@ const _hardTtsFallbackDurationMs = 30000;
 const _defaultTtsFallbackSampleRate = 16000;
 const _hardTtsFallbackSampleRate = 48000;
 const _minTtsFallbackSampleRate = 8000;
+const _mobileCliDryRunToolIds = <String>{
+  'github_search',
+  'github_pr_create',
+  'github_issue_create',
+  'github_issue_update',
+  'github_issue_list',
+  'linear_issue_sync',
+  'jira_issue_sync',
+};
+const _mobileConnectorPayloadDryRunToolIds = <String>{
+  'gmail_search',
+  'gmail_draft',
+  'calendar_create',
+  'drive_create',
+  'drive_export',
+  'slack_send',
+  'discord_send',
+  'line_push',
+};
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -1968,6 +1987,9 @@ class MobileToolRuntime {
 
   MobileToolResult execute(MobileToolCall call) {
     final name = _canonicalToolName(call.name);
+    if (_isMobileConnectorDryRunTool(name)) {
+      return _connectorDryRun(name, call.arguments);
+    }
     switch (name) {
       case 'calculator':
         return _calculator(call.arguments);
@@ -4487,6 +4509,24 @@ class MobileToolRuntime {
 
     final tool = _findToolDefinition(canonical);
     final invokeArgs = _invokeArguments(args);
+    if (_isMobileConnectorDryRunTool(canonical)) {
+      final result = _connectorDryRun(canonical, invokeArgs);
+      return MobileToolResult(
+        ok: result.ok,
+        summary: '$canonical: ${result.summary}',
+        output: jsonEncode({
+          'status': result.ok ? 'ok' : 'error',
+          'data': {
+            'tool_name': canonical,
+            'requested_tool_name': requested,
+            'result': result.output,
+            'summary': result.summary,
+            'is_error': !result.ok,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
     if (tool != null && tool.available) {
       final result = execute(
         MobileToolCall(
@@ -4671,6 +4711,105 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _connectorDryRun(
+    String toolName,
+    Map<String, dynamic> args,
+  ) {
+    final normalized = toolName.trim().toLowerCase();
+    if (_mobileCliDryRunToolIds.contains(normalized)) {
+      final commandPlan = _connectorCliCommands(normalized, args);
+      if (!commandPlan.ok) {
+        return MobileToolResult(
+          ok: false,
+          summary: '$normalized connector dry-run failed',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': commandPlan.errorCode,
+              'message': commandPlan.errorMessage,
+              'tool': normalized,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      final commands = commandPlan.commands;
+      final data = <String, dynamic>{
+        'dry_run': true,
+        'commands': commands,
+        'tool': normalized,
+        if (commands.isNotEmpty) 'command': commands.first,
+        if (commandPlan.payload != null) 'payload': commandPlan.payload,
+      };
+      if (_boolArg(args['execute'], fallback: false)) {
+        return MobileToolResult(
+          ok: false,
+          summary: '$normalized requires PC runtime for execute=true',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'PC_RUNTIME_REQUIRED',
+              'message':
+                  '$normalized can build a dry-run command plan on this phone, but execute=true requires the connected PC runtime/defaultspack CLI.',
+              'data': {
+                ...data,
+                'dry_run': false,
+                'execution_location': 'phone',
+                'runtime_layers': _flutterRuntimeLayers,
+                'implementation_status': 'implemented_cli_dry_run_pc_execute',
+              },
+            },
+          }),
+        );
+      }
+      return MobileToolResult(
+        ok: true,
+        summary: '$normalized dry-run command plan',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            ...data,
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+            'implementation_status': 'implemented_cli_dry_run_pc_execute',
+          },
+        }),
+      );
+    }
+
+    final data = _connectorPayloadDryRunData(normalized, args);
+    if (data == null) {
+      return MobileToolResult(
+        ok: false,
+        summary: '$normalized is not a phone connector dry-run tool',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_CONNECTOR_TOOL',
+            'message': '$normalized is not available in phone-local dry-run.',
+          },
+        }),
+      );
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: '$normalized connector dry-run',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'tool': normalized,
+          'dry_run': true,
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+          'implementation_status': 'implemented_connector_dry_run',
+        },
+      }),
+    );
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -4683,6 +4822,9 @@ class MobileToolRuntime {
     if (normalized == 'media_clipboard_read' ||
         normalized == 'media_clipboard_write') {
       return 'このdefaultspack toolはiOS Swift/Android Kotlinのclipboard bridgeでスマホ実装可能ですが、clipboard読み書き用のモバイル承認UIがまだないため、このスマホ単体では実行しません。PC接続時はPC側runtimeへ委譲できます。';
+    }
+    if (_isMobileConnectorDryRunTool(normalized)) {
+      return 'このdefaultspack connector toolはFlutter/Dartでdry-run planをスマホ実行できます。実送信やCLI execute=trueはPC接続時にPC側runtimeへ委譲してください。';
     }
     final catalogEntry = _findDefaultspackCatalogEntry(normalized);
     if (catalogEntry != null) {
@@ -4755,9 +4897,390 @@ bool _isAsyncPhoneToolName(String name) {
   }.contains(name.trim().toLowerCase());
 }
 
+bool _isMobileConnectorDryRunTool(String name) {
+  final normalized = name.trim().toLowerCase();
+  return _mobileCliDryRunToolIds.contains(normalized) ||
+      _mobileConnectorPayloadDryRunToolIds.contains(normalized);
+}
+
 bool _isOpenAiFunctionName(String name) {
   final trimmed = name.trim();
   return RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(trimmed);
+}
+
+class _ConnectorCommandPlan {
+  const _ConnectorCommandPlan({
+    required this.ok,
+    this.commands = const [],
+    this.payload,
+    this.errorCode = '',
+    this.errorMessage = '',
+  });
+
+  final bool ok;
+  final List<List<String>> commands;
+  final Map<String, dynamic>? payload;
+  final String errorCode;
+  final String errorMessage;
+}
+
+_ConnectorCommandPlan _connectorCliCommands(
+  String toolName,
+  Map<String, dynamic> args,
+) {
+  return switch (toolName) {
+    'github_search' => _githubSearchCommands(args),
+    'github_pr_create' => _githubPrCreateCommands(args),
+    'github_issue_create' => _githubIssueCreateCommands(args),
+    'github_issue_update' => _githubIssueUpdateCommands(args),
+    'github_issue_list' => _githubIssueListCommands(args),
+    'linear_issue_sync' => _thirdPartyIssueSyncCommands(
+        args,
+        toolName: 'linear_issue_sync',
+        connectorName: 'linear',
+        executable: 'linear',
+      ),
+    'jira_issue_sync' => _thirdPartyIssueSyncCommands(
+        args,
+        toolName: 'jira_issue_sync',
+        connectorName: 'jira',
+        executable: 'jira',
+      ),
+    _ => _ConnectorCommandPlan(
+        ok: false,
+        errorCode: 'UNSUPPORTED_CONNECTOR_TOOL',
+        errorMessage: '$toolName is not a phone CLI dry-run tool.',
+      ),
+  };
+}
+
+_ConnectorCommandPlan _githubSearchCommands(Map<String, dynamic> args) {
+  final query = '${args['query'] ?? ''}';
+  final kind = '${args['kind'] ?? 'repos'}'.trim().isEmpty
+      ? 'repos'
+      : '${args['kind']}'.trim();
+  final limit = _boundedConnectorLimit(args['limit'], defaultValue: 10);
+  return _ConnectorCommandPlan(
+    ok: true,
+    commands: [
+      ['gh', 'search', kind, query, '--limit', '$limit'],
+    ],
+  );
+}
+
+_ConnectorCommandPlan _githubPrCreateCommands(Map<String, dynamic> args) {
+  final command = [
+    'gh',
+    'pr',
+    'create',
+    '--title',
+    '${args['title'] ?? 'PR'}',
+    '--body',
+    '${args['body'] ?? ''}',
+  ];
+  if (_boolArg(args['draft'], fallback: true)) command.add('--draft');
+  return _ConnectorCommandPlan(ok: true, commands: [command]);
+}
+
+_ConnectorCommandPlan _githubIssueCreateCommands(Map<String, dynamic> args) {
+  return _ConnectorCommandPlan(
+    ok: true,
+    commands: [
+      [
+        'gh',
+        'issue',
+        'create',
+        '--title',
+        '${args['title'] ?? 'Issue'}',
+        '--body',
+        '${args['body'] ?? ''}',
+      ],
+    ],
+  );
+}
+
+_ConnectorCommandPlan _githubIssueListCommands(Map<String, dynamic> args) {
+  final command = ['gh', 'issue', 'list'];
+  _addRepo(command, args);
+  var state = _firstConnectorText(args, const ['state']);
+  final status = _firstConnectorText(args, const ['status']);
+  if (state.isEmpty && {'open', 'opened', 'closed'}.contains(status)) {
+    state = status == 'closed' ? 'closed' : 'open';
+  }
+  if (state.isNotEmpty) command.addAll(['--state', state]);
+  command.addAll([
+    '--limit',
+    '${_boundedConnectorLimit(args['limit'], defaultValue: 30)}',
+  ]);
+  final assignee = _firstConnectorText(args, const ['assignee']);
+  if (assignee.isNotEmpty) command.addAll(['--assignee', assignee]);
+  for (final label in _connectorTextList(args['label'] ?? args['labels'])) {
+    command.addAll(['--label', label]);
+  }
+  if (status.isNotEmpty && state.isEmpty) {
+    command.addAll(['--label', _statusLabel(status)]);
+  }
+  final search = _firstConnectorText(args, const ['search', 'query']);
+  if (search.isNotEmpty) command.addAll(['--search', search]);
+  return _ConnectorCommandPlan(ok: true, commands: [command]);
+}
+
+_ConnectorCommandPlan _githubIssueUpdateCommands(Map<String, dynamic> args) {
+  final issue = _issueReference(args);
+  if (issue.isEmpty) {
+    return const _ConnectorCommandPlan(
+      ok: false,
+      errorCode: 'MISSING_ISSUE',
+      errorMessage:
+          'github_issue_update requires issue, issue_number, id, or key.',
+    );
+  }
+
+  final command = ['gh', 'issue', 'edit', issue];
+  _addRepo(command, args);
+  var hasEdit = false;
+  final title = _firstConnectorText(args, const ['title', 'summary']);
+  final body = _firstConnectorText(args, const ['body', 'description']);
+  if (title.isNotEmpty) {
+    command.addAll(['--title', title]);
+    hasEdit = true;
+  }
+  if (body.isNotEmpty) {
+    command.addAll(['--body', body]);
+    hasEdit = true;
+  }
+  for (final assignee
+      in _connectorTextList(args['assignee'] ?? args['assignees'])) {
+    command.addAll(['--add-assignee', assignee]);
+    hasEdit = true;
+  }
+
+  final commands = <List<String>>[];
+  final status = _firstConnectorText(args, const ['status', 'state']);
+  final statusLower = status.toLowerCase();
+  if ({'closed', 'close', 'done', 'resolved'}.contains(statusLower)) {
+    final closeCommand = ['gh', 'issue', 'close', issue];
+    _addRepo(closeCommand, args);
+    commands.add(closeCommand);
+  } else if ({'open', 'opened', 'reopen', 'reopened'}.contains(statusLower)) {
+    final reopenCommand = ['gh', 'issue', 'reopen', issue];
+    _addRepo(reopenCommand, args);
+    commands.add(reopenCommand);
+  } else if (status.isNotEmpty) {
+    command.addAll(['--add-label', _statusLabel(status)]);
+    hasEdit = true;
+  }
+  if (hasEdit) commands.insert(0, command);
+
+  final comment = _firstConnectorText(args, const ['comment', 'note']);
+  if (comment.isNotEmpty) {
+    final commentCommand = ['gh', 'issue', 'comment', issue, '--body', comment];
+    _addRepo(commentCommand, args);
+    commands.add(commentCommand);
+  }
+  if (commands.isEmpty) {
+    return const _ConnectorCommandPlan(
+      ok: false,
+      errorCode: 'EMPTY_UPDATE',
+      errorMessage:
+          'github_issue_update needs a title, body, status, assignee, or comment.',
+    );
+  }
+  return _ConnectorCommandPlan(
+    ok: true,
+    commands: commands,
+    payload: _redactConnectorPayload({
+      'issue': issue,
+      'title': title.isEmpty ? null : title,
+      'status': status.isEmpty ? null : status,
+      'assignee': args['assignee'] ?? args['assignees'],
+      'comment': comment.isEmpty ? null : comment,
+    }) as Map<String, dynamic>,
+  );
+}
+
+_ConnectorCommandPlan _thirdPartyIssueSyncCommands(
+  Map<String, dynamic> args, {
+  required String toolName,
+  required String connectorName,
+  required String executable,
+}) {
+  final issue = _issueReference(args);
+  if (issue.isEmpty) {
+    return _ConnectorCommandPlan(
+      ok: false,
+      errorCode: 'MISSING_ISSUE',
+      errorMessage: '$toolName requires issue, issue_id, id, or key.',
+    );
+  }
+  final command = [executable, 'issue', 'update', issue];
+  var hasUpdate = false;
+  final title = _firstConnectorText(args, const ['title', 'summary']);
+  final description = _firstConnectorText(args, const ['body', 'description']);
+  final status = _firstConnectorText(args, const ['status', 'state']);
+  final assignee = _firstConnectorText(args, const ['assignee']);
+  if (title.isNotEmpty) {
+    command.addAll(['--title', title]);
+    hasUpdate = true;
+  }
+  if (description.isNotEmpty) {
+    command.addAll(['--description', description]);
+    hasUpdate = true;
+  }
+  if (status.isNotEmpty) {
+    command.addAll(['--status', status]);
+    hasUpdate = true;
+  }
+  if (assignee.isNotEmpty) {
+    command.addAll(['--assignee', assignee]);
+    hasUpdate = true;
+  }
+  final commands = <List<String>>[];
+  if (hasUpdate) commands.add(command);
+  final comment = _firstConnectorText(args, const ['comment', 'note']);
+  if (comment.isNotEmpty) {
+    commands.add([executable, 'issue', 'comment', issue, '--body', comment]);
+  }
+  if (commands.isEmpty) {
+    return _ConnectorCommandPlan(
+      ok: false,
+      errorCode: 'EMPTY_UPDATE',
+      errorMessage:
+          '$toolName needs a title, description, status, assignee, or comment.',
+    );
+  }
+  return _ConnectorCommandPlan(
+    ok: true,
+    commands: commands,
+    payload: _redactConnectorPayload({
+      'connector_required': connectorName,
+      'issue': issue,
+      'title': title.isEmpty ? null : title,
+      'description': description.isEmpty ? null : description,
+      'status': status.isEmpty ? null : status,
+      'assignee': assignee.isEmpty ? null : assignee,
+      'comment': comment.isEmpty ? null : comment,
+      'external_url': args['external_url'] ?? args['url'],
+      'metadata': args['metadata'] is Map ? args['metadata'] : null,
+    }) as Map<String, dynamic>,
+  );
+}
+
+Map<String, dynamic>? _connectorPayloadDryRunData(
+  String toolName,
+  Map<String, dynamic> args,
+) {
+  final redacted = _redactConnectorPayload(args);
+  return switch (toolName) {
+    'gmail_search' => {
+        'connector_required': 'gmail',
+        'query': args['query'],
+      },
+    'gmail_draft' => {
+        'connector_required': 'gmail',
+        'draft': {
+          'to': args['to'],
+          'subject': args['subject'],
+          'body': args['body'],
+        },
+      },
+    'calendar_create' => {
+        'connector_required': 'calendar',
+        'event': redacted,
+      },
+    'drive_create' => {
+        'connector_required': 'drive',
+        'file': redacted,
+      },
+    'drive_export' => {
+        'connector_required': 'drive',
+        'export': redacted,
+      },
+    'slack_send' => {
+        'connector_required': 'slack',
+        'message': redacted,
+      },
+    'discord_send' => {
+        'connector_required': 'discord',
+        'message': redacted,
+      },
+    'line_push' => {
+        'connector_required': 'line',
+        'message': redacted,
+      },
+    _ => null,
+  };
+}
+
+String _firstConnectorText(Map<String, dynamic> args, Iterable<String> keys) {
+  for (final key in keys) {
+    final value = args[key];
+    if (value != null && '$value'.trim().isNotEmpty) return '$value'.trim();
+  }
+  return '';
+}
+
+List<String> _connectorTextList(Object? value) {
+  if (value is List) {
+    return value
+        .map((item) => '$item'.trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+  final text = '${value ?? ''}'.trim();
+  return text.isEmpty ? const [] : [text];
+}
+
+void _addRepo(List<String> command, Map<String, dynamic> args) {
+  final repo = _firstConnectorText(args, const ['repo', 'repository']);
+  if (repo.isNotEmpty) command.addAll(['--repo', repo]);
+}
+
+String _statusLabel(String status) {
+  return 'status:${status.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '-')}';
+}
+
+String _issueReference(Map<String, dynamic> args) {
+  return _firstConnectorText(
+    args,
+    const ['issue', 'issue_number', 'number', 'issue_id', 'id', 'key'],
+  );
+}
+
+int _boundedConnectorLimit(Object? value, {required int defaultValue}) {
+  if (value is num) return math.max(1, math.min(100, value.toInt()));
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) return math.max(1, math.min(100, parsed));
+  return defaultValue;
+}
+
+Object? _redactConnectorPayload(Object? value) {
+  if (value is Map) {
+    return value.map((key, item) {
+      final keyText = '$key';
+      return MapEntry(
+        keyText,
+        _isSensitiveConnectorKey(keyText)
+            ? '[redacted]'
+            : _redactConnectorPayload(item),
+      );
+    });
+  }
+  if (value is List) return value.map(_redactConnectorPayload).toList();
+  return value;
+}
+
+bool _isSensitiveConnectorKey(String key) {
+  final lowered = key.toLowerCase();
+  return const [
+    'api_key',
+    'authorization',
+    'bearer',
+    'credential',
+    'password',
+    'secret',
+    'token',
+  ].any(lowered.contains);
 }
 
 Map<String, dynamic> _agentTemplateRecord() => {
@@ -4929,6 +5452,29 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
     'tags': _mobilePlatformTags(
       platforms: tool.executionPlatforms,
       runtimeLayers: tool.runtimeLayers,
+      pcDelegated: false,
+    ),
+  };
+}
+
+Map<String, dynamic> _mobileRuntimeRecordForConnectorDryRun(String name) {
+  final normalized = name.trim().toLowerCase();
+  final implementationStatus = _mobileCliDryRunToolIds.contains(normalized)
+      ? 'implemented_cli_dry_run_pc_execute'
+      : 'implemented_connector_dry_run';
+  return {
+    'compatible': true,
+    'available': true,
+    'execution_location': 'phone',
+    'platforms': _defaultMobilePlatforms,
+    'runtime_layers': _flutterRuntimeLayers,
+    'native_layers': [],
+    'requires_pc': false,
+    'requires_mobile_approval': false,
+    'implementation_status': implementationStatus,
+    'tags': _mobilePlatformTags(
+      platforms: _defaultMobilePlatforms,
+      runtimeLayers: _flutterRuntimeLayers,
       pcDelegated: false,
     ),
   };
@@ -5501,6 +6047,31 @@ Map<String, dynamic> _invokeArguments(Map<String, dynamic> args) {
 Map<String, dynamic> _unsupportedToolRecord(String name) {
   final normalized = name.trim();
   final tags = _inferredDefaultspackTags(normalized);
+  if (_isMobileConnectorDryRunTool(normalized)) {
+    final mobile = _mobileRuntimeRecordForConnectorDryRun(normalized);
+    return {
+      'function_id': normalized,
+      'tool_id': normalized,
+      'aliases': const <String>[],
+      'tags': _orderedStrings([
+        ...tags,
+        'connector',
+        'dry_run',
+        ...(mobile['tags'] as List? ?? const []),
+      ]),
+      'mobile_compatible': true,
+      'mobile': mobile,
+      'execution_location': mobile['execution_location'],
+      'execution_platforms': mobile['platforms'],
+      'mobile_runtime_layers': mobile['runtime_layers'],
+      'native_layers': mobile['native_layers'],
+      'requires_mobile_approval': mobile['requires_mobile_approval'],
+      'unavailable_reason': '',
+      'summary':
+          'Defaultspack connector tool is available as a phone-local dry-run plan.',
+      'parameters': {'type': 'object', 'additionalProperties': true},
+    };
+  }
   final reason = const MobileToolRuntime()._unsupportedReason(normalized);
   final mobile = _mobileRuntimeRecordForUnavailable(normalized, tags, reason);
   return {

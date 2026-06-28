@@ -178,6 +178,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["research", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "github_search",
+                "name": "github_search",
+                "summary": "Plan GitHub search",
+                "tags": ["connector", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "slack_send",
+                "name": "slack_send",
+                "summary": "Prepare Slack send",
+                "tags": ["connector", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "browser_extract_table",
                 "name": "browser_extract_table",
                 "summary": "Extract HTML table rows",
@@ -324,6 +336,26 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["source_rank"]["mobile"]["implementation_status"] == "implemented"
     assert "flutter" in by_id["source_rank"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["source_rank"]["mobile"]["runtime_layers"]
+
+    assert by_id["github_search"]["mobile_compatible"] is True
+    assert by_id["github_search"]["execution_route"] == "phone"
+    assert by_id["github_search"]["mobile"]["requires_mobile_approval"] is False
+    assert (
+        by_id["github_search"]["mobile"]["implementation_status"]
+        == "implemented_cli_dry_run_pc_execute"
+    )
+    assert "flutter" in by_id["github_search"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["github_search"]["mobile"]["runtime_layers"]
+
+    assert by_id["slack_send"]["mobile_compatible"] is True
+    assert by_id["slack_send"]["execution_route"] == "phone"
+    assert by_id["slack_send"]["mobile"]["requires_mobile_approval"] is False
+    assert (
+        by_id["slack_send"]["mobile"]["implementation_status"]
+        == "implemented_connector_dry_run"
+    )
+    assert "flutter" in by_id["slack_send"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["slack_send"]["mobile"]["runtime_layers"]
 
     assert by_id["browser_extract_table"]["mobile_compatible"] is True
     assert by_id["browser_extract_table"]["execution_route"] == "phone"

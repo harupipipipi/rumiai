@@ -1678,6 +1678,74 @@ void main() {
       expect(data['execution_location'], 'pc');
     });
 
+    test('runs connector dry-run plans on phone', () {
+      final github = runtime.execute(
+        const MobileToolCall(
+          id: 'github_search_1',
+          name: 'github_search',
+          arguments: {
+            'query': 'rumiai mobile',
+            'kind': 'issues',
+            'limit': 3,
+          },
+        ),
+      );
+
+      expect(github.ok, isTrue);
+      final githubPayload = jsonDecode(github.output) as Map<String, dynamic>;
+      final githubData = githubPayload['data'] as Map<String, dynamic>;
+      expect(githubData['dry_run'], isTrue);
+      expect(
+          githubData['command'],
+          orderedEquals(
+              ['gh', 'search', 'issues', 'rumiai mobile', '--limit', '3']));
+      expect(githubData['execution_location'], 'phone');
+      expect(githubData['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(githubData['implementation_status'],
+          'implemented_cli_dry_run_pc_execute');
+
+      final slack = runtime.execute(
+        const MobileToolCall(
+          id: 'slack_send_1',
+          name: 'slack_send',
+          arguments: {
+            'channel': '#dev',
+            'text': 'hello',
+            'token': 'xoxb-secret',
+          },
+        ),
+      );
+
+      expect(slack.ok, isTrue);
+      final slackPayload = jsonDecode(slack.output) as Map<String, dynamic>;
+      final slackData = slackPayload['data'] as Map<String, dynamic>;
+      final message = slackData['message'] as Map<String, dynamic>;
+      expect(slackData['connector_required'], 'slack');
+      expect(slackData['dry_run'], isTrue);
+      expect(message['token'], '[redacted]');
+      expect(
+          slackData['implementation_status'], 'implemented_connector_dry_run');
+    });
+
+    test('executeAsync delegates connector execute=true to PC', () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'github_search_execute_1',
+          name: 'github_search',
+          arguments: {
+            'query': 'rumiai mobile',
+            'execute': true,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(delegate.lastCall?.name, 'github_search');
+    });
+
     test('executeAsync keeps phone-compatible tools on phone', () async {
       final delegate = _FakePcToolDelegate();
       final runtime = MobileToolRuntime(pcDelegate: delegate);
@@ -2086,6 +2154,30 @@ void main() {
       expect(
           sourceRankMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(sourceRankData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'github_search': 'implemented_cli_dry_run_pc_execute',
+        'slack_send': 'implemented_connector_dry_run',
+      }.entries) {
+        final connectorSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final connectorPayload =
+            jsonDecode(connectorSchema.output) as Map<String, dynamic>;
+        final connectorData = connectorPayload['data'] as Map<String, dynamic>;
+        final connectorMobile = connectorData['mobile'] as Map<String, dynamic>;
+        expect(connectorData['mobile_compatible'], isTrue);
+        expect(connectorData['execution_route'], 'phone');
+        expect(connectorMobile['requires_mobile_approval'], isFalse);
+        expect(connectorMobile['implementation_status'], entry.value);
+        expect(connectorMobile['runtime_layers'],
+            containsAll(['flutter', 'dart']));
+        expect(connectorData['tags'], contains(mobileFlutterTag));
+      }
 
       final tableSchema = runtime.execute(
         const MobileToolCall(
