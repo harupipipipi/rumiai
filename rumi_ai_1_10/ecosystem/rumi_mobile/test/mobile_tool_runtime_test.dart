@@ -218,6 +218,7 @@ void main() {
           'tool_list',
           'tool_schema',
           'tool_invoke',
+          'tool_batch',
           'tool_consent_check',
           'tool_consent_confirm',
           'artifact_file_list',
@@ -225,6 +226,9 @@ void main() {
           'artifact_file_write',
           'artifact_file_patch',
           'artifact_file_delete',
+          'browser_save_page',
+          'webapp_preview',
+          'webapp_lint',
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
@@ -503,6 +507,74 @@ void main() {
       final payload = jsonDecode(result.output) as Map<String, dynamic>;
       final error = payload['error'] as Map<String, dynamic>;
       expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
+    });
+
+    test('saves and previews phone-local webapp HTML artifacts', () {
+      const html = '<!doctype html><html><head><title>Phone Site</title>'
+          '<meta name="viewport" content="width=device-width"></head>'
+          '<body><main>Hello webapp</main></body></html>';
+      final save = runtime.execute(
+        const MobileToolCall(
+          id: 'browser_save_page_1',
+          name: 'browser_save_page',
+          arguments: {
+            'html': html,
+            'output_path': 'webapps/phone/index.html',
+          },
+        ),
+      );
+
+      expect(save.ok, isTrue);
+      final savePayload = jsonDecode(save.output) as Map<String, dynamic>;
+      final saveData = savePayload['data'] as Map<String, dynamic>;
+      expect(saveData['path'], 'webapps/phone/index.html');
+      expect(saveData['workspace'], 'phone');
+
+      final preview = runtime.execute(
+        const MobileToolCall(
+          id: 'webapp_preview_1',
+          name: 'webapp_preview',
+          arguments: {'path': 'webapps/phone'},
+        ),
+      );
+      expect(preview.ok, isTrue);
+      final previewPayload = jsonDecode(preview.output) as Map<String, dynamic>;
+      final previewData = previewPayload['data'] as Map<String, dynamic>;
+      expect(previewData['path'], 'webapps/phone/index.html');
+      expect(previewData['title'], 'Phone Site');
+      expect(previewData['text'], contains('Hello webapp'));
+      expect(previewData['screenshot_supported'], isFalse);
+      expect(previewData['runtime_layers'], containsAll(['flutter', 'dart']));
+
+      final lint = runtime.execute(
+        const MobileToolCall(
+          id: 'webapp_lint_1',
+          name: 'webapp_lint',
+          arguments: {'path': 'webapps/phone'},
+        ),
+      );
+      expect(lint.ok, isTrue);
+      final lintPayload = jsonDecode(lint.output) as Map<String, dynamic>;
+      final lintData = lintPayload['data'] as Map<String, dynamic>;
+      expect(lintData['ok'], isTrue);
+      expect(lintData['issues'], isEmpty);
+      expect(lintData['warnings'], isEmpty);
+    });
+
+    test('webapp_lint reports missing phone-local index html', () {
+      final lint = runtime.execute(
+        const MobileToolCall(
+          id: 'webapp_lint_missing_1',
+          name: 'webapp_lint',
+          arguments: {'path': 'webapps/missing'},
+        ),
+      );
+
+      expect(lint.ok, isTrue);
+      final payload = jsonDecode(lint.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['ok'], isFalse);
+      expect(data['issues'], contains('missing index.html'));
     });
 
     test('runs mobile clipboard tools after explicit phone approval', () async {
@@ -1785,6 +1857,53 @@ void main() {
       expect(data['execution_location'], 'pc');
     });
 
+    test(
+        'tool_batch runs phone tools and delegates PC tools through one surface',
+        () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'batch_1',
+          name: 'tool_batch',
+          arguments: {
+            'parallel': true,
+            'calls': [
+              {
+                'id': 'calc',
+                'tool_name': 'tool_calculator',
+                'arguments': {'expression': '7 * 6'},
+              },
+              {
+                'id': 'pc',
+                'tool_name': 'python_exec',
+                'arguments': {'code': 'print(42)'},
+              },
+            ],
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final results = data['results'] as List<dynamic>;
+      expect(data['parallel'], isTrue);
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(results, hasLength(2));
+      final calc = results.first as Map<String, dynamic>;
+      final pc = results.last as Map<String, dynamic>;
+      expect(calc['ok'], isTrue);
+      expect(calc['tool_name'], 'calculator');
+      expect(calc['execution_location'], 'phone');
+      expect(calc['output'], contains('7 * 6 = 42'));
+      expect(pc['ok'], isTrue);
+      expect(pc['tool_name'], 'python_exec');
+      expect(pc['execution_location'], 'pc');
+      expect(delegate.lastCall?.name, 'python_exec');
+    });
+
     test('runs connector dry-run plans on phone', () {
       final github = runtime.execute(
         const MobileToolCall(
@@ -2226,6 +2345,50 @@ void main() {
             artifactMobile['runtime_layers'], containsAll(['flutter', 'dart']));
         expect(artifactData['tags'], contains(mobileFlutterTag));
       }
+
+      for (final toolName in const [
+        'browser_save_page',
+        'webapp_preview',
+        'webapp_lint',
+      ]) {
+        final htmlSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${toolName}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': toolName},
+          ),
+        );
+        final htmlPayload =
+            jsonDecode(htmlSchema.output) as Map<String, dynamic>;
+        final htmlData = htmlPayload['data'] as Map<String, dynamic>;
+        final htmlMobile = htmlData['mobile'] as Map<String, dynamic>;
+        expect(htmlData['mobile_compatible'], isTrue);
+        expect(htmlData['execution_route'], 'phone');
+        expect(htmlMobile['requires_mobile_approval'], isFalse);
+        expect(htmlMobile['implementation_status'],
+            'implemented_phone_artifact_html');
+        expect(htmlMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(htmlData['tags'], contains(mobileFlutterTag));
+      }
+
+      final batchSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_tool_batch_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tool_batch'},
+        ),
+      );
+      final batchPayload =
+          jsonDecode(batchSchema.output) as Map<String, dynamic>;
+      final batchData = batchPayload['data'] as Map<String, dynamic>;
+      final batchMobile = batchData['mobile'] as Map<String, dynamic>;
+      expect(batchData['mobile_compatible'], isTrue);
+      expect(batchData['execution_route'], 'phone');
+      expect(batchMobile['requires_mobile_approval'], isFalse);
+      expect(batchMobile['implementation_status'],
+          'implemented_mobile_batch_router');
+      expect(batchMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(batchData['tags'], contains(mobileFlutterTag));
 
       for (final toolName in const ['html_preview', 'pdf_preview']) {
         final previewSchema = runtime.execute(

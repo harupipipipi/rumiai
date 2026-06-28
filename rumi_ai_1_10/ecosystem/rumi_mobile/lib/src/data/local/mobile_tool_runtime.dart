@@ -28,6 +28,7 @@ const mobileAssistantProgressSystemInstruction =
 
 const _assistantProgressTextLimit = 120;
 const _assistantProgressRelatedToolLimit = 4;
+const _toolBatchMaxCalls = 8;
 const _assistantProgressPhases = <String>{
   'inspect',
   'change',
@@ -749,6 +750,94 @@ class MobileToolRuntime {
         'properties': {
           'path': {'type': 'string'},
           'checkpoint': {'type': 'boolean', 'default': true},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'browser_save_page',
+      description:
+          'Save provided HTML into this phone-local artifact workspace. This does not read a PC browser session.',
+      tags: [
+        'tool',
+        'browser',
+        'webapp',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_browser_save_page',
+        'defaultspack_browser_save_page',
+        'defaults.browser.save_page',
+        'defaultspack.browser.save_page',
+      ],
+      implementationStatus: 'implemented_phone_artifact_html',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'html': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['html'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'webapp_preview',
+      description:
+          'Preview a phone-local artifact webapp index.html with HTML metadata fallback.',
+      tags: [
+        'tool',
+        'webapp',
+        'preview',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_webapp_preview',
+        'defaultspack_webapp_preview',
+        'defaults.webapp.preview',
+        'defaultspack.webapp.preview',
+      ],
+      implementationStatus: 'implemented_phone_artifact_html',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxChars,
+            'default': _defaultArtifactPreviewMaxChars,
+          },
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'webapp_lint',
+      description:
+          'Run simple phone-local structural lint checks for an artifact webapp.',
+      tags: [
+        'tool',
+        'webapp',
+        'lint',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_webapp_lint',
+        'defaultspack_webapp_lint',
+        'defaults.webapp.lint',
+        'defaultspack.webapp.lint',
+      ],
+      implementationStatus: 'implemented_phone_artifact_html',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
         },
         'required': ['path'],
       },
@@ -1834,6 +1923,45 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'tool_batch',
+      description:
+          'Invoke multiple defaultspack-compatible tools through one mobile call. Phone-compatible tools run locally; host-bound tools route to the connected PC when delegation is enabled.',
+      tags: ['tool', 'broker', 'batch', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_batch',
+        'defaultspack_tool_batch',
+        'defaults.tool.batch',
+        'defaultspack.tool.batch',
+      ],
+      implementationStatus: 'implemented_mobile_batch_router',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'calls': {
+            'type': 'array',
+            'minItems': 1,
+            'maxItems': _toolBatchMaxCalls,
+            'items': {
+              'type': 'object',
+              'additionalProperties': true,
+              'properties': {
+                'id': {'type': 'string'},
+                'tool_name': {'type': 'string'},
+                'tool_id': {'type': 'string'},
+                'name': {'type': 'string'},
+                'arguments': {'type': 'object'},
+                'args': {'type': 'object'},
+                'input': {'type': 'object'},
+              },
+            },
+          },
+          'parallel': {'type': 'boolean', 'default': false},
+        },
+        'required': ['calls'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'agent_plan',
       description:
           'Create a lightweight phone-local agent plan using the defaultspack agent_plan convention.',
@@ -2141,6 +2269,12 @@ class MobileToolRuntime {
       case 'artifact_file_patch':
       case 'artifact_file_delete':
         return _asyncOnlyTool(name);
+      case 'browser_save_page':
+        return _browserSavePage(call.arguments);
+      case 'webapp_preview':
+        return _webappPreview(call.arguments);
+      case 'webapp_lint':
+        return _webappLint(call.arguments);
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
@@ -2187,6 +2321,8 @@ class MobileToolRuntime {
         return _toolSchema(call.arguments);
       case 'tool_invoke':
         return _toolInvoke(call.arguments);
+      case 'tool_batch':
+        return _asyncOnlyTool(name);
       case 'agent_plan':
         return _agentPlan(call.arguments);
       case 'agent_progress':
@@ -2255,6 +2391,8 @@ class MobileToolRuntime {
       case 'artifact_file_patch':
       case 'artifact_file_delete':
         return _artifactFileMutation(name, call.arguments);
+      case 'tool_batch':
+        return _toolBatch(call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -2291,6 +2429,140 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _toolBatch(Map<String, dynamic> args) async {
+    final rawCalls = args['calls'];
+    if (rawCalls is! List || rawCalls.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'calls are required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'MISSING_PARAM',
+            'message': 'calls must be a non-empty array',
+          },
+        }),
+      );
+    }
+    if (rawCalls.length > _toolBatchMaxCalls) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'too many tool calls',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'TOO_MANY_CALLS',
+            'message': 'tool_batch supports at most $_toolBatchMaxCalls calls',
+            'max_calls': _toolBatchMaxCalls,
+          },
+        }),
+      );
+    }
+
+    final parallel = args['parallel'] == true;
+    Future<Map<String, dynamic>> runOne(int index, Object? rawCall) async {
+      if (rawCall is! Map) {
+        return {
+          'index': index,
+          'ok': false,
+          'summary': 'call must be an object',
+          'error': {
+            'code': 'INVALID_CALL',
+            'message': 'Each calls item must be an object.',
+          },
+        };
+      }
+      final item = rawCall.map((key, value) => MapEntry('$key', value));
+      final requested =
+          '${item['tool_name'] ?? item['tool_id'] ?? item['name'] ?? ''}'
+              .trim();
+      if (requested.isEmpty) {
+        return {
+          'index': index,
+          'ok': false,
+          'summary': 'tool_name is required',
+          'error': {
+            'code': 'MISSING_TOOL_NAME',
+            'message': 'tool_name is required for every batch call.',
+          },
+        };
+      }
+      final canonical = _canonicalToolName(requested);
+      final phoneLocal = _isMobileConnectorDryRunTool(canonical) ||
+          (_findToolDefinition(canonical)?.available == true);
+      if (canonical == 'tool_batch') {
+        return {
+          'index': index,
+          'id': '${item['id'] ?? ''}',
+          'tool_name': canonical,
+          'requested_tool_name': requested,
+          'ok': false,
+          'summary': 'recursive tool_batch is not allowed',
+          'error': {
+            'code': 'RECURSIVE_TOOL_BATCH',
+            'message': 'tool_batch cannot invoke itself.',
+          },
+        };
+      }
+      final result = await executeAsync(
+        MobileToolCall(
+          id: '${item['id'] ?? 'tool_batch:$index'}',
+          name: requested,
+          arguments: _invokeArguments(item),
+        ),
+      );
+      final parsed = _decodeObject(result.output);
+      final data = parsed['data'];
+      final executionLocation = data is Map
+          ? '${data['execution_location'] ?? ''}'.trim()
+          : '${parsed['execution_location'] ?? ''}'.trim();
+      return {
+        'index': index,
+        'id': '${item['id'] ?? ''}',
+        'tool_name': canonical,
+        'requested_tool_name': requested,
+        'ok': result.ok,
+        'summary': result.summary,
+        'output': result.output,
+        'parsed_output': parsed.isEmpty ? null : parsed,
+        'execution_location': executionLocation.isEmpty
+            ? (phoneLocal ? 'phone' : 'phone_or_pc')
+            : executionLocation,
+      };
+    }
+
+    final results = <Map<String, dynamic>>[];
+    if (parallel) {
+      results.addAll(await Future.wait([
+        for (var index = 0; index < rawCalls.length; index++)
+          runOne(index, rawCalls[index]),
+      ]));
+    } else {
+      for (var index = 0; index < rawCalls.length; index++) {
+        results.add(await runOne(index, rawCalls[index]));
+      }
+    }
+    final allOk = results.every((result) => result['ok'] == true);
+    return MobileToolResult(
+      ok: allOk,
+      summary: allOk
+          ? 'tool_batch completed ${results.length} calls'
+          : 'tool_batch completed with errors',
+      output: jsonEncode({
+        'status': allOk ? 'ok' : 'error',
+        'data': {
+          'parallel': parallel,
+          'count': results.length,
+          'ok_count': results.where((result) => result['ok'] == true).length,
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+          'results': results,
+        },
+      }),
+    );
+  }
+
   String _openAiToolDescription(MobileToolDefinition tool) {
     if (tool.name == 'tool_invoke' && pcDelegationAvailable) {
       return '${tool.description} The mobile tool surface is unified: phone-compatible tools run locally, and host-bound defaultspack tools route to the connected PC runtime when PC delegation is enabled.';
@@ -2306,6 +2578,7 @@ class MobileToolRuntime {
       'tool_names',
       'tool_list',
       'tool_schema',
+      'tool_batch',
       'agent_plan',
       'agent_progress',
       'agent_status',
@@ -2325,6 +2598,9 @@ class MobileToolRuntime {
       'artifact_file_write',
       'artifact_file_patch',
       'artifact_file_delete',
+      'browser_save_page',
+      'webapp_preview',
+      'webapp_lint',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -4407,6 +4683,142 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _browserSavePage(Map<String, dynamic> args) {
+    final html = '${args['html'] ?? ''}';
+    if (html.isEmpty) {
+      return _phoneArtifactError('INVALID_INPUT', "'html' is required.");
+    }
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ?? 'browser/page.html',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    _mobileArtifactFiles[outputPath] = {
+      'path': outputPath,
+      'content': html,
+      'size': utf8.encode(html).length,
+      'created_at': _mobileArtifactFiles[outputPath]?['created_at'] ?? now,
+      'updated_at': now,
+      'source': 'browser_save_page',
+    };
+    return MobileToolResult(
+      ok: true,
+      summary: 'saved HTML to $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': outputPath,
+          'size': utf8.encode(html).length,
+          'title': _extractHtmlTitle(html),
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _webappPreview(Map<String, dynamic> args) {
+    final htmlPath = _phoneWebappIndexPath(args['path']);
+    if (htmlPath == null) {
+      return _phoneArtifactError('INVALID_INPUT', "'path' is required.");
+    }
+    final file = _mobileArtifactFiles[htmlPath];
+    if (file == null) {
+      return _phoneArtifactError(
+        'WEBAPP_PREVIEW_FAILED',
+        'webapp index.html not found in phone artifact workspace',
+        path: htmlPath,
+      );
+    }
+    final html = '${file['content'] ?? ''}';
+    final maxChars = _boundedArtifactPreviewMaxChars(args['max_chars']);
+    final truncated = html.length > maxChars;
+    final content = truncated ? html.substring(0, maxChars) : html;
+    return MobileToolResult(
+      ok: true,
+      summary: 'preview webapp $htmlPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': htmlPath,
+          'kind': 'html',
+          'title': _extractHtmlTitle(html) ?? 'Webapp Preview',
+          'content': content,
+          'text': _stripHtmlToText(content).trim(),
+          'truncated': truncated,
+          'length': html.length,
+          'returned_length': content.length,
+          'fallback': 'phone_artifact_html_metadata',
+          'screenshot_supported': false,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+          'metadata': {
+            'payload_only': false,
+            'phone_artifact_workspace': true,
+            'preview_mode': 'webapp_index_html',
+          },
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _webappLint(Map<String, dynamic> args) {
+    final rawPath = '${args['path'] ?? ''}'.trim();
+    final root = _normalizePhoneArtifactPath(rawPath, allowRoot: true);
+    if (root == null) {
+      return _phoneArtifactError(
+        'WEBAPP_LINT_FAILED',
+        'Invalid webapp artifact path.',
+      );
+    }
+    final htmlPath = _phoneWebappIndexPath(rawPath, allowRoot: true);
+    final issues = <String>[];
+    final warnings = <String>[];
+    final file = htmlPath == null ? null : _mobileArtifactFiles[htmlPath];
+    if (file == null) {
+      issues.add('missing index.html');
+    } else {
+      final html = '${file['content'] ?? ''}';
+      if (!_looksLikeHtmlFragment(html)) {
+        warnings.add('index.html has no HTML tags');
+      }
+      if (_extractHtmlTitle(html) == null) warnings.add('missing <title>');
+      if (!RegExp(
+        '<meta[^>]+name=["\\\']viewport["\\\']',
+        caseSensitive: false,
+      ).hasMatch(html)) {
+        warnings.add('missing viewport meta');
+      }
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: issues.isEmpty ? 'webapp lint ok' : 'webapp lint issues',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': root,
+          'index_path': htmlPath,
+          'issues': issues,
+          'warnings': warnings,
+          'ok': issues.isEmpty,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   Future<MobileToolResult> _mobileUrlOpen(Map<String, dynamic> args) async {
     final raw = '${args['url'] ?? args['href'] ?? args['input'] ?? ''}'.trim();
     if (raw.isEmpty) {
@@ -5302,6 +5714,7 @@ bool _isAsyncPhoneToolName(String name) {
     'artifact_file_patch',
     'artifact_file_delete',
     'mobile_url_open',
+    'tool_batch',
   }.contains(name.trim().toLowerCase());
 }
 
@@ -5945,6 +6358,11 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'artifact_file_patch',
     'artifact_file_delete',
   }.contains(normalized);
+  final isPhoneArtifactHtmlTool = const {
+    'browser_save_page',
+    'webapp_preview',
+    'webapp_lint',
+  }.contains(normalized);
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -6106,6 +6524,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
         'artifact_file_delete',
       }.contains(normalized),
       'implementation_status': 'implemented_phone_artifact_workspace',
+    };
+  }
+  if (isPhoneArtifactHtmlTool) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_phone_artifact_html',
     };
   }
   if (tagSet.contains('media') ||
@@ -8086,6 +8513,15 @@ String? _normalizePhoneArtifactPath(Object? value, {bool allowRoot = false}) {
   }
   if (parts.isEmpty) return allowRoot ? '.' : null;
   return parts.join('/');
+}
+
+String? _phoneWebappIndexPath(Object? value, {bool allowRoot = false}) {
+  final path = _normalizePhoneArtifactPath(value, allowRoot: allowRoot);
+  if (path == null) return null;
+  final lower = path.toLowerCase();
+  if (lower.endsWith('.html') || lower.endsWith('.htm')) return path;
+  if (path == '.') return 'index.html';
+  return '$path/index.html';
 }
 
 bool _artifactPathInBase(

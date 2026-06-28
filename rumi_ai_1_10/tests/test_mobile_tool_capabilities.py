@@ -184,6 +184,30 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["artifact", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "browser_save_page",
+                "name": "browser_save_page",
+                "summary": "Save HTML page",
+                "tags": ["browser", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "webapp_preview",
+                "name": "webapp_preview",
+                "summary": "Preview phone webapp",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "webapp_lint",
+                "name": "webapp_lint",
+                "summary": "Lint phone webapp",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "tool_batch",
+                "name": "tool_batch",
+                "summary": "Invoke multiple tools",
+                "tags": ["tool", "broker", "batch"],
+            },
+            {
                 "tool_id": "html_preview",
                 "name": "html_preview",
                 "summary": "Preview HTML payload",
@@ -358,6 +382,27 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         )
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id in ("browser_save_page", "webapp_preview", "webapp_lint"):
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is False
+        assert (
+            by_id[tool_id]["mobile"]["implementation_status"]
+            == "implemented_phone_artifact_html"
+        )
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    assert by_id["tool_batch"]["mobile_compatible"] is True
+    assert by_id["tool_batch"]["execution_route"] == "phone"
+    assert by_id["tool_batch"]["mobile"]["requires_mobile_approval"] is False
+    assert (
+        by_id["tool_batch"]["mobile"]["implementation_status"]
+        == "implemented_mobile_batch_router"
+    )
+    assert "flutter" in by_id["tool_batch"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["tool_batch"]["mobile"]["runtime_layers"]
 
     for tool_id in ("html_preview", "pdf_preview"):
         assert by_id[tool_id]["mobile_compatible"] is True

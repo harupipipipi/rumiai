@@ -69,6 +69,11 @@ _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_patch",
     "artifact_file_delete",
 }
+_PHONE_ARTIFACT_HTML_TOOLS = {
+    "browser_save_page",
+    "webapp_preview",
+    "webapp_lint",
+}
 
 
 def mobile_agent_template() -> dict[str, str]:
@@ -246,6 +251,22 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "requires_mobile_approval": tool_id
             in {"artifact_file_write", "artifact_file_patch", "artifact_file_delete"},
             "implementation_status": "implemented_phone_artifact_workspace",
+        }
+    if tool_id in _PHONE_ARTIFACT_HTML_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_phone_artifact_html",
+        }
+    if tool_id == "tool_batch":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_mobile_batch_router",
         }
     if tool_id in {
         "agent_plan",
