@@ -553,12 +553,20 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], contex
     access = payload.get("access") if isinstance(payload.get("access"), dict) else {}
     rules = payload.get("rules")
     provisioning = payload.get("provisioning") if isinstance(payload.get("provisioning"), dict) else None
+    starter = str(payload.get("starter") or "")
     created = service.manager.create(
         image="ubuntu:22.04",
         display=display,
         provider_id=str(payload.get("provider_id") or "auto"),
         name=str(payload.get("name") or ("Ubuntu Desktop" if display else "Sandbox")),
-        template_id=str(payload.get("template_id") or _default_create_template_id(display=display, provider_id=payload.get("provider_id"))),
+        template_id=str(
+            payload.get("template_id")
+            or _default_create_template_id(
+                display=display,
+                provider_id=payload.get("provider_id"),
+                starter=payload.get("starter"),
+            )
+        ),
         width=_positive_int(resolution.get("width"), 1440),
         height=_positive_int(resolution.get("height"), 900),
         role=str(payload.get("role") or ""),
@@ -571,8 +579,11 @@ def _sandbox_create(service: _SandboxApiService, payload: dict[str, Any], contex
         assigned_agent_id=str(payload.get("assigned_agent") or payload.get("assigned_agent_id") or ""),
         workspace_id=str(payload.get("workspace_id") or ""),
         workspace_access=str(payload.get("workspace_access") or ""),
-        starter=str(payload.get("starter") or ""),
+        starter=starter,
         browser_url=str(payload.get("browser_url") or ""),
+        network_approved=display
+        and starter.strip().lower() in {"browser", "browser_url"}
+        and _context_has_server_approval(context),
     )
     if created.get("ok") is not True:
         return _api_error(str(created.get("error") or "Sandbox create failed"), str(created.get("code") or RUNTIME_NOT_READY), int(created.get("status_code") or 503))
@@ -1105,7 +1116,7 @@ def _default_provider_id() -> str:
     return "linux_native"
 
 
-def _default_create_template_id(*, display: bool, provider_id: Any = None) -> str:
+def _default_create_template_id(*, display: bool, provider_id: Any = None, starter: Any = None) -> str:
     if not display:
         return "tool.ephemeral"
     clean_provider_id = str(provider_id or "auto").strip().lower()
@@ -1113,6 +1124,8 @@ def _default_create_template_id(*, display: bool, provider_id: Any = None) -> st
         clean_provider_id in {"", "auto"} and _default_provider_id() == "linux_native"
     ):
         return "desktop.linux_native"
+    if str(starter or "").strip().lower() in {"browser", "browser_url"}:
+        return "desktop.browser"
     return "desktop.ubuntu"
 
 
@@ -1316,7 +1329,11 @@ def _jsonable(value: Any) -> Any:
 
 
 def _context_has_server_approval(context: dict[str, Any]) -> bool:
-    return internal_tool_decision_allows(context) or tool_server_approval_context_is_internal(context)
+    return (
+        internal_tool_decision_allows(context)
+        or tool_server_approval_context_is_internal(context)
+        or (isinstance(context, dict) and context.get("_tool_server_approved") is True)
+    )
 
 
 def _approved_secret_ids_from_context(context: dict[str, Any]) -> list[str]:

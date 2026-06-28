@@ -2020,7 +2020,7 @@ class MimoCodingCompanyRuntime:
             "managed_desktop_fallback": {
                 "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
                 "create_defaults": {
-                    "template_id": "desktop.linux_native",
+                    "template_id": "desktop.browser",
                     "starter": "browser_url",
                     "assigned_agent": "browser_qa",
                     "resolution": {"width": 1280, "height": 800},
@@ -2079,7 +2079,7 @@ class MimoCodingCompanyRuntime:
             "Run a QA swarm with short prompts."
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " First call desktop_list. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using starter=browser_url, assigned_agent=browser_qa, and the assigned target URL, then continue with desktop_frame and desktop_input. "
+            + " First call desktop_list. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, assigned_agent=browser_qa, and the assigned target URL, then continue with desktop_frame and desktop_input. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."

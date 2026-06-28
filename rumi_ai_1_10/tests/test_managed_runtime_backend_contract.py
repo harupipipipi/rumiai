@@ -948,6 +948,55 @@ def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp
     assert service.manager.list_instances() == []
 
 
+def test_desktop_create_browser_url_defaults_to_browser_template_and_context_network_approval(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "sandbox.network_policy",
+        },
+        sandbox_id_factory=lambda: "browser-seat",
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "provider_id": "fake-runtime",
+                "owner_id": "local-user",
+                "starter": "browser_url",
+                "browser_url": "http://127.0.0.1:8766/chat",
+            },
+            {"user_id": "local-user", "_tool_server_approved": True},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["template_id"] == "desktop.browser"
+    assert provider.create_specs[0].template.template_id == "desktop.browser"
+    assert provider.create_specs[0].metadata["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "http://127.0.0.1:8766/chat",
+    }
+    assert provider.create_specs[0].metadata["network_approved"] is True
+
+
 def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -1965,6 +2014,44 @@ def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch)
     assert "command -v Xvfb" in dependency_checks[0][-1]
 
 
+def test_windows_wsl_guest_shell_escapes_dollar_expansion_and_preserves_stdin() -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+        GuestCommandResult,
+        WindowsWslProvider,
+    )
+
+    captured = {}
+
+    def runner(command, input_text, timeout):
+        captured["command"] = tuple(command)
+        captured["input_text"] = input_text
+        captured["timeout"] = timeout
+        return GuestCommandResult(returncode=0, stdout="ok")
+
+    provider = WindowsWslProvider(command_path="wsl.exe", runner=runner)
+
+    result = provider._guest_shell(
+        "wsl.exe",
+        'DISPLAY_ID=":98"\nprintf "%s" "$DISPLAY_ID"',
+        input_text="payload",
+        timeout=5,
+        check=False,
+    )
+
+    assert result.stdout == "ok"
+    assert captured["command"] == (
+        "wsl.exe",
+        "-d",
+        "RumiUbuntu",
+        "--",
+        "bash",
+        "-lc",
+        'DISPLAY_ID=":98"\nprintf "%s" "\\$DISPLAY_ID"',
+    )
+    assert captured["input_text"] == "payload"
+    assert captured["timeout"] == 5
+
+
 def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_processes() -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import _desktop_start_script
 
@@ -1979,6 +2066,12 @@ def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_
     )
 
     assert "chmod 1777 /tmp/.X11-unix" in script
+    assert "CLIENT_DISPLAY=\"127.0.0.1:${DISPLAY_NUM}.0\"" in script
+    assert "$XVFB_TRANSPORT_ARGS" in script
+    assert "-nolisten local -listen tcp" in script
+    assert "display.env" in script
+    assert "run_display_service setsid" in script
+    assert "run_ui() {" in script
     assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in script
     assert "Desktop Xvfb failed to stay running." in script
     assert "Desktop openbox failed to stay running." in script

@@ -244,6 +244,7 @@ def _create_spec(
     startup: dict[str, object] | None = None,
     provisioning: dict[str, object] | None = None,
     workspace_binding: WorkspaceBinding | None = None,
+    network_approved: bool = False,
 ) -> SandboxCreateSpec:
     return SandboxCreateSpec(
         name="Managed Ubuntu",
@@ -253,6 +254,7 @@ def _create_spec(
         metadata={
             "startup": startup or {"starter": "terminal"},
             "desktop_provisioning": provisioning or {},
+            "network_approved": network_approved,
         },
     )
 
@@ -750,6 +752,10 @@ def test_managed_ubuntu_desktop_browser_url_starter_is_projected_to_guest(monkey
     assert "BROWSER_URL=https://example.com" in start_script
     assert "BROWSER_CANDIDATES='google-chrome-stable google-chrome chromium chromium-browser firefox'" in start_script
     assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
+    assert "run_detached()" in start_script
+    assert "setsid -f sh -c" in start_script
+    assert "/etc/machine-id" in start_script
+    assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
     assert "starter-browser.log" in start_script
 
 
@@ -769,7 +775,8 @@ def test_managed_ubuntu_desktop_browser_starter_opens_browser_without_url(monkey
     assert "BROWSER_URL=''" in start_script
     assert 'BROWSER_CANDIDATES="$BROWSER_CANDIDATES xdg-open"' in start_script
     assert 'elif [ -n "$BROWSER_URL" ]; then' in start_script
-    assert '"$BROWSER_BIN" --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
+    assert "run_detached" in start_script
+    assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
     assert "starter-browser.pid" in start_script
 
 
@@ -817,6 +824,32 @@ def test_managed_ubuntu_browser_url_starter_respects_network_policy(monkeypatch)
     assert "RUMI_NETWORK_DISABLED='1'" in start_script
     assert "browser_url starter skipped by sandbox network policy" in start_script
     assert "google-chrome-stable google-chrome chromium chromium-browser firefox xdg-open" not in start_script
+
+
+def test_managed_ubuntu_browser_url_starter_runs_after_approved_create(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(
+        _create_spec(
+            _template(),
+            startup={"starter": "browser_url", "browser_url": "https://example.com"},
+            network_approved=True,
+        )
+    )
+    started = provider.start(instance)
+    start_script = next(script for script in fake.guest_scripts if "starter-browser.log" in script)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert started.opaque_state["network_disabled"] is False
+    assert "RUMI_NETWORK_DISABLED='0'" in start_script
+    assert "browser_url starter skipped by sandbox network policy" not in start_script
+    assert "google-chrome-stable google-chrome chromium chromium-browser firefox" in start_script
+    assert '"$BROWSER_BIN" --no-sandbox --no-first-run --disable-dev-shm-usage --user-data-dir=' in start_script
 
 
 def test_managed_ubuntu_port_exposure_respects_network_policy(monkeypatch) -> None:
@@ -921,6 +954,26 @@ def test_managed_ubuntu_template_packages_are_guest_provisioned(monkeypatch) -> 
     assert "python3" in provision_script
     assert "python3-pip" in provision_script
     assert "not-a-known-app" not in provision_script
+
+
+def test_managed_ubuntu_browser_template_uses_launchable_chrome_package(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
+    fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
+    provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
+    requirements = RuntimeRequirements(required_capabilities=MANAGED_UBUNTU_CAPABILITIES)
+    template = _template(packages=(PackageSpec(name="chromium", version="managed", source="guest"),))
+
+    ensured = provider.ensure(EnsureRuntimeRequest(provider_id="mac_lima", requirements=requirements), NullProgressSink())
+    instance = provider.create(_create_spec(template))
+    started = provider.start(instance)
+    provision_script = next(script for script in fake.guest_scripts if "PROVISION_MARKER" in script)
+    install_line = next(line for line in provision_script.splitlines() if "apt-get install -y $RUMI_APT_PACKAGES" in line)
+
+    assert ensured.ok is True
+    assert started.state == "ready"
+    assert "google-chrome-stable" in provision_script
+    assert "chromium-browser" not in install_line
+    assert "chromium-browser apt package is not a usable fallback" in provision_script
 
 
 def test_managed_ubuntu_seeds_trusted_workspace_read_only(monkeypatch, tmp_path) -> None:

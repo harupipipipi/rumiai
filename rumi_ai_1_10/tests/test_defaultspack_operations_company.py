@@ -175,6 +175,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         "desktop_frame",
         "desktop_input",
     ]
+    assert status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["create_defaults"]["template_id"] == "desktop.browser"
+    assert "template_id=desktop.browser" in qa_schedule["task"]["message"]
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])

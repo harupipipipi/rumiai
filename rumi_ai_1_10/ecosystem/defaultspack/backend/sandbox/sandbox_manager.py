@@ -137,6 +137,7 @@ class SandboxManager:
         workspace_access: str | None = None,
         starter: str | None = None,
         browser_url: str | None = None,
+        network_approved: bool = False,
     ) -> Dict[str, Any]:
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
@@ -215,6 +216,7 @@ class SandboxManager:
                         "desktop_rules": model_to_dict(rule_config),
                         "desktop_provisioning": model_to_dict(provisioning_plan),
                         "assigned_agent_id": assigned_agent,
+                        "network_approved": bool(network_approved),
                     },
                 )
             )
@@ -1891,7 +1893,10 @@ class SandboxManager:
         starter: str | None = None,
         browser_url: str | None = None,
     ) -> ResolvedSandboxTemplate:
-        requested_template_id = str(template_id or _default_template_id(display=display, provider_id=provider_id)).strip()
+        requested_template_id = str(
+            template_id
+            or _default_template_id(display=display, provider_id=provider_id, starter=starter)
+        ).strip()
         raw_template = _load_sandbox_template(requested_template_id)
         if not raw_template:
             raise SandboxContractError(
@@ -2173,7 +2178,7 @@ def _normalize_secret_grant_ids(value: Any) -> set[str]:
     return result
 
 
-def _default_template_id(*, display: bool, provider_id: str | None) -> str:
+def _default_template_id(*, display: bool, provider_id: str | None, starter: str | None = None) -> str:
     if not display:
         return "tool.ephemeral"
     clean_provider_id = str(provider_id or "auto").strip().lower()
@@ -2181,6 +2186,8 @@ def _default_template_id(*, display: bool, provider_id: str | None) -> str:
         clean_provider_id in {"", "auto"} and platform.system().lower() == "linux"
     ):
         return "desktop.linux_native"
+    if str(starter or "").strip().lower() in {"browser", "browser_url"}:
+        return "desktop.browser"
     return "desktop.ubuntu"
 
 
