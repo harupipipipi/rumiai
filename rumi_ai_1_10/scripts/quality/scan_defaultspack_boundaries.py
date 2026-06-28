@@ -81,6 +81,10 @@ def _iter_domain_imports(py_path: Path) -> set[str]:
     return imports
 
 
+def _portable_rel(path: Path, base: Path) -> str:
+    return path.relative_to(base).as_posix()
+
+
 def main() -> int:
     config = _read_yaml(BOUNDARIES_PATH)
     domains = config.get("domains") or {}
@@ -103,7 +107,7 @@ def main() -> int:
         (
             str(item.get("from") or "").strip(),
             str(item.get("import") or "").strip().replace("domain/", "").replace("domain.", ""),
-            str(item.get("file") or "").strip(),
+            str(item.get("file") or "").strip().replace("\\", "/"),
         )
         for item in exceptions
         if isinstance(item, dict)
@@ -127,7 +131,7 @@ def main() -> int:
             for target_domain in sorted(_iter_domain_imports(py_path)):
                 if target_domain == source_domain:
                     continue
-                rel_file = py_path.relative_to(DEFAULTSPACK_ROOT).as_posix()
+                rel_file = _portable_rel(py_path, DEFAULTSPACK_ROOT)
                 if (source_domain, target_domain, rel_file) in exception_keys:
                     continue
                 if target_domain not in allowed:

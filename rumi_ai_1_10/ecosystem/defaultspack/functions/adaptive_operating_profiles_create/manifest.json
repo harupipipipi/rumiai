@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_operating_profiles_create",
+  "description": "Create an Operating Profile preview.",
+  "tags": [
+    "adaptive",
+    "profile"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.operating.profiles.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.operating_profiles_create",
+    "defaultspack.adaptive.operating_profiles_create",
+    "defaults.adaptive.operating.profiles.create",
+    "defaultspack.adaptive.operating.profiles.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "operating_profiles_create"
+      }
+    }
+  }
+}

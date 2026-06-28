@@ -1372,6 +1372,7 @@ _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/runtime/update": {"POST"},
     "/api/runtime/uninstall": {"POST"},
     "/api/desktops": {"POST"},
+    "/api/onboarding/apply": {"POST"},
 }
 _LOCAL_UI_APPROVAL_METHOD_PATTERNS = (
     (re.compile(r"^/api/runtime/operations/[^/]+/cancel$"), {"POST"}),

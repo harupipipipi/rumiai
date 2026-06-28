@@ -1,0 +1,48 @@
+{
+  "function_id": "adaptive_skill_candidate_promote",
+  "description": "Promote a Skill candidate.",
+  "tags": [
+    "adaptive",
+    "skill"
+  ],
+  "risk": "high",
+  "requires": [
+    "adaptive.skill.candidate.promote"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.skill_candidate_promote",
+    "defaultspack.adaptive.skill_candidate_promote",
+    "defaults.adaptive.skill.candidate.promote",
+    "defaultspack.adaptive.skill.candidate.promote"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "skill_candidate_promote"
+      }
+    }
+  }
+}

@@ -362,7 +362,7 @@ class APIRouteTableMixin:
                     args.append(dict(query or {}))
                 result = handler(*args)
 
-            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+            if entry.get("function_id"):
                 result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:

@@ -1,4 +1,9 @@
 domains:
+  adaptive:
+    may_import:
+    - domain/coding
+    - domain/tool_policy
+    path: domain/adaptive
   agent:
     may_import:
     - domain/agent_runtime
@@ -127,6 +132,7 @@ domains:
     path: domain/frontend
   function_runtime:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/browser
     - domain/external
@@ -247,6 +253,7 @@ domains:
     path: domain/templates
   tool:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/artifact
     - domain/capabilities

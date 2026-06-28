@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_event_dlq",
+  "description": "Move a durable adaptive event to the dead-letter queue.",
+  "tags": [
+    "adaptive",
+    "event"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.event.dlq"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.event_dlq",
+    "defaultspack.adaptive.event_dlq",
+    "defaults.adaptive.event.dlq",
+    "defaultspack.adaptive.event.dlq"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "event_dlq"
+      }
+    }
+  }
+}
