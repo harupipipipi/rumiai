@@ -830,6 +830,77 @@ def test_once_timer_skip_for_active_running_execution_stays_active_and_retries(t
         _reset_scheduler_singleton()
 
 
+def test_timer_suppresses_duplicate_already_running_history_for_same_execution(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    schedule_id = "sched-active-duplicate"
+    active_execution_id = "sexec-active-duplicate"
+    started_at = scheduler_module.timestamp()
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Active duplicate QA",
+            "description": "",
+            "type": "interval",
+            "task": {"message": "keep testing", "conversation_id": "conv-mimo", "timeout": 600},
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2000-01-01T00:00:00Z",
+            "created_at": "2026-06-28T15:00:00Z",
+            "updated_at": "2026-06-28T15:53:36Z",
+            "running_execution": {
+                "execution_id": active_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": started_at,
+                "trigger": "scheduled",
+                "timeout_seconds": 600,
+            },
+            "running_started_at": started_at,
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        scheduler.ensure_loaded()
+        first = scheduler._execute_task(schedule_id, manual=False)
+        second = scheduler._execute_task(schedule_id, manual=False)
+
+        assert first["status"] == "skipped"
+        assert second["status"] == "skipped"
+        assert first["skipped_reason"] == "already_running"
+        assert second["skipped_reason"] == "already_running"
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        assert entries[0]["running_execution"]["execution_id"] == active_execution_id
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+
+
 def test_scheduler_marks_interval_running_until_task_completes(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -1215,6 +1286,11 @@ def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkey
     assert len(calls) == 2
     assert calls[0]["payload"]["params"]["tool_choice"] == "required"
     assert "tool_choice" not in calls[1]["payload"]["params"]
+    followup_content = calls[1]["payload"]["message"]["content"]
+    assert "Scheduled task:" in followup_content
+    assert "Run browser QA." in followup_content
+    assert "Approved tool request:" in followup_content
+    assert calls[1]["payload"]["message"]["metadata"]["scheduled_task_message"] == "Run browser QA."
     followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
     assert followup["tool_name"] == "browser_use"
     assert followup["request_id"].startswith("apr_")

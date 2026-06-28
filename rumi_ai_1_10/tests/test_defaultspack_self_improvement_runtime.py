@@ -23,6 +23,33 @@ def test_mimo_profile_assigns_main_vision_fast_models(tmp_path):
     assert runtime.role_map["fast"] == "xiaomi-token-plan-sgp/mimo-v2-flash"
 
 
+def test_live_self_improvement_defaults_to_token_plan_models():
+    from domain.agent.self_improvement_live_loop import run_live_improvement, run_vision_qa
+
+    assert run_live_improvement.__kwdefaults__["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert run_vision_qa.__kwdefaults__["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
+
+
+def test_self_improvement_run_defaults_to_token_plan_sgp(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run_live_improvement(**kwargs):
+        seen.update(kwargs)
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "domain.agent.self_improvement_live_loop.run_live_improvement",
+        fake_run_live_improvement,
+    )
+
+    from blocks.agent.self_improvement_run import run
+
+    result = run({"action": "single", "model": ""}, {})
+
+    assert result["status"] == "ok"
+    assert seen["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+
+
 def test_mimo_vision_role_uses_omni(tmp_path):
     from domain.agent.self_improvement_runtime import create_mimo_profile
 

@@ -6,7 +6,7 @@ from typing import Any
 
 PROVIDER_REQUEST_TIMEOUT_RESERVE_SECONDS = 5.0
 PROVIDER_REQUEST_TIMEOUT_MIN_SECONDS = 2.0
-PROVIDER_REQUEST_TIMEOUT_MAX_SECONDS = 120.0
+PROVIDER_REQUEST_TIMEOUT_MAX_SECONDS = 3600.0
 
 
 def provider_request_timeout_for_execution_timeout(timeout_seconds: Any) -> float | None:

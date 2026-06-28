@@ -19,6 +19,18 @@ def test_provider_timeout_uses_outer_budget_with_reserve() -> None:
     assert params["request_timeout"] == 85.0
 
 
+def test_provider_timeout_allows_long_scheduled_budget() -> None:
+    from domain.ai_client.request_timeout import apply_execution_timeout_to_params
+    from domain.ai_client.providers.openai_provider import OpenAIProvider
+
+    params: dict[str, object] = {}
+
+    apply_execution_timeout_to_params(params, 600)
+
+    assert params["request_timeout"] == 595.0
+    assert OpenAIProvider._request_timeout(params) == 595.0
+
+
 def test_provider_timeout_preserves_explicit_request_timeout() -> None:
     from domain.ai_client.request_timeout import apply_execution_timeout_to_params
 

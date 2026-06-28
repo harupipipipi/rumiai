@@ -43,6 +43,24 @@ function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+export function resolveEffectiveCompanies({
+  activeConversationId,
+  activeCompanyIdHint,
+  activeCompany,
+  companies,
+}: {
+  activeConversationId?: string | null;
+  activeCompanyIdHint?: string | null;
+  activeCompany?: CompanyRecord | null;
+  companies: CompanyRecord[];
+}): CompanyRecord[] {
+  const normalizedHint = textValue(activeCompanyIdHint) || null;
+  if (!activeCompany) return companies;
+  const ordered = [activeCompany, ...companies.filter((item) => item.id !== activeCompany.id)];
+  if (activeConversationId && !normalizedHint) return ordered;
+  return ordered;
+}
+
 function researchSources(value: unknown): Array<Record<string, unknown>> {
   if (!Array.isArray(value)) return [];
   return value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item))).slice(0, 5);
@@ -97,11 +115,12 @@ export function CompanyWorkspacePanel({
   const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
   const normalizedActiveCompanyIdHint = textValue(activeCompanyIdHint) || null;
 
-  const effectiveCompanies = useMemo(() => {
-    if (activeConversationId && !normalizedActiveCompanyIdHint) return company ? [company] : [];
-    if (!company) return companies;
-    return [company, ...companies.filter((item) => item.id !== company.id)];
-  }, [activeConversationId, companies, company, normalizedActiveCompanyIdHint]);
+  const effectiveCompanies = useMemo(() => resolveEffectiveCompanies({
+    activeConversationId,
+    activeCompanyIdHint: normalizedActiveCompanyIdHint,
+    activeCompany: company,
+    companies,
+  }), [activeConversationId, companies, company, normalizedActiveCompanyIdHint]);
 
   const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
     setBusy(true);
@@ -152,7 +171,7 @@ export function CompanyWorkspacePanel({
           // Keep the generic company workspace usable if the MiMo pack is unavailable.
         }
       }
-      setCompanies(activeConversationId && !normalizedActiveCompanyIdHint ? (statusCompany ? [statusCompany] : []) : listedCompanies);
+      setCompanies(listedCompanies);
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);
 

@@ -252,6 +252,35 @@ def _followup_params(params: dict[str, Any]) -> dict[str, Any]:
     return followup
 
 
+def _scheduled_approval_followup_content(
+    *,
+    task_cfg: dict[str, Any],
+    approved: dict[str, Any],
+) -> str:
+    summary = approved.get("summary") if isinstance(approved.get("summary"), dict) else {}
+    task_message = str(task_cfg.get("message") or "").strip()
+    operation = str(summary.get("operation") or "").strip()
+    tool_name = str(summary.get("tool_name") or "").strip()
+    lines = ["Continue this approved scheduled task."]
+    if task_message:
+        lines.extend(["", "Scheduled task:", task_message])
+    if tool_name or operation:
+        lines.extend(
+            [
+                "",
+                "Approved tool request:",
+                " / ".join(part for part in (tool_name, operation) if part),
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Use the approved tool result to continue only this scheduled task and summarize what happened.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _scheduler_chat_params_and_tools(
     task_cfg: dict[str, Any],
     *,
@@ -316,9 +345,9 @@ def _resume_scheduled_chat_approvals(
         result = send_chat(
             _scheduler_chat_payload(
                 conversation_id=conversation_id,
-                content=(
-                    "Continue the approved scheduled tool request. "
-                    "Use the approved result to continue the assigned scheduled task and summarize what happened."
+                content=_scheduled_approval_followup_content(
+                    task_cfg=task_cfg,
+                    approved=approved,
                 ),
                 task_cfg=task_cfg,
                 schedule_id=schedule_id,
@@ -329,6 +358,9 @@ def _resume_scheduled_chat_approvals(
                 metadata_extra={
                     "source": "scheduler_approval_followup",
                     "approval_followup": approved["followup"],
+                    "scheduled_task_message": str(task_cfg.get("message") or ""),
+                    "scheduled_task_model": str(task_cfg.get("model") or ""),
+                    "scheduled_task_agent_id": str(task_cfg.get("agent_id") or ""),
                 },
             ),
             _scheduler_chat_context(task_cfg),
@@ -1247,6 +1279,24 @@ class Scheduler:
             },
         }
 
+    def _last_history_is_duplicate_already_running_skip(self, schedule_id, running):
+        active_execution_id = str(running.get("execution_id") or "").strip()
+        if not active_execution_id:
+            return False
+        try:
+            entries, _total = load_history(schedule_id, limit=1)
+        except Exception:
+            return False
+        if not entries:
+            return False
+        latest = entries[0]
+        if not isinstance(latest, dict):
+            return False
+        if latest.get("status") != "skipped" or latest.get("skipped_reason") != "already_running":
+            return False
+        latest_running = latest.get("running_execution") if isinstance(latest.get("running_execution"), dict) else {}
+        return str(latest_running.get("execution_id") or "").strip() == active_execution_id
+
     def _advance_after_skipped_scheduled_execution(self, schedule_id):
         with self._lock:
             sched = self._schedules.get(schedule_id)
@@ -1296,7 +1346,8 @@ class Scheduler:
         if running is not None:
             history_entry = self._already_running_entry(schedule_id, running, manual)
             if not manual:
-                append_history(schedule_id, history_entry)
+                if not self._last_history_is_duplicate_already_running_skip(schedule_id, running):
+                    append_history(schedule_id, history_entry)
                 self._advance_after_skipped_scheduled_execution(schedule_id)
             return history_entry
 

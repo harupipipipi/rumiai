@@ -25,7 +25,7 @@ def run(input_data, context=None):
             task_id=input_data.get("task_id", "live_01"),
             task_title=input_data.get("task_title", "Live self-improvement"),
             max_tool_calls=int(input_data.get("max_tool_calls", 15)),
-            model=input_data.get("model", "mimo-v2.5-pro"),
+            model=input_data.get("model") or "xiaomi-token-plan-sgp/mimo-v2.5-pro",
             state_path=input_data.get("state_path"),
         )
         return ok(result)

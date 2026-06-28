@@ -5,7 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
-import { CompanyWorkspacePanel } from "../components/company/CompanyWorkspacePanel";
+import { CompanyWorkspacePanel, resolveEffectiveCompanies } from "../components/company/CompanyWorkspacePanel";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
 
 test("defaultspack renderer registry covers visible shell regions", () => {
@@ -151,6 +151,39 @@ test("company workspace renders a visible empty state before a chat exists", () 
   assert.doesNotMatch(html, />P2P</);
   assert.match(html, /Start or send a chat message to create its employee group/);
   assert.doesNotMatch(html, /Rumi Operations Company/);
+});
+
+test("company workspace keeps global companies visible for conversation-scoped groups", () => {
+  const effectiveCompanies = resolveEffectiveCompanies({
+    activeConversationId: "chat-1",
+    activeCompanyIdHint: null,
+    activeCompany: {
+      id: "chat-team-1",
+      name: "Executive Team",
+      agent_count: 2,
+      task_count: 0,
+    },
+    companies: [
+      {
+        id: "mimo-coding-company",
+        name: "MiMo Coding Company",
+        agent_count: 7,
+        task_count: 6,
+      },
+      {
+        id: "operations-company",
+        name: "Rumi Operations Company",
+        agent_count: 9,
+        task_count: 0,
+      },
+    ],
+  });
+
+  assert.deepEqual(effectiveCompanies.map((company) => company.id), [
+    "chat-team-1",
+    "mimo-coding-company",
+    "operations-company",
+  ]);
 });
 
 test("company task board renders agent run errors", () => {
