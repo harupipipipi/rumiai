@@ -57,6 +57,39 @@ def test_mobile_tool_records_explain_host_bound_tools() -> None:
     assert records[0]["execution_route"] == "unavailable"
 
 
+def test_mobile_tool_records_mark_phone_local_overrides() -> None:
+    from domain.mobile.tools import mobile_tool_records
+
+    records = mobile_tool_records(
+        [
+            {
+                "tool_id": "browser_open_url",
+                "name": "browser_open_url",
+                "summary": "Open a URL",
+                "service_id": "browser",
+                "tags": ["browser", "tool"],
+            },
+            {
+                "tool_id": "media_clipboard_read",
+                "name": "media_clipboard_read",
+                "summary": "Read clipboard",
+                "tags": ["media", "tool"],
+            },
+        ]
+    )
+
+    by_id = {record["tool_id"]: record for record in records}
+    assert by_id["browser_open_url"]["mobile_compatible"] is True
+    assert by_id["browser_open_url"]["execution_route"] == "phone"
+    assert by_id["browser_open_url"]["mobile"]["requires_pc"] is False
+    assert "ios-swift" in by_id["browser_open_url"]["mobile"]["runtime_layers"]
+
+    assert by_id["media_clipboard_read"]["mobile_compatible"] is True
+    assert by_id["media_clipboard_read"]["execution_route"] == "phone"
+    assert by_id["media_clipboard_read"]["mobile"]["requires_mobile_approval"] is True
+    assert by_id["media_clipboard_read"]["mobile"]["implementation_status"] == "implemented"
+
+
 def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:
     from domain.mobile.tools import mobile_tool_records, mobile_tool_summary
 

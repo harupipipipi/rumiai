@@ -39,6 +39,33 @@ class _FakeUrlLauncher extends PlatformUrlLauncher {
   }
 }
 
+class _FakeClipboard extends PlatformClipboard {
+  _FakeClipboard(this.text);
+
+  String? text;
+
+  @override
+  Future<String?> readText() async => text;
+
+  @override
+  Future<void> writeText(String text) async {
+    this.text = text;
+  }
+}
+
+class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
+  _FakeMobileToolApproval(this.approved);
+
+  final bool approved;
+  MobileToolApprovalRequest? lastRequest;
+
+  @override
+  Future<bool> approve(MobileToolApprovalRequest request) async {
+    lastRequest = request;
+    return approved;
+  }
+}
+
 void main() {
   group('MobileToolRuntime', () {
     const runtime = MobileToolRuntime();
@@ -98,6 +125,8 @@ void main() {
           'tool_invoke',
           'tool_consent_check',
           'tool_consent_confirm',
+          'media_clipboard_read',
+          'media_clipboard_write',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -252,6 +281,67 @@ void main() {
       expect(schemaData['mobile_compatible'], isTrue);
       expect(schemaData['execution_route'], 'phone');
       expect(schemaData['callable'], isTrue);
+    });
+
+    test('runs mobile clipboard tools after explicit phone approval', () async {
+      final approval = _FakeMobileToolApproval(true);
+      final clipboard = _FakeClipboard('clipboard secret');
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        clipboard: clipboard,
+      );
+
+      final read = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'clipboard_read_1',
+          name: 'media_clipboard_read',
+          arguments: {'reason': 'Use pasted text in the answer'},
+        ),
+      );
+
+      expect(read.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'media_clipboard_read');
+      final readPayload = jsonDecode(read.output) as Map<String, dynamic>;
+      final readData = readPayload['data'] as Map<String, dynamic>;
+      expect(readData['content'], 'clipboard secret');
+      expect(readData['requires_mobile_approval'], isTrue);
+
+      final write = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'clipboard_write_1',
+          name: 'defaultspack.media.clipboard_write',
+          arguments: {'text': 'new clipboard', 'reason': 'Copy result'},
+        ),
+      );
+
+      expect(write.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'media_clipboard_write');
+      expect(clipboard.text, 'new clipboard');
+      final writePayload = jsonDecode(write.output) as Map<String, dynamic>;
+      final writeData = writePayload['data'] as Map<String, dynamic>;
+      expect(writeData['written'], isTrue);
+    });
+
+    test('mobile clipboard tools fail closed without approval', () async {
+      final approval = _FakeMobileToolApproval(false);
+      final clipboard = _FakeClipboard('private');
+      final runtime = MobileToolRuntime(
+        approvalDelegate: approval,
+        clipboard: clipboard,
+      );
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'clipboard_denied_1',
+          name: 'media_clipboard_read',
+          arguments: {},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
     });
 
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
@@ -451,12 +541,12 @@ void main() {
           jsonDecode(clipboardSchema.output) as Map<String, dynamic>;
       final clipboardData = clipboardPayload['data'] as Map<String, dynamic>;
       final clipboardMobile = clipboardData['mobile'] as Map<String, dynamic>;
-      expect(clipboardData['mobile_compatible'], isFalse);
-      expect(clipboardMobile['implementation_status'],
-          'feasible_needs_mobile_approval_ui');
+      expect(clipboardData['mobile_compatible'], isTrue);
+      expect(clipboardData['execution_route'], 'phone');
+      expect(clipboardMobile['implementation_status'], 'implemented');
       expect(clipboardMobile['requires_mobile_approval'], isTrue);
       expect(clipboardMobile['platforms'], containsAll(['ios', 'android']));
-      expect(clipboardData['unavailable_reason'], contains('モバイル承認UI'));
+      expect(clipboardData['callable'], isTrue);
 
       final computerSchema = runtime.execute(
         const MobileToolCall(

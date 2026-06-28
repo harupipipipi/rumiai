@@ -126,9 +126,31 @@ def mobile_tool_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
 def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | None = None) -> dict[str, Any]:
     record = record if isinstance(record, dict) else ToolServiceCatalog.compact_record(tool)
     service_id = str(record.get("service_id") or "").strip().lower()
+    tool_id = str(record.get("tool_id") or tool.get("tool_id") or tool.get("name") or "").strip().lower()
     tags = _tag_set(record.get("tags")) | _tag_set(tool.get("tags"))
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
     tags |= _tag_set(metadata.get("tags"))
+
+    phone_plan = _phone_local_plan(tool_id)
+    if phone_plan is not None:
+        return {
+            "compatible": True,
+            "available": True,
+            "execution_location": "phone",
+            "execution_route": "phone",
+            "unavailable_reason": "",
+            "platforms": phone_plan["platforms"],
+            "runtime_layers": phone_plan["runtime_layers"],
+            "native_layers": phone_plan["native_layers"],
+            "requires_pc": False,
+            "requires_mobile_approval": phone_plan["requires_mobile_approval"],
+            "implementation_status": "implemented",
+            "tags": [
+                MOBILE_COMPATIBLE_TAG,
+                *_platform_tags(phone_plan, pc_delegated=False),
+            ],
+            "agent_template": mobile_agent_template(),
+        }
 
     blocked_reason = _blocked_reason(service_id, tags, tool)
     connection_status = str(record.get("connection_status") or "").strip().lower()
@@ -175,6 +197,50 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
         ],
         "agent_template": mobile_agent_template(),
     }
+
+
+def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
+    if tool_id in {
+        "agent_plan",
+        "agent_progress",
+        "agent_status",
+        "tool_calculator",
+        "tool_consent_check",
+        "tool_consent_confirm",
+        "tool_list",
+        "tool_names",
+        "tool_schema",
+        "tool_search",
+        "tool_task_board",
+        "tool_todo",
+    }:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+        }
+    if tool_id == "browser_open_url":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIApplication.open",
+                "android:Kotlin Intent.ACTION_VIEW",
+            ],
+            "requires_mobile_approval": False,
+        }
+    if tool_id in {"media_clipboard_read", "media_clipboard_write"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Flutter Clipboard/Pasteboard bridge",
+                "android:Flutter ClipboardManager bridge",
+            ],
+            "requires_mobile_approval": True,
+        }
+    return None
 
 
 def _blocked_reason(service_id: str, tags: set[str], tool: dict[str, Any]) -> str:

@@ -31,6 +31,19 @@ class PlatformUrlLauncher {
   }
 }
 
+class PlatformClipboard {
+  const PlatformClipboard();
+
+  Future<String?> readText() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    return data?.text;
+  }
+
+  Future<void> writeText(String text) {
+    return Clipboard.setData(ClipboardData(text: text));
+  }
+}
+
 class PlatformNotifications {
   const PlatformNotifications();
 

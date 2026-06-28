@@ -227,6 +227,20 @@ class MobileToolCall {
   final Map<String, dynamic> arguments;
 }
 
+class MobileToolApprovalRequest {
+  const MobileToolApprovalRequest({
+    required this.toolName,
+    required this.prompt,
+    required this.arguments,
+    required this.risk,
+  });
+
+  final String toolName;
+  final String prompt;
+  final Map<String, dynamic> arguments;
+  final String risk;
+}
+
 class MobileToolResult {
   const MobileToolResult({
     required this.output,
@@ -249,15 +263,25 @@ abstract interface class MobileToolDelegate {
   Future<MobileToolResult> invoke(MobileToolCall call);
 }
 
+abstract interface class MobileToolApprovalDelegate {
+  Future<bool> approve(MobileToolApprovalRequest request);
+}
+
 class MobileToolRuntime {
   const MobileToolRuntime({
     MobileToolDelegate? pcDelegate,
+    MobileToolApprovalDelegate? approvalDelegate,
     PlatformUrlLauncher urlLauncher = const PlatformUrlLauncher(),
+    PlatformClipboard clipboard = const PlatformClipboard(),
   })  : _pcDelegate = pcDelegate,
-        _urlLauncher = urlLauncher;
+        _approvalDelegate = approvalDelegate,
+        _urlLauncher = urlLauncher,
+        _clipboard = clipboard;
 
   final MobileToolDelegate? _pcDelegate;
+  final MobileToolApprovalDelegate? _approvalDelegate;
   final PlatformUrlLauncher _urlLauncher;
+  final PlatformClipboard _clipboard;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -539,6 +563,77 @@ class MobileToolRuntime {
           'url': {'type': 'string'},
         },
         'required': ['url'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'media_clipboard_read',
+      description:
+          'Read text from this phone clipboard after explicit mobile approval.',
+      tags: ['tool', 'media', 'clipboard', mobileCompatibleTag],
+      aliases: [
+        'clipboard_read',
+        'defaults_media_clipboard_read',
+        'defaultspack_media_clipboard_read',
+        'defaults.media.clipboard.read',
+        'defaults.media.clipboard_read',
+        'defaultspack.media.clipboard.read',
+        'defaultspack.media.clipboard_read',
+      ],
+      runtimeLayers: _nativeUrlRuntimeLayers,
+      nativeLayers: [
+        'ios:Flutter Clipboard/Pasteboard bridge',
+        'android:Flutter ClipboardManager bridge',
+      ],
+      requiresMobileApproval: true,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'reason': {
+            'type': 'string',
+            'description': 'Why clipboard text is needed.',
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 8000,
+            'default': 4000,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'media_clipboard_write',
+      description:
+          'Write text to this phone clipboard after explicit mobile approval.',
+      tags: ['tool', 'media', 'clipboard', mobileCompatibleTag],
+      aliases: [
+        'clipboard_write',
+        'defaults_media_clipboard_write',
+        'defaultspack_media_clipboard_write',
+        'defaults.media.clipboard.write',
+        'defaults.media.clipboard_write',
+        'defaultspack.media.clipboard.write',
+        'defaultspack.media.clipboard_write',
+      ],
+      runtimeLayers: _nativeUrlRuntimeLayers,
+      nativeLayers: [
+        'ios:Flutter Clipboard/Pasteboard bridge',
+        'android:Flutter ClipboardManager bridge',
+      ],
+      requiresMobileApproval: true,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'content': {'type': 'string'},
+          'reason': {
+            'type': 'string',
+            'description': 'Why clipboard text should be replaced.',
+          },
+        },
+        'required': ['text'],
       },
     ),
     MobileToolDefinition(
@@ -974,6 +1069,8 @@ class MobileToolRuntime {
       case 'mobile_uuid':
         return _mobileUuid(call.arguments);
       case 'mobile_url_open':
+      case 'media_clipboard_read':
+      case 'media_clipboard_write':
         return _asyncOnlyTool(name);
       case 'tool_search':
         return _toolSearch(call.arguments);
@@ -1031,6 +1128,10 @@ class MobileToolRuntime {
     switch (name) {
       case 'mobile_url_open':
         return _mobileUrlOpen(call.arguments);
+      case 'media_clipboard_read':
+        return _mediaClipboardRead(call.arguments);
+      case 'media_clipboard_write':
+        return _mediaClipboardWrite(call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -1097,6 +1198,8 @@ class MobileToolRuntime {
       'mobile_base64',
       'mobile_uuid',
       'mobile_url_open',
+      'media_clipboard_read',
+      'media_clipboard_write',
     }.contains(name)) {
       return false;
     }
@@ -1684,6 +1787,123 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _mediaClipboardRead(
+    Map<String, dynamic> args,
+  ) async {
+    final approved = await _requestMobileApproval(
+      toolName: 'media_clipboard_read',
+      risk: 'high',
+      arguments: args,
+      prompt: 'このスマホのclipboardからテキストを読み取ります。許可した内容はAIのtool結果として会話に渡されます。',
+    );
+    if (!approved) return _mobileApprovalRequired('media_clipboard_read');
+
+    final text = await _clipboard.readText() ?? '';
+    final maxChars = (args['max_chars'] is num)
+        ? math.max(1, math.min(8000, (args['max_chars'] as num).toInt()))
+        : 4000;
+    final truncated = text.length > maxChars;
+    final content = truncated ? text.substring(0, maxChars) : text;
+    return MobileToolResult(
+      ok: true,
+      summary: truncated
+          ? 'clipboard read ${content.length}/${text.length} chars'
+          : 'clipboard read ${content.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'content': content,
+          'truncated': truncated,
+          'length': text.length,
+          'returned_length': content.length,
+          'execution_location': 'phone',
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _mediaClipboardWrite(
+    Map<String, dynamic> args,
+  ) async {
+    final text = '${args['text'] ?? args['content'] ?? args['input'] ?? ''}';
+    if (text.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'text is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {'code': 'MISSING_PARAM', 'message': 'text is required'},
+        }),
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'media_clipboard_write',
+      risk: 'high',
+      arguments: {
+        ...args,
+        'preview': _clampText(text.replaceAll(RegExp(r'\s+'), ' '), 160),
+        'length': text.length,
+      },
+      prompt: 'このスマホのclipboardを新しいテキストで置き換えます。現在のclipboard内容は上書きされます。',
+    );
+    if (!approved) return _mobileApprovalRequired('media_clipboard_write');
+
+    await _clipboard.writeText(text);
+    return MobileToolResult(
+      ok: true,
+      summary: 'clipboard wrote ${text.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'written': true,
+          'length': text.length,
+          'execution_location': 'phone',
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  Future<bool> _requestMobileApproval({
+    required String toolName,
+    required String prompt,
+    required Map<String, dynamic> arguments,
+    required String risk,
+  }) async {
+    final delegate = _approvalDelegate;
+    if (delegate == null) return false;
+    try {
+      return await delegate.approve(
+        MobileToolApprovalRequest(
+          toolName: toolName,
+          prompt: prompt,
+          arguments: arguments,
+          risk: risk,
+        ),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  MobileToolResult _mobileApprovalRequired(String toolName) {
+    return MobileToolResult(
+      ok: false,
+      summary: '$toolName requires mobile approval',
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': 'MOBILE_APPROVAL_REQUIRED',
+          'message':
+              '$toolName requires explicit approval on this phone before it can run.',
+          'tool_name': toolName,
+          'execution_location': 'phone',
+        },
+      }),
+    );
+  }
+
   MobileToolResult _asyncOnlyTool(String name) {
     return MobileToolResult(
       ok: false,
@@ -2119,7 +2339,11 @@ String _canonicalToolName(String name) {
 }
 
 bool _isAsyncPhoneToolName(String name) {
-  return const {'mobile_url_open'}.contains(name.trim().toLowerCase());
+  return const {
+    'media_clipboard_read',
+    'media_clipboard_write',
+    'mobile_url_open',
+  }.contains(name.trim().toLowerCase());
 }
 
 bool _isOpenAiFunctionName(String name) {

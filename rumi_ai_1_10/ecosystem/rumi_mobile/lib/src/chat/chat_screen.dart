@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../application/conversation_router.dart';
 import '../data/local/local_chat_backend.dart';
+import '../data/local/mobile_tool_runtime.dart';
 import '../data/pc/device_store.dart';
 import '../data/pc/pc_approval_client.dart';
 import '../data/pc/pc_catalog.dart';
@@ -45,7 +46,8 @@ class ChatScreen extends StatefulWidget {
   State<ChatScreen> createState() => _ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
+class _ChatScreenState extends State<ChatScreen>
+    implements MobileToolApprovalDelegate {
   final _uuid = const Uuid();
   final _scrollController = ScrollController();
   ApiConfig? _apiConfig;
@@ -84,6 +86,7 @@ class _ChatScreenState extends State<ChatScreen> {
           LocalConversationBackend(
             store: widget.store,
             configStore: widget.configStore,
+            mobileToolApprovalDelegate: this,
           ),
     );
     _initFuture = _init();
@@ -557,6 +560,84 @@ class _ChatScreenState extends State<ChatScreen> {
       }
     }
     if (mounted) setState(() {});
+  }
+
+  @override
+  Future<bool> approve(MobileToolApprovalRequest request) async {
+    if (!mounted) return false;
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('スマホtoolの許可'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(request.prompt),
+              const SizedBox(height: 12),
+              Text(
+                request.toolName,
+                style: Theme.of(dialogContext).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _mobileToolApprovalDetails(request),
+                style: Theme.of(dialogContext).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('拒否'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('許可'),
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  String _mobileToolApprovalDetails(MobileToolApprovalRequest request) {
+    final lines = <String>['risk: ${request.risk}'];
+    final reason = '${request.arguments['reason'] ?? ''}'.trim();
+    if (reason.isNotEmpty) lines.add('reason: $reason');
+    if (request.arguments['length'] != null) {
+      lines.add('length: ${request.arguments['length']}');
+    }
+    final preview = '${request.arguments['preview'] ?? ''}'.trim();
+    if (preview.isNotEmpty) {
+      lines.add('preview: ${_compactApprovalValue(preview)}');
+    }
+    for (final entry in request.arguments.entries) {
+      if (lines.length >= 6) break;
+      final key = entry.key;
+      if (const {
+        'approved',
+        'content',
+        'input',
+        'length',
+        'preview',
+        'reason',
+        'text',
+      }.contains(key)) {
+        continue;
+      }
+      lines.add('$key: ${_compactApprovalValue(entry.value)}');
+    }
+    return lines.join('\n');
+  }
+
+  String _compactApprovalValue(Object? value) {
+    final text = '$value'.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (text.length <= 160) return text;
+    return '${text.substring(0, 160)}...';
   }
 
   Future<void> _sendToPc(String text) async {

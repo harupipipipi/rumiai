@@ -16,17 +16,20 @@ class LocalConversationBackend implements ConversationBackend {
     required ApiConfigStore configStore,
     OpenAiClient? client,
     OpenAiClient Function()? createClient,
+    MobileToolApprovalDelegate? mobileToolApprovalDelegate,
   })  : _store = store,
         _configStore = configStore,
         _uuid = const Uuid(),
         _client = client,
-        _createClient = createClient;
+        _createClient = createClient,
+        _mobileToolApprovalDelegate = mobileToolApprovalDelegate;
 
   final ChatStore _store;
   final ApiConfigStore _configStore;
   final Uuid _uuid;
   OpenAiClient? _client;
   final OpenAiClient Function()? _createClient;
+  final MobileToolApprovalDelegate? _mobileToolApprovalDelegate;
 
   OpenAiClient _newClient() => _createClient?.call() ?? OpenAiClient();
 
@@ -260,14 +263,19 @@ class LocalConversationBackend implements ConversationBackend {
   Future<MobileToolRuntime> _buildToolRuntime() async {
     final settings = await _configStore.loadNotificationSettings();
     if (!settings.delegatePhoneToolsToPcWhenAvailable) {
-      return const MobileToolRuntime();
+      return MobileToolRuntime(
+        approvalDelegate: _mobileToolApprovalDelegate,
+      );
     }
     final pc = await _configStore.loadPc();
     if (pc == null || !pc.isConfigured) {
-      return const MobileToolRuntime();
+      return MobileToolRuntime(
+        approvalDelegate: _mobileToolApprovalDelegate,
+      );
     }
     return MobileToolRuntime(
       pcDelegate: PcToolExecutionDelegate(connection: pc),
+      approvalDelegate: _mobileToolApprovalDelegate,
     );
   }
 
