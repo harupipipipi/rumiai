@@ -41,6 +41,7 @@ _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS = 3
 _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS = 64
 _SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES = {"none", "null", "unlimited", "infinite", "infinity"}
 _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS = 300.0
+_SCHEDULE_ONCE_ALREADY_RUNNING_RETRY_SECONDS = 30.0
 
 
 class _SchedulerTaskTimedOut(TimeoutError):
@@ -86,6 +87,11 @@ def _wait_timeout_seconds(value: float) -> float:
 
 def _remaining_timeout_seconds(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
+
+
+def _retry_once_after_running_skip() -> str:
+    retry_at = datetime.now(timezone.utc) + timedelta(seconds=_SCHEDULE_ONCE_ALREADY_RUNNING_RETRY_SECONDS)
+    return retry_at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _run_with_timeout(call, timeout_seconds: float, *, task_timeout_seconds: float, cancel_event=None):
@@ -1241,8 +1247,7 @@ class Scheduler:
             if sched is None:
                 return
             if sched.get("type") == "once":
-                sched["status"] = "completed"
-                sched["next_execution_at"] = None
+                sched["next_execution_at"] = _retry_once_after_running_skip()
             elif sched.get("status") == "active":
                 sched["next_execution_at"] = self._compute_next_execution(sched)
             sched["updated_at"] = timestamp()
@@ -1272,8 +1277,7 @@ class Scheduler:
             sched = self._schedules.get(schedule_id)
         if sched is None or sched.get("status") != "active" or not sched.get("next_execution_at"):
             return
-        if sched.get("type") != "once":
-            self._arm_timer(schedule_id)
+        self._arm_timer(schedule_id)
 
     def _execute_task(self, schedule_id, manual=False):
         """Execute the agent task for a schedule and record history."""

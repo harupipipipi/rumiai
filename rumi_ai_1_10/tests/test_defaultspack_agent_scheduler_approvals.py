@@ -721,6 +721,115 @@ def test_timer_skips_active_running_execution_without_overwriting_or_chat_send(t
         _reset_scheduler_singleton()
 
 
+def test_once_timer_skip_for_active_running_execution_stays_active_and_retries(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "should not run"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    schedule_id = "sched-once-active-timer"
+    active_execution_id = "sexec-once-active-timer"
+    started_at = scheduler_module.timestamp()
+    overdue_next = "2000-01-01T00:00:00Z"
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Active once timer QA",
+            "description": "",
+            "type": "once",
+            "task": {"message": "keep testing", "conversation_id": "conv-mimo", "timeout": 600},
+            "config": {"run_at": overdue_next},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": overdue_next,
+            "created_at": "2026-06-28T15:00:00Z",
+            "updated_at": "2026-06-28T15:53:36Z",
+            "running_execution": {
+                "execution_id": active_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": started_at,
+                "trigger": "manual",
+                "timeout_seconds": 600,
+            },
+            "running_started_at": started_at,
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        scheduler.ensure_loaded()
+        initial_timer_count = len(FakeTimer.created)
+
+        scheduler._on_timer_fire(schedule_id)
+
+        assert calls == []
+        saved = load_schedule(schedule_id)
+        assert saved["status"] == "active"
+        assert saved["running_execution"]["execution_id"] == active_execution_id
+        assert saved["running_execution"]["started_at"] == started_at
+        assert saved["running_execution"]["trigger"] == "manual"
+        assert saved["running_started_at"] == started_at
+        assert saved["execution_count"] == 0
+        assert saved["last_executed_at"] is None
+        assert saved["next_execution_at"] != overdue_next
+        assert saved["next_execution_at"]
+        assert len(FakeTimer.created) == initial_timer_count + 1
+        assert FakeTimer.created[-1].args == [schedule_id]
+        assert FakeTimer.created[-1].started is True
+
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        assert entries[0]["status"] == "skipped"
+        assert entries[0]["skipped_reason"] == "already_running"
+        assert entries[0]["trigger"] == "scheduled"
+        assert entries[0]["running_execution"]["execution_id"] == active_execution_id
+        assert active_execution_id in entries[0]["error"]
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+
+
 def test_scheduler_marks_interval_running_until_task_completes(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
