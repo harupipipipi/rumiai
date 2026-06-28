@@ -204,6 +204,8 @@ const _defaultPdfParseMaxBytes = 8 * 1024 * 1024;
 const _hardPdfParseMaxBytes = 16 * 1024 * 1024;
 const _defaultPdfParseMaxChars = 120000;
 const _hardPdfParseMaxChars = 400000;
+const _defaultSourceExtractMaxChars = 120000;
+const _hardSourceExtractMaxChars = 400000;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -966,6 +968,71 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'source_extract',
+      description:
+          'Extract text and title metadata from source text, HTML, or URL payloads already provided to this phone runtime. Does not read PC workspace paths.',
+      tags: ['tool', 'research', 'source', 'text', mobileCompatibleTag],
+      aliases: [
+        'defaults_source_extract',
+        'defaultspack_source_extract',
+        'defaults.source.extract',
+        'defaultspack.source.extract',
+      ],
+      implementationStatus: 'implemented_payload_only',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'source': {'type': 'string'},
+          'path': {'type': 'string'},
+          'url': {'type': 'string'},
+          'title': {'type': 'string'},
+          'text': {'type': 'string'},
+          'content': {'type': 'string'},
+          'html': {'type': 'string'},
+          'strip_html': {'type': 'boolean', 'default': true},
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardSourceExtractMaxChars,
+            'default': _defaultSourceExtractMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'source_rank',
+      description:
+          'Rank provided source snippets by query term frequency locally on this phone.',
+      tags: ['tool', 'research', 'source', 'ranking', mobileCompatibleTag],
+      aliases: [
+        'defaults_source_rank',
+        'defaultspack_source_rank',
+        'defaults.source.rank',
+        'defaultspack.source.rank',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'sources': {
+            'type': 'array',
+            'items': {
+              'type': 'object',
+              'additionalProperties': true,
+              'properties': {
+                'title': {'type': 'string'},
+                'content': {'type': 'string'},
+                'source': {'type': 'string'},
+              },
+            },
+          },
+        },
+        'required': ['query', 'sources'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -1410,6 +1477,10 @@ class MobileToolRuntime {
         return _mediaDocParse(call.arguments);
       case 'media_pdf_parse':
         return _mediaPdfParse(call.arguments);
+      case 'source_extract':
+        return _sourceExtract(call.arguments);
+      case 'source_rank':
+        return _sourceRank(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case 'tool_names':
@@ -1550,6 +1621,7 @@ class MobileToolRuntime {
       'media_image_read',
       'media_doc_parse',
       'media_pdf_parse',
+      'source_rank',
     }.contains(name)) {
       return false;
     }
@@ -2543,6 +2615,144 @@ class MobileToolRuntime {
         }),
       );
     }
+  }
+
+  MobileToolResult _sourceExtract(Map<String, dynamic> args) {
+    final maxChars = _boundedSourceExtractMaxChars(args['max_chars']);
+    final url = _stringOrNull(args['url']) ??
+        (_looksLikeHttpUrl('${args['source'] ?? ''}')
+            ? '${args['source']}'.trim()
+            : null);
+    if (url != null) {
+      return MobileToolResult(
+        ok: true,
+        summary: 'source url placeholder',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'source': url,
+            'title': _stringOrNull(args['title']) ?? url,
+            'content': '',
+            'length': 0,
+            'network_required': true,
+            'metadata': {
+              'input_kind': 'url',
+              'payload_only': true,
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    }
+
+    final rawHtml = _stringOrNull(args['html']);
+    final rawText = _stringOrNull(args['text']) ??
+        _stringOrNull(args['content']) ??
+        _sourceArgumentAsInlineText(args['source']);
+    final path = _stringOrNull(args['path']) ??
+        ((rawText == null && url == null)
+            ? _stringOrNull(args['source'])
+            : null);
+    if (rawHtml == null && rawText == null) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'source payload is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code':
+                path == null ? 'MISSING_SOURCE_PAYLOAD' : 'UNSUPPORTED_PATH',
+            'message': path == null
+                ? 'text, content, html, url, or inline source text is required.'
+                : 'Phone-local source_extract cannot read PC workspace paths. PC接続時はPC側runtimeへ委譲できます。',
+            if (path != null) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    final input = rawHtml ?? rawText ?? '';
+    final title = _stringOrNull(args['title']) ??
+        (rawHtml == null ? null : _extractHtmlTitle(rawHtml)) ??
+        'Phone source';
+    final content = (rawHtml != null && args['strip_html'] != false)
+        ? _stripHtmlToText(rawHtml)
+        : input;
+    final clean = _normalizeSourceText(content);
+    final truncated = clean.length > maxChars;
+    final returned = truncated ? clean.substring(0, maxChars) : clean;
+    return MobileToolResult(
+      ok: true,
+      summary: 'source extracted ${returned.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'source': rawHtml != null ? 'arguments.html' : 'arguments.text',
+          'title': title,
+          'content': returned,
+          'length': clean.length,
+          'returned_length': returned.length,
+          'truncated': truncated,
+          'network_required': false,
+          'metadata': {
+            'input_kind': rawHtml != null ? 'html' : 'text',
+            'payload_only': true,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _sourceRank(Map<String, dynamic> args) {
+    final query = '${args['query'] ?? ''}'.toLowerCase();
+    final rawSources = args['sources'];
+    final sources = rawSources is List ? rawSources : const [];
+    final terms = _splitSourceRankTerms(query);
+    final ranked = <Map<String, dynamic>>[];
+    for (var index = 0; index < sources.length; index += 1) {
+      final source = sources[index];
+      final text = _sourceRankText(source).toLowerCase();
+      final score = terms.fold<int>(
+        0,
+        (sum, term) =>
+            sum + RegExp(RegExp.escape(term)).allMatches(text).length,
+      );
+      ranked.add({
+        'source': _sourceRankSourceObject(source),
+        'score': score,
+        '_index': index,
+      });
+    }
+    ranked.sort((left, right) {
+      final scoreCompare =
+          (right['score'] as int).compareTo(left['score'] as int);
+      if (scoreCompare != 0) return scoreCompare;
+      return (left['_index'] as int).compareTo(right['_index'] as int);
+    });
+    for (final item in ranked) {
+      item.remove('_index');
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: 'ranked ${ranked.length} sources',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'query': query,
+          'ranked_sources': ranked,
+          'terms': terms,
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
   }
 
   MobileToolResult _mobileUuid(Map<String, dynamic> args) {
@@ -3550,6 +3760,8 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isImageTransform = normalized == 'media_image_transform';
   final isDocParse = normalized == 'media_doc_parse';
   final isPdfParse = normalized == 'media_pdf_parse';
+  final isSourcePayloadTool =
+      normalized == 'source_extract' || normalized == 'source_rank';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -3623,6 +3835,17 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_best_effort_bytes',
+    };
+  }
+  if (isSourcePayloadTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': normalized == 'source_extract'
+          ? 'implemented_payload_only'
+          : 'implemented',
     };
   }
   if (tagSet.contains('media') ||
@@ -3887,6 +4110,12 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'media_pdf_parse') {
     return 'このdefaultspack-compatible toolはDartで渡されたPDF bytesのbest-effort text抽出にスマホ対応済みです。フルlayout/table抽出はPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'source_extract') {
+    return 'このdefaultspack-compatible toolはDartで渡されたtext/html/url payloadの抽出にスマホ対応済みです。PC workspace pathはPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'source_rank') {
+    return 'このdefaultspack-compatible toolはDartで渡されたsource snippetsのterm frequency rankingにスマホ対応済みです。';
   }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
@@ -4262,6 +4491,87 @@ int _boundedPdfParseMaxChars(Object? value) {
     return math.max(1, math.min(_hardPdfParseMaxChars, parsed));
   }
   return _defaultPdfParseMaxChars;
+}
+
+int _boundedSourceExtractMaxChars(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardSourceExtractMaxChars, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardSourceExtractMaxChars, parsed));
+  }
+  return _defaultSourceExtractMaxChars;
+}
+
+bool _looksLikeHttpUrl(String value) {
+  final text = value.trim().toLowerCase();
+  return text.startsWith('http://') || text.startsWith('https://');
+}
+
+String? _sourceArgumentAsInlineText(Object? value) {
+  final text = _stringOrNull(value);
+  if (text == null || _looksLikeHttpUrl(text)) return null;
+  if (text.contains('\n') ||
+      text.contains('\t') ||
+      text.contains('<') ||
+      text.split(RegExp(r'\s+')).length >= 8) {
+    return text;
+  }
+  return null;
+}
+
+String? _extractHtmlTitle(String html) {
+  final match =
+      RegExp(r'<title[^>]*>(.*?)</title>', caseSensitive: false, dotAll: true)
+          .firstMatch(html);
+  final raw = match?.group(1);
+  if (raw == null) return null;
+  final title = _normalizeSourceText(_stripHtmlToText(raw));
+  return title.isEmpty ? null : title;
+}
+
+String _normalizeSourceText(String text) {
+  return text
+      .replaceAll('\r\n', '\n')
+      .replaceAll('\r', '\n')
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r'\s*\n\s*'), '\n')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+}
+
+List<String> _splitSourceRankTerms(String query) {
+  return query
+      .split(RegExp(r'\W+'))
+      .map((term) => term.trim().toLowerCase())
+      .where((term) => term.isNotEmpty)
+      .toList();
+}
+
+String _sourceRankText(Object? source) {
+  if (source is Map) {
+    for (final key in const [
+      'content',
+      'text',
+      'snippet',
+      'summary',
+      'title'
+    ]) {
+      final value = _stringOrNull(source[key]);
+      if (value != null) return value;
+    }
+    return jsonEncode(source);
+  }
+  return '$source';
+}
+
+Object _sourceRankSourceObject(Object? source) {
+  if (source is Map<String, dynamic>) return source;
+  if (source is Map) {
+    return source.map((key, value) => MapEntry('$key', value));
+  }
+  return {'content': '$source'};
 }
 
 String _decodePdfBytesForScan(Uint8List bytes) {

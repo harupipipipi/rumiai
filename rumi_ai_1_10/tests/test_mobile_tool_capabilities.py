@@ -111,6 +111,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "summary": "Parse PDF bytes",
                 "tags": ["media", "tool"],
             },
+            {
+                "tool_id": "source_extract",
+                "name": "source_extract",
+                "summary": "Extract source payload",
+                "tags": ["research", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "source_rank",
+                "name": "source_rank",
+                "summary": "Rank source snippets",
+                "tags": ["research", "agent_os", "artifact_workspace"],
+            },
         ]
     )
 
@@ -166,6 +178,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["media_pdf_parse"]["mobile"]["implementation_status"] == "implemented_best_effort_bytes"
     assert "flutter" in by_id["media_pdf_parse"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["media_pdf_parse"]["mobile"]["runtime_layers"]
+
+    assert by_id["source_extract"]["mobile_compatible"] is True
+    assert by_id["source_extract"]["execution_route"] == "phone"
+    assert by_id["source_extract"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["source_extract"]["mobile"]["implementation_status"] == "implemented_payload_only"
+    assert "flutter" in by_id["source_extract"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["source_extract"]["mobile"]["runtime_layers"]
+
+    assert by_id["source_rank"]["mobile_compatible"] is True
+    assert by_id["source_rank"]["execution_route"] == "phone"
+    assert by_id["source_rank"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["source_rank"]["mobile"]["implementation_status"] == "implemented"
+    assert "flutter" in by_id["source_rank"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["source_rank"]["mobile"]["runtime_layers"]
 
 
 def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:

@@ -293,6 +293,16 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "requires_mobile_approval": False,
             "implementation_status": "implemented_best_effort_bytes",
         }
+    if tool_id in {"source_extract", "source_rank"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": (
+                "implemented_payload_only" if tool_id == "source_extract" else "implemented"
+            ),
+        }
     return None
 
 
@@ -379,6 +389,16 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             "native_layers": [],
             "requires_mobile_approval": False,
             "implementation_status": "implemented_best_effort_bytes",
+        }
+    if tool_id in {"source_extract", "source_rank"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": (
+                "implemented_payload_only" if tool_id == "source_extract" else "implemented"
+            ),
         }
     if "media" in tags or tool_id.startswith(("audio_", "image_", "ocr_")):
         return {

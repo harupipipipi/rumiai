@@ -205,6 +205,8 @@ void main() {
           'media_image_transform',
           'media_doc_parse',
           'media_pdf_parse',
+          'source_extract',
+          'source_rank',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -879,6 +881,82 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('extracts provided HTML source payload on phone', () {
+      const html = '<html><head><title>Source Title</title></head>'
+          '<body><h1>Hello</h1><p>mobile research &amp; ranking</p></body></html>';
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'source_extract_1',
+          name: 'source_extract',
+          arguments: {'html': html},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['title'], 'Source Title');
+      expect(data['content'], contains('Hello'));
+      expect(data['content'], contains('mobile research & ranking'));
+      expect(data['content'], isNot(contains('<h1>')));
+      expect(metadata['payload_only'], isTrue);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('source_extract does not read host paths on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'source_extract_path_1',
+          name: 'source_extract',
+          arguments: {'path': '/tmp/source.html'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+    });
+
+    test('ranks provided source snippets on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'source_rank_1',
+          name: 'source_rank',
+          arguments: {
+            'query': 'mobile tool',
+            'sources': [
+              {
+                'title': 'B',
+                'content': 'mobile only',
+                'source': 'b',
+              },
+              {
+                'title': 'A',
+                'content': 'mobile tool mobile',
+                'source': 'a',
+              },
+            ],
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final ranked = data['ranked_sources'] as List<dynamic>;
+      expect((ranked.first as Map<String, dynamic>)['score'], 3);
+      expect(
+        (((ranked.first as Map<String, dynamic>)['source']
+            as Map<String, dynamic>)['source']),
+        'a',
+      );
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -1199,6 +1277,47 @@ void main() {
       expect(
           pdfParseMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(pdfParseData['tags'], contains(mobileFlutterTag));
+
+      final sourceExtractSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_source_extract_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'source_extract'},
+        ),
+      );
+      final sourceExtractPayload =
+          jsonDecode(sourceExtractSchema.output) as Map<String, dynamic>;
+      final sourceExtractData =
+          sourceExtractPayload['data'] as Map<String, dynamic>;
+      final sourceExtractMobile =
+          sourceExtractData['mobile'] as Map<String, dynamic>;
+      expect(sourceExtractData['mobile_compatible'], isTrue);
+      expect(sourceExtractData['execution_route'], 'phone');
+      expect(sourceExtractMobile['requires_mobile_approval'], isFalse);
+      expect(sourceExtractMobile['implementation_status'],
+          'implemented_payload_only');
+      expect(sourceExtractMobile['runtime_layers'],
+          containsAll(['flutter', 'dart']));
+      expect(sourceExtractData['tags'], contains(mobileFlutterTag));
+
+      final sourceRankSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_source_rank_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'source_rank'},
+        ),
+      );
+      final sourceRankPayload =
+          jsonDecode(sourceRankSchema.output) as Map<String, dynamic>;
+      final sourceRankData = sourceRankPayload['data'] as Map<String, dynamic>;
+      final sourceRankMobile = sourceRankData['mobile'] as Map<String, dynamic>;
+      expect(sourceRankData['mobile_compatible'], isTrue);
+      expect(sourceRankData['execution_route'], 'phone');
+      expect(sourceRankMobile['requires_mobile_approval'], isFalse);
+      expect(sourceRankMobile['implementation_status'], 'implemented');
+      expect(
+          sourceRankMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(sourceRankData['tags'], contains(mobileFlutterTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(
