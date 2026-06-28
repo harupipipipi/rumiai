@@ -213,6 +213,10 @@ const _defaultPdfParseMaxChars = 120000;
 const _hardPdfParseMaxChars = 400000;
 const _defaultSourceExtractMaxChars = 120000;
 const _hardSourceExtractMaxChars = 400000;
+const _defaultArtifactPreviewMaxBytes = 8 * 1024 * 1024;
+const _hardArtifactPreviewMaxBytes = 16 * 1024 * 1024;
+const _defaultArtifactPreviewMaxChars = 40000;
+const _hardArtifactPreviewMaxChars = 120000;
 const _defaultHtmlTableMaxRows = 200;
 const _hardHtmlTableMaxRows = 1000;
 const _defaultHtmlTableMaxTables = 20;
@@ -1294,6 +1298,58 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'artifact_preview',
+      description:
+          'Preview text, HTML, image, or PDF payloads already provided to this phone runtime. Does not read PC artifact paths or directories.',
+      tags: [
+        'tool',
+        'preview',
+        'media',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_artifact_preview',
+        'defaultspack_artifact_preview',
+        'defaults.artifact.preview',
+        'defaultspack.artifact.preview',
+      ],
+      implementationStatus: 'implemented_payload_only_preview',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'content': {'type': 'string'},
+          'html': {'type': 'string'},
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'pdf_base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'image': {'type': 'object'},
+          'path': {'type': 'string'},
+          'name': {'type': 'string'},
+          'mime_type': {'type': 'string'},
+          'format': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxBytes,
+            'default': _defaultArtifactPreviewMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxChars,
+            'default': _defaultArtifactPreviewMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'source_extract',
       description:
           'Extract text and title metadata from source text, HTML, or URL payloads already provided to this phone runtime. Does not read PC workspace paths.',
@@ -1863,6 +1919,8 @@ class MobileToolRuntime {
         return _pdfExtract(call.arguments);
       case 'pdf_extract_tables':
         return _pdfExtractTables(call.arguments);
+      case 'artifact_preview':
+        return _artifactPreview(call.arguments);
       case 'tts_generate':
       case 'tts_generate_local':
         return _ttsGenerate(call.arguments, toolName: name);
@@ -2022,6 +2080,7 @@ class MobileToolRuntime {
       'media_image_read',
       'media_doc_parse',
       'media_pdf_parse',
+      'artifact_preview',
       'source_rank',
       'source_extract',
       'browser_extract_table',
@@ -3199,6 +3258,215 @@ class MobileToolRuntime {
         },
       }),
     );
+  }
+
+  MobileToolResult _artifactPreview(Map<String, dynamic> args) {
+    final maxBytes = _boundedArtifactPreviewMaxBytes(args['max_bytes']);
+    final maxChars = _boundedArtifactPreviewMaxChars(args['max_chars']);
+
+    final imageBase64 = _extractImageBase64(args);
+    if (imageBase64 != null && imageBase64.trim().isNotEmpty) {
+      try {
+        final bytes = base64Decode(_stripDataUrlPrefix(imageBase64));
+        if (bytes.length > maxBytes) {
+          return _artifactPreviewTooLarge(bytes.length, maxBytes);
+        }
+        final metadata = _readImageHeader(bytes);
+        if (metadata != null) {
+          return MobileToolResult(
+            ok: true,
+            summary: 'preview image ${metadata.width}x${metadata.height}',
+            output: jsonEncode({
+              'status': 'ok',
+              'data': {
+                'kind': 'image',
+                'size': bytes.length,
+                'size_bytes': bytes.length,
+                'width': metadata.width,
+                'height': metadata.height,
+                'format': metadata.format,
+                'mime_type': metadata.mimeType,
+                'metadata': {
+                  'payload_only': true,
+                  'source': 'image_payload',
+                  'preview_mode': 'metadata',
+                },
+                'execution_location': 'phone',
+                'runtime_layers': _flutterRuntimeLayers,
+                'requires_mobile_approval': false,
+              },
+            }),
+          );
+        }
+      } catch (_) {
+        // Fall through to document/text parsing; some base64 inputs are text.
+      }
+    }
+
+    final explicitHtml = _stringOrNull(args['html']);
+    if (explicitHtml != null) {
+      return _artifactPreviewText(
+        explicitHtml,
+        kind: 'html',
+        source: 'arguments.html',
+        maxChars: maxChars,
+        metadata: {'title': _extractHtmlTitle(explicitHtml)},
+      );
+    }
+    final explicitText = _stringOrNull(args['text']) ??
+        _stringOrNull(args['content']) ??
+        _sourceArgumentAsInlineText(args['source']);
+    if (explicitText != null) {
+      return _artifactPreviewText(
+        explicitText,
+        kind: _looksLikeHtmlFragment(explicitText) ? 'html' : 'text',
+        source: 'arguments.text',
+        maxChars: maxChars,
+        metadata: _looksLikeHtmlFragment(explicitText)
+            ? {'title': _extractHtmlTitle(explicitText)}
+            : const {},
+      );
+    }
+
+    final _DocumentPayload? payload;
+    try {
+      payload = _extractDocumentPayload(args);
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'artifact payload is invalid',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'INVALID_ARTIFACT_PAYLOAD',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    if (payload == null) {
+      final path = _stringOrNull(args['path']);
+      return MobileToolResult(
+        ok: false,
+        summary: 'artifact payload is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code':
+                path == null ? 'MISSING_ARTIFACT_PAYLOAD' : 'UNSUPPORTED_PATH',
+            'message': path == null
+                ? 'text, html, content, base64, data_url, image/file/document payload is required.'
+                : 'Phone-local artifact_preview cannot read PC artifact paths or directories. Pass payload bytes/text or route this call to the connected PC runtime.',
+            if (path != null) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    if (payload.sizeBytes > maxBytes) {
+      return _artifactPreviewTooLarge(payload.sizeBytes, maxBytes);
+    }
+    final format = _normalizeDocumentFormat(
+      args['format'] ?? payload.format,
+      mimeType: '${args['mime_type'] ?? payload.mimeType ?? ''}',
+      name: '${args['name'] ?? payload.name ?? ''}',
+    );
+    final bytes =
+        payload.bytes ?? Uint8List.fromList(latin1.encode(payload.text ?? ''));
+    final isPdf = format == 'pdf' ||
+        (payload.mimeType ?? '').trim().toLowerCase() == 'application/pdf' ||
+        (payload.name ?? '').trim().toLowerCase().endsWith('.pdf') ||
+        _decodePdfBytesForScan(bytes).startsWith('%PDF');
+    if (isPdf) {
+      final raw = _decodePdfBytesForScan(bytes);
+      final extraction = _extractBestEffortPdfText(raw);
+      final text = extraction.text;
+      final truncated = text.length > maxChars;
+      final content = truncated ? text.substring(0, maxChars) : text;
+      return MobileToolResult(
+        ok: true,
+        summary: content.isEmpty
+            ? 'preview PDF metadata'
+            : 'preview PDF ${content.length} chars',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'kind': 'pdf',
+            'content': content,
+            'text': content,
+            'truncated': truncated,
+            'length': text.length,
+            'returned_length': content.length,
+            'metadata': {
+              'payload_only': true,
+              'source': payload.source,
+              'size_bytes': payload.sizeBytes,
+              'method': extraction.method,
+              'best_effort': true,
+              'screenshot_supported': false,
+              if (payload.name != null) 'name': payload.name,
+              if (payload.mimeType != null) 'mime_type': payload.mimeType,
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    }
+
+    try {
+      final decoded = payload.text == null
+          ? _decodeDocumentBytes(payload.bytes ?? Uint8List(0), maxBytes)
+          : null;
+      final text = payload.text ?? decoded!.text;
+      final kind =
+          format == 'html' || _looksLikeHtmlFragment(text) ? 'html' : 'text';
+      return _artifactPreviewText(
+        kind == 'html'
+            ? text
+            : _parsePhoneDocumentText(text, format: format, stripHtml: false),
+        kind: kind,
+        source: payload.source,
+        maxChars: maxChars,
+        metadata: {
+          if (payload.name != null) 'name': payload.name,
+          if (payload.mimeType != null) 'mime_type': payload.mimeType,
+          'format': format,
+          'size_bytes': payload.sizeBytes,
+          'encoding': payload.text != null ? 'string' : decoded!.encoding,
+          if (kind == 'html') 'title': _extractHtmlTitle(text),
+        },
+      );
+    } on _UnsupportedDocumentEncoding catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'artifact encoding unsupported',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_ARTIFACT_ENCODING',
+            'message': error.message,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'artifact preview failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'ARTIFACT_PREVIEW_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
   }
 
   MobileToolResult _ttsGenerate(
@@ -4478,6 +4746,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPdfParse = normalized == 'media_pdf_parse';
   final isPdfPayloadTool =
       normalized == 'pdf_extract' || normalized == 'pdf_extract_tables';
+  final isArtifactPreview = normalized == 'artifact_preview';
   final isSourcePayloadTool =
       normalized == 'source_extract' || normalized == 'source_rank';
   final isBrowserExtractTable = normalized == 'browser_extract_table';
@@ -4593,6 +4862,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'implementation_status': normalized == 'pdf_extract_tables'
           ? 'implemented_empty_table_fallback'
           : 'implemented_best_effort_bytes',
+    };
+  }
+  if (isArtifactPreview) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_payload_only_preview',
     };
   }
   if (isSourcePayloadTool) {
@@ -4901,6 +5179,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'pdf_extract_tables') {
     return 'このdefaultspack-compatible toolはスマホでは空table fallbackまで対応済みです。フルPDF table抽出はPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'artifact_preview') {
+    return 'このdefaultspack-compatible toolはDartで渡されたtext/html/image/pdf payloadのpreviewにスマホ対応済みです。PC artifact pathやdirectory previewはPC runtimeへ委譲してください。';
   }
   if (normalized == 'source_extract') {
     return 'このdefaultspack-compatible toolはDartで渡されたtext/html/url payloadの抽出にスマホ対応済みです。PC workspace pathはPC runtimeへ委譲してください。';
@@ -5335,6 +5616,28 @@ int _boundedSourceExtractMaxChars(Object? value) {
   return _defaultSourceExtractMaxChars;
 }
 
+int _boundedArtifactPreviewMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardArtifactPreviewMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardArtifactPreviewMaxBytes, parsed));
+  }
+  return _defaultArtifactPreviewMaxBytes;
+}
+
+int _boundedArtifactPreviewMaxChars(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardArtifactPreviewMaxChars, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardArtifactPreviewMaxChars, parsed));
+  }
+  return _defaultArtifactPreviewMaxChars;
+}
+
 int _boundedHtmlTableMaxTables(Object? value) {
   if (value is num) {
     return math.max(1, math.min(_hardHtmlTableMaxTables, value.toInt()));
@@ -5455,6 +5758,71 @@ String? _extractHtmlTitle(String html) {
   if (raw == null) return null;
   final title = _normalizeSourceText(_stripHtmlToText(raw));
   return title.isEmpty ? null : title;
+}
+
+bool _looksLikeHtmlFragment(String value) {
+  final text = value.trim().toLowerCase();
+  return text.contains('<html') ||
+      text.contains('<body') ||
+      text.contains('<table') ||
+      RegExp(r'<[a-z][a-z0-9:-]*(\s|>|/)').hasMatch(text);
+}
+
+MobileToolResult _artifactPreviewTooLarge(int sizeBytes, int maxBytes) {
+  return MobileToolResult(
+    ok: false,
+    summary: 'artifact payload is too large',
+    output: jsonEncode({
+      'status': 'error',
+      'error': {
+        'code': 'ARTIFACT_TOO_LARGE',
+        'message': 'Artifact payload is larger than max_bytes.',
+        'size_bytes': sizeBytes,
+        'max_bytes': maxBytes,
+        'execution_location': 'phone',
+      },
+    }),
+  );
+}
+
+MobileToolResult _artifactPreviewText(
+  String text, {
+  required String kind,
+  required String source,
+  required int maxChars,
+  Map<String, dynamic> metadata = const {},
+}) {
+  final normalized = kind == 'html' ? text.trim() : _normalizeSourceText(text);
+  final truncated = normalized.length > maxChars;
+  final content = truncated ? normalized.substring(0, maxChars) : normalized;
+  final cleanMetadata = <String, dynamic>{
+    for (final entry in metadata.entries)
+      if (entry.value != null) entry.key: entry.value,
+  };
+  return MobileToolResult(
+    ok: true,
+    summary: 'preview $kind ${content.length} chars',
+    output: jsonEncode({
+      'status': 'ok',
+      'data': {
+        'kind': kind,
+        'content': content,
+        'text': kind == 'html' ? _stripHtmlToText(content).trim() : content,
+        'truncated': truncated,
+        'length': normalized.length,
+        'returned_length': content.length,
+        'metadata': {
+          ...cleanMetadata,
+          'payload_only': true,
+          'source': source,
+          'preview_mode': kind == 'html' ? 'html_payload' : 'text_payload',
+        },
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+        'requires_mobile_approval': false,
+      },
+    }),
+  );
 }
 
 String _normalizeSourceText(String text) {

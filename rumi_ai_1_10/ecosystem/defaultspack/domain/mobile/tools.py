@@ -331,6 +331,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
                 else "implemented_best_effort_bytes"
             ),
         }
+    if tool_id == "artifact_preview":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_payload_only_preview",
+        }
     if tool_id in {"source_extract", "source_rank"}:
         return {
             "platforms": ["ios", "android"],
@@ -481,6 +489,14 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
                 if tool_id == "pdf_extract_tables"
                 else "implemented_best_effort_bytes"
             ),
+        }
+    if tool_id == "artifact_preview":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_payload_only_preview",
         }
     if tool_id in {"source_extract", "source_rank"}:
         return {

@@ -148,6 +148,12 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["media", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "artifact_preview",
+                "name": "artifact_preview",
+                "summary": "Preview artifact payload",
+                "tags": ["preview", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "source_extract",
                 "name": "source_extract",
                 "summary": "Extract source payload",
@@ -274,6 +280,13 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["pdf_extract_tables"]["mobile"]["implementation_status"] == "implemented_empty_table_fallback"
     assert "flutter" in by_id["pdf_extract_tables"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["pdf_extract_tables"]["mobile"]["runtime_layers"]
+
+    assert by_id["artifact_preview"]["mobile_compatible"] is True
+    assert by_id["artifact_preview"]["execution_route"] == "phone"
+    assert by_id["artifact_preview"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["artifact_preview"]["mobile"]["implementation_status"] == "implemented_payload_only_preview"
+    assert "flutter" in by_id["artifact_preview"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["artifact_preview"]["mobile"]["runtime_layers"]
 
     assert by_id["source_extract"]["mobile_compatible"] is True
     assert by_id["source_extract"]["execution_route"] == "phone"
