@@ -168,8 +168,15 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
+    auto_approve_allowlist = set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
+    assert "rumi_api" not in auto_approve_allowlist
     assert {
-        "rumi_api",
+        "rumi_api:list_routes",
+        "GET /api/agent/mimo-company/status",
+        "GET /api/company/status",
+        "GET /api/desktops",
+        "GET /api/health",
+        "GET /api/remote/host/status",
         "todo",
         "subagent",
         "knowledge_search",
@@ -179,7 +186,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         "desktop_create",
         "desktop_frame",
         "desktop_input",
-    } <= set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
+    } <= auto_approve_allowlist
     assert "managed desktop" in qa_schedule["task"]["message"]
     assert (tmp_path / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").is_file()
     assert not (tmp_path / "ops_pack" / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").exists()
@@ -194,6 +201,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     ]
     assert status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["create_defaults"]["template_id"] == "desktop.browser"
     assert "template_id=desktop.browser" in qa_schedule["task"]["message"]
+    assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
+    assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
@@ -250,6 +259,10 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     assert "workers reported status" not in heartbeat_schedule["task"]["message"]
     assert "workers reported status" not in qa_schedule["task"]["message"]
     assert "First call desktop_list" in qa_schedule["task"]["message"]
+    assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
+    assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
+    assert "Do not use rumi_api for desktop frames or inputs" in qa_schedule["task"]["message"]
+    assert "/api/desktops/{seat_id}/frame is a GET route, never POST" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
 
     for schedule in status["schedules"]:

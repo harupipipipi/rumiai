@@ -279,6 +279,17 @@ def _authority_context_token_for_permission(context: dict[str, Any], permission_
     return request_id, token
 
 
+def _tool_identity_text_matches(left: Any, right: Any) -> bool:
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text or not right_text:
+        return False
+    if left_text == right_text:
+        return True
+    normalize = lambda value: re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    return normalize(left_text) == normalize(right_text)
+
+
 def _normalize_tool_call_name_and_arguments(
     tool_name: str,
     arguments: dict[str, Any],
@@ -2377,7 +2388,7 @@ class ChatRunEngine:
         # signed-token verification below, which still binds the approval to
         # the operation + args_hash.
         request_tool_name = str(details.get("tool_name") or "").strip()
-        if request_tool_name and request_tool_name != tool_name:
+        if request_tool_name and not _tool_identity_text_matches(request_tool_name, tool_name):
             return None
 
         stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None

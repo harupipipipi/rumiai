@@ -1842,7 +1842,12 @@ class MimoCodingCompanyRuntime:
             "schedule_initial_tool_choice": "required",
             "schedule_auto_approve_tool_requests": True,
             "schedule_auto_approve_tool_allowlist": [
-                "rumi_api",
+                "rumi_api:list_routes",
+                "GET /api/agent/mimo-company/status",
+                "GET /api/company/status",
+                "GET /api/desktops",
+                "GET /api/health",
+                "GET /api/remote/host/status",
                 "todo",
                 "subagent",
                 "knowledge_search",
@@ -2163,7 +2168,7 @@ class MimoCodingCompanyRuntime:
             "Run a QA swarm with short prompts."
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " First call desktop_list. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, assigned_agent=browser_qa, and the assigned target URL, then continue with desktop_frame and desktop_input. "
+            + " First call desktop_list. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, assigned_agent=browser_qa, owner_id=mimo-coding-company, and the assigned target URL, then continue with the desktop_frame and desktop_input tools directly. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."

@@ -16,6 +16,7 @@ import threading
 import time
 import calendar
 import re
+from itertools import count
 from typing import Any
 from datetime import datetime, timezone, timedelta
 
@@ -120,18 +121,18 @@ def _scheduler_chat_payload(
     }
 
 
-def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int:
+def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int | None:
     policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
     if "schedule_auto_approve_max_followups" not in policy:
         raw_value: Any = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
     else:
         raw_value = policy.get("schedule_auto_approve_max_followups")
         if raw_value is None:
-            return _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS
+            return None
     if isinstance(raw_value, str):
         text = raw_value.strip().lower()
         if text in _SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES:
-            return _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS
+            return None
         if not text:
             raw_value = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
     try:
@@ -139,6 +140,13 @@ def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int:
     except Exception:
         value = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
     return max(0, min(value, _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS))
+
+
+def _schedule_auto_approval_attempts(task_cfg: dict[str, Any]):
+    limit = _schedule_auto_approval_limit(task_cfg)
+    if limit is None:
+        return count()
+    return range(limit)
 
 
 def _initial_tool_choice(task_cfg: dict[str, Any]) -> Any:
@@ -157,6 +165,18 @@ def _followup_params(params: dict[str, Any]) -> dict[str, Any]:
     return followup
 
 
+def _scheduler_chat_context(task_cfg: dict[str, Any]) -> dict[str, Any]:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    context: dict[str, Any] = {"profile_policy": policy}
+    metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+    profile_id = str(task_cfg.get("profile_id") or policy.get("profile_id") or metadata.get("profile_id") or "").strip()
+    company_id = str(metadata.get("company_id") or "").strip()
+    if profile_id == "defaultspack.mimo_coding_company" and company_id == "mimo-coding-company":
+        context["owner_pack"] = "defaultspack"
+        context["source"] = "scheduler"
+    return context
+
+
 def _resume_scheduled_chat_approvals(
     *,
     result: dict[str, Any],
@@ -170,7 +190,7 @@ def _resume_scheduled_chat_approvals(
     tools: list[Any] | None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     auto_approvals: list[dict[str, Any]] = []
-    for _idx in range(_schedule_auto_approval_limit(task_cfg)):
+    for _idx in _schedule_auto_approval_attempts(task_cfg):
         if _chat_result_finish_reason(result) not in _APPROVAL_REQUIRED_FINISH_REASONS:
             break
         pending = _pending_approval_from_chat_result(result)
@@ -198,7 +218,7 @@ def _resume_scheduled_chat_approvals(
                     "approval_followup": approved["followup"],
                 },
             ),
-            {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+            _scheduler_chat_context(task_cfg),
         )
     return result, auto_approvals
 
@@ -808,7 +828,7 @@ class Scheduler:
                             params=params,
                             tools=tools,
                         ),
-                        {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                        _scheduler_chat_context(task_cfg),
                     )
                     result, auto_approvals = _resume_scheduled_chat_approvals(
                         result=result,

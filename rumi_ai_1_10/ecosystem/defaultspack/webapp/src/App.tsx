@@ -5886,7 +5886,13 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
+            companyPanel={(
+              <CompanyWorkspacePanel
+                activeConversationId={activeConversationId}
+                activeConversationTitle={activeChatTitle}
+                activeCompanyIdHint={activeConversationCompanyId}
+              />
+            )}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

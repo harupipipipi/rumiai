@@ -83,6 +83,40 @@ def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(mo
     assert seen["conversation_id"] == "conv_1"
 
 
+def test_agent_run_subagent_delegate_provider_error_surfaces_safe_text(monkeypatch):
+    secret = "sk-subagent-secret"
+
+    def fake_execute(input_data, context):
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent-provider-fail",
+                "status": "error",
+                "result": {
+                    "execution_id": "agent-provider-fail",
+                    "status": "error",
+                    "error": "provider error: API key " + secret,
+                },
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = run_subagent_block({"payload": {"task": "delegate this"}}, {})
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["status"] == "error"
+    assert data["code"] == "DELEGATE_PROVIDER_ERROR"
+    assert data["assistant_text"]
+    assert data["error"] == data["assistant_text"]
+    assert data["delegate"]["status"] == "error"
+    assert data["delegate"]["execution_id"] == "agent-provider-fail"
+    serialized = json.dumps(data, ensure_ascii=False)
+    assert secret not in serialized
+    assert "API key" not in serialized
+
+
 def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     parent = _parent_conversation()

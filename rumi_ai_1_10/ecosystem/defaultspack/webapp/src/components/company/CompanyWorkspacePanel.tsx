@@ -68,12 +68,14 @@ function researchTaskDescription(query: string, sources: Array<Record<string, un
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
+  activeCompanyIdHint = null,
 }: {
   activeConversationId?: string | null;
   activeConversationTitle?: string | null;
+  activeCompanyIdHint?: string | null;
 }) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
-  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => textValue(activeCompanyIdHint) || null);
   const [company, setCompany] = useState<CompanyRecord | null>(null);
   const [agents, setAgents] = useState<CompanyAgent[]>([]);
   const [channels, setChannels] = useState<CompanyChannel[]>([]);
@@ -92,18 +94,20 @@ export function CompanyWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const hasActiveConversation = Boolean(activeConversationId);
   const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
+  const normalizedActiveCompanyIdHint = textValue(activeCompanyIdHint) || null;
 
   const effectiveCompanies = useMemo(() => {
-    if (activeConversationId) return company ? [company] : [];
+    if (activeConversationId && !normalizedActiveCompanyIdHint) return company ? [company] : [];
     if (!company) return companies;
     return [company, ...companies.filter((item) => item.id !== company.id)];
-  }, [activeConversationId, companies, company]);
+  }, [activeConversationId, companies, company, normalizedActiveCompanyIdHint]);
 
   const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
     setBusy(true);
     setError(null);
     try {
-      if (!requestedCompanyId && !activeConversationId) {
+      const hintedCompanyId = requestedCompanyId ?? normalizedActiveCompanyIdHint;
+      if (!hintedCompanyId && !activeConversationId) {
         setCompanies([]);
         setActiveCompanyId(null);
         setCompany(null);
@@ -121,8 +125,8 @@ export function CompanyWorkspacePanel({
         return;
       }
 
-      const statusTarget = requestedCompanyId
-        ? requestedCompanyId
+      const statusTarget = hintedCompanyId
+        ? hintedCompanyId
         : activeConversationId
           ? { conversationId: activeConversationId, bootstrap: true }
           : activeCompanyId ?? undefined;
@@ -136,8 +140,8 @@ export function CompanyWorkspacePanel({
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
       const statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
-      const selectedId = requestedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
-      setCompanies(activeConversationId ? (statusCompany ? [statusCompany] : []) : listedCompanies);
+      const selectedId = hintedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
+      setCompanies(activeConversationId && !normalizedActiveCompanyIdHint ? (statusCompany ? [statusCompany] : []) : listedCompanies);
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);
 
@@ -187,12 +191,12 @@ export function CompanyWorkspacePanel({
     } finally {
       setBusy(false);
     }
-  }, [activeCompanyId, activeConversationId]);
+  }, [activeCompanyId, activeConversationId, normalizedActiveCompanyIdHint]);
 
   useEffect(() => {
-    setActiveCompanyId(null);
+    setActiveCompanyId(normalizedActiveCompanyIdHint);
     void loadCompany();
-  }, [activeConversationId]);
+  }, [activeConversationId, normalizedActiveCompanyIdHint]);
 
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 

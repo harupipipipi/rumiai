@@ -38,6 +38,7 @@ def _approval_required_response(
     *,
     conversation_id: str,
     tool_name: str = "browser_use",
+    pending_tool_name: str | None = None,
     operation: str = "browser.open_url",
     risk_level: str = "high",
     arguments: dict | None = None,
@@ -62,9 +63,10 @@ def _approval_required_response(
             "arguments": arguments,
         },
     )
+    pending_tool_name = pending_tool_name or tool_name
     pending = {
-        "tool_name": tool_name,
-        "tool_call_id": f"call_{tool_name}",
+        "tool_name": pending_tool_name,
+        "tool_call_id": f"call_{pending_tool_name}",
         "action": operation,
         "operation": operation,
         "payload": arguments,
@@ -90,8 +92,8 @@ def test_schedule_auto_approval_limit_accepts_unlimited_policy():
 
     assert _schedule_auto_approval_limit({"tool_policy": {}}) == 3
     assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": 0}}) == 0
-    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": "unlimited"}}) == 64
-    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": None}}) == 64
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": "unlimited"}}) is None
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": None}}) is None
     assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": 999}}) == 64
 
 
@@ -248,6 +250,350 @@ def test_scheduler_auto_approves_mimo_scheduled_todo_request(tmp_path, monkeypat
     _reset_scheduler_singleton()
 
 
+def test_scheduler_auto_approves_display_name_tool_requests(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) == 1:
+            return _approval_required_response(
+                approval,
+                conversation_id="conv-mimo",
+                tool_name="Desktop List",
+                pending_tool_name="desktop_list",
+                operation="tool.Desktop List",
+                risk_level="medium",
+                arguments={},
+            )
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "desktop list checked"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "List managed desktops.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["desktop_list"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["desktop_list"],
+                "schedule_auto_approve_max_followups": 2,
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "desktop list checked"
+    assert len(calls) == 2
+    assert calls[0]["context"]["owner_pack"] == "defaultspack"
+    assert calls[1]["context"]["owner_pack"] == "defaultspack"
+    assert history["auto_approvals"] == [
+        {
+            "request_id": calls[1]["payload"]["message"]["metadata"]["approval_followup"]["request_id"],
+            "tool_name": "desktop_list",
+            "operation": "tool.Desktop List",
+            "status": "approved",
+        }
+    ]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_unlimited_auto_approves_repeated_rumi_api_get_desktop_frame_requests(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    approval_count = 66
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) <= approval_count:
+            seat_id = f"seat-{len(calls)}"
+            return _approval_required_response(
+                approval,
+                conversation_id="conv-mimo",
+                tool_name="rumi_api",
+                operation="tool.rumi_api",
+                risk_level="high",
+                arguments={
+                    "action": "request",
+                    "method": "GET",
+                    "path": f"/api/desktops/{seat_id}/frame",
+                },
+            )
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "desktop frames inspected"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Keep inspecting the desktop frames.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["GET /api/desktops/{id}/frame"],
+                "schedule_auto_approve_max_followups": "unlimited",
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "desktop frames inspected"
+    assert len(calls) == approval_count + 1
+    assert len(history["auto_approvals"]) == approval_count
+    assert history["auto_approvals"][0]["tool_name"] == "rumi_api"
+    assert history["auto_approvals"][0]["operation"] == "GET /api/desktops/{id}/frame"
+    assert history["auto_approvals"][-1]["operation"] == "GET /api/desktops/{id}/frame"
+    assert "approval_token" not in history["auto_approvals"][0]
+    followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
+    assert followup["tool_name"] == "rumi_api"
+    assert followup["operation"] == "tool.rumi_api"
+    assert followup["approval_token"]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_does_not_auto_approve_post_frame_when_get_frame_is_allowlisted(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        return _approval_required_response(
+            approval,
+            conversation_id="conv-mimo",
+            tool_name="rumi_api",
+            operation="tool.rumi_api",
+            risk_level="high",
+            arguments={
+                "action": "request",
+                "method": "POST",
+                "path": "/api/desktops/seat-1/frame",
+            },
+        )
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Inspect a desktop frame.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["GET /api/desktops/{id}/frame"],
+                "schedule_auto_approve_max_followups": "unlimited",
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "approval_required"
+    assert len(calls) == 1
+    assert "auto_approvals" not in history
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_does_not_auto_approve_rumi_api_post_frame_from_desktop_frame_alias(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        return _approval_required_response(
+            approval,
+            conversation_id="conv-mimo",
+            tool_name="rumi_api",
+            operation="tool.rumi_api",
+            risk_level="high",
+            arguments={
+                "action": "request",
+                "method": "POST",
+                "path": "/api/desktops/seat-1/frame",
+            },
+        )
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Inspect a desktop frame.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["desktop_frame"],
+                "schedule_auto_approve_max_followups": "unlimited",
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "approval_required"
+    assert len(calls) == 1
+    assert "auto_approvals" not in history
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
+def test_scheduler_auto_approves_route_listing_without_broad_rumi_api_allowlist(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) == 1:
+            return _approval_required_response(
+                approval,
+                conversation_id="conv-mimo",
+                tool_name="rumi_api",
+                operation="tool.rumi_api",
+                risk_level="medium",
+                arguments={"action": "list_routes"},
+            )
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "routes checked"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "List routes.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["rumi_api:list_routes"],
+                "schedule_auto_approve_max_followups": 2,
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "routes checked"
+    assert len(calls) == 2
+    assert history["auto_approvals"][0]["tool_name"] == "rumi_api"
+    assert history["auto_approvals"][0]["operation"] == "tool.rumi_api"
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -291,6 +637,7 @@ def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
     assert history["finish_reason"] == "approval_required"
     assert "approval_required" in history["result"]
     assert len(calls) == 1
+    assert "owner_pack" not in calls[0]["context"]
     assert "auto_approvals" not in history
 
     scheduler.delete_schedule(schedule["id"])
@@ -299,6 +646,7 @@ def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
 
 def test_schedule_history_replaces_lone_surrogates_before_persisting(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
 
     from domain.agent.schedule_store import append_history, load_history, save_schedule
 
