@@ -178,6 +178,11 @@ const _nativeScreenshotRuntimeLayers = <String>[
   'ios-swift',
   'android-kotlin',
 ];
+const _nativeImageTransformRuntimeLayers = <String>[
+  'flutter',
+  'ios-swift',
+  'android-kotlin',
+];
 const _defaultMediaPickMaxBytes = 4 * 1024 * 1024;
 const _hardMediaPickMaxBytes = 8 * 1024 * 1024;
 const _defaultScreenshotMaxBytes = 6 * 1024 * 1024;
@@ -186,6 +191,11 @@ const _defaultScreenshotMaxDimension = 1600;
 const _hardScreenshotMaxDimension = 4096;
 const _defaultImageReadMaxBytes = 8 * 1024 * 1024;
 const _hardImageReadMaxBytes = 16 * 1024 * 1024;
+const _defaultImageTransformOutputMaxBytes = 8 * 1024 * 1024;
+const _hardImageTransformOutputMaxBytes = 16 * 1024 * 1024;
+const _hardImageTransformInputMaxBytes = 24 * 1024 * 1024;
+const _defaultImageTransformMaxDimension = 2048;
+const _hardImageTransformMaxDimension = 4096;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -295,12 +305,15 @@ class MobileToolRuntime {
     PlatformMediaPicker mediaPicker = const PlatformMediaPicker(),
     PlatformScreenshotCapture screenshotCapture =
         const PlatformScreenshotCapture(),
+    PlatformImageTransformer imageTransformer =
+        const PlatformImageTransformer(),
   })  : _pcDelegate = pcDelegate,
         _approvalDelegate = approvalDelegate,
         _urlLauncher = urlLauncher,
         _clipboard = clipboard,
         _mediaPicker = mediaPicker,
-        _screenshotCapture = screenshotCapture;
+        _screenshotCapture = screenshotCapture,
+        _imageTransformer = imageTransformer;
 
   final MobileToolDelegate? _pcDelegate;
   final MobileToolApprovalDelegate? _approvalDelegate;
@@ -308,6 +321,7 @@ class MobileToolRuntime {
   final PlatformClipboard _clipboard;
   final PlatformMediaPicker _mediaPicker;
   final PlatformScreenshotCapture _screenshotCapture;
+  final PlatformImageTransformer _imageTransformer;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -785,6 +799,74 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'media_image_transform',
+      description:
+          'Resize and encode image bytes already provided to this phone runtime. Does not read host file paths.',
+      tags: ['tool', 'media', 'image', 'transform', mobileCompatibleTag],
+      aliases: [
+        'image_transform',
+        'defaults_media_image_transform',
+        'defaultspack_media_image_transform',
+        'defaults.media.image.transform',
+        'defaults.media.image_transform',
+        'defaultspack.media.image.transform',
+        'defaultspack.media.image_transform',
+      ],
+      runtimeLayers: _nativeImageTransformRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift UIImage resize/encode',
+        'android:Kotlin Bitmap resize/encode',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'operations': {
+            'type': 'array',
+            'items': {'type': 'object'},
+          },
+          'width': {'type': 'integer', 'minimum': 1},
+          'height': {'type': 'integer', 'minimum': 1},
+          'max_width': {'type': 'integer', 'minimum': 1},
+          'max_height': {'type': 'integer', 'minimum': 1},
+          'max_dimension': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardImageTransformMaxDimension,
+            'default': _defaultImageTransformMaxDimension,
+          },
+          'format': {
+            'type': 'string',
+            'enum': ['jpeg', 'jpg', 'png'],
+            'default': 'png',
+          },
+          'quality': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 100,
+            'default': 90,
+          },
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardImageTransformOutputMaxBytes,
+            'default': _defaultImageTransformOutputMaxBytes,
+          },
+          'max_input_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardImageTransformInputMaxBytes,
+            'default': _hardImageTransformInputMaxBytes,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -1221,6 +1303,7 @@ class MobileToolRuntime {
       case 'media_clipboard_write':
       case 'media_file_pick':
       case 'media_screenshot':
+      case 'media_image_transform':
         return _asyncOnlyTool(name);
       case 'media_image_read':
         return _mediaImageRead(call.arguments);
@@ -1288,6 +1371,8 @@ class MobileToolRuntime {
         return _mediaFilePick(call.arguments);
       case 'media_screenshot':
         return _mediaScreenshot(call.arguments);
+      case 'media_image_transform':
+        return _mediaImageTransform(call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -1358,6 +1443,7 @@ class MobileToolRuntime {
       'media_clipboard_write',
       'media_file_pick',
       'media_screenshot',
+      'media_image_transform',
       'media_image_read',
     }.contains(name)) {
       return false;
@@ -1957,6 +2043,131 @@ class MobileToolRuntime {
           'status': 'error',
           'error': {
             'code': 'IMAGE_READ_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
+  Future<MobileToolResult> _mediaImageTransform(
+    Map<String, dynamic> args,
+  ) async {
+    final base64Image = _extractImageBase64(args);
+    if (base64Image == null || base64Image.trim().isEmpty) {
+      final path = '${args['path'] ?? ''}'.trim();
+      return MobileToolResult(
+        ok: false,
+        summary: 'image bytes are required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': path.isEmpty ? 'MISSING_IMAGE_BYTES' : 'UNSUPPORTED_PATH',
+            'message': path.isEmpty
+                ? 'base64, image_base64, data_url, image.base64, or file.base64 is required.'
+                : 'Phone-local media_image_transform cannot read host file paths. Use media_file_pick or pass base64 image bytes.',
+            if (path.isNotEmpty) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    try {
+      final bytes = base64Decode(_stripDataUrlPrefix(base64Image));
+      final maxInputBytes =
+          _boundedImageTransformInputMaxBytes(args['max_input_bytes']);
+      if (bytes.length > maxInputBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'image is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'IMAGE_TOO_LARGE',
+              'message': 'Image bytes are larger than max_input_bytes.',
+              'size_bytes': bytes.length,
+              'max_input_bytes': maxInputBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+
+      final format = _normalizeImageTransformFormat(
+        args['format'] ?? args['output_format'] ?? args['mime_type'],
+      );
+      final quality = _boundedImageQuality(args['quality']);
+      final dimensions = _imageTransformDimensions(args);
+      final maxBytes = _boundedImageTransformOutputMaxBytes(args['max_bytes']);
+      final transformed = await _imageTransformer.transform(
+        base64Data: base64Encode(bytes),
+        outputFormat: format,
+        quality: quality,
+        maxWidth: dimensions.maxWidth,
+        maxHeight: dimensions.maxHeight,
+        maxBytes: maxBytes,
+      );
+      if (transformed.size > maxBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'transformed image is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'IMAGE_TRANSFORM_TOO_LARGE',
+              'message': 'Transformed image is larger than max_bytes.',
+              'size': transformed.size,
+              'max_bytes': maxBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      final metadata = _readImageHeader(bytes);
+      final operations = _imageTransformOperationsApplied(
+        args,
+        format: format,
+        dimensions: dimensions,
+      );
+      return MobileToolResult(
+        ok: true,
+        summary: 'transformed image ${transformed.width}x${transformed.height}',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'mime_type': transformed.mimeType,
+            'format': _mimeToImageFormat(transformed.mimeType, format),
+            'size': transformed.size,
+            'size_bytes': transformed.size,
+            'width': transformed.width,
+            'height': transformed.height,
+            'base64': transformed.base64Data,
+            'encoding': 'base64',
+            'operations_applied': operations,
+            'quality': quality,
+            'input': {
+              'size_bytes': bytes.length,
+              if (metadata != null) 'width': metadata.width,
+              if (metadata != null) 'height': metadata.height,
+              if (metadata != null) 'format': metadata.format,
+              if (metadata != null) 'mime_type': metadata.mimeType,
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _nativeImageTransformRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'image transform failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'IMAGE_TRANSFORM_FAILED',
             'message': '$error',
             'execution_location': 'phone',
           },
@@ -2749,6 +2960,7 @@ bool _isAsyncPhoneToolName(String name) {
     'media_clipboard_write',
     'media_file_pick',
     'media_screenshot',
+    'media_image_transform',
     'mobile_url_open',
   }.contains(name.trim().toLowerCase());
 }
@@ -2966,6 +3178,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isMediaPicker = normalized == 'media_file_pick';
   final isScreenshot = normalized == 'media_screenshot';
   final isImageRead = normalized == 'media_image_read';
+  final isImageTransform = normalized == 'media_image_transform';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -3007,6 +3220,18 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'platforms': _defaultMobilePlatforms,
       'runtime_layers': _flutterRuntimeLayers,
       'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented',
+    };
+  }
+  if (isImageTransform) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _nativeImageTransformRuntimeLayers,
+      'native_layers': [
+        'ios:Swift UIImage resize/encode',
+        'android:Kotlin Bitmap resize/encode',
+      ],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented',
     };
@@ -3265,6 +3490,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   if (normalized == 'media_image_read') {
     return 'このdefaultspack-compatible toolはDartの画像ヘッダー解析でスマホ実装済みです。';
   }
+  if (normalized == 'media_image_transform') {
+    return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinの画像resize/encode bridgeでスマホ実装済みです。';
+  }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
   }
@@ -3455,6 +3683,146 @@ int _boundedImageReadMaxBytes(Object? value) {
     return math.max(1, math.min(_hardImageReadMaxBytes, parsed));
   }
   return _defaultImageReadMaxBytes;
+}
+
+int _boundedImageTransformOutputMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(
+      1,
+      math.min(_hardImageTransformOutputMaxBytes, value.toInt()),
+    );
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardImageTransformOutputMaxBytes, parsed));
+  }
+  return _defaultImageTransformOutputMaxBytes;
+}
+
+int _boundedImageTransformInputMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(
+      1,
+      math.min(_hardImageTransformInputMaxBytes, value.toInt()),
+    );
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardImageTransformInputMaxBytes, parsed));
+  }
+  return _hardImageTransformInputMaxBytes;
+}
+
+int _boundedImageQuality(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(100, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) return math.max(1, math.min(100, parsed));
+  return 90;
+}
+
+int? _positiveImageTransformDimension(Object? value) {
+  if (value is num) {
+    return math.max(
+      1,
+      math.min(_hardImageTransformMaxDimension, value.toInt()),
+    );
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed == null) return null;
+  return math.max(1, math.min(_hardImageTransformMaxDimension, parsed));
+}
+
+String _normalizeImageTransformFormat(Object? value) {
+  final raw = '${value ?? ''}'.trim().toLowerCase();
+  if (raw == 'jpg' || raw == 'jpeg' || raw == 'image/jpeg') return 'jpeg';
+  if (raw == 'png' || raw == 'image/png' || raw.isEmpty) return 'png';
+  return 'png';
+}
+
+_ImageTransformDimensions _imageTransformDimensions(Map<String, dynamic> args) {
+  int? maxWidth;
+  int? maxHeight;
+
+  void apply(Object? width, Object? height, Object? maxDimension) {
+    final dimension = _positiveImageTransformDimension(maxDimension);
+    maxWidth = _positiveImageTransformDimension(width) ?? maxWidth;
+    maxHeight = _positiveImageTransformDimension(height) ?? maxHeight;
+    if (dimension != null) {
+      maxWidth ??= dimension;
+      maxHeight ??= dimension;
+    }
+  }
+
+  final operations = args['operations'];
+  if (operations is List) {
+    for (final operation in operations) {
+      if (operation is! Map) continue;
+      final type =
+          '${operation['type'] ?? operation['op'] ?? ''}'.trim().toLowerCase();
+      if (type.isNotEmpty &&
+          !{'resize', 'scale', 'thumbnail', 'fit', 'encode', 'convert'}
+              .contains(type)) {
+        continue;
+      }
+      apply(
+        operation['width'] ?? operation['max_width'],
+        operation['height'] ?? operation['max_height'],
+        operation['max_dimension'] ?? operation['max_size'],
+      );
+    }
+  }
+
+  apply(
+    args['width'] ?? args['max_width'],
+    args['height'] ?? args['max_height'],
+    args['max_dimension'],
+  );
+
+  final defaultDimension =
+      _positiveImageTransformDimension(args['max_dimension']) ??
+          _defaultImageTransformMaxDimension;
+  maxWidth ??= defaultDimension;
+  maxHeight ??= defaultDimension;
+  return _ImageTransformDimensions(maxWidth: maxWidth, maxHeight: maxHeight);
+}
+
+List<String> _imageTransformOperationsApplied(
+  Map<String, dynamic> args, {
+  required String format,
+  required _ImageTransformDimensions dimensions,
+}) {
+  final operations = <String>[];
+  final raw = args['operations'];
+  if (raw is List) {
+    for (final operation in raw) {
+      if (operation is! Map) continue;
+      final type =
+          '${operation['type'] ?? operation['op'] ?? ''}'.trim().toLowerCase();
+      if (type.isNotEmpty && !operations.contains(type)) {
+        operations.add(type);
+      }
+    }
+  }
+  if (dimensions.maxWidth != null || dimensions.maxHeight != null) {
+    final label = [
+      'resize_fit',
+      if (dimensions.maxWidth != null) 'w${dimensions.maxWidth}',
+      if (dimensions.maxHeight != null) 'h${dimensions.maxHeight}',
+    ].join(':');
+    if (!operations.contains(label)) operations.add(label);
+  }
+  final encode = 'encode:$format';
+  if (!operations.contains(encode)) operations.add(encode);
+  return operations;
+}
+
+String _mimeToImageFormat(String mimeType, String fallback) {
+  final mime = mimeType.trim().toLowerCase();
+  if (mime == 'image/jpeg') return 'jpeg';
+  if (mime == 'image/png') return 'png';
+  return fallback;
 }
 
 String? _extractImageBase64(Object? value, [int depth = 0]) {
@@ -3682,6 +4050,16 @@ class _MobileImageMetadata {
   final int height;
   final String format;
   final String mimeType;
+}
+
+class _ImageTransformDimensions {
+  const _ImageTransformDimensions({
+    required this.maxWidth,
+    required this.maxHeight,
+  });
+
+  final int? maxWidth;
+  final int? maxHeight;
 }
 
 final List<Map<String, dynamic>> _mobileTodos = [];

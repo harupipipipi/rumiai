@@ -24,6 +24,7 @@ import UserNotifications
     registerQrScannerChannel()
     registerMediaPickerChannel()
     registerScreenshotChannel()
+    registerImageTransformerChannel()
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -395,6 +396,90 @@ import UserNotifications
       "height": Int(image.size.height * image.scale),
       "base64": data.base64EncodedString(),
     ]
+  }
+
+  private func registerImageTransformerChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "ai.rumi.remote/image_transformer",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "transform" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let args = call.arguments as? [String: Any]
+      result(self.transformImagePayload(args: args))
+    }
+  }
+
+  private func transformImagePayload(args: [String: Any]?) -> [String: Any] {
+    guard let rawBase64 = (args?["base64"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !rawBase64.isEmpty,
+          let inputData = Data(base64Encoded: rawBase64),
+          let image = UIImage(data: inputData) else {
+      return mediaPickerError(code: "invalid_image", message: "Image base64 could not be decoded")
+    }
+
+    let maxBytes = max(1, min((args?["max_bytes"] as? NSNumber)?.intValue ?? 8 * 1024 * 1024, 16 * 1024 * 1024))
+    let format = ((args?["format"] as? String) ?? "png").lowercased()
+    let quality = max(1, min((args?["quality"] as? NSNumber)?.intValue ?? 90, 100))
+    let targetSize = imageTransformTargetSize(
+      image: image,
+      maxWidth: (args?["max_width"] as? NSNumber)?.intValue,
+      maxHeight: (args?["max_height"] as? NSNumber)?.intValue
+    )
+    let rendered = renderImage(image, targetSize: targetSize)
+    let encoded: Data?
+    let mimeType: String
+    if format == "jpeg" || format == "jpg" {
+      encoded = rendered.jpegData(compressionQuality: CGFloat(quality) / 100.0)
+      mimeType = "image/jpeg"
+    } else {
+      encoded = rendered.pngData()
+      mimeType = "image/png"
+    }
+    guard let data = encoded else {
+      return mediaPickerError(code: "encode_failed", message: "Could not encode transformed image")
+    }
+    if data.count > maxBytes {
+      return mediaPickerError(code: "too_large", message: "Transformed image is larger than max_bytes")
+    }
+    return [
+      "mime_type": mimeType,
+      "size": data.count,
+      "width": Int(rendered.size.width * rendered.scale),
+      "height": Int(rendered.size.height * rendered.scale),
+      "base64": data.base64EncodedString(),
+    ]
+  }
+
+  private func imageTransformTargetSize(image: UIImage, maxWidth: Int?, maxHeight: Int?) -> CGSize {
+    let sourceWidth = max(1, image.size.width)
+    let sourceHeight = max(1, image.size.height)
+    let widthLimit = CGFloat(max(1, maxWidth ?? Int(sourceWidth)))
+    let heightLimit = CGFloat(max(1, maxHeight ?? Int(sourceHeight)))
+    let scale = min(1, widthLimit / sourceWidth, heightLimit / sourceHeight)
+    return CGSize(
+      width: max(1, floor(sourceWidth * scale)),
+      height: max(1, floor(sourceHeight * scale))
+    )
+  }
+
+  private func renderImage(_ image: UIImage, targetSize: CGSize) -> UIImage {
+    if Int(targetSize.width) == Int(image.size.width),
+       Int(targetSize.height) == Int(image.size.height) {
+      return image
+    }
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
+    return renderer.image { _ in
+      image.draw(in: CGRect(origin: .zero, size: targetSize))
+    }
   }
 
   override func userNotificationCenter(

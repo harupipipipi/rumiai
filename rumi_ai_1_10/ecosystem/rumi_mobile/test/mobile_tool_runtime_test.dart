@@ -93,6 +93,38 @@ class _FakeScreenshotCapture extends PlatformScreenshotCapture {
   }
 }
 
+class _FakeImageTransformer extends PlatformImageTransformer {
+  _FakeImageTransformer(this.image);
+
+  final PlatformTransformedImage image;
+  bool called = false;
+  String? lastBase64Data;
+  String? lastOutputFormat;
+  int? lastQuality;
+  int? lastMaxWidth;
+  int? lastMaxHeight;
+  int? lastMaxBytes;
+
+  @override
+  Future<PlatformTransformedImage> transform({
+    required String base64Data,
+    required String outputFormat,
+    required int quality,
+    required int? maxWidth,
+    required int? maxHeight,
+    required int maxBytes,
+  }) async {
+    called = true;
+    lastBase64Data = base64Data;
+    lastOutputFormat = outputFormat;
+    lastQuality = quality;
+    lastMaxWidth = maxWidth;
+    lastMaxHeight = maxHeight;
+    lastMaxBytes = maxBytes;
+    return image;
+  }
+}
+
 class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
   _FakeMobileToolApproval(this.approved);
 
@@ -170,6 +202,7 @@ void main() {
           'media_file_pick',
           'media_screenshot',
           'media_image_read',
+          'media_image_transform',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -601,6 +634,113 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('transforms phone-provided image bytes through media_image_transform',
+        () async {
+      final pngHeader = base64Encode([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x04,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
+      ]);
+      final transformedBase64 = base64Encode([1, 2, 3, 4]);
+      final transformer = _FakeImageTransformer(
+        PlatformTransformedImage(
+          mimeType: 'image/jpeg',
+          size: 4,
+          width: 2,
+          height: 2,
+          base64Data: transformedBase64,
+        ),
+      );
+      final runtime = MobileToolRuntime(imageTransformer: transformer);
+
+      final result = await runtime.executeAsync(
+        MobileToolCall(
+          id: 'image_transform_1',
+          name: 'defaultspack.media.image_transform',
+          arguments: {
+            'image': {
+              'base64': 'data:image/png;base64,$pngHeader',
+            },
+            'operations': [
+              {'type': 'resize', 'width': 2, 'height': 2},
+            ],
+            'format': 'jpeg',
+            'quality': 80,
+            'max_bytes': 1024,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(transformer.called, isTrue);
+      expect(transformer.lastOutputFormat, 'jpeg');
+      expect(transformer.lastQuality, 80);
+      expect(transformer.lastMaxWidth, 2);
+      expect(transformer.lastMaxHeight, 2);
+      expect(transformer.lastMaxBytes, 1024);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['width'], 2);
+      expect(data['height'], 2);
+      expect(data['format'], 'jpeg');
+      expect(data['mime_type'], 'image/jpeg');
+      expect(data['base64'], transformedBase64);
+      expect(data['operations_applied'], contains('resize'));
+      expect(data['operations_applied'], contains('encode:jpeg'));
+      expect(data['execution_location'], 'phone');
+      expect(data['requires_mobile_approval'], isFalse);
+      expect(data['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+    });
+
+    test('media_image_transform does not read host paths on phone', () async {
+      final transformer = _FakeImageTransformer(
+        PlatformTransformedImage(
+          mimeType: 'image/png',
+          size: 1,
+          width: 1,
+          height: 1,
+          base64Data: base64Encode([1]),
+        ),
+      );
+      final runtime = MobileToolRuntime(imageTransformer: transformer);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'image_transform_path_1',
+          name: 'media_image_transform',
+          arguments: {'path': '/tmp/image.png'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(transformer.called, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -859,6 +999,28 @@ void main() {
       expect(
           imageReadMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(imageReadData['tags'], contains(mobileFlutterTag));
+
+      final imageTransformSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_image_transform_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_image_transform'},
+        ),
+      );
+      final imageTransformPayload =
+          jsonDecode(imageTransformSchema.output) as Map<String, dynamic>;
+      final imageTransformData =
+          imageTransformPayload['data'] as Map<String, dynamic>;
+      final imageTransformMobile =
+          imageTransformData['mobile'] as Map<String, dynamic>;
+      expect(imageTransformData['mobile_compatible'], isTrue);
+      expect(imageTransformData['execution_route'], 'phone');
+      expect(imageTransformMobile['requires_mobile_approval'], isFalse);
+      expect(imageTransformMobile['implementation_status'], 'implemented');
+      expect(imageTransformMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(imageTransformData['tags'], contains(mobileSwiftNativeTag));
+      expect(imageTransformData['tags'], contains(mobileKotlinNativeTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(

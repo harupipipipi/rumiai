@@ -135,6 +135,61 @@ class PlatformScreenshotCapture {
   }
 }
 
+class PlatformTransformedImage {
+  const PlatformTransformedImage({
+    required this.mimeType,
+    required this.size,
+    required this.width,
+    required this.height,
+    required this.base64Data,
+  });
+
+  final String mimeType;
+  final int size;
+  final int width;
+  final int height;
+  final String base64Data;
+}
+
+class PlatformImageTransformer {
+  const PlatformImageTransformer();
+
+  static const _channel = MethodChannel('ai.rumi.remote/image_transformer');
+
+  Future<PlatformTransformedImage> transform({
+    required String base64Data,
+    required String outputFormat,
+    required int quality,
+    required int? maxWidth,
+    required int? maxHeight,
+    required int maxBytes,
+  }) async {
+    final raw = await _channel.invokeMapMethod<String, dynamic>('transform', {
+      'base64': base64Data,
+      'format': outputFormat,
+      'quality': quality,
+      'max_width': maxWidth,
+      'max_height': maxHeight,
+      'max_bytes': maxBytes,
+    });
+    final map = raw ?? const <String, dynamic>{};
+    final errorCode = '${map['error_code'] ?? ''}'.trim();
+    if (errorCode.isNotEmpty) {
+      throw PlatformException(
+        code: errorCode,
+        message: '${map['message'] ?? 'Image transform failed'}',
+      );
+    }
+    return PlatformTransformedImage(
+      mimeType: '${map['mime_type'] ?? 'image/png'}',
+      size: map['size'] is num ? (map['size'] as num).toInt() : 0,
+      width: map['width'] is num ? (map['width'] as num).toInt() : 0,
+      height: map['height'] is num ? (map['height'] as num).toInt() : 0,
+      base64Data: '${map['base64'] ?? ''}',
+    );
+  }
+}
+
 class PlatformNotifications {
   const PlatformNotifications();
 

@@ -267,6 +267,16 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": False,
         }
+    if tool_id == "media_image_transform":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIImage resize/encode",
+                "android:Kotlin Bitmap resize/encode",
+            ],
+            "requires_mobile_approval": False,
+        }
     return None
 
 
@@ -324,6 +334,17 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart"],
             "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented",
+        }
+    if tool_id == "media_image_transform":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift UIImage resize/encode",
+                "android:Kotlin Bitmap resize/encode",
+            ],
             "requires_mobile_approval": False,
             "implementation_status": "implemented",
         }

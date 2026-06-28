@@ -10,6 +10,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.net.Uri
 import android.os.Build
@@ -41,6 +42,7 @@ class MainActivity : FlutterActivity() {
         registerNotificationsChannel(flutterEngine)
         registerMediaPickerChannel(flutterEngine)
         registerScreenshotChannel(flutterEngine)
+        registerImageTransformerChannel(flutterEngine)
     }
 
     private fun registerSecureStorageChannel(flutterEngine: FlutterEngine) {
@@ -226,6 +228,20 @@ class MainActivity : FlutterActivity() {
                 ?: DEFAULT_SCREENSHOT_MAX_DIMENSION)
                 .coerceIn(320, HARD_SCREENSHOT_MAX_DIMENSION)
             result.success(captureScreenshotPayload(maxBytes, maxDimension))
+        }
+    }
+
+    private fun registerImageTransformerChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "ai.rumi.remote/image_transformer",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "transform") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val args = call.arguments as? Map<*, *>
+            result.success(transformImagePayload(args))
         }
     }
 
@@ -416,6 +432,64 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun transformImagePayload(args: Map<*, *>?): Map<String, Any> {
+        return try {
+            val rawBase64 = (args?.get("base64") as? String)?.trim()
+                ?: return mediaPickerError("invalid_image", "Image base64 is required")
+            val input = Base64.decode(rawBase64, Base64.NO_WRAP)
+            val bitmap = BitmapFactory.decodeByteArray(input, 0, input.size)
+                ?: return mediaPickerError("invalid_image", "Image base64 could not be decoded")
+            val maxWidth = (args?.get("max_width") as? Number)?.toInt()?.coerceAtLeast(1)
+                ?: bitmap.width
+            val maxHeight = (args?.get("max_height") as? Number)?.toInt()?.coerceAtLeast(1)
+                ?: bitmap.height
+            val maxBytes = ((args?.get("max_bytes") as? Number)?.toLong()
+                ?: DEFAULT_IMAGE_TRANSFORM_MAX_BYTES)
+                .coerceIn(1L, HARD_IMAGE_TRANSFORM_MAX_BYTES)
+            val format = ((args?.get("format") as? String) ?: "png").trim().lowercase()
+            val quality = ((args?.get("quality") as? Number)?.toInt() ?: 90).coerceIn(1, 100)
+            val scale = minOf(
+                1f,
+                maxWidth.toFloat() / bitmap.width.coerceAtLeast(1).toFloat(),
+                maxHeight.toFloat() / bitmap.height.coerceAtLeast(1).toFloat(),
+            )
+            val outputWidth = maxOf(1, (bitmap.width * scale).toInt())
+            val outputHeight = maxOf(1, (bitmap.height * scale).toInt())
+            val resized = if (outputWidth == bitmap.width && outputHeight == bitmap.height) {
+                bitmap
+            } else {
+                Bitmap.createScaledBitmap(bitmap, outputWidth, outputHeight, true)
+            }
+            val compressFormat = if (format == "jpeg" || format == "jpg") {
+                Bitmap.CompressFormat.JPEG
+            } else {
+                Bitmap.CompressFormat.PNG
+            }
+            val mimeType = if (compressFormat == Bitmap.CompressFormat.JPEG) {
+                "image/jpeg"
+            } else {
+                "image/png"
+            }
+            val output = ByteArrayOutputStream()
+            resized.compress(compressFormat, quality, output)
+            val bytes = output.toByteArray()
+            if (resized !== bitmap) resized.recycle()
+            bitmap.recycle()
+            if (bytes.size.toLong() > maxBytes) {
+                return mediaPickerError("too_large", "Transformed image is larger than max_bytes")
+            }
+            mapOf(
+                "mime_type" to mimeType,
+                "size" to bytes.size,
+                "width" to outputWidth,
+                "height" to outputHeight,
+                "base64" to Base64.encodeToString(bytes, Base64.NO_WRAP),
+            )
+        } catch (e: Exception) {
+            mediaPickerError("transform_failed", e.message ?: "Could not transform image")
+        }
+    }
+
     private fun immutablePendingIntentFlag(): Int {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE
@@ -434,6 +508,8 @@ class MainActivity : FlutterActivity() {
         const val HARD_SCREENSHOT_MAX_BYTES = 12L * 1024L * 1024L
         const val DEFAULT_SCREENSHOT_MAX_DIMENSION = 1600
         const val HARD_SCREENSHOT_MAX_DIMENSION = 4096
+        const val DEFAULT_IMAGE_TRANSFORM_MAX_BYTES = 8L * 1024L * 1024L
+        const val HARD_IMAGE_TRANSFORM_MAX_BYTES = 16L * 1024L * 1024L
     }
 }
 
