@@ -147,6 +147,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "summary": "Rank source snippets",
                 "tags": ["research", "agent_os", "artifact_workspace"],
             },
+            {
+                "tool_id": "tts_generate",
+                "name": "tts_generate",
+                "summary": "Generate fallback audio",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "tts_generate_local",
+                "name": "tts_generate_local",
+                "summary": "Generate fallback audio locally",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
         ]
     )
 
@@ -244,6 +256,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["source_rank"]["mobile"]["implementation_status"] == "implemented"
     assert "flutter" in by_id["source_rank"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["source_rank"]["mobile"]["runtime_layers"]
+
+    assert by_id["tts_generate"]["mobile_compatible"] is True
+    assert by_id["tts_generate"]["execution_route"] == "phone"
+    assert by_id["tts_generate"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["tts_generate"]["mobile"]["implementation_status"] == "implemented_silent_wav_fallback"
+    assert "flutter" in by_id["tts_generate"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["tts_generate"]["mobile"]["runtime_layers"]
+
+    assert by_id["tts_generate_local"]["mobile_compatible"] is True
+    assert by_id["tts_generate_local"]["execution_route"] == "phone"
+    assert by_id["tts_generate_local"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["tts_generate_local"]["mobile"]["implementation_status"] == "implemented_silent_wav_fallback"
+    assert "flutter" in by_id["tts_generate_local"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["tts_generate_local"]["mobile"]["runtime_layers"]
 
 
 def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:

@@ -206,6 +206,11 @@ const _defaultPdfParseMaxChars = 120000;
 const _hardPdfParseMaxChars = 400000;
 const _defaultSourceExtractMaxChars = 120000;
 const _hardSourceExtractMaxChars = 400000;
+const _defaultTtsFallbackDurationMs = 100;
+const _hardTtsFallbackDurationMs = 30000;
+const _defaultTtsFallbackSampleRate = 16000;
+const _hardTtsFallbackSampleRate = 48000;
+const _minTtsFallbackSampleRate = 8000;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -965,6 +970,72 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'tts_generate',
+      description:
+          'Generate a phone-local fallback WAV audio payload in Flutter/Dart. This does not synthesize spoken speech yet and does not write PC artifact paths.',
+      tags: ['tool', 'media', 'audio', 'tts', mobileCompatibleTag],
+      aliases: [
+        'defaults_tts_generate',
+        'defaultspack_tts_generate',
+        'defaults.tts.generate',
+        'defaultspack.tts.generate',
+      ],
+      implementationStatus: 'implemented_silent_wav_fallback',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'duration_ms': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardTtsFallbackDurationMs,
+            'default': _defaultTtsFallbackDurationMs,
+          },
+          'sample_rate': {
+            'type': 'integer',
+            'minimum': _minTtsFallbackSampleRate,
+            'maximum': _hardTtsFallbackSampleRate,
+            'default': _defaultTtsFallbackSampleRate,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tts_generate_local',
+      description:
+          'Generate a phone-local fallback WAV audio payload in Flutter/Dart. This mirrors defaultspack local TTS fallback without writing PC artifact paths.',
+      tags: ['tool', 'media', 'audio', 'tts', mobileCompatibleTag],
+      aliases: [
+        'defaults_tts_generate_local',
+        'defaultspack_tts_generate_local',
+        'defaults.tts.generate_local',
+        'defaultspack.tts.generate_local',
+      ],
+      implementationStatus: 'implemented_silent_wav_fallback',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'duration_ms': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardTtsFallbackDurationMs,
+            'default': _defaultTtsFallbackDurationMs,
+          },
+          'sample_rate': {
+            'type': 'integer',
+            'minimum': _minTtsFallbackSampleRate,
+            'maximum': _hardTtsFallbackSampleRate,
+            'default': _defaultTtsFallbackSampleRate,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'media_doc_parse',
       description:
           'Parse text-like document bytes or text already provided to this phone runtime. Supports txt, markdown, json, csv, html, xml, and similar UTF text; does not read host file paths.',
@@ -1639,6 +1710,9 @@ class MobileToolRuntime {
         return _pdfExtract(call.arguments);
       case 'pdf_extract_tables':
         return _pdfExtractTables(call.arguments);
+      case 'tts_generate':
+      case 'tts_generate_local':
+        return _ttsGenerate(call.arguments, toolName: name);
       case 'source_extract':
         return _sourceExtract(call.arguments);
       case 'source_rank':
@@ -1789,6 +1863,8 @@ class MobileToolRuntime {
       'media_doc_parse',
       'media_pdf_parse',
       'source_rank',
+      'tts_generate',
+      'tts_generate_local',
     }.contains(name)) {
       return false;
     }
@@ -2851,6 +2927,51 @@ class MobileToolRuntime {
             'payload_only': true,
             'best_effort': true,
             'tables_supported': false,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _ttsGenerate(
+    Map<String, dynamic> args, {
+    required String toolName,
+  }) {
+    final text = '${args['text'] ?? ''}';
+    final durationMs = _boundedTtsFallbackDurationMs(args['duration_ms']);
+    final sampleRate = _boundedTtsFallbackSampleRate(args['sample_rate']);
+    final wav = _silentWavBytes(
+      durationMs: durationMs,
+      sampleRate: sampleRate,
+    );
+    final outputPath = _stringOrNull(args['output_path']);
+    return MobileToolResult(
+      ok: true,
+      summary: 'generated fallback WAV ${wav.length} bytes',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'mime_type': 'audio/wav',
+          'format': 'wav',
+          'encoding': 'base64',
+          'base64': base64Encode(wav),
+          'size': wav.length,
+          'size_bytes': wav.length,
+          'sample_rate': sampleRate,
+          'channels': 1,
+          'bits_per_sample': 16,
+          'duration_ms': durationMs,
+          'fallback': 'silent_wav',
+          'text_length': text.length,
+          if (outputPath != null) 'requested_output_path': outputPath,
+          'metadata': {
+            'tool': toolName,
+            'payload_only': true,
+            'real_tts_supported': false,
+            'native_tts_bridge': false,
           },
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
@@ -4011,6 +4132,8 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       normalized == 'pdf_extract' || normalized == 'pdf_extract_tables';
   final isSourcePayloadTool =
       normalized == 'source_extract' || normalized == 'source_rank';
+  final isTtsFallbackTool =
+      normalized == 'tts_generate' || normalized == 'tts_generate_local';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -4118,6 +4241,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'implementation_status': normalized == 'source_extract'
           ? 'implemented_payload_only'
           : 'implemented',
+    };
+  }
+  if (isTtsFallbackTool) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_silent_wav_fallback',
     };
   }
   if (tagSet.contains('media') ||
@@ -4397,6 +4529,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'source_rank') {
     return 'このdefaultspack-compatible toolはDartで渡されたsource snippetsのterm frequency rankingにスマホ対応済みです。';
+  }
+  if (normalized == 'tts_generate' || normalized == 'tts_generate_local') {
+    return 'このdefaultspack-compatible toolはFlutter/Dartでsilent WAV fallback payload生成にスマホ対応済みです。実音声TTS合成とPC artifact保存はPC/native runtimeへ委譲してください。';
   }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
@@ -4806,6 +4941,67 @@ int _boundedSourceExtractMaxChars(Object? value) {
     return math.max(1, math.min(_hardSourceExtractMaxChars, parsed));
   }
   return _defaultSourceExtractMaxChars;
+}
+
+int _boundedTtsFallbackDurationMs(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardTtsFallbackDurationMs, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardTtsFallbackDurationMs, parsed));
+  }
+  return _defaultTtsFallbackDurationMs;
+}
+
+int _boundedTtsFallbackSampleRate(Object? value) {
+  if (value is num) {
+    return math.max(
+      _minTtsFallbackSampleRate,
+      math.min(_hardTtsFallbackSampleRate, value.toInt()),
+    );
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(
+      _minTtsFallbackSampleRate,
+      math.min(_hardTtsFallbackSampleRate, parsed),
+    );
+  }
+  return _defaultTtsFallbackSampleRate;
+}
+
+Uint8List _silentWavBytes({
+  required int durationMs,
+  required int sampleRate,
+}) {
+  const channels = 1;
+  const bitsPerSample = 16;
+  final samples = math.max(1, (sampleRate * durationMs / 1000).round());
+  final dataBytes = samples * channels * (bitsPerSample ~/ 8);
+  final bytes = Uint8List(44 + dataBytes);
+  final data = ByteData.sublistView(bytes);
+  _writeAscii(bytes, 0, 'RIFF');
+  data.setUint32(4, 36 + dataBytes, Endian.little);
+  _writeAscii(bytes, 8, 'WAVE');
+  _writeAscii(bytes, 12, 'fmt ');
+  data.setUint32(16, 16, Endian.little);
+  data.setUint16(20, 1, Endian.little);
+  data.setUint16(22, channels, Endian.little);
+  data.setUint32(24, sampleRate, Endian.little);
+  data.setUint32(
+      28, sampleRate * channels * (bitsPerSample ~/ 8), Endian.little);
+  data.setUint16(32, channels * (bitsPerSample ~/ 8), Endian.little);
+  data.setUint16(34, bitsPerSample, Endian.little);
+  _writeAscii(bytes, 36, 'data');
+  data.setUint32(40, dataBytes, Endian.little);
+  return bytes;
+}
+
+void _writeAscii(Uint8List bytes, int offset, String value) {
+  for (var index = 0; index < value.length; index += 1) {
+    bytes[offset + index] = value.codeUnitAt(index);
+  }
 }
 
 bool _looksLikeHttpUrl(String value) {

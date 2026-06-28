@@ -211,6 +211,8 @@ void main() {
           'pdf_extract_tables',
           'source_extract',
           'source_rank',
+          'tts_generate',
+          'tts_generate_local',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -871,6 +873,56 @@ void main() {
       expect(data['mime_type'], 'image/jpeg');
       expect(data['format'], 'jpeg');
       expect(data['base64'], transformedBase64);
+    });
+
+    test('generates phone-local TTS fallback WAV payload', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'tts_generate_1',
+          name: 'tts_generate',
+          arguments: {
+            'text': 'hello mobile',
+            'duration_ms': 100,
+            'sample_rate': 16000,
+            'output_path': 'audio/hello.wav',
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      final wav = base64Decode(data['base64'] as String);
+      expect(ascii.decode(wav.sublist(0, 4)), 'RIFF');
+      expect(ascii.decode(wav.sublist(8, 12)), 'WAVE');
+      expect(data['mime_type'], 'audio/wav');
+      expect(data['fallback'], 'silent_wav');
+      expect(data['sample_rate'], 16000);
+      expect(data['duration_ms'], 100);
+      expect(data['requested_output_path'], 'audio/hello.wav');
+      expect(metadata['payload_only'], isTrue);
+      expect(metadata['real_tts_supported'], isFalse);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('tts_generate_local shares the phone-local WAV fallback', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'tts_generate_local_1',
+          name: 'tts_generate_local',
+          arguments: {'text': 'local'},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      final wav = base64Decode(data['base64'] as String);
+      expect(ascii.decode(wav.sublist(0, 4)), 'RIFF');
+      expect(metadata['tool'], 'tts_generate_local');
     });
 
     test('parses phone-provided text documents through media_doc_parse', () {
@@ -1574,6 +1626,44 @@ void main() {
       expect(
           sourceRankMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(sourceRankData['tags'], contains(mobileFlutterTag));
+
+      final ttsSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_tts_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tts_generate'},
+        ),
+      );
+      final ttsPayload = jsonDecode(ttsSchema.output) as Map<String, dynamic>;
+      final ttsData = ttsPayload['data'] as Map<String, dynamic>;
+      final ttsMobile = ttsData['mobile'] as Map<String, dynamic>;
+      expect(ttsData['mobile_compatible'], isTrue);
+      expect(ttsData['execution_route'], 'phone');
+      expect(ttsMobile['requires_mobile_approval'], isFalse);
+      expect(ttsMobile['implementation_status'],
+          'implemented_silent_wav_fallback');
+      expect(ttsMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(ttsData['tags'], contains(mobileFlutterTag));
+
+      final ttsLocalSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_tts_local_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tts_generate_local'},
+        ),
+      );
+      final ttsLocalPayload =
+          jsonDecode(ttsLocalSchema.output) as Map<String, dynamic>;
+      final ttsLocalData = ttsLocalPayload['data'] as Map<String, dynamic>;
+      final ttsLocalMobile = ttsLocalData['mobile'] as Map<String, dynamic>;
+      expect(ttsLocalData['mobile_compatible'], isTrue);
+      expect(ttsLocalData['execution_route'], 'phone');
+      expect(ttsLocalMobile['requires_mobile_approval'], isFalse);
+      expect(ttsLocalMobile['implementation_status'],
+          'implemented_silent_wav_fallback');
+      expect(
+          ttsLocalMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(ttsLocalData['tags'], contains(mobileFlutterTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(
