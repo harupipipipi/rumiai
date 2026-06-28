@@ -15,11 +15,25 @@ import { DesktopInspector } from "./DesktopInspector";
 import { DesktopProviderNotice } from "./DesktopProviderNotice";
 import { type DesktopDensity, type DesktopFilter, DesktopToolbar } from "./DesktopToolbar";
 
+export function shouldShowDesktopList({
+  runtimeReady,
+  desktopCount,
+  loading,
+  error,
+}: {
+  runtimeReady: boolean;
+  desktopCount: number;
+  loading: boolean;
+  error?: string | null;
+}) {
+  return runtimeReady || desktopCount > 0 || loading || Boolean(error);
+}
+
 export function DesktopMonitorWorkspace() {
   const runtime = useRuntimeDoctor({ autoRunDoctor: true });
   const runtimeReady = runtime.availability.status === "ready";
   const templates = useSandboxTemplates({ enabled: runtimeReady });
-  const desktopInstances = useDesktopInstances({ enabled: runtimeReady, pollIntervalMs: 2500 });
+  const desktopInstances = useDesktopInstances({ pollIntervalMs: 2500 });
   const [filter, setFilter] = useState<DesktopFilter>("all");
   const [density, setDensity] = useState<DesktopDensity>("comfortable");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
@@ -231,6 +245,12 @@ export function DesktopMonitorWorkspace() {
   const canCreate = runtimeReady && !templates.loading && templates.desktopTemplates.length > 0;
   const setupMessage = diagnosticsCopied ? "Diagnostics copied." : null;
   const surfaceError = actionError || desktopInstances.error || templates.error || setupMessage;
+  const showDesktopList = shouldShowDesktopList({
+    runtimeReady,
+    desktopCount: desktopInstances.desktops.length,
+    loading: desktopInstances.loading,
+    error: desktopInstances.error,
+  });
 
   return (
     <section className="relative flex h-full min-h-0 flex-1 flex-col bg-[#09090b] text-zinc-300" aria-label="Desktops workspace">
@@ -259,7 +279,7 @@ export function DesktopMonitorWorkspace() {
             </div>
           )}
 
-          {runtimeReady && (
+          {showDesktopList && (
             <div className="grid min-h-0 gap-2 min-[1280px]:grid-cols-[minmax(0,1fr)_300px] min-[1536px]:grid-cols-[minmax(0,1fr)_340px]">
               <DesktopGrid
                 desktops={visibleDesktops}

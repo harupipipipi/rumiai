@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DesktopInstance } from "../../features/sandboxes/types";
+import { shouldShowDesktopList } from "./DesktopMonitorWorkspace";
 import { DesktopGrid } from "./DesktopGrid";
 
 const noop = () => undefined;
@@ -51,4 +52,17 @@ test("multiple desktop grid keeps compact multi-column sizing", () => {
 
   assert.match(html, /min-\[900px\]:grid-cols-2/);
   assert.doesNotMatch(html, /min-h-\[calc\(100vh-180px\)\]/);
+});
+
+test("desktop workspace keeps existing seats visible while runtime setup is degraded", () => {
+  assert.equal(shouldShowDesktopList({
+    runtimeReady: false,
+    desktopCount: 1,
+    loading: false,
+  }), true);
+  assert.equal(shouldShowDesktopList({
+    runtimeReady: false,
+    desktopCount: 0,
+    loading: false,
+  }), false);
 });

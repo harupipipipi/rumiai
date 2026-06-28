@@ -164,7 +164,18 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
-    assert {"desktop_create", "desktop_input"} <= set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
+    assert {
+        "rumi_api",
+        "todo",
+        "subagent",
+        "knowledge_search",
+        "knowledge_create",
+        "web_search",
+        "desktop_list",
+        "desktop_create",
+        "desktop_frame",
+        "desktop_input",
+    } <= set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "managed desktop" in qa_schedule["task"]["message"]
     browser_qa_role = next(role for role in status["manifest"]["roles"] if role["agent_id"] == "browser_qa")
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(browser_qa_role["allowed_tools"])
@@ -430,6 +441,18 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "empty",
+            "desktop_count": 0,
+            "desktops": [],
+            "signal": "desktops_empty",
+        }),
+    )
     status = runtime.bootstrap(
         start_nonstop=True,
         heartbeat_minutes=30,
