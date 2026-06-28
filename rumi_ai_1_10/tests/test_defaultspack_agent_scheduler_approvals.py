@@ -529,6 +529,90 @@ def test_trigger_now_skips_when_schedule_has_active_running_execution(tmp_path, 
         _reset_scheduler_singleton()
 
 
+def test_manual_trigger_fails_fast_when_conversation_is_busy_without_running_marker(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "should not start"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {"message": "manual check", "conversation_id": "conv-busy", "timeout": 30},
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+    conversation_lock = scheduler._conversation_execution_lock("conv-busy")
+    assert conversation_lock is not None
+    assert conversation_lock.acquire(blocking=False)
+    try:
+        started = time.monotonic()
+        history = scheduler.trigger_now(schedule["id"])
+        elapsed = time.monotonic() - started
+    finally:
+        conversation_lock.release()
+
+    try:
+        assert elapsed < 1
+        assert calls == []
+        assert history["status"] == "error"
+        assert history["error_code"] == "CONVERSATION_RUNNING"
+        assert history["skipped_reason"] == "conversation_running"
+        assert "conv-busy" in history["error"]
+
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert "running_started_at" not in saved
+        assert saved["execution_count"] == 1
+        assert saved["last_executed_at"] == history["completed_at"]
+
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["execution_id"] == history["execution_id"]
+        assert entries[0]["status"] == "error"
+        assert entries[0]["error_code"] == "CONVERSATION_RUNNING"
+        assert entries[0]["skipped_reason"] == "conversation_running"
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_timer_skips_active_running_execution_without_overwriting_or_chat_send(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -1954,7 +2038,7 @@ def test_scheduler_serializes_chat_runs_for_same_conversation(tmp_path, monkeypa
     results = {}
 
     def run_schedule(key, schedule_id):
-        results[key] = scheduler.trigger_now(schedule_id)
+        results[key] = scheduler._execute_task(schedule_id, manual=False)
 
     t1 = threading.Thread(target=run_schedule, args=("first", first["id"]))
     t2 = threading.Thread(target=run_schedule, args=("second", second["id"]))

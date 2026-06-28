@@ -49,6 +49,12 @@ class _SchedulerTaskTimedOut(TimeoutError):
         super().__init__(_scheduler_timeout_error(timeout_seconds))
 
 
+class _SchedulerConversationBusy(RuntimeError):
+    def __init__(self, conversation_id: str):
+        self.conversation_id = conversation_id
+        super().__init__("conversation is already running: " + conversation_id)
+
+
 def _format_timeout_seconds(value: float) -> str:
     if float(value).is_integer():
         return str(int(value))
@@ -1307,19 +1313,27 @@ class Scheduler:
         }
         auto_approvals = []
         trigger = _scheduler_trigger_name(manual)
+        conversation_lock = None
+        conversation_lock_acquired = False
         with self._lock:
             self._active_execution_ids.add(exec_id)
-        self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
-
         try:
             if conversation_id:
                 conversation_lock = self._conversation_execution_lock(conversation_id)
                 if conversation_lock is None:
                     raise ValueError("task.conversation_id cannot be blank")
-                lock_timeout = _remaining_timeout_seconds(deadline)
-                if not conversation_lock.acquire(timeout=_wait_timeout_seconds(lock_timeout)):
+                if manual:
+                    acquired = conversation_lock.acquire(blocking=False)
+                else:
+                    lock_timeout = _remaining_timeout_seconds(deadline)
+                    acquired = conversation_lock.acquire(timeout=_wait_timeout_seconds(lock_timeout))
+                if not acquired:
                     cancel_event.set()
+                    if manual:
+                        raise _SchedulerConversationBusy(str(conversation_id))
                     raise _SchedulerTaskTimedOut(timeout_seconds)
+                conversation_lock_acquired = True
+                self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
                 try:
                     from blocks.chat.send import run as chat_send_run
 
@@ -1360,7 +1374,9 @@ class Scheduler:
                     )
                 finally:
                     conversation_lock.release()
+                    conversation_lock_acquired = False
             else:
+                self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
                 from blocks.ai.complete import run as ai_complete_run
 
                 messages = []
@@ -1418,37 +1434,48 @@ class Scheduler:
             history_entry["error"] = str(exc)
             if isinstance(exc, _SchedulerTaskTimedOut):
                 history_entry["timeout_seconds"] = exc.timeout_seconds
+            elif isinstance(exc, _SchedulerConversationBusy):
+                history_entry["error_code"] = "CONVERSATION_RUNNING"
+                history_entry["skipped_reason"] = "conversation_running"
+        finally:
+            if conversation_lock_acquired and conversation_lock is not None:
+                try:
+                    conversation_lock.release()
+                except RuntimeError:
+                    pass
 
-        history_entry["completed_at"] = timestamp()
-        append_history(schedule_id, history_entry)
+            try:
+                history_entry["completed_at"] = timestamp()
+                append_history(schedule_id, history_entry)
 
-        # Update schedule metadata
-        with self._lock:
-            sched = self._schedules.get(schedule_id)
-        if sched is not None:
-            current = _running_execution_details(sched)
-            if isinstance(current, dict):
-                current_execution_id = str(current.get("execution_id") or "").strip()
-                if not current_execution_id or current_execution_id == exec_id:
-                    sched.pop("running_execution", None)
-                    sched.pop("running_started_at", None)
-            else:
-                sched.pop("running_started_at", None)
-            sched["execution_count"] = sched.get("execution_count", 0) + 1
-            sched["last_executed_at"] = history_entry["completed_at"]
-            if not manual:
-                if sched.get("type") == "once":
-                    sched["status"] = "completed"
-                    sched["next_execution_at"] = None
-                elif sched.get("status") == "active":
-                    sched["next_execution_at"] = self._compute_next_execution(sched)
-            sched["updated_at"] = timestamp()
-            save_schedule(sched)
-            with self._lock:
-                self._schedules[schedule_id] = sched
-
-        with self._lock:
-            self._active_execution_ids.discard(exec_id)
+                # Update schedule metadata
+                with self._lock:
+                    sched = self._schedules.get(schedule_id)
+                if sched is not None:
+                    current = _running_execution_details(sched)
+                    if isinstance(current, dict):
+                        current_execution_id = str(current.get("execution_id") or "").strip()
+                        if not current_execution_id or current_execution_id == exec_id:
+                            sched.pop("running_execution", None)
+                            sched.pop("running_started_at", None)
+                    else:
+                        sched.pop("running_execution", None)
+                        sched.pop("running_started_at", None)
+                    sched["execution_count"] = sched.get("execution_count", 0) + 1
+                    sched["last_executed_at"] = history_entry["completed_at"]
+                    if not manual:
+                        if sched.get("type") == "once":
+                            sched["status"] = "completed"
+                            sched["next_execution_at"] = None
+                        elif sched.get("status") == "active":
+                            sched["next_execution_at"] = self._compute_next_execution(sched)
+                    sched["updated_at"] = timestamp()
+                    save_schedule(sched)
+                    with self._lock:
+                        self._schedules[schedule_id] = sched
+            finally:
+                with self._lock:
+                    self._active_execution_ids.discard(exec_id)
         return history_entry
 
     def shutdown(self):
