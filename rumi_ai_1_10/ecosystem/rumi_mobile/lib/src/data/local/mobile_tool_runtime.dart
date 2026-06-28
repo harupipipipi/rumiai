@@ -967,6 +967,158 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'sheet_create',
+      description:
+          'Create a phone-local CSV, TSV, JSON, or HTML sheet artifact. XLSX output remains PC-delegated.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'sheet',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_sheet_create',
+        'defaultspack_sheet_create',
+        'defaults.sheet.create',
+        'defaultspack.sheet.create',
+      ],
+      implementationStatus: 'implemented_phone_sheet_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'rows': {
+            'type': 'array',
+            'items': {'type': 'array'},
+          },
+          'columns': {
+            'type': 'array',
+            'items': {'type': 'string'},
+          },
+          'output_path': {'type': 'string'},
+          'format': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'sheet_read',
+      description:
+          'Read rows from a phone-local CSV, TSV, JSON, or simple text sheet artifact. XLSX reading remains PC-delegated.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'sheet',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_sheet_read',
+        'defaultspack_sheet_read',
+        'defaults.sheet.read',
+        'defaultspack.sheet.read',
+      ],
+      implementationStatus: 'implemented_phone_sheet_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'sheet_analyze',
+      description:
+          'Analyze row counts, missing values, headers, and numeric stats for a phone-local text sheet artifact.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'sheet',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_sheet_analyze',
+        'defaultspack_sheet_analyze',
+        'defaults.sheet.analyze',
+        'defaultspack.sheet.analyze',
+      ],
+      implementationStatus: 'implemented_phone_sheet_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'sheet_update',
+      description:
+          'Replace rows in a phone-local CSV, TSV, JSON, or HTML sheet artifact after mobile approval. XLSX updates remain PC-delegated.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'sheet',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_sheet_update',
+        'defaultspack_sheet_update',
+        'defaults.sheet.update',
+        'defaultspack.sheet.update',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_sheet_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'rows': {
+            'type': 'array',
+            'items': {'type': 'array'},
+          },
+        },
+        'required': ['path', 'rows'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'sheet_export',
+      description:
+          'Export a phone-local text sheet artifact to CSV, TSV, JSON, HTML, or TXT. XLSX/PDF export remains PC-delegated.',
+      tags: [
+        'tool',
+        'spreadsheet',
+        'sheet',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_sheet_export',
+        'defaultspack_sheet_export',
+        'defaults.sheet.export',
+        'defaultspack.sheet.export',
+      ],
+      implementationStatus: 'implemented_phone_sheet_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'format': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'mobile_url_open',
       description:
           'Open an http/https URL visibly on this phone. Implemented through Flutter with iOS Swift and Android Kotlin native bridges.',
@@ -2407,6 +2559,16 @@ class MobileToolRuntime {
         return _slidesFromMarkdown(call.arguments);
       case 'chart_create':
         return _chartCreate(call.arguments);
+      case 'sheet_create':
+        return _sheetCreate(call.arguments);
+      case 'sheet_read':
+        return _sheetRead(call.arguments);
+      case 'sheet_analyze':
+        return _sheetAnalyze(call.arguments);
+      case 'sheet_export':
+        return _sheetExport(call.arguments);
+      case 'sheet_update':
+        return _asyncOnlyTool(name);
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
@@ -2523,6 +2685,8 @@ class MobileToolRuntime {
       case 'artifact_file_patch':
       case 'artifact_file_delete':
         return _artifactFileMutation(name, call.arguments);
+      case 'sheet_update':
+        return _sheetUpdate(call.arguments);
       case 'tool_batch':
         return _toolBatch(call.arguments);
       default:
@@ -2737,6 +2901,11 @@ class MobileToolRuntime {
       'doc_create',
       'slides_from_markdown',
       'chart_create',
+      'sheet_create',
+      'sheet_read',
+      'sheet_analyze',
+      'sheet_export',
+      'sheet_update',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -5220,6 +5389,228 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _sheetCreate(Map<String, dynamic> args) {
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ?? 'sheets/sheet.csv',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final format = _phoneSheetFormat(args['format'], outputPath);
+    final unsupported = _unsupportedPhoneSheetFormat(format);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_SHEET_FORMAT',
+        unsupported,
+        path: outputPath,
+      );
+    }
+    final rows = _phoneSheetRowsFromArgs(args);
+    final content = _phoneSheetContentForFormat(rows, format);
+    final data =
+        _putPhoneArtifactContent(outputPath, content, source: 'sheet_create');
+    return MobileToolResult(
+      ok: true,
+      summary: 'created sheet $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'rows': rows.length,
+          'columns': rows.fold<int>(
+            0,
+            (maxColumns, row) => math.max(maxColumns, row.length).toInt(),
+          ),
+          'format': format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _sheetRead(Map<String, dynamic> args) {
+    final parsed = _readPhoneSheetRows(args['path']);
+    if (parsed.error != null) return parsed.error!;
+    final limit = _boundedConnectorLimit(args['limit'], defaultValue: 200);
+    final rows = parsed.rows;
+    return MobileToolResult(
+      ok: true,
+      summary: 'read ${rows.length} sheet rows',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': parsed.path,
+          'rows': rows.take(limit).toList(),
+          'row_count': rows.length,
+          'returned_rows': math.min(limit, rows.length),
+          'format': parsed.format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _sheetAnalyze(Map<String, dynamic> args) {
+    final parsed = _readPhoneSheetRows(args['path']);
+    if (parsed.error != null) return parsed.error!;
+    final rows = parsed.rows;
+    final headers = rows.isNotEmpty ? rows.first : <String>[];
+    final dataRows = rows.isNotEmpty ? rows.skip(1).toList() : <List<String>>[];
+    final missing = dataRows.fold<int>(
+      0,
+      (count, row) => count + row.where((cell) => cell.trim().isEmpty).length,
+    );
+    final numericValues = <double>[];
+    for (final row in dataRows) {
+      for (final cell in row) {
+        final value = double.tryParse(cell.trim());
+        if (value != null && value.isFinite) numericValues.add(value);
+      }
+    }
+    final numeric = numericValues.isEmpty
+        ? <String, dynamic>{}
+        : {
+            'count': numericValues.length,
+            'mean':
+                numericValues.reduce((a, b) => a + b) / numericValues.length,
+            'min': numericValues.reduce(math.min),
+            'max': numericValues.reduce(math.max),
+          };
+    return MobileToolResult(
+      ok: true,
+      summary: 'analyzed ${rows.length} sheet rows',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': parsed.path,
+          'headers': headers,
+          'row_count': rows.length,
+          'missing_values': missing,
+          'numeric': numeric,
+          'format': parsed.format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _sheetUpdate(Map<String, dynamic> args) async {
+    final outputPath = _normalizePhoneArtifactPath(args['path']);
+    if (outputPath == null || !args.containsKey('rows')) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' and 'rows' are required.",
+      );
+    }
+    final format = _phoneSheetFormat(args['format'], outputPath);
+    final unsupported = _unsupportedPhoneSheetFormat(format);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_SHEET_FORMAT',
+        unsupported,
+        path: outputPath,
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'sheet_update',
+      risk: 'medium',
+      arguments: {
+        ...args,
+        'path': outputPath,
+        'row_count':
+            args['rows'] is List ? (args['rows'] as List).length : null,
+      },
+      prompt: 'このスマホ内のsheet artifactを新しい行データで置き換えます。対象: $outputPath',
+    );
+    if (!approved) return _mobileApprovalRequired('sheet_update');
+    final rows = _phoneSheetRowsFromArgs(args);
+    final content = _phoneSheetContentForFormat(rows, format);
+    final before = '${_mobileArtifactFiles[outputPath]?['content'] ?? ''}';
+    final checkpoint = _boolArg(args['checkpoint'], fallback: true)
+        ? _phoneArtifactCheckpoint('sheet.update', outputPath, before)
+        : null;
+    final data =
+        _putPhoneArtifactContent(outputPath, content, source: 'sheet_update');
+    return MobileToolResult(
+      ok: true,
+      summary: 'updated sheet $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'rows': rows.length,
+          'format': format,
+          'diff': _simpleTextDiff(before, content, path: outputPath),
+          'checkpoint': checkpoint,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _sheetExport(Map<String, dynamic> args) {
+    final parsed = _readPhoneSheetRows(args['path']);
+    if (parsed.error != null) return parsed.error!;
+    final format = _phoneSheetFormat(
+      args['format'],
+      _normalizePhoneArtifactPath(args['output_path']) ?? '',
+      fallback: 'csv',
+    );
+    final unsupported = _unsupportedPhoneSheetFormat(format, export: true);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_SHEET_FORMAT',
+        unsupported,
+        path: parsed.path,
+      );
+    }
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ??
+          'exports/${_phoneArtifactStem(parsed.path)}.$format',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final content = _phoneSheetContentForFormat(parsed.rows, format);
+    final data =
+        _putPhoneArtifactContent(outputPath, content, source: 'sheet_export');
+    return MobileToolResult(
+      ok: true,
+      summary: 'exported sheet $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'source_path': parsed.path,
+          'rows': parsed.rows.length,
+          'format': format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   Future<MobileToolResult> _mobileUrlOpen(Map<String, dynamic> args) async {
     final raw = '${args['url'] ?? args['href'] ?? args['input'] ?? ''}'.trim();
     if (raw.isEmpty) {
@@ -6116,6 +6507,7 @@ bool _isAsyncPhoneToolName(String name) {
     'artifact_file_delete',
     'mobile_url_open',
     'tool_batch',
+    'sheet_update',
   }.contains(name.trim().toLowerCase());
 }
 
@@ -6770,6 +7162,13 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'slides_from_markdown',
     'chart_create',
   }.contains(normalized);
+  final isPhoneSheetTool = const {
+    'sheet_create',
+    'sheet_read',
+    'sheet_analyze',
+    'sheet_update',
+    'sheet_export',
+  }.contains(normalized);
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -6956,6 +7355,17 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': status,
+    };
+  }
+  if (isPhoneSheetTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': normalized == 'sheet_update',
+      'implementation_status': normalized == 'sheet_export'
+          ? 'implemented_phone_sheet_export'
+          : 'implemented_phone_sheet_text',
     };
   }
   if (tagSet.contains('media') ||
@@ -9099,6 +9509,267 @@ String _phoneChartSvg({
   }
   buffer.writeln('</svg>');
   return buffer.toString();
+}
+
+String _phoneArtifactStem(String path) {
+  final name = path.split('/').last;
+  final index = name.lastIndexOf('.');
+  return index <= 0 ? name : name.substring(0, index);
+}
+
+String _phoneSheetFormat(
+  Object? explicit,
+  String path, {
+  String fallback = 'csv',
+}) {
+  final raw = '${explicit ?? ''}'.trim().toLowerCase().replaceFirst(
+        RegExp(r'^\.'),
+        '',
+      );
+  if (raw.isNotEmpty) return raw;
+  final ext = _phoneArtifactExtension(path);
+  return ext.isEmpty ? fallback : ext;
+}
+
+String? _unsupportedPhoneSheetFormat(String format, {bool export = false}) {
+  if (const {'csv', 'tsv', 'json', 'html', 'htm', 'txt', 'text'}
+      .contains(format)) {
+    return null;
+  }
+  if (const {'xlsx', 'xls', 'pdf', 'png'}.contains(format)) {
+    return 'Phone-local sheet ${export ? 'export' : 'tools'} support CSV, TSV, JSON, HTML, and text only. Use PC delegation for $format.';
+  }
+  return 'Unsupported phone-local sheet format: $format';
+}
+
+List<List<String>> _phoneSheetRowsFromArgs(Map<String, dynamic> args) {
+  final columns = args['columns'];
+  final rows = _normalizePhoneSheetRows(args['rows']);
+  if (columns is List && columns.isNotEmpty) {
+    return [
+      columns.map((item) => '$item').toList(),
+      ...rows,
+    ];
+  }
+  return rows.isEmpty
+      ? const [
+          ['value']
+        ]
+      : rows;
+}
+
+List<List<String>> _normalizePhoneSheetRows(Object? value) {
+  if (value is String && value.trim().isNotEmpty) {
+    try {
+      return _normalizePhoneSheetRows(jsonDecode(value));
+    } catch (_) {
+      return _parseDelimitedRows(value);
+    }
+  }
+  if (value is List) {
+    if (value.every((item) => item is Map)) {
+      final maps = value.cast<Map>();
+      final headers = <String>{
+        for (final map in maps)
+          for (final key in map.keys) '$key',
+      }.toList()
+        ..sort();
+      return [
+        headers,
+        for (final map in maps)
+          [for (final key in headers) '${map[key] ?? ''}'],
+      ];
+    }
+    return [
+      for (final row in value)
+        if (row is List) [for (final cell in row) '$cell'] else ['$row'],
+    ];
+  }
+  if (value is Map) {
+    return [
+      const ['key', 'value'],
+      for (final entry in value.entries) ['${entry.key}', '${entry.value}'],
+    ];
+  }
+  return const [];
+}
+
+String _phoneSheetContentForFormat(List<List<String>> rows, String format) {
+  return switch (format) {
+    'tsv' => _rowsToDelimitedText(rows, delimiter: '\t'),
+    'json' => '${const JsonEncoder.withIndent('  ').convert(rows)}\n',
+    'html' || 'htm' => _rowsToHtmlTable(rows),
+    'txt' || 'text' => _rowsToDelimitedText(rows, delimiter: '\t'),
+    _ => _rowsToDelimitedText(rows, delimiter: ','),
+  };
+}
+
+_PhoneSheetReadResult _readPhoneSheetRows(Object? value) {
+  final path = _normalizePhoneArtifactPath(value);
+  if (path == null) {
+    return _PhoneSheetReadResult(
+      error: _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      ),
+    );
+  }
+  final file = _mobileArtifactFiles[path];
+  if (file == null) {
+    return _PhoneSheetReadResult(
+      path: path,
+      error: _phoneArtifactError(
+          'SHEET_READ_FAILED', 'sheet artifact not found',
+          path: path),
+    );
+  }
+  final format = _phoneSheetFormat(null, path);
+  final unsupported = _unsupportedPhoneSheetFormat(format);
+  if (unsupported != null) {
+    return _PhoneSheetReadResult(
+      path: path,
+      format: format,
+      error: _phoneArtifactError(
+        'UNSUPPORTED_PHONE_SHEET_FORMAT',
+        unsupported,
+        path: path,
+      ),
+    );
+  }
+  final content = '${file['content'] ?? ''}';
+  try {
+    final rows = switch (format) {
+      'json' => _normalizePhoneSheetRows(jsonDecode(content)),
+      'tsv' => _parseDelimitedRows(content, delimiter: '\t'),
+      'html' || 'htm' => _parseHtmlTableRows(content),
+      'txt' || 'text' => const LineSplitter()
+          .convert(content)
+          .map((line) => <String>[line])
+          .toList(),
+      _ => _parseDelimitedRows(content),
+    };
+    return _PhoneSheetReadResult(path: path, rows: rows, format: format);
+  } catch (error) {
+    return _PhoneSheetReadResult(
+      path: path,
+      format: format,
+      error: _phoneArtifactError(
+        'SHEET_READ_FAILED',
+        'could not parse phone-local sheet artifact: $error',
+        path: path,
+      ),
+    );
+  }
+}
+
+String _rowsToDelimitedText(
+  List<List<String>> rows, {
+  required String delimiter,
+}) {
+  return '${rows.map((row) => row.map((cell) => _escapeDelimitedCell(cell, delimiter)).join(delimiter)).join('\n')}\n';
+}
+
+String _escapeDelimitedCell(String cell, String delimiter) {
+  final needsQuote = cell.contains(delimiter) ||
+      cell.contains('"') ||
+      cell.contains('\n') ||
+      cell.contains('\r');
+  if (!needsQuote) return cell;
+  return '"${cell.replaceAll('"', '""')}"';
+}
+
+List<List<String>> _parseDelimitedRows(
+  String content, {
+  String delimiter = ',',
+}) {
+  final rows = <List<String>>[];
+  final row = <String>[];
+  final cell = StringBuffer();
+  var inQuotes = false;
+  for (var index = 0; index < content.length; index++) {
+    final char = content[index];
+    if (char == '"') {
+      if (inQuotes && index + 1 < content.length && content[index + 1] == '"') {
+        cell.write('"');
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (!inQuotes && char == delimiter) {
+      row.add(cell.toString());
+      cell.clear();
+      continue;
+    }
+    if (!inQuotes && (char == '\n' || char == '\r')) {
+      if (char == '\r' &&
+          index + 1 < content.length &&
+          content[index + 1] == '\n') {
+        index += 1;
+      }
+      row.add(cell.toString());
+      cell.clear();
+      rows.add(List<String>.from(row));
+      row.clear();
+      continue;
+    }
+    cell.write(char);
+  }
+  if (cell.isNotEmpty || row.isNotEmpty) {
+    row.add(cell.toString());
+    rows.add(List<String>.from(row));
+  }
+  return rows;
+}
+
+String _rowsToHtmlTable(List<List<String>> rows) {
+  final buffer = StringBuffer()
+    ..writeln('<!doctype html><html><head><meta charset="utf-8">')
+    ..writeln(
+        '<meta name="viewport" content="width=device-width,initial-scale=1">')
+    ..writeln('<title>Sheet</title></head><body><table>');
+  for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+    final tag = rowIndex == 0 ? 'th' : 'td';
+    buffer.writeln('<tr>');
+    for (final cell in rows[rowIndex]) {
+      buffer.writeln('<$tag>${_escapeHtmlText(cell)}</$tag>');
+    }
+    buffer.writeln('</tr>');
+  }
+  buffer.writeln('</table></body></html>');
+  return buffer.toString();
+}
+
+List<List<String>> _parseHtmlTableRows(String html) {
+  final rows = <List<String>>[];
+  final rowRegExp =
+      RegExp(r'<tr[^>]*>(.*?)</tr>', caseSensitive: false, dotAll: true);
+  final cellRegExp =
+      RegExp(r'<t[hd][^>]*>(.*?)</t[hd]>', caseSensitive: false, dotAll: true);
+  for (final rowMatch in rowRegExp.allMatches(html)) {
+    final rowHtml = rowMatch.group(1) ?? '';
+    final cells = [
+      for (final cellMatch in cellRegExp.allMatches(rowHtml))
+        _stripHtmlToText(cellMatch.group(1) ?? '').trim(),
+    ];
+    if (cells.isNotEmpty) rows.add(cells);
+  }
+  return rows;
+}
+
+class _PhoneSheetReadResult {
+  const _PhoneSheetReadResult({
+    this.path = '',
+    this.rows = const [],
+    this.format = '',
+    this.error,
+  });
+
+  final String path;
+  final List<List<String>> rows;
+  final String format;
+  final MobileToolResult? error;
 }
 
 bool _artifactPathInBase(

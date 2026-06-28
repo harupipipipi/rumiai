@@ -232,6 +232,36 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "sheet_create",
+                "name": "sheet_create",
+                "summary": "Create sheet artifact",
+                "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "sheet_read",
+                "name": "sheet_read",
+                "summary": "Read sheet artifact",
+                "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "sheet_analyze",
+                "name": "sheet_analyze",
+                "summary": "Analyze sheet artifact",
+                "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "sheet_update",
+                "name": "sheet_update",
+                "summary": "Update sheet artifact",
+                "tags": ["spreadsheet", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "sheet_export",
+                "name": "sheet_export",
+                "summary": "Export sheet artifact",
+                "tags": ["export", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "html_preview",
                 "name": "html_preview",
                 "summary": "Preview HTML payload",
@@ -437,6 +467,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert by_id[tool_id]["mobile_compatible"] is True
         assert by_id[tool_id]["execution_route"] == "phone"
         assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is False
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "sheet_create": ("implemented_phone_sheet_text", False),
+        "sheet_read": ("implemented_phone_sheet_text", False),
+        "sheet_analyze": ("implemented_phone_sheet_text", False),
+        "sheet_update": ("implemented_phone_sheet_text", True),
+        "sheet_export": ("implemented_phone_sheet_export", False),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
         assert by_id[tool_id]["mobile"]["implementation_status"] == status
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]

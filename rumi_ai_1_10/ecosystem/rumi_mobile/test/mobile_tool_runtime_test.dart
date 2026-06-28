@@ -233,6 +233,11 @@ void main() {
           'doc_create',
           'slides_from_markdown',
           'chart_create',
+          'sheet_create',
+          'sheet_read',
+          'sheet_analyze',
+          'sheet_update',
+          'sheet_export',
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
@@ -695,6 +700,154 @@ void main() {
       );
       expect(png.ok, isFalse);
       expect(png.output, contains('UNSUPPORTED_PHONE_CHART_FORMAT'));
+    });
+
+    test('runs phone-local sheet create read analyze update and export',
+        () async {
+      final sheetRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(true),
+      );
+
+      final create = sheetRuntime.execute(
+        const MobileToolCall(
+          id: 'sheet_create_1',
+          name: 'sheet_create',
+          arguments: {
+            'output_path': 'sheets/mobile.csv',
+            'columns': ['name', 'score'],
+            'rows': [
+              ['a', '1'],
+              ['b', '3'],
+              ['c', ''],
+            ],
+          },
+        ),
+      );
+      expect(create.ok, isTrue);
+      final createPayload = jsonDecode(create.output) as Map<String, dynamic>;
+      final createData = createPayload['data'] as Map<String, dynamic>;
+      expect(createData['path'], 'sheets/mobile.csv');
+      expect(createData['rows'], 4);
+      expect(createData['format'], 'csv');
+
+      final read = sheetRuntime.execute(
+        const MobileToolCall(
+          id: 'sheet_read_1',
+          name: 'sheet_read',
+          arguments: {'path': 'sheets/mobile.csv', 'limit': 2},
+        ),
+      );
+      expect(read.ok, isTrue);
+      final readPayload = jsonDecode(read.output) as Map<String, dynamic>;
+      final readData = readPayload['data'] as Map<String, dynamic>;
+      expect(readData['row_count'], 4);
+      expect(readData['returned_rows'], 2);
+
+      final analyze = sheetRuntime.execute(
+        const MobileToolCall(
+          id: 'sheet_analyze_1',
+          name: 'sheet_analyze',
+          arguments: {'path': 'sheets/mobile.csv'},
+        ),
+      );
+      expect(analyze.ok, isTrue);
+      final analyzePayload = jsonDecode(analyze.output) as Map<String, dynamic>;
+      final analyzeData = analyzePayload['data'] as Map<String, dynamic>;
+      final numeric = analyzeData['numeric'] as Map<String, dynamic>;
+      expect(analyzeData['headers'], ['name', 'score']);
+      expect(analyzeData['missing_values'], 1);
+      expect(numeric['count'], 2);
+      expect(numeric['mean'], 2);
+
+      final export = sheetRuntime.execute(
+        const MobileToolCall(
+          id: 'sheet_export_1',
+          name: 'sheet_export',
+          arguments: {
+            'path': 'sheets/mobile.csv',
+            'format': 'html',
+            'output_path': 'exports/mobile-sheet.html',
+          },
+        ),
+      );
+      expect(export.ok, isTrue);
+      final exportPayload = jsonDecode(export.output) as Map<String, dynamic>;
+      final exportData = exportPayload['data'] as Map<String, dynamic>;
+      expect(exportData['path'], 'exports/mobile-sheet.html');
+      expect(exportData['format'], 'html');
+
+      final update = await sheetRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'sheet_update_1',
+          name: 'sheet_update',
+          arguments: {
+            'path': 'sheets/mobile.csv',
+            'rows': [
+              ['name', 'score'],
+              ['z', '5'],
+            ],
+          },
+        ),
+      );
+      expect(update.ok, isTrue);
+      final updatePayload = jsonDecode(update.output) as Map<String, dynamic>;
+      final updateData = updatePayload['data'] as Map<String, dynamic>;
+      expect(updateData['rows'], 2);
+      expect(updateData['requires_mobile_approval'], isTrue);
+
+      final updatedRead = sheetRuntime.execute(
+        const MobileToolCall(
+          id: 'sheet_read_updated_1',
+          name: 'sheet_read',
+          arguments: {'path': 'sheets/mobile.csv'},
+        ),
+      );
+      final updatedPayload =
+          jsonDecode(updatedRead.output) as Map<String, dynamic>;
+      final updatedData = updatedPayload['data'] as Map<String, dynamic>;
+      expect(updatedData['rows'], [
+        ['name', 'score'],
+        ['z', '5'],
+      ]);
+    });
+
+    test('phone-local sheet tools reject binary spreadsheet formats', () {
+      final create = runtime.execute(
+        const MobileToolCall(
+          id: 'sheet_create_xlsx_1',
+          name: 'sheet_create',
+          arguments: {'output_path': 'sheets/native.xlsx'},
+        ),
+      );
+      expect(create.ok, isFalse);
+      expect(create.output, contains('UNSUPPORTED_PHONE_SHEET_FORMAT'));
+
+      final source = runtime.execute(
+        const MobileToolCall(
+          id: 'sheet_create_source_1',
+          name: 'sheet_create',
+          arguments: {
+            'output_path': 'sheets/binary-source.csv',
+            'rows': [
+              ['a', '1'],
+            ],
+          },
+        ),
+      );
+      expect(source.ok, isTrue);
+
+      final export = runtime.execute(
+        const MobileToolCall(
+          id: 'sheet_export_xlsx_1',
+          name: 'sheet_export',
+          arguments: {
+            'path': 'sheets/binary-source.csv',
+            'format': 'xlsx',
+          },
+        ),
+      );
+      expect(export.ok, isFalse);
+      expect(export.output, contains('UNSUPPORTED_PHONE_SHEET_FORMAT'));
     });
 
     test('runs mobile clipboard tools after explicit phone approval', () async {
@@ -2534,6 +2687,32 @@ void main() {
         expect(generatorMobile['runtime_layers'],
             containsAll(['flutter', 'dart']));
         expect(generatorData['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'sheet_create': ['implemented_phone_sheet_text', false],
+        'sheet_read': ['implemented_phone_sheet_text', false],
+        'sheet_analyze': ['implemented_phone_sheet_text', false],
+        'sheet_update': ['implemented_phone_sheet_text', true],
+        'sheet_export': ['implemented_phone_sheet_export', false],
+      }.entries) {
+        final sheetSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final sheetPayload =
+            jsonDecode(sheetSchema.output) as Map<String, dynamic>;
+        final sheetData = sheetPayload['data'] as Map<String, dynamic>;
+        final sheetMobile = sheetData['mobile'] as Map<String, dynamic>;
+        expect(sheetData['mobile_compatible'], isTrue);
+        expect(sheetData['execution_route'], 'phone');
+        expect(sheetMobile['implementation_status'], entry.value[0]);
+        expect(sheetMobile['requires_mobile_approval'], entry.value[1]);
+        expect(sheetMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(sheetData['tags'], contains(mobileFlutterTag));
       }
 
       for (final toolName in const ['html_preview', 'pdf_preview']) {
