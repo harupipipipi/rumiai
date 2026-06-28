@@ -274,6 +274,30 @@ def test_company_runs_include_agent_model_and_result_preview(tmp_path, monkeypat
     ]
 
 
+def test_company_runs_accept_string_limit_and_offset(tmp_path, monkeypatch):
+    from blocks.company import runs
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    runtime_store = CompanyRuntimeStore()
+    for index in range(3):
+        runtime_store.record_agent_run(
+            "acme",
+            agent_id="worker",
+            run_id=f"run_{index}",
+            task_id=f"task_{index}",
+            status="completed",
+        )
+
+    listed = runs.run({"company_id": "acme", "limit": "2", "offset": "1"}, {})
+
+    assert listed["status"] == "ok"
+    assert listed["data"]["total"] == 3
+    assert len(listed["data"]["runs"]) == 2
+
+
 def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):
     from blocks.company import bootstrap, inbound_routes, messages
 

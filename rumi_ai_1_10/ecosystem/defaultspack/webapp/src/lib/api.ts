@@ -3293,7 +3293,7 @@ export const api = {
     });
   },
 
-  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number; offset?: number }) {
     return request<{ runs: CompanyRunLink[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
       { cache: "no-store" },

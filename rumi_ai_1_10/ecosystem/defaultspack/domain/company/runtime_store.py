@@ -651,7 +651,9 @@ class CompanyRuntimeStore:
         task_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+        offset: int = 0,
+        include_total: bool = False,
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
         sql = "SELECT * FROM company_agent_runs WHERE company_id = ?"
         params: list[Any] = [str(company_id)]
         if agent_id:
@@ -663,9 +665,12 @@ class CompanyRuntimeStore:
         if status:
             sql += " AND status = ?"
             params.append(str(status))
-        sql += " ORDER BY updated_at DESC LIMIT ?"
-        rows = self.conn.execute(sql, [*params, int(limit)]).fetchall()
-        return [_decode_row(row) or {} for row in rows]
+        total = int(self.conn.execute("SELECT COUNT(*) AS count FROM (" + sql + ")", params).fetchone()["count"])
+        rows = self.conn.execute(sql + " ORDER BY updated_at DESC LIMIT ? OFFSET ?", [*params, int(limit), int(offset)]).fetchall()
+        runs = [_decode_row(row) or {} for row in rows]
+        if include_total:
+            return runs, total
+        return runs
 
     def update_run_link_status(self, run_id: str, status: str, *, heartbeat_at: str | None = None) -> None:
         now = utc_now()
