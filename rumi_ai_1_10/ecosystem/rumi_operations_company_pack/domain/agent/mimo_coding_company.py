@@ -9,6 +9,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
@@ -770,6 +771,17 @@ class MimoCodingCompanyRuntime:
             if value and value not in cleaned:
                 cleaned.append(value)
         return cleaned
+
+    @staticmethod
+    def _managed_desktop_target_url(target: str) -> str:
+        value = str(target or "").strip()
+        parsed = urlsplit(value)
+        host = (parsed.hostname or "").strip().lower()
+        if parsed.scheme in {"http", "https"} and host in {"127.0.0.1", "localhost"} and parsed.port == 8766:
+            hostname = parsed.hostname or "127.0.0.1"
+            netloc = f"{hostname}:18766"
+            return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+        return value
 
     def _persona_specs(self) -> list[dict[str, Any]]:
         path = self._docker_bundle_dir() / "personas.json"
@@ -2155,22 +2167,26 @@ class MimoCodingCompanyRuntime:
     def _qa_message(self, state: dict[str, Any]) -> str:
         assignments = self._qa_swarm_plan(state).get("workers", [])
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
+        qa_targets = list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else [])
+        managed_targets = [self._managed_desktop_target_url(str(target)) for target in qa_targets]
         summary = "; ".join(
             (
                 str(item.get("worker_id") or "")
                 + " "
                 + str(item.get("persona_label") or item.get("persona_id") or "")
                 + " -> "
-                + str(item.get("qa_target") or "defaultspack surface")
+                + self._managed_desktop_target_url(str(item.get("qa_target") or "defaultspack surface"))
             )
             for item in assignments[:4]
             if isinstance(item, dict)
         )
+        target_summary = "; ".join(target for target in managed_targets if target)
         return (
             "Run a QA swarm with short prompts."
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " First call desktop_list. Use only desktops whose status is running; ignore destroyed or failed seats. If no running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<assigned target URL>, assigned_agent=browser_qa, owner_id=mimo-coding-company. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id, then continue with the desktop_frame and desktop_input tools directly. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<assigned target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
+            + (" Managed desktop target URLs: " + target_summary + "." if target_summary else "")
+            + " First call desktop_list. Reuse only desktops whose status is running and whose startup.browser_url, desktop_spec.browser_url, or metadata startup browser_url exactly matches the managed desktop target URL. Ignore destroyed, failed, stale, or wrong-target seats. If no current-target running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<managed desktop target URL>, assigned_agent=browser_qa, owner_id=mimo-coding-company. If a frame shows ERR_CONNECTION_REFUSED or a different address-bar URL, treat that seat as stale/wrong-target and create a current-target desktop. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id, then continue with the desktop_frame and desktop_input tools directly. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<managed desktop target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."

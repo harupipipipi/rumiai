@@ -202,8 +202,10 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["create_defaults"]["template_id"] == "desktop.browser"
     assert "template_id=desktop.browser" in qa_schedule["task"]["message"]
     assert "status is running" in qa_schedule["task"]["message"]
-    assert "ignore destroyed or failed seats" in qa_schedule["task"]["message"]
-    assert "If no running browser desktop is available" in qa_schedule["task"]["message"]
+    assert "exactly matches the managed desktop target URL" in qa_schedule["task"]["message"]
+    assert "Ignore destroyed, failed, stale, or wrong-target seats" in qa_schedule["task"]["message"]
+    assert "If no current-target running browser desktop is available" in qa_schedule["task"]["message"]
+    assert "ERR_CONNECTION_REFUSED" in qa_schedule["task"]["message"]
     assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
     assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
     assert "action=type_text" in qa_schedule["task"]["message"]
@@ -266,8 +268,10 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     assert "workers reported status" not in qa_schedule["task"]["message"]
     assert "First call desktop_list" in qa_schedule["task"]["message"]
     assert "status is running" in qa_schedule["task"]["message"]
-    assert "ignore destroyed or failed seats" in qa_schedule["task"]["message"]
-    assert "If no running browser desktop is available" in qa_schedule["task"]["message"]
+    assert "exactly matches the managed desktop target URL" in qa_schedule["task"]["message"]
+    assert "Ignore destroyed, failed, stale, or wrong-target seats" in qa_schedule["task"]["message"]
+    assert "If no current-target running browser desktop is available" in qa_schedule["task"]["message"]
+    assert "ERR_CONNECTION_REFUSED" in qa_schedule["task"]["message"]
     assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
     assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
     assert "action=type_text" in qa_schedule["task"]["message"]
@@ -276,6 +280,47 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     assert "Do not use rumi_api for desktop frames or inputs" in qa_schedule["task"]["message"]
     assert "/api/desktops/{seat_id}/frame is a GET route, never POST" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
+
+    for schedule in status["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_qa_schedule_uses_managed_desktop_reachable_defaultspack_url(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:8766/chat"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+
+    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    message = qa_schedule["task"]["message"]
+
+    assert "Managed desktop target URLs: http://127.0.0.1:18766/chat" in message
+    assert "browser_url=<managed desktop target URL>" in message
+    assert "different address-bar URL" in message
+    assert "stale/wrong-target" in message
+    assert "http://127.0.0.1:8766/chat" not in message
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
