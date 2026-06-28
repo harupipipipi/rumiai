@@ -37,6 +37,7 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
 const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
 const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
 const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+const MIMO_CODING_COMPANY_ID = "mimo-coding-company";
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -139,8 +140,18 @@ export function CompanyWorkspacePanel({
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
-      const statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
+      let statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
       const selectedId = hintedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
+      if (selectedId === MIMO_CODING_COMPANY_ID) {
+        try {
+          const mimoStatus = await companyResources.getMimoCodingCompanyStatus();
+          if (mimoStatus.company) {
+            statusCompany = mimoStatus.company;
+          }
+        } catch {
+          // Keep the generic company workspace usable if the MiMo pack is unavailable.
+        }
+      }
       setCompanies(activeConversationId && !normalizedActiveCompanyIdHint ? (statusCompany ? [statusCompany] : []) : listedCompanies);
       setActiveCompanyId(selectedId);
       setCompany(statusCompany);

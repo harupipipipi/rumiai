@@ -354,37 +354,47 @@ def _text_tool_call_blocks(
     if not text:
         return []
     match = _TEXT_TOOL_CALL_RE.match(text)
-    if not match:
+    matches: list[re.Match[str]]
+    if match:
+        matches = [match]
+    else:
         if not allow_preface:
             return []
         matches = list(_TEXT_TOOL_CALL_BLOCK_RE.finditer(text))
-        if len(matches) != 1:
+        if not matches:
             return []
-        match = matches[0]
-        if text[match.end():].strip():
+        if text[matches[-1].end():].strip():
             return []
+        previous_end = matches[0].end()
+        for next_match in matches[1:]:
+            if text[previous_end:next_match.start()].strip():
+                return []
+            previous_end = next_match.end()
     connected = {str(name) for name in connected_tool_names if name}
-    tool_name = html.unescape(str(match.group(1) or "").strip())
-    if not tool_name or tool_name not in connected:
-        return []
-    body = str(match.group("body") or "")
-    arguments: dict[str, Any] = {}
-    for parameter in _TEXT_TOOL_PARAMETER_RE.finditer(body):
-        key = html.unescape(str(parameter.group(1) or "").strip())
-        if key:
-            arguments[key] = _parse_text_tool_parameter_value(str(parameter.group(2) or ""))
-    if not arguments and body.strip():
-        return []
-    if _TEXT_TOOL_PARAMETER_RE.sub("", body).strip():
-        return []
-    tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
-    return [{
-        "type": "tool_use",
-        "id": gen_id(),
-        "name": tool_name,
-        "input": arguments,
-        "metadata": {"recovered_from_text_tool_call": True},
-    }]
+    tool_uses: list[dict[str, Any]] = []
+    for item in matches:
+        tool_name = html.unescape(str(item.group(1) or "").strip())
+        if not tool_name or tool_name not in connected:
+            return []
+        body = str(item.group("body") or "")
+        arguments: dict[str, Any] = {}
+        for parameter in _TEXT_TOOL_PARAMETER_RE.finditer(body):
+            key = html.unescape(str(parameter.group(1) or "").strip())
+            if key:
+                arguments[key] = _parse_text_tool_parameter_value(str(parameter.group(2) or ""))
+        if not arguments and body.strip():
+            return []
+        if _TEXT_TOOL_PARAMETER_RE.sub("", body).strip():
+            return []
+        tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
+        tool_uses.append({
+            "type": "tool_use",
+            "id": gen_id(),
+            "name": tool_name,
+            "input": arguments,
+            "metadata": {"recovered_from_text_tool_call": True},
+        })
+    return tool_uses
 
 
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:

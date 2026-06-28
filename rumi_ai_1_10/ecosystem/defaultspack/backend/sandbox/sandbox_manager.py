@@ -815,13 +815,19 @@ class SandboxManager:
     def list_instances(self) -> List[Dict[str, Any]]:
         self.enforce_lifecycle()
         with self._lock:
-            return [self._instance_to_dict(instance) for instance in self._instances.values()]
+            return [
+                self._instance_to_dict(instance)
+                for instance in self._instances.values()
+                if isinstance(instance, SandboxInstance)
+            ]
 
     def enforce_lifecycle(self, *, now: float | None = None) -> list[dict[str, Any]]:
         current_time = time.time() if now is None else float(now)
         actions: list[tuple[str, str]] = []
         with self._lock:
             for inst in self._instances.values():
+                if not isinstance(inst, SandboxInstance):
+                    continue
                 action = self._lifecycle_action(inst, current_time)
                 if action is not None:
                     actions.append((inst.sandbox_id, action))
@@ -1213,6 +1219,8 @@ class SandboxManager:
         changed = False
         now = time.time()
         for inst in list(self._instances.values()):
+            if not isinstance(inst, SandboxInstance):
+                continue
             if inst.state in TERMINAL_STATES or inst.provider_id == LEGACY_PLACEHOLDER_PROVIDER:
                 continue
             try:
@@ -1234,6 +1242,16 @@ class SandboxManager:
                     inst.updated_at = now
                     inst.last_activity_at = now
                     inst.last_error = f"Managed runtime startup reconcile failed: {exc}"
+                    changed = True
+                continue
+
+            if not isinstance(reconciled, ProviderInstance):
+                if inst.state in RUNNING_STATES:
+                    inst.state = STOPPED
+                    inst.stopped_at = now
+                    inst.updated_at = now
+                    inst.last_activity_at = now
+                    inst.last_error = "Managed runtime provider returned no instance during startup reconcile."
                     changed = True
                 continue
 

@@ -11,4 +11,8 @@ def run(context, args):
     from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
     result = SubagentController().run(args, context if isinstance(context, dict) else {})
-    return tool_result(result.get("summary", "subagent completed"), widget={"type": "subagent", **result})
+    return tool_result(
+        result.get("summary", "subagent completed"),
+        is_error=bool(result.get("is_error")),
+        widget={"type": "subagent", **result},
+    )

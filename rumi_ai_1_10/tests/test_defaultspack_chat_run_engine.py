@@ -1263,6 +1263,47 @@ def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler_follo
     assert any(event.get("type") == "tool_call_completed" for event in events)
 
 
+def test_stream_engine_recovers_multiple_text_tool_calls_for_mimo_scheduler(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "Check company status and desktops.\n\n"
+            "<tool_call>\n"
+            "<function=rumi_api>\n"
+            "<parameter=action>request</parameter>\n"
+            "<parameter=method>GET</parameter>\n"
+            "<parameter=path>/api/company/status</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+            "<tool_call>\n"
+            "<function=desktop_frame>\n"
+            "<parameter=owner_id>local-user</parameter>\n"
+            "<parameter=seat_id>seat-1</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+        metadata={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+        tool_names=("rumi_api", "desktop_frame"),
+    )
+
+    assert calls == [
+        (
+            "rumi_api",
+            {"action": "request", "method": "GET", "path": "/api/company/status"},
+        ),
+        ("desktop_frame", {"owner_id": "local-user", "seat_id": "seat-1"}),
+    ]
+    tool_call_messages = [
+        message
+        for message in gateway.complete_requests[1]["messages"]
+        if isinstance(message.get("tool_calls"), list)
+    ]
+    assert len(tool_call_messages[-1]["tool_calls"]) == 2
+    assert stored["raw_text"] == "routes checked"
+    assert sum(1 for event in events if event.get("type") == "tool_call_completed") == 2
+
+
 def test_stream_engine_ignores_prefaced_text_tool_call_outside_mimo_scheduler(tmp_path, monkeypatch):
     raw_text = (
         "For example, a model might write this instead of calling the tool.\n\n"

@@ -666,11 +666,15 @@ def _sandbox_lifecycle(service: _SandboxApiService, payload: dict[str, Any], *, 
 
 
 def _desktop_list(service: _SandboxApiService) -> list[dict[str, Any]]:
-    return [
-        _desktop_payload(service, item)
-        for item in service.manager.list_instances()
-        if item.get("display") is True
-    ]
+    desktops: list[dict[str, Any]] = []
+    for item in service.manager.list_instances():
+        if not isinstance(item, dict) or item.get("display") is not True:
+            continue
+        try:
+            desktops.append(_desktop_payload(service, item))
+        except Exception:
+            desktops.append(_desktop_payload_error(item))
+    return desktops
 
 
 def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):
@@ -1072,6 +1076,34 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
             "status": provisioning.get("status") or "declared",
         },
         "last_error": item.get("last_error"),
+        "created_at": item.get("created_at"),
+        "updated_at": item.get("updated_at"),
+    }
+
+
+def _desktop_payload_error(item: dict[str, Any]) -> dict[str, Any]:
+    seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
+    provider_id = str(item.get("provider_id") or "")
+    return {
+        "seat_id": seat_id,
+        "sandbox_id": seat_id,
+        "name": item.get("name") or "Desktop",
+        "status": "failed",
+        "provider_id": provider_id,
+        "provider_label": _provider_label(provider_id),
+        "template_id": item.get("template_id") or "desktop.ubuntu",
+        "resolution": {"width": 1440, "height": 900},
+        "frame": None,
+        "assigned_agent": item.get("assigned_agent_id"),
+        "control": {"holder": "none", "lease_expires_at": None},
+        "isolation": _provider_isolation(provider_id, False),
+        "network_policy": {"summary": "unknown", "default": "unknown", "allowed": [], "approval_required": False},
+        "workspace": {"workspace_id": None, "label": None, "access": "none"},
+        "role": None,
+        "rules": {"role": None, "instructions": "", "rule_ids": []},
+        "access_policy": {"mode": "owner_only", "owner_id": None, "key_required": False, "request_required": False, "key_hint": None, "link_enabled": False},
+        "provisioning": {"packages": [], "apps": [], "mcp_servers": [], "status": "unknown"},
+        "last_error": "Desktop state could not be serialized.",
         "created_at": item.get("created_at"),
         "updated_at": item.get("updated_at"),
     }

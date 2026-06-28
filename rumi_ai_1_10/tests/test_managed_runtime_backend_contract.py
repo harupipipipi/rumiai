@@ -920,6 +920,58 @@ def test_api_rejects_template_kind_mismatches(tmp_path) -> None:
     assert desktops["data"]["desktops"] == []
 
 
+def test_desktop_list_survives_invalid_desktop_payload(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    service = SimpleNamespace(
+        manager=SimpleNamespace(
+            list_instances=lambda: [
+                None,
+                {
+                    "display": True,
+                    "sandbox_id": "seat-broken",
+                    "name": "Broken desktop",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                },
+            ]
+        ),
+        frame_cache=SimpleNamespace(last_metadata=lambda _seat_id: None),
+        lease_manager=SimpleNamespace(active_lease=lambda _seat_id: None),
+    )
+
+    def broken_payload(_service, _item):
+        raise AttributeError("'NoneType' object has no attribute '__dict__'")
+
+    monkeypatch.setattr(api, "_desktop_payload", broken_payload)
+
+    desktops = api._desktop_list(service)
+
+    assert len(desktops) == 1
+    assert desktops[0]["seat_id"] == "seat-broken"
+    assert desktops[0]["status"] == "failed"
+    assert desktops[0]["last_error"] == "Desktop state could not be serialized."
+
+
+def test_desktops_list_skips_malformed_manager_instances() -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    api._reset_service_for_tests(None)
+    service = api._SandboxApiService(start_lifecycle_sweeper=False)
+    service.manager._instances.clear()
+    service.manager._instances["bad"] = None
+    api._reset_service_for_tests(service)
+    try:
+        result = api.run({"_handler": "desktops_list"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert result["status"] == "ok"
+    assert result["data"]["desktops"] == []
+
+
 def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 

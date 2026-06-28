@@ -107,26 +107,46 @@ class SubagentController:
                 "Use the connected tools directly. Do not claim missing repo or file access unless a tool call fails.\n\n"
                 + task
             )
-        result = dispatch_input(
-            RumiInputEnvelope(
-                role="user",
-                input=effective_task,
-                chat={"conversation_id": child["id"], "title": title, "model": model},
-                source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
-                target={
-                    "conversation_id": child["id"],
-                    "direct": True,
-                    "model_route": {"preferred_model": model},
-                },
-                delivery={"action_id": "chat.message"},
-                metadata=message_metadata,
-                params=params,
-                tools=inherited_tools,
-            ),
-            {**context, "chat_history_mode": "current_turn"},
-        )
+        try:
+            result = dispatch_input(
+                RumiInputEnvelope(
+                    role="user",
+                    input=effective_task,
+                    chat={"conversation_id": child["id"], "title": title, "model": model},
+                    source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
+                    target={
+                        "conversation_id": child["id"],
+                        "direct": True,
+                        "model_route": {"preferred_model": model},
+                    },
+                    delivery={"action_id": "chat.message"},
+                    metadata=message_metadata,
+                    params=params,
+                    tools=inherited_tools,
+                ),
+                {**context, "chat_history_mode": "current_turn"},
+            )
+        except Exception as exc:
+            code = "SUBAGENT_DISPATCH_TIMEOUT" if isinstance(exc, TimeoutError) else "SUBAGENT_DISPATCH_EXCEPTION"
+            self._mark_child_failed(store, child["id"], child_metadata, code=code)
+            return self._failed_result(
+                parent_id=parent_id,
+                child_id=child["id"],
+                title=title,
+                task=task,
+                workspace=workspace_contract,
+                code=code,
+            )
         if result.get("status") != "ok":
-            raise RuntimeError(str(result.get("error") or "failed to dispatch subagent conversation"))
+            self._mark_child_failed(store, child["id"], child_metadata, code="SUBAGENT_DISPATCH_FAILED")
+            return self._failed_result(
+                parent_id=parent_id,
+                child_id=child["id"],
+                title=title,
+                task=task,
+                workspace=workspace_contract,
+                code="SUBAGENT_DISPATCH_FAILED",
+            )
         summary = str(result.get("assistant_text") or "Subagent completed.").strip()
         return {
             "action": "subagent.run",
@@ -143,3 +163,54 @@ class SubagentController:
         graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
         connected = graph.get("connected_tools") if isinstance(graph.get("connected_tools"), list) else []
         return [str(item).strip() for item in connected if isinstance(item, str) and str(item).strip()]
+
+    @staticmethod
+    def _mark_child_failed(store: ChatStore, child_id: str, metadata: dict[str, Any], *, code: str) -> None:
+        message = "The delegated agent could not complete before producing a response."
+        updated_metadata = dict(metadata)
+        subagent_metadata = dict(updated_metadata.get("subagent") or {})
+        subagent_metadata.update({"status": "error", "error_code": code})
+        updated_metadata["subagent"] = subagent_metadata
+        try:
+            store.update_conversation(child_id, {"metadata": updated_metadata})
+            store.add_message(
+                child_id,
+                {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": message}],
+                    "raw_text": message,
+                    "finish_reason": "error",
+                    "metadata": {
+                        "source": "subagent_tool",
+                        "status": "error",
+                        "error_code": code,
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _failed_result(
+        *,
+        parent_id: str,
+        child_id: str,
+        title: str,
+        task: str,
+        workspace: dict[str, Any],
+        code: str,
+    ) -> dict[str, Any]:
+        summary = "The delegated agent could not complete before producing a response."
+        return {
+            "action": "subagent.run",
+            "parent_conversation_id": parent_id,
+            "child_conversation_id": child_id,
+            "title": title,
+            "task": task,
+            "summary": summary,
+            "workspace": workspace,
+            "status": "error",
+            "is_error": True,
+            "error_type": "timeout" if "TIMEOUT" in code else "error",
+            "code": code,
+        }

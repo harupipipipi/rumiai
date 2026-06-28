@@ -222,6 +222,52 @@ def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_pat
     assert child["metadata"]["company_id"] == "mimo-coding-company"
 
 
+def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_out(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    parent = ChatStore().create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+
+    def fake_dispatch(envelope, context):
+        ChatStore().add_message(
+            envelope.target["conversation_id"],
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": envelope.input}],
+                "metadata": envelope.metadata,
+            },
+        )
+        raise TimeoutError("handler execution timed out")
+
+    monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input", fake_dispatch)
+
+    result = run_defaultspack_function(
+        "tool_subagent",
+        {"task": "simple json probe"},
+        {"conversation_id": parent["id"]},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["is_error"] is True
+    assert result["data"]["widget"]["type"] == "subagent"
+    assert result["data"]["widget"]["child_conversation_id"]
+    parent_after = ChatStore().get_conversation(parent["id"])
+    child_id = parent_after["child_conversation_ids"][0]
+    assert result["data"]["widget"]["child_conversation_id"] == child_id
+    child = ChatStore().get_conversation(child_id)
+    assert child["metadata"]["subagent"]["status"] == "error"
+    assert child["metadata"]["subagent"]["error_code"] == "SUBAGENT_DISPATCH_TIMEOUT"
+    assert result["data"]["widget"]["error_type"] == "timeout"
+    assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    assert child["messages"][-1]["finish_reason"] == "error"
+    assert "could not complete" in child["messages"][-1]["raw_text"]
+    assert "timed out" not in child["messages"][-1]["raw_text"]
+
+
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):
     seen: dict[str, object] = {}
 

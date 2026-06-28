@@ -994,7 +994,9 @@ export type OperationsCompanyStatus = {
   };
 };
 
-export type MimoCodingCompanyStatus = OperationsCompanyStatus;
+export type MimoCodingCompanyStatus = OperationsCompanyStatus & {
+  company?: CompanyRecord | null;
+};
 
 export type ChatActivityEvent = {
   type: string;

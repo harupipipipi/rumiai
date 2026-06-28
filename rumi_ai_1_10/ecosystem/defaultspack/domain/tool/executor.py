@@ -1162,9 +1162,10 @@ class ToolExecutor:
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
             result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
+            is_error = bool(result.get("is_error"))
             return {
                 "result": result.get("summary", "subagent completed"),
-                "is_error": False,
+                "is_error": is_error,
                 "widget": {"type": "subagent", **result},
             }
         elif tool_name == "calculator":
