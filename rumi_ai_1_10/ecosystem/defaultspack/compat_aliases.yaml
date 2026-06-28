@@ -2334,11 +2334,6 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.task_board
-  defaults.tool.task_board.agent.session:
-    owner: tool
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.tool.task_board.agent.session
   defaults.tool.task_board_agent_session:
     owner: tool
     reason: legacy caller compatibility
@@ -2619,11 +2614,6 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.task_board
-  defaults.tool.task_board.agent.session:
-    owner: tool
-    reason: legacy caller compatibility
-    remove_after: v2.3
-    replacement: defaultspack.tool.task_board.agent.session
   defaults.tool.task_board_agent_session:
     owner: tool
     reason: legacy caller compatibility
@@ -2899,6 +2889,486 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.names
+  defaults.adaptive.activity_snapshot:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.activity_snapshot
+  defaults.adaptive.activity.snapshot:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.activity.snapshot
+  defaults.adaptive.automation_update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.automation_update
+  defaults.adaptive.automation.update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.automation.update
+  defaults.adaptive.context_code_search:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context_code_search
+  defaults.adaptive.context.code.search:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context.code.search
+  defaults.adaptive.context_evidence:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context_evidence
+  defaults.adaptive.context.evidence:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context.evidence
+  defaults.adaptive.context_file_read:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context_file_read
+  defaults.adaptive.context.file.read:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context.file.read
+  defaults.adaptive.context_repository_map:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context_repository_map
+  defaults.adaptive.context.repository.map:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.context.repository.map
+  defaults.adaptive.continuation_resume:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.continuation_resume
+  defaults.adaptive.continuation.resume:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.continuation.resume
+  defaults.adaptive.event_append:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_append
+  defaults.adaptive.event.append:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.append
+  defaults.adaptive.event_ack:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_ack
+  defaults.adaptive.event.ack:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.ack
+  defaults.adaptive.event_dlq:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_dlq
+  defaults.adaptive.event.dlq:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.dlq
+  defaults.adaptive.event_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_list
+  defaults.adaptive.event.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.list
+  defaults.adaptive.event_outbox:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_outbox
+  defaults.adaptive.event.outbox:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.outbox
+  defaults.adaptive.event_replay:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_replay
+  defaults.adaptive.event.replay:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.replay
+  defaults.adaptive.event_retry:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_retry
+  defaults.adaptive.event.retry:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.retry
+  defaults.adaptive.event_subscribe:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_subscribe
+  defaults.adaptive.event.subscribe:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.subscribe
+  defaults.adaptive.event_subscription_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event_subscription_list
+  defaults.adaptive.event.subscription.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.event.subscription.list
+  defaults.adaptive.freeze_set:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.freeze_set
+  defaults.adaptive.freeze.set:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.freeze.set
+  defaults.adaptive.lease_acquire:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.lease_acquire
+  defaults.adaptive.lease.acquire:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.lease.acquire
+  defaults.adaptive.lease_release:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.lease_release
+  defaults.adaptive.lease.release:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.lease.release
+  defaults.adaptive.memory_conflict_resolve:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.memory_conflict_resolve
+  defaults.adaptive.memory.conflict.resolve:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.memory.conflict.resolve
+  defaults.adaptive.memory_conflicts_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.memory_conflicts_list
+  defaults.adaptive.memory.conflicts.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.memory.conflicts.list
+  defaults.adaptive.onboarding_apply:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_apply
+  defaults.adaptive.onboarding.apply:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.apply
+  defaults.adaptive.onboarding_compile:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_compile
+  defaults.adaptive.onboarding.compile:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.compile
+  defaults.adaptive.onboarding_history:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_history
+  defaults.adaptive.onboarding.history:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.history
+  defaults.adaptive.onboarding_normalize:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_normalize
+  defaults.adaptive.onboarding.normalize:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.normalize
+  defaults.adaptive.onboarding_rediagnose:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_rediagnose
+  defaults.adaptive.onboarding.rediagnose:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.rediagnose
+  defaults.adaptive.onboarding_schema:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_schema
+  defaults.adaptive.onboarding.schema:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.schema
+  defaults.adaptive.onboarding_simulate:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_simulate
+  defaults.adaptive.onboarding.simulate:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.simulate
+  defaults.adaptive.onboarding_status:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_status
+  defaults.adaptive.onboarding.status:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.status
+  defaults.adaptive.onboarding_undo:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding_undo
+  defaults.adaptive.onboarding.undo:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.onboarding.undo
+  defaults.adaptive.operating_profiles_activate:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_activate
+  defaults.adaptive.operating.profiles.activate:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.activate
+  defaults.adaptive.operating_profiles_create:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_create
+  defaults.adaptive.operating.profiles.create:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.create
+  defaults.adaptive.operating_profiles_get:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_get
+  defaults.adaptive.operating.profiles.get:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.get
+  defaults.adaptive.operating_profiles_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_list
+  defaults.adaptive.operating.profiles.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.list
+  defaults.adaptive.operating_profiles_preview:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_preview
+  defaults.adaptive.operating.profiles.preview:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.preview
+  defaults.adaptive.operating_profiles_update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating_profiles_update
+  defaults.adaptive.operating.profiles.update:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.operating.profiles.update
+  defaults.adaptive.pack_recommendations_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.pack_recommendations_list
+  defaults.adaptive.pack.recommendations.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.pack.recommendations.list
+  defaults.adaptive.pack_recommendations_preview:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.pack_recommendations_preview
+  defaults.adaptive.pack.recommendations.preview:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.pack.recommendations.preview
+  defaults.adaptive.prepared_action_commit:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared_action_commit
+  defaults.adaptive.prepared.action.commit:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared.action.commit
+  defaults.adaptive.prepared_action_prepare:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared_action_prepare
+  defaults.adaptive.prepared.action.prepare:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared.action.prepare
+  defaults.adaptive.prepared_action_revoke:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared_action_revoke
+  defaults.adaptive.prepared.action.revoke:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.prepared.action.revoke
+  defaults.adaptive.skill_candidate_promote:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill_candidate_promote
+  defaults.adaptive.skill.candidate.promote:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill.candidate.promote
+  defaults.adaptive.skill_candidate_rollback:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill_candidate_rollback
+  defaults.adaptive.skill.candidate.rollback:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill.candidate.rollback
+  defaults.adaptive.skill_candidates_list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill_candidates_list
+  defaults.adaptive.skill.candidates.list:
+    owner: adaptive
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.adaptive.skill.candidates.list
+  defaults.input.endpoint_create:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint_create
+  defaults.input.endpoint.create:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint.create
+  defaults.input.endpoint_delete:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint_delete
+  defaults.input.endpoint.delete:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint.delete
+  defaults.input.endpoint_list:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint_list
+  defaults.input.endpoint.list:
+    owner: input
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.input.endpoint.list
+  defaults.tool.task.board:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.task.board
+  defaults.tool.task.board.agent.session:
+    owner: tool
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.tool.task.board.agent.session
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.

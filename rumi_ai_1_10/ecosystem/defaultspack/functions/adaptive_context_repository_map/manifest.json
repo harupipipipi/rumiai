@@ -1,0 +1,44 @@
+{
+  "function_id": "adaptive_context_repository_map",
+  "description": "Build a bounded repository map.",
+  "tags": [
+    "adaptive",
+    "context"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.context_repository_map",
+    "defaultspack.adaptive.context_repository_map",
+    "defaults.adaptive.context.repository.map",
+    "defaultspack.adaptive.context.repository.map"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "context_repository_map"
+      }
+    }
+  }
+}

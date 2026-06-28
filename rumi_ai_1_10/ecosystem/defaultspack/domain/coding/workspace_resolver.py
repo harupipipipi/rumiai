@@ -90,6 +90,8 @@ class WorkspaceResolver:
         if workspace_id:
             return self._resolve_workspace_id(str(workspace_id), touch=touch)
         workspace_root = _value_for("workspace_root", input_data, context)
+        if not workspace_root:
+            workspace_root = _value_for("root", input_data, context)
         if workspace_root:
             return WorkspaceResolution(root_path=_legacy_root(workspace_root), source="workspace_root")
         cwd = _value_for("cwd", input_data, context) if allow_cwd_fallback else None

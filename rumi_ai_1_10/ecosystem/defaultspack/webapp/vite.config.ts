@@ -19,6 +19,7 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "../ui"),
     emptyOutDir: false,
+    cssMinify: "esbuild",
     cssCodeSplit: false,
     assetsDir: ".",
     rollupOptions: {

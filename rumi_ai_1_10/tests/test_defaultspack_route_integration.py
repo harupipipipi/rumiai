@@ -189,6 +189,64 @@ def test_template_function_routes_join_canonical_transport_registry():
     )
 
 
+def test_adaptive_function_routes_join_canonical_transport_registry():
+    import json
+    from pathlib import Path
+
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    onboarding = canonical[("GET", "/api/onboarding/status")]
+    assert onboarding.function_id == "adaptive_onboarding_status"
+    assert onboarding.function_name == "defaultspack:adaptive_onboarding_status"
+    assert (
+        canonical[("POST", "/api/prepared-actions/{id}/commit")].path_inject
+        == {"id": "id"}
+    )
+    assert (
+        canonical[("POST", "/api/orchestration/leases/{id}/release")].function_name
+        == "defaultspack:adaptive_lease_release"
+    )
+    assert (
+        canonical[("PUT", "/api/automations/{id}")].path_inject
+        == {"id": "automation_id"}
+    )
+    assert (
+        canonical[("POST", "/api/events/{id}/ack")].path_inject
+        == {"id": "event_id"}
+    )
+    assert (
+        canonical[("GET", "/api/events/outbox")].function_name
+        == "defaultspack:adaptive_event_outbox"
+    )
+    assert (
+        canonical[("POST", "/api/continuations/resume")].function_id
+        == "adaptive_continuation_resume"
+    )
+
+    ecosystem_path = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack" / "ecosystem.json"
+    ecosystem_routes = json.loads(ecosystem_path.read_text(encoding="utf-8"))["api_routes"]
+    ecosystem_adaptive = {
+        (str(route["method"]).upper(), route.get("path") or route.get("path_pattern")): route
+        for route in ecosystem_routes
+        if str(route.get("function_id") or "").startswith("adaptive_")
+    }
+    canonical_adaptive = {
+        key: spec
+        for key, spec in canonical.items()
+        if str(spec.function_id or "").startswith("adaptive_")
+    }
+    assert set(ecosystem_adaptive) == set(canonical_adaptive)
+    for key, spec in canonical_adaptive.items():
+        route = ecosystem_adaptive[key]
+        assert route["function_id"] == spec.function_id
+        if spec.path_inject:
+            assert route.get("path_param_map") == spec.path_inject
+        if spec.sensitive:
+            assert route.get("sensitive") is True
+
+
 def test_inactive_template_function_routes_are_not_registered(tmp_path):
     import domain.function_runtime.template_specs as template_specs
     from ecosystem.defaultspack.transport.registry import template_http_route_specs
@@ -254,6 +312,8 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/finger-recording", "_handle_static") in routes
     assert ("GET", "/console", "_handle_static") in routes
     assert ("GET", "/host-permissions", "_handle_static") in routes
+    assert ("GET", "/adaptive", "_handle_static") in routes
+    assert ("GET", "/operating-profile", "_handle_static") in routes
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
@@ -418,6 +478,32 @@ def test_pack_api_uses_direct_defaultspack_fallback_without_registered_routes(mo
     assert module_name == "blocks.chat.create_conversation"
     assert input_data["model"] == "google/gemma-4-31b-it"
     assert context["owner_pack"] == "defaultspack"
+
+
+def test_pack_api_dispatches_adaptive_defaultspack_route_without_kernel(tmp_path, monkeypatch):
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+
+    handler = object.__new__(PackAPIHandler)
+    handler.path = "/api/onboarding/status"
+    handler.headers = {"Origin": "http://127.0.0.1:8766"}
+    captured = []
+    handler._send_defaultspack_http_result = captured.append
+
+    previous_kernel = PackAPIHandler.kernel
+    monkeypatch.setattr(PackAPIHandler, "kernel", None)
+    try:
+        assert handler._dispatch_defaultspack_http_route(
+            "GET",
+            "/api/onboarding/status",
+        )
+    finally:
+        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
+
+    assert captured
+    assert captured[0]["status"] == "ok"
+    assert captured[0]["data"]["profile_id"] == "default"
 
 
 def test_chat_send_route_handler_invokes_flow_route_before_block_fallback():

@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_memory_conflict_resolve",
+  "description": "Resolve a memory conflict.",
+  "tags": [
+    "adaptive",
+    "memory"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.memory.conflict.resolve"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.memory_conflict_resolve",
+    "defaultspack.adaptive.memory_conflict_resolve",
+    "defaults.adaptive.memory.conflict.resolve",
+    "defaultspack.adaptive.memory.conflict.resolve"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "memory_conflict_resolve"
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_onboarding_rediagnose",
+  "description": "Preview a re-diagnosis.",
+  "tags": [
+    "adaptive",
+    "onboarding"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.onboarding.rediagnose"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.onboarding_rediagnose",
+    "defaultspack.adaptive.onboarding_rediagnose",
+    "defaults.adaptive.onboarding.rediagnose",
+    "defaultspack.adaptive.onboarding.rediagnose"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "onboarding_rediagnose"
+      }
+    }
+  }
+}

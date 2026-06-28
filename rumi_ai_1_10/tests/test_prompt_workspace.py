@@ -717,7 +717,7 @@ def test_readonly_prompt_save_creates_profile_override(monkeypatch, tmp_path: Pa
     assert result["action"] == "override_saved"
     assert override_path.is_file()
     assert override_path.read_text(encoding="utf-8") == "Profile-owned override text"
-    assert "profiles/prompt-profile/prompts/locked.system.system.md" in str(override_path)
+    assert "profiles/prompt-profile/prompts/locked.system.system.md" in override_path.as_posix()
 
     resolved = resolve_effective_prompt(
         {

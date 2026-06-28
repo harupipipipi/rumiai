@@ -333,6 +333,46 @@ class TestDefaultspackApiRoutes(unittest.TestCase):
             },
         )
 
+    def test_defaultspack_api_route_unwraps_function_ok_envelope(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        PackAPIHandler._api_route_exact = {
+            ("POST", "/api/onboarding/compile"): {
+                "pack_id": "defaultspack",
+                "handler": "",
+                "function_id": "adaptive_onboarding_compile",
+                "pass_body": True,
+                "response_mode": "result",
+                "args": {},
+                "path_param_map": {},
+            }
+        }
+        PackAPIHandler._api_route_patterns = []
+        handler = PackAPIHandler.__new__(PackAPIHandler)
+        sent = []
+        handler._send_response = lambda response, status=200: sent.append((status, response))
+
+        executor = SimpleNamespace(
+            execute=Mock(
+                return_value=SimpleNamespace(
+                    success=True,
+                    output={"status": "ok", "data": {"compiled": True, "plan": {"plan_id": "plan_1"}}},
+                )
+            )
+        )
+        capability_executor = _pack_api_sibling_module(PackAPIHandler, "capability_executor")
+        with patch.object(
+            PackAPIHandler,
+            "_is_pack_approved_for_runtime_routes",
+            return_value=True,
+        ), patch.object(capability_executor, "get_capability_executor", return_value=executor):
+            dispatched = handler._dispatch_api_route("POST", "/api/onboarding/compile", {"operation": "status"})
+
+        self.assertTrue(dispatched)
+        self.assertEqual(sent[0][0], 200)
+        self.assertTrue(sent[0][1].success)
+        self.assertEqual(sent[0][1].data, {"compiled": True, "plan": {"plan_id": "plan_1"}})
+
     def test_remote_api_route_unwraps_function_ok_envelope(self):
         from core_runtime.pack_api_server import PackAPIHandler
 

@@ -572,7 +572,7 @@ class PackAPIHandler(
 
                 result = handler(*args)
 
-            if entry.get("function_id") and str(entry.get("function_id") or "").startswith("remote_"):
+            if entry.get("function_id"):
                 result = self._unwrap_defaultspack_function_envelope(result)
             sse_events = self._sse_events_from_result(result)
             if sse_events is not None:
@@ -865,18 +865,20 @@ class PackAPIHandler(
         body: Optional[dict[str, Any]] = None,
     ) -> bool:
         kernel = self.__class__.kernel
-        if kernel is None:
-            return False
         try:
-            from .kernel_facade import KernelFacade
             from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
-            facade = KernelFacade(kernel)
+            facade = None
+            if kernel is not None:
+                from .kernel_facade import KernelFacade
+
+                facade = KernelFacade(kernel)
             registry_routes = []
-            try:
-                registry_routes = facade.get_interface("io.http.route", strategy="all") or []
-            except Exception:
-                registry_routes = []
+            if facade is not None:
+                try:
+                    registry_routes = facade.get_interface("io.http.route", strategy="all") or []
+                except Exception:
+                    registry_routes = []
             adapter_facade = facade if registry_routes else None
             adapter = DefaultsHttpServer(adapter_facade)
             handler, path_params, source, path_inject, _route_pattern = adapter._match_route(
