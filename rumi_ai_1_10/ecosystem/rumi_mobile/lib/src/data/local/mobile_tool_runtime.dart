@@ -904,6 +904,66 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'doc_update',
+      description:
+          'Update a phone-local text document artifact after mobile approval. Binary DOCX/PDF mutation remains PC-delegated.',
+      tags: [
+        'tool',
+        'document',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_doc_update',
+        'defaultspack_doc_update',
+        'defaults.doc.update',
+        'defaultspack.doc.update',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_document_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'content': {'type': 'string'},
+          'append': {'type': 'string'},
+          'replace': {'type': 'boolean'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'slides_create',
+      description:
+          'Create a phone-local slide outline artifact from structured slide JSON. Binary PPTX output remains PC-delegated.',
+      tags: [
+        'tool',
+        'presentation',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_slides_create',
+        'defaultspack_slides_create',
+        'defaults.slides.create',
+        'defaultspack.slides.create',
+      ],
+      implementationStatus: 'implemented_phone_slide_outline',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'title': {'type': 'string'},
+          'slides': {
+            'type': 'array',
+            'items': {'type': 'object'},
+          },
+          'output_path': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'slides_from_markdown',
       description:
           'Create a phone-local slide outline artifact from markdown headings and bullets. Binary PPTX export remains PC-delegated.',
@@ -928,6 +988,66 @@ class MobileToolRuntime {
           'path': {'type': 'string'},
           'output_path': {'type': 'string'},
         },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'slides_update',
+      description:
+          'Rewrite a phone-local slide outline artifact from structured slide JSON after mobile approval. Binary PPTX mutation remains PC-delegated.',
+      tags: [
+        'tool',
+        'presentation',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_slides_update',
+        'defaultspack_slides_update',
+        'defaults.slides.update',
+        'defaultspack.slides.update',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_slide_outline',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'slides': {
+            'type': 'array',
+            'items': {'type': 'object'},
+          },
+        },
+        'required': ['path', 'slides'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'slides_export',
+      description:
+          'Export a phone-local slide outline artifact to JSON, Markdown, HTML, or text. Binary PPTX/PDF output remains PC-delegated.',
+      tags: [
+        'tool',
+        'presentation',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_slides_export',
+        'defaultspack_slides_export',
+        'defaults.slides.export',
+        'defaultspack.slides.export',
+      ],
+      implementationStatus: 'implemented_phone_slide_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'format': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+        'required': ['path'],
       },
     ),
     MobileToolDefinition(
@@ -2754,8 +2874,16 @@ class MobileToolRuntime {
         return _projectScaffold(call.arguments);
       case 'doc_create':
         return _docCreate(call.arguments);
+      case 'doc_update':
+        return _asyncOnlyTool(name);
+      case 'slides_create':
+        return _slidesCreate(call.arguments);
       case 'slides_from_markdown':
         return _slidesFromMarkdown(call.arguments);
+      case 'slides_update':
+        return _asyncOnlyTool(name);
+      case 'slides_export':
+        return _slidesExport(call.arguments);
       case 'chart_create':
         return _chartCreate(call.arguments);
       case 'sheet_create':
@@ -2900,6 +3028,10 @@ class MobileToolRuntime {
         return _artifactFileMutation(name, call.arguments);
       case 'sheet_update':
         return _sheetUpdate(call.arguments);
+      case 'doc_update':
+        return _docUpdate(call.arguments);
+      case 'slides_update':
+        return _slidesUpdate(call.arguments);
       case 'tool_batch':
         return _toolBatch(call.arguments);
       default:
@@ -3111,19 +3243,13 @@ class MobileToolRuntime {
       'webapp_preview',
       'webapp_lint',
       'project_scaffold',
-      'doc_create',
-      'slides_from_markdown',
-      'chart_create',
       'sheet_create',
       'sheet_read',
       'sheet_analyze',
-      'sheet_export',
       'sheet_update',
       'artifact_zip',
-      'artifact_export',
       'static_site_export',
       'webapp_export_static',
-      'doc_export',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -3155,6 +3281,7 @@ class MobileToolRuntime {
       final output = result.output.toLowerCase();
       if (requestedTool != null && requestedTool.available) {
         return output.contains('pc_delegation_required') ||
+            output.contains('pc delegation') ||
             output.contains('pc runtime');
       }
       return true;
@@ -3164,6 +3291,7 @@ class MobileToolRuntime {
         result.summary.contains('unavailable on phone') ||
         output.contains('tool_unavailable_on_phone') ||
         output.contains('pc_delegation_required') ||
+        output.contains('pc delegation') ||
         output.contains('pc側') ||
         output.contains('pc runtime') ||
         output.contains('pc接続時');
@@ -5496,6 +5624,137 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _docUpdate(Map<String, dynamic> args) async {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final ext = _phoneArtifactExtension(path);
+    if ({'docx', 'pdf', 'pptx', 'xlsx', 'png'}.contains(ext)) {
+      return _binaryExportRequiresPc(
+          'doc_update', ext.isEmpty ? 'binary' : ext);
+    }
+    final file = _mobileArtifactFiles[path];
+    if (file == null) {
+      return _phoneArtifactError(
+        'DOC_UPDATE_FAILED',
+        'document not found in phone artifact workspace',
+        path: path,
+      );
+    }
+    final hasContent = args.containsKey('content');
+    final append = '${args['append'] ?? ''}';
+    if (!hasContent && append.isEmpty) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'content' or 'append' is required for doc_update.",
+        path: path,
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'doc_update',
+      prompt: 'このスマホ内のdocument artifactを更新します。対象: $path',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('doc_update');
+    final before = '${file['content'] ?? ''}';
+    var updated = hasContent || _boolArg(args['replace'], fallback: false)
+        ? '${args['content'] ?? ''}'
+        : before;
+    if (append.isNotEmpty) {
+      updated =
+          updated.isEmpty ? '$append\n' : '${updated.trimRight()}\n$append\n';
+    }
+    final data = _putPhoneArtifactContent(
+      path,
+      updated,
+      source: 'doc_update',
+      metadata: {
+        'operation': hasContent ? 'replace' : 'append',
+        'previous_size': utf8.encode(before).length,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'updated document $path',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'operation': hasContent ? 'replace' : 'append',
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _slidesCreate(Map<String, dynamic> args) {
+    final title = '${args['title'] ?? 'Deck'}'.trim();
+    final explicitFormat = '${args['format'] ?? ''}'
+        .trim()
+        .toLowerCase()
+        .replaceFirst(RegExp(r'^\.'), '');
+    final defaultExt = explicitFormat.isEmpty || explicitFormat == 'json'
+        ? 'slides.json'
+        : explicitFormat;
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ??
+          'slides/${_slugifyPhoneArtifactName(title, fallback: 'deck')}.$defaultExt',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final format = _phoneSlideFormat(args['format'], outputPath);
+    final unsupported = _unsupportedPhoneSlideFormat(format);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'PC_DELEGATION_REQUIRED',
+        unsupported,
+        path: outputPath,
+      );
+    }
+    final deck = _phoneSlidesFromArgs(args, fallbackTitle: title);
+    final content = _phoneSlidesContentForFormat(deck, format);
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      content.content,
+      source: 'slides_create',
+      mimeType: content.mimeType,
+      metadata: {
+        'title': deck.title,
+        'slides': deck.slides.length,
+        'format': format,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'created ${deck.slides.length} slide outlines',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'title': deck.title,
+          'slides': deck.slides.length,
+          'format': format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _slidesFromMarkdown(Map<String, dynamic> args) {
     var markdown = '${args['markdown'] ?? ''}';
     final sourcePathRaw = '${args['path'] ?? ''}'.trim();
@@ -5556,6 +5815,145 @@ class MobileToolRuntime {
           'slides': slides.length,
           'format': 'slide_outline_json',
           'source_path': sourcePath,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _slidesUpdate(Map<String, dynamic> args) async {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final format = _phoneSlideFormat(args['format'], path);
+    final unsupported = _unsupportedPhoneSlideFormat(format);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'PC_DELEGATION_REQUIRED',
+        unsupported,
+        path: path,
+      );
+    }
+    if (!_mobileArtifactFiles.containsKey(path)) {
+      return _phoneArtifactError(
+        'SLIDES_UPDATE_FAILED',
+        'slide artifact not found in phone artifact workspace',
+        path: path,
+      );
+    }
+    if (args['slides'] is! List) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'slides' array is required for slides_update.",
+        path: path,
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'slides_update',
+      prompt: 'このスマホ内のslide artifactを書き換えます。対象: $path',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('slides_update');
+    final deck =
+        _phoneSlidesFromArgs(args, fallbackTitle: _phoneArtifactStem(path));
+    final content = _phoneSlidesContentForFormat(deck, format);
+    final data = _putPhoneArtifactContent(
+      path,
+      content.content,
+      source: 'slides_update',
+      mimeType: content.mimeType,
+      metadata: {
+        'title': deck.title,
+        'slides': deck.slides.length,
+        'format': format,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'updated ${deck.slides.length} slide outlines',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'title': deck.title,
+          'slides': deck.slides.length,
+          'format': format,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _slidesExport(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final requestedFormat =
+        '${args['format'] ?? args['output_format'] ?? ''}'.trim();
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ??
+          'exports/${_phoneArtifactStem(path)}.${requestedFormat.isEmpty ? 'md' : requestedFormat.replaceFirst(RegExp(r'^\.'), '')}',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final format = _phoneSlideFormat(
+      requestedFormat,
+      outputPath,
+      fallback: 'md',
+    );
+    final unsupported = _unsupportedPhoneSlideFormat(format);
+    if (unsupported != null) {
+      return _phoneArtifactError(
+        'PC_DELEGATION_REQUIRED',
+        unsupported,
+        path: path,
+      );
+    }
+    final parsed = _readPhoneSlides(path);
+    if (parsed.error != null) return parsed.error!;
+    final content = _phoneSlidesContentForFormat(parsed.deck, format);
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      content.content,
+      source: 'slides_export',
+      mimeType: content.mimeType,
+      metadata: {
+        'source_path': path,
+        'title': parsed.deck.title,
+        'slides': parsed.deck.slides.length,
+        'format': format,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'exported slides $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'source_path': path,
+          'title': parsed.deck.title,
+          'slides': parsed.deck.slides.length,
+          'format': format,
           'workspace': 'phone',
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
@@ -6914,6 +7312,8 @@ bool _isAsyncPhoneToolName(String name) {
     'mobile_url_open',
     'tool_batch',
     'sheet_update',
+    'doc_update',
+    'slides_update',
   }.contains(name.trim().toLowerCase());
 }
 
@@ -7565,9 +7965,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPhoneArtifactGeneratorTool = const {
     'project_scaffold',
     'doc_create',
+    'slides_create',
     'slides_from_markdown',
     'chart_create',
   }.contains(normalized);
+  final isPhoneDocumentSlideMutationTool = const {
+    'doc_update',
+    'slides_update',
+  }.contains(normalized);
+  final isPhoneSlideExportTool = normalized == 'slides_export';
   final isPhoneSheetTool = const {
     'sheet_create',
     'sheet_read',
@@ -7760,6 +8166,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     final status = switch (normalized) {
       'project_scaffold' => 'implemented_phone_artifact_scaffold',
       'doc_create' => 'implemented_phone_document_text',
+      'slides_create' => 'implemented_phone_slide_outline',
       'slides_from_markdown' => 'implemented_phone_slide_outline',
       'chart_create' => 'implemented_phone_svg_chart',
       _ => 'implemented_phone_artifact_generator',
@@ -7769,6 +8176,20 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'runtime_layers': _flutterRuntimeLayers,
       'native_layers': [],
       'requires_mobile_approval': false,
+      'implementation_status': status,
+    };
+  }
+  if (isPhoneDocumentSlideMutationTool || isPhoneSlideExportTool) {
+    final status = switch (normalized) {
+      'doc_update' => 'implemented_phone_document_text',
+      'slides_export' => 'implemented_phone_slide_export',
+      _ => 'implemented_phone_slide_outline',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': isPhoneDocumentSlideMutationTool,
       'implementation_status': status,
     };
   }
@@ -9888,6 +10309,217 @@ List<Map<String, dynamic>> _slidesFromMarkdownText(String markdown) {
           {'title': 'Slide', 'bullets': <String>[]}
         ]
       : slides;
+}
+
+String _phoneSlideFormat(
+  Object? explicit,
+  String path, {
+  String fallback = 'json',
+}) {
+  final raw = '${explicit ?? ''}'.trim().toLowerCase().replaceFirst(
+        RegExp(r'^\.'),
+        '',
+      );
+  if (raw.isNotEmpty) return raw;
+  final ext = _phoneArtifactExtension(path);
+  if (ext == 'slides') return fallback;
+  return ext.isEmpty ? fallback : ext;
+}
+
+String? _unsupportedPhoneSlideFormat(String format) {
+  if (const {'json', 'md', 'markdown', 'html', 'htm', 'txt', 'text'}
+      .contains(format)) {
+    return null;
+  }
+  if (const {'pptx', 'pdf', 'png', 'key'}.contains(format)) {
+    return 'Phone-local slide tools support JSON, Markdown, HTML, and text only. Use PC delegation for $format output.';
+  }
+  return 'Unsupported phone-local slide format: $format';
+}
+
+_PhoneSlidesDocument _phoneSlidesFromArgs(
+  Map<String, dynamic> args, {
+  required String fallbackTitle,
+}) {
+  final title = '${args['title'] ?? fallbackTitle}'.trim();
+  final slides = _normalizePhoneSlides(args['slides']);
+  return _PhoneSlidesDocument(
+    title: title.isEmpty ? 'Deck' : title,
+    slides: slides.isEmpty
+        ? [
+            {
+              'title': title.isEmpty ? 'Slide' : title,
+              'bullets': <String>[],
+            }
+          ]
+        : slides,
+  );
+}
+
+_PhoneSlidesReadResult _readPhoneSlides(String path) {
+  final file = _mobileArtifactFiles[path];
+  if (file == null) {
+    return _PhoneSlidesReadResult(
+      error: _phoneArtifactError(
+        'SLIDES_READ_FAILED',
+        'slide source not found in phone artifact workspace',
+        path: path,
+      ),
+    );
+  }
+  final content = '${file['content'] ?? ''}';
+  final stem = _phoneArtifactStem(path);
+  try {
+    final decoded = jsonDecode(content);
+    if (decoded is Map) {
+      final title = '${decoded['title'] ?? stem}'.trim();
+      final slides = _normalizePhoneSlides(decoded['slides']);
+      return _PhoneSlidesReadResult(
+        deck: _PhoneSlidesDocument(
+          title: title.isEmpty ? stem : title,
+          slides: slides.isEmpty ? _slidesFromMarkdownText(content) : slides,
+        ),
+      );
+    }
+    if (decoded is List) {
+      return _PhoneSlidesReadResult(
+        deck: _PhoneSlidesDocument(
+          title: stem,
+          slides: _normalizePhoneSlides(decoded),
+        ),
+      );
+    }
+  } catch (_) {
+    // Fall through to markdown/text parsing.
+  }
+  final markdownSlides = _slidesFromMarkdownText(content);
+  return _PhoneSlidesReadResult(
+    deck: _PhoneSlidesDocument(title: stem, slides: markdownSlides),
+  );
+}
+
+List<Map<String, dynamic>> _normalizePhoneSlides(Object? value) {
+  Object? decoded = value;
+  if (value is String && value.trim().isNotEmpty) {
+    try {
+      decoded = jsonDecode(value);
+    } catch (_) {
+      decoded = null;
+    }
+  }
+  if (decoded is! List) return const [];
+  final slides = <Map<String, dynamic>>[];
+  for (final item in decoded) {
+    if (item is Map) {
+      final title = '${item['title'] ?? 'Slide'}'.trim();
+      final rawBullets = item['bullets'] ?? item['body'] ?? item['items'];
+      final bullets = rawBullets is List
+          ? rawBullets.map((entry) => '$entry').toList()
+          : '${rawBullets ?? ''}'.trim().isEmpty
+              ? <String>[]
+              : ['${rawBullets ?? ''}'.trim()];
+      slides.add({
+        'title': title.isEmpty ? 'Slide' : title,
+        'bullets': bullets,
+      });
+    } else {
+      final title = '$item'.trim();
+      if (title.isNotEmpty) {
+        slides.add({'title': title, 'bullets': <String>[]});
+      }
+    }
+  }
+  return slides;
+}
+
+_PhoneArtifactExportContent _phoneSlidesContentForFormat(
+  _PhoneSlidesDocument deck,
+  String format,
+) {
+  return switch (format) {
+    'html' || 'htm' => _PhoneArtifactExportContent(
+        content: _phoneSlidesHtml(deck),
+        mimeType: 'text/html',
+      ),
+    'md' || 'markdown' => _PhoneArtifactExportContent(
+        content: _phoneSlidesMarkdown(deck),
+        mimeType: 'text/markdown',
+      ),
+    'txt' || 'text' => _PhoneArtifactExportContent(
+        content: _phoneSlidesText(deck),
+        mimeType: 'text/plain',
+      ),
+    _ => _PhoneArtifactExportContent(
+        content: '${const JsonEncoder.withIndent('  ').convert({
+              'title': deck.title,
+              'slides': deck.slides,
+              'format': 'slide_outline',
+              'pc_export_note':
+                  'Use PC delegation to export this outline to PPTX.',
+            })}\n',
+        mimeType: 'application/json',
+      ),
+  };
+}
+
+String _phoneSlidesMarkdown(_PhoneSlidesDocument deck) {
+  final buffer = StringBuffer('# ${deck.title}\n');
+  for (final slide in deck.slides) {
+    buffer.writeln('\n## ${slide['title']}');
+    for (final bullet in slide['bullets'] as List? ?? const []) {
+      buffer.writeln('- $bullet');
+    }
+  }
+  return '${buffer.toString().trimRight()}\n';
+}
+
+String _phoneSlidesText(_PhoneSlidesDocument deck) {
+  final buffer = StringBuffer('${deck.title}\n');
+  for (final slide in deck.slides) {
+    buffer.writeln('\n${slide['title']}');
+    for (final bullet in slide['bullets'] as List? ?? const []) {
+      buffer.writeln('- $bullet');
+    }
+  }
+  return '${buffer.toString().trimRight()}\n';
+}
+
+String _phoneSlidesHtml(_PhoneSlidesDocument deck) {
+  final buffer = StringBuffer(
+    '<!doctype html><html><head><meta charset="utf-8">'
+    '<meta name="viewport" content="width=device-width,initial-scale=1">'
+    '<title>${_escapeHtmlText(deck.title)}</title></head><body><main>'
+    '<h1>${_escapeHtmlText(deck.title)}</h1>',
+  );
+  for (final slide in deck.slides) {
+    buffer.write('<section><h2>${_escapeHtmlText(slide['title'])}</h2><ul>');
+    for (final bullet in slide['bullets'] as List? ?? const []) {
+      buffer.write('<li>${_escapeHtmlText(bullet)}</li>');
+    }
+    buffer.write('</ul></section>');
+  }
+  buffer.write('</main></body></html>\n');
+  return buffer.toString();
+}
+
+class _PhoneSlidesDocument {
+  const _PhoneSlidesDocument({
+    required this.title,
+    required this.slides,
+  });
+
+  final String title;
+  final List<Map<String, dynamic>> slides;
+}
+
+class _PhoneSlidesReadResult {
+  const _PhoneSlidesReadResult({
+    this.deck = const _PhoneSlidesDocument(title: 'Deck', slides: []),
+    this.error,
+  });
+
+  final _PhoneSlidesDocument deck;
+  final MobileToolResult? error;
 }
 
 List<double> _phoneChartValues(Map<String, dynamic> args) {

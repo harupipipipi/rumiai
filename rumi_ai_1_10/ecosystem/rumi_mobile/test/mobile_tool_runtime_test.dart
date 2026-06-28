@@ -231,7 +231,11 @@ void main() {
           'webapp_lint',
           'project_scaffold',
           'doc_create',
+          'doc_update',
+          'slides_create',
           'slides_from_markdown',
+          'slides_update',
+          'slides_export',
           'chart_create',
           'sheet_create',
           'sheet_read',
@@ -671,6 +675,129 @@ void main() {
       expect(readData['content'], contains('Mobile Chart'));
     });
 
+    test('updates phone-local documents and slide outlines', () async {
+      final editRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(true),
+      );
+
+      final doc = editRuntime.execute(
+        const MobileToolCall(
+          id: 'doc_update_source_1',
+          name: 'doc_create',
+          arguments: {
+            'title': 'Editable Notes',
+            'content': 'first',
+          },
+        ),
+      );
+      expect(doc.ok, isTrue);
+
+      final docUpdate = await editRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'doc_update_1',
+          name: 'doc_update',
+          arguments: {
+            'path': 'documents/editable-notes.md',
+            'append': 'second',
+          },
+        ),
+      );
+      expect(docUpdate.ok, isTrue);
+      final docUpdatePayload =
+          jsonDecode(docUpdate.output) as Map<String, dynamic>;
+      final docUpdateData = docUpdatePayload['data'] as Map<String, dynamic>;
+      expect(docUpdateData['requires_mobile_approval'], isTrue);
+
+      final docRead = editRuntime.execute(
+        const MobileToolCall(
+          id: 'doc_update_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'documents/editable-notes.md'},
+        ),
+      );
+      final docReadPayload = jsonDecode(docRead.output) as Map<String, dynamic>;
+      final docReadData = docReadPayload['data'] as Map<String, dynamic>;
+      expect(docReadData['content'], contains('first'));
+      expect(docReadData['content'], contains('second'));
+
+      final slidesCreate = editRuntime.execute(
+        const MobileToolCall(
+          id: 'slides_create_1',
+          name: 'slides_create',
+          arguments: {
+            'title': 'Mobile Deck',
+            'slides': [
+              {
+                'title': 'Intro',
+                'bullets': ['One']
+              },
+            ],
+          },
+        ),
+      );
+      expect(slidesCreate.ok, isTrue);
+      final slidesCreatePayload =
+          jsonDecode(slidesCreate.output) as Map<String, dynamic>;
+      final slidesCreateData =
+          slidesCreatePayload['data'] as Map<String, dynamic>;
+      expect(slidesCreateData['path'], 'slides/mobile-deck.slides.json');
+      expect(slidesCreateData['slides'], 1);
+
+      final slidesUpdate = await editRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'slides_update_1',
+          name: 'slides_update',
+          arguments: {
+            'path': 'slides/mobile-deck.slides.json',
+            'slides': [
+              {
+                'title': 'Updated',
+                'bullets': ['Two', 'Three']
+              },
+            ],
+          },
+        ),
+      );
+      expect(slidesUpdate.ok, isTrue);
+      final slidesUpdatePayload =
+          jsonDecode(slidesUpdate.output) as Map<String, dynamic>;
+      final slidesUpdateData =
+          slidesUpdatePayload['data'] as Map<String, dynamic>;
+      expect(slidesUpdateData['requires_mobile_approval'], isTrue);
+
+      final slidesExport = editRuntime.execute(
+        const MobileToolCall(
+          id: 'slides_export_1',
+          name: 'slides_export',
+          arguments: {
+            'path': 'slides/mobile-deck.slides.json',
+            'format': 'md',
+            'output_path': 'exports/mobile-deck.md',
+          },
+        ),
+      );
+      expect(slidesExport.ok, isTrue);
+      final slidesExportPayload =
+          jsonDecode(slidesExport.output) as Map<String, dynamic>;
+      final slidesExportData =
+          slidesExportPayload['data'] as Map<String, dynamic>;
+      expect(slidesExportData['path'], 'exports/mobile-deck.md');
+      expect(slidesExportData['format'], 'md');
+
+      final exportedRead = editRuntime.execute(
+        const MobileToolCall(
+          id: 'slides_export_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'exports/mobile-deck.md'},
+        ),
+      );
+      final exportedPayload =
+          jsonDecode(exportedRead.output) as Map<String, dynamic>;
+      final exportedData = exportedPayload['data'] as Map<String, dynamic>;
+      expect(exportedData['content'], contains('Updated'));
+      expect(exportedData['content'], contains('Three'));
+    });
+
     test('phone-local document generators reject binary output formats', () {
       final docx = runtime.execute(
         const MobileToolCall(
@@ -697,6 +824,16 @@ void main() {
       );
       expect(pptx.ok, isFalse);
       expect(pptx.output, contains('UNSUPPORTED_PHONE_SLIDE_FORMAT'));
+
+      final slidesCreatePptx = runtime.execute(
+        const MobileToolCall(
+          id: 'slides_create_pptx_1',
+          name: 'slides_create',
+          arguments: {'output_path': 'slides/deck.pptx'},
+        ),
+      );
+      expect(slidesCreatePptx.ok, isFalse);
+      expect(slidesCreatePptx.output, contains('PC_DELEGATION_REQUIRED'));
 
       final png = runtime.execute(
         const MobileToolCall(
@@ -2296,6 +2433,20 @@ void main() {
 
       expect(viaInvoke.ok, isTrue);
       expect(delegate.lastCall?.name, 'tool_invoke');
+
+      final slidePptx = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'slides_create_pc_1',
+          name: 'slides_create',
+          arguments: {
+            'title': 'PC Deck',
+            'output_path': 'slides/pc-deck.pptx',
+          },
+        ),
+      );
+
+      expect(slidePptx.ok, isTrue);
+      expect(delegate.lastCall?.name, 'slides_create');
     });
 
     test(
@@ -2834,6 +2985,7 @@ void main() {
       for (final entry in const {
         'project_scaffold': 'implemented_phone_artifact_scaffold',
         'doc_create': 'implemented_phone_document_text',
+        'slides_create': 'implemented_phone_slide_outline',
         'slides_from_markdown': 'implemented_phone_slide_outline',
         'chart_create': 'implemented_phone_svg_chart',
       }.entries) {
@@ -2855,6 +3007,30 @@ void main() {
         expect(generatorMobile['runtime_layers'],
             containsAll(['flutter', 'dart']));
         expect(generatorData['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'doc_update': ['implemented_phone_document_text', true],
+        'slides_update': ['implemented_phone_slide_outline', true],
+        'slides_export': ['implemented_phone_slide_export', false],
+      }.entries) {
+        final editSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final editPayload =
+            jsonDecode(editSchema.output) as Map<String, dynamic>;
+        final editData = editPayload['data'] as Map<String, dynamic>;
+        final editMobile = editData['mobile'] as Map<String, dynamic>;
+        expect(editData['mobile_compatible'], isTrue);
+        expect(editData['execution_route'], 'phone');
+        expect(editMobile['implementation_status'], entry.value[0]);
+        expect(editMobile['requires_mobile_approval'], entry.value[1]);
+        expect(editMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(editData['tags'], contains(mobileFlutterTag));
       }
 
       for (final entry in const {

@@ -220,10 +220,34 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["document", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "doc_update",
+                "name": "doc_update",
+                "summary": "Update document artifact",
+                "tags": ["document", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "slides_create",
+                "name": "slides_create",
+                "summary": "Create slides artifact",
+                "tags": ["presentation", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "slides_from_markdown",
                 "name": "slides_from_markdown",
                 "summary": "Create slides from markdown",
                 "tags": ["presentation", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "slides_update",
+                "name": "slides_update",
+                "summary": "Update slides artifact",
+                "tags": ["presentation", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "slides_export",
+                "name": "slides_export",
+                "summary": "Export slides artifact",
+                "tags": ["export", "agent_os", "artifact_workspace"],
             },
             {
                 "tool_id": "chart_create",
@@ -503,6 +527,7 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     for tool_id, status in {
         "project_scaffold": "implemented_phone_artifact_scaffold",
         "doc_create": "implemented_phone_document_text",
+        "slides_create": "implemented_phone_slide_outline",
         "slides_from_markdown": "implemented_phone_slide_outline",
         "chart_create": "implemented_phone_svg_chart",
     }.items():
@@ -516,6 +541,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert "android-kotlin" not in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "mobile-swift-native" not in by_id[tool_id]["tags"]
         assert "mobile-kotlin-native" not in by_id[tool_id]["tags"]
+
+    for tool_id, (status, requires_approval) in {
+        "doc_update": ("implemented_phone_document_text", True),
+        "slides_update": ("implemented_phone_slide_outline", True),
+        "slides_export": ("implemented_phone_slide_export", False),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "ios-swift" not in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "android-kotlin" not in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, (status, requires_approval) in {
         "sheet_create": ("implemented_phone_sheet_text", False),
