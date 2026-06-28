@@ -834,6 +834,103 @@ def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkey
     _reset_scheduler_singleton()
 
 
+def test_scheduler_resumes_mimo_request_already_approved_by_manager(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+    approval_args = {"path": "notes.txt", "content": "approved by manager"}
+    external_approval: dict[str, str] = {}
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) == 1:
+            response = _approval_required_response(
+                approval,
+                conversation_id="conv-mimo",
+                tool_name="coding_file_write",
+                operation="tool.coding_file_write",
+                risk_level="medium",
+                arguments=approval_args,
+            )
+            request_id = response["data"]["metadata"]["pending_approval"]["request_id"]
+            decision = approval.approve(request_id)
+            assert decision["approved"] is True
+            external_approval.update({"request_id": request_id, "token": decision["token"]})
+            assert approval.get_approval_request(request_id)["status"] == "approved"
+            return response
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "approved write completed"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Write the scheduled note.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "self_improvement",
+            "tools": ["coding_file_write"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["coding_file_write"],
+                "schedule_auto_approve_max_followups": "unlimited",
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "approved write completed"
+    assert len(calls) == 2
+    followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
+    assert followup["request_id"] == external_approval["request_id"]
+    assert followup["approval_token"]
+    assert followup["approval_token"] != external_approval["token"]
+    assert history["auto_approvals"] == [
+        {
+            "request_id": external_approval["request_id"],
+            "tool_name": "coding_file_write",
+            "operation": "tool.coding_file_write",
+            "status": "approved",
+        }
+    ]
+
+    verification = approval.verify_execution_token(
+        followup["approval_token"],
+        "tool.coding_file_write",
+        approval.hash_arguments(approval_args),
+        consume=True,
+        pack_id="defaultspack",
+        conversation_id="conv-mimo",
+    )
+    assert verification.valid is True
+    assert approval.get_approval_request(external_approval["request_id"])["status"] == "consumed"
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_auto_approves_mimo_scheduled_todo_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

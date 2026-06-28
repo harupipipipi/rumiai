@@ -219,7 +219,12 @@ def approve_schedule_pending_approval(
         return None
 
     request = approval.get_approval_request(request_id)
-    if not isinstance(request, dict) or str(request.get("status") or "") != "pending":
+    if not isinstance(request, dict):
+        return None
+    request_status = str(request.get("status") or "").strip().lower()
+    # The manager can approve between approval_required and scheduler follow-up;
+    # approve() will mint a fresh one-shot token for an approved request.
+    if request_status not in {"pending", "approved"}:
         return None
     details = request.get("details") if isinstance(request.get("details"), dict) else {}
     stored_conversation_id = str(details.get("conversation_id") or "").strip()
