@@ -96,6 +96,34 @@ def test_chat_store_list_conversations_omits_full_messages_by_default(tmp_path, 
     ChatStore._instance = None
 
 
+def test_chat_store_replaces_lone_surrogates_before_persisting(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    store.add_message(
+        conversation["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "bad \udc88 text"}],
+            "tool_logs": [{"result": "tool \udc88 log"}],
+        },
+    )
+
+    history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
+    history = json.loads(history_path.read_text(encoding="utf-8"))
+    persisted = json.dumps(history, ensure_ascii=False)
+
+    assert "\udc88" not in persisted
+    assert "bad ? text" in persisted
+    assert "tool ? log" in persisted
+    ChatStore._instance = None
+
+
 def test_chat_store_update_replaces_client_supplied_icon_svg(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 

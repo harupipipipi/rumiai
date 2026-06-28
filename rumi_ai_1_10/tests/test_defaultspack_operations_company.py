@@ -196,6 +196,62 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+
+    docker_swarm = status["harness"]["docker_swarm"]
+    assert docker_swarm["enabled"] is False
+    assert docker_swarm["worker_count"] == 0
+    assert docker_swarm["workers"] == []
+    assert docker_swarm["disabled_reason"] == "non_docker_worker_mode"
+    assert docker_swarm["monitoring"]["disabled"] is True
+    assert docker_swarm["monitoring"]["total_workers"] == 0
+    assert docker_swarm["monitoring"]["missing_status_workers"] == []
+    assert status["company"]["metadata"]["docker_swarm"]["enabled"] is False
+    assert status["harness"]["qa_swarm_plan"]["runtime_mode"] == "managed_desktop"
+    assert status["harness"]["qa_swarm_plan"]["docker_disabled_reason"] == "non_docker_worker_mode"
+    assert status["harness"]["qa_swarm_plan"]["workers"] == []
+    assert status["company"]["metadata"]["qa_swarm_plan"]["runtime_mode"] == "managed_desktop"
+    desktop_defaults = status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["create_defaults"]
+    assert desktop_defaults["starter"] == "browser_url"
+    assert desktop_defaults["assigned_agent"] == "browser_qa"
+    assert desktop_defaults["resolution"] == {"width": 1280, "height": 800}
+
+    heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
+    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    assert "workers reported status" not in heartbeat_schedule["task"]["message"]
+    assert "workers reported status" not in qa_schedule["task"]["message"]
+    assert "First call desktop_list" in qa_schedule["task"]["message"]
+    assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
+
+    for schedule in status["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
@@ -633,6 +689,45 @@ def test_mimo_coding_company_bootstrap_block_accepts_catalog_backed_models(tmp_p
     assert result["status"] == "ok"
     assert result["data"]["harness"]["main_model"] == "groq/openai/gpt-oss-20b"
     assert result["data"]["harness"]["fast_model"] == "cerebras/zai-glm-4.7"
+
+    for schedule in result["data"]["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_bootstrap_block_accepts_non_docker_worker_mode(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import bootstrap
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    result = bootstrap.run(
+        {
+            "start_nonstop": True,
+            "heartbeat_minutes": 30,
+            "review_interval_minutes": 180,
+            "qa_interval_minutes": 240,
+            "model": "stub/default",
+            "vision_model": "stub/default",
+            "fast_model": "stub/default",
+            "qa_targets": ["http://127.0.0.1:3000"],
+            "worker_mode": "managed_desktop",
+            "seed_knowledge": False,
+            "run_initial_review_now": False,
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    docker_swarm = result["data"]["harness"]["docker_swarm"]
+    assert docker_swarm["enabled"] is False
+    assert docker_swarm["worker_count"] == 0
+    assert docker_swarm["monitoring"]["disabled"] is True
+    assert result["data"]["harness"]["qa_swarm_plan"]["runtime_mode"] == "managed_desktop"
 
     for schedule in result["data"]["schedules"]:
         Scheduler().delete_schedule(schedule["id"])

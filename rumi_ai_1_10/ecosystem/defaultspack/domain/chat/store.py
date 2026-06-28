@@ -54,6 +54,19 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
+def _sanitize_json_text(value):
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_sanitize_json_text(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_text(key): _sanitize_json_text(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 class ChatStore:
     _instance = None
 
@@ -133,7 +146,7 @@ class ChatStore:
         tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                json.dump(_sanitize_json_text(payload), handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
             self._replace_atomic_file(tmp_path, path)
@@ -1129,7 +1142,7 @@ class ChatStore:
             tool_dir = self.conversation_workspace_dir(conversation_id) / "tools"
             tool_dir.mkdir(parents=True, exist_ok=True)
             path = tool_dir / "{}-tool_logs.json".format(self._safe_filename(str(msg.get("id") or "message")))
-            path.write_text(json.dumps(msg["tool_logs"], ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(json.dumps(_sanitize_json_text(msg["tool_logs"]), ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _sanitize_inline_thought_messages(self, conversation):
         for msg in conversation.get("messages", []) if isinstance(conversation.get("messages"), list) else []:

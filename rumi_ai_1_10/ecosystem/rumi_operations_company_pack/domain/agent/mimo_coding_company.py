@@ -592,6 +592,7 @@ class MimoCodingCompanyRuntime:
         qa_targets: list[str] | None = None,
         docker_worker_count: int = DEFAULT_DOCKER_WORKER_COUNT,
         docker_personas: list[str] | None = None,
+        docker_enabled: bool = True,
         max_tool_calls: int | None = None,
         workspace_id: str | None = None,
         workspace_label: str | None = None,
@@ -605,6 +606,8 @@ class MimoCodingCompanyRuntime:
         selected_fast_model = self._allowed_model(fast_model or DEFAULT_FAST_MODEL)
         cleaned_targets = self._clean_targets(qa_targets)
         cleaned_personas = self._clean_personas(docker_personas)
+        safe_docker_worker_count = max(0, min(int(docker_worker_count if docker_worker_count is not None else DEFAULT_DOCKER_WORKER_COUNT), 16))
+        docker_swarm_enabled = bool(docker_enabled) and safe_docker_worker_count > 0
         workspace_metadata = self._workspace_metadata(
             workspace_id=workspace_id,
             workspace_label=workspace_label,
@@ -640,12 +643,19 @@ class MimoCodingCompanyRuntime:
             "fast_reply": selected_fast_model,
         }
         state["qa_targets"] = cleaned_targets
-        state["docker_swarm"] = self._docker_swarm_state(
-            worker_count=max(1, min(int(docker_worker_count or DEFAULT_DOCKER_WORKER_COUNT), 16)),
-            persona_ids=cleaned_personas,
-            qa_targets=cleaned_targets,
-            workspace_root=workspace_metadata.get("workspace_root"),
-        )
+        if docker_swarm_enabled:
+            state["docker_swarm"] = self._docker_swarm_state(
+                worker_count=safe_docker_worker_count,
+                persona_ids=cleaned_personas,
+                qa_targets=cleaned_targets,
+                workspace_root=workspace_metadata.get("workspace_root"),
+            )
+        else:
+            state["docker_swarm"] = self._docker_swarm_disabled_state(
+                persona_ids=cleaned_personas,
+                qa_targets=cleaned_targets,
+                reason="non_docker_worker_mode",
+            )
         state["autonomy_board"] = self._autonomy_board(state)
         state["qa_swarm_plan"] = self._qa_swarm_plan(state)
         company = self._sync_company_record(state)
@@ -850,6 +860,32 @@ class MimoCodingCompanyRuntime:
         }
         return self._materialize_docker_swarm_artifacts(swarm_state, workspace_root=workspace_root)
 
+    def _docker_swarm_disabled_state(
+        self,
+        *,
+        persona_ids: list[str] | None = None,
+        qa_targets: list[str] | None = None,
+        reason: str = "disabled",
+    ) -> dict[str, Any]:
+        return {
+            "enabled": False,
+            "worker_count": 0,
+            "personas": self._clean_personas(persona_ids),
+            "qa_targets": list(qa_targets or []),
+            "workers": [],
+            "runtime_dir": str(self._docker_runtime_dir()),
+            "disabled_reason": reason,
+            "monitoring": {
+                "disabled": True,
+                "reason": reason,
+                "total_workers": 0,
+                "reported_workers": 0,
+                "browser_launch_attempted_workers": 0,
+                "missing_status_workers": [],
+                "workers": [],
+            },
+        }
+
     def _materialize_docker_swarm_artifacts(self, swarm_state: dict[str, Any], *, workspace_root: str | None = None) -> dict[str, Any]:
         runtime_dir = self._docker_runtime_dir()
         assignments_dir = runtime_dir / "assignments"
@@ -926,6 +962,17 @@ class MimoCodingCompanyRuntime:
 
     def _docker_swarm_with_monitoring(self, swarm_state: dict[str, Any]) -> dict[str, Any]:
         swarm = deepcopy(swarm_state) if isinstance(swarm_state, dict) else {}
+        if swarm.get("enabled") is False:
+            swarm["monitoring"] = {
+                "disabled": True,
+                "reason": str(swarm.get("disabled_reason") or "disabled"),
+                "total_workers": 0,
+                "reported_workers": 0,
+                "browser_launch_attempted_workers": 0,
+                "missing_status_workers": [],
+                "workers": [],
+            }
+            return swarm
         monitoring = self._docker_swarm_monitoring(swarm)
         swarm["monitoring"] = monitoring
         supervisor_path_text = str(swarm.get("supervisor_path") or self._docker_runtime_dir() / "supervisor.json")
@@ -988,6 +1035,8 @@ class MimoCodingCompanyRuntime:
         docker_swarm = self._docker_swarm_with_monitoring(
             deepcopy(state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state())
         )
+        if docker_swarm.get("enabled") is False:
+            return ""
         monitoring = docker_swarm.get("monitoring") if isinstance(docker_swarm.get("monitoring"), dict) else {}
         try:
             total_workers = int(monitoring.get("total_workers") or 0)
@@ -2000,6 +2049,23 @@ class MimoCodingCompanyRuntime:
 
     def _qa_swarm_plan(self, state: dict[str, Any]) -> dict[str, Any]:
         docker_swarm = state.get("docker_swarm") if isinstance(state.get("docker_swarm"), dict) else self._docker_swarm_state()
+        if docker_swarm.get("enabled") is False:
+            return {
+                "coordinator_agent_id": "browser_qa",
+                "reporting_policy": "Report only evidence-backed bugs. Stay quiet if the assigned path passes.",
+                "managed_desktop_fallback": {
+                    "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
+                    "create_defaults": {
+                        "template_id": "desktop.browser",
+                        "starter": "browser_url",
+                        "assigned_agent": "browser_qa",
+                        "resolution": {"width": 1280, "height": 800},
+                    },
+                },
+                "workers": [],
+                "runtime_mode": "managed_desktop",
+                "docker_disabled_reason": str(docker_swarm.get("disabled_reason") or "disabled"),
+            }
         workers = docker_swarm.get("workers") if isinstance(docker_swarm.get("workers"), list) else []
         persona_specs = {str(item.get("id")): item for item in self._persona_specs()}
         assignments: list[dict[str, Any]] = []

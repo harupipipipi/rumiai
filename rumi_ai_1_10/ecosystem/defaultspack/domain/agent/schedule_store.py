@@ -16,6 +16,19 @@ _SCHEDULES_DIR = os.path.join("user_data", "shared", "schedules")
 _lock = threading.Lock()
 
 
+def _sanitize_json_text(value):
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_sanitize_json_text(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_text(key): _sanitize_json_text(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _ensure_dir():
     """Create the schedules directory if it does not exist."""
     if not os.path.isdir(_SCHEDULES_DIR):
@@ -41,7 +54,7 @@ def save_schedule(schedule_dict):
     path = _schedule_path(sid)
     with _lock:
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(schedule_dict, f, ensure_ascii=False, indent=2)
+            json.dump(_sanitize_json_text(schedule_dict), f, ensure_ascii=False, indent=2)
 
 
 def load_schedule(schedule_id):
@@ -108,7 +121,7 @@ def append_history(schedule_id, entry):
         if len(history) > max_entries:
             history = history[-max_entries:]
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(history, f, ensure_ascii=False, indent=2)
+            json.dump(_sanitize_json_text(history), f, ensure_ascii=False, indent=2)
 
 
 def load_history(schedule_id, limit=50, offset=0):

@@ -283,3 +283,35 @@ def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
 
     scheduler.delete_schedule(schedule["id"])
     _reset_scheduler_singleton()
+
+
+def test_schedule_history_replaces_lone_surrogates_before_persisting(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    from domain.agent.schedule_store import append_history, load_history, save_schedule
+
+    save_schedule(
+        {
+            "id": "sched-surrogate",
+            "type": "once",
+            "task": {"message": "bad \udc88 schedule"},
+            "config": {"run_at": "2099-01-01T00:00:00Z"},
+            "status": "active",
+        }
+    )
+    append_history(
+        "sched-surrogate",
+        {
+            "execution_id": "sexec-surrogate",
+            "status": "error",
+            "error": "bad \udc88 history",
+        },
+    )
+
+    entries, total = load_history("sched-surrogate")
+
+    assert total == 1
+    assert entries[0]["error"] == "bad ? history"
+    assert "bad ? schedule" in (tmp_path / "user_data" / "shared" / "schedules" / "sched-surrogate.json").read_text(
+        encoding="utf-8"
+    )
