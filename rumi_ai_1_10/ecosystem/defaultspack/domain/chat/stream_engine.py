@@ -338,7 +338,10 @@ def _prefaced_text_tool_calls_allowed(prepared: PreparedChatRun) -> bool:
         or prepared.request_context.get("source")
         or ""
     ).strip()
-    return source == "scheduler" and profile_id == "defaultspack.mimo_coding_company"
+    return (
+        source in {"scheduler", "scheduler_approval_followup"}
+        and profile_id == "defaultspack.mimo_coding_company"
+    )
 
 
 def _text_tool_call_blocks(

@@ -1086,6 +1086,7 @@ def _run_text_tool_call_response(
     *,
     metadata=None,
     request_context=None,
+    tool_names=("rumi_api",),
 ):
     from domain.chat.store import ChatStore
     from domain.chat.run_request import PreparedChatRun
@@ -1144,14 +1145,17 @@ def _run_text_tool_call_response(
     }
     if metadata:
         user_message["metadata"] = metadata
-    provider_tools = [{
-        "type": "function",
-        "function": {
-            "name": "rumi_api",
-            "description": "Rumi API",
-            "parameters": {"type": "object", "properties": {"action": {"type": "string"}}},
-        },
-    }]
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": str(tool_name),
+                "description": str(tool_name),
+                "parameters": {"type": "object", "properties": {"action": {"type": "string"}}},
+            },
+        }
+        for tool_name in tool_names
+    ]
     prepared = PreparedChatRun(
         conversation_id=conversation["id"],
         conversation={"id": conversation["id"], "messages": [user_message]},
@@ -1170,8 +1174,8 @@ def _run_text_tool_call_response(
         enrich_info={},
         raw_tools=provider_tools,
         provider_tools=provider_tools,
-        tools_called=["rumi_api"],
-        connected_tool_names={"rumi_api"},
+        tools_called=[str(tool_name) for tool_name in tool_names],
+        connected_tool_names={str(tool_name) for tool_name in tool_names},
         call_handler=None,
         model_routing={},
     )
@@ -1229,6 +1233,32 @@ def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler(tmp_p
         )
     ]
     assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
+def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler_followup(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "Got desktops. Using the approved desktop_list result.\n\n"
+            "<tool_call>\n"
+            "<function=desktop_frame>\n"
+            "<parameter=owner_id>local-user</parameter>\n"
+            "<parameter=seat_id>seat-1</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+        metadata={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_names=("desktop_frame",),
+    )
+
+    assert calls == [("desktop_frame", {"owner_id": "local-user", "seat_id": "seat-1"})]
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "desktop_frame"
     assert stored["raw_text"] == "routes checked"
     assert any(event.get("type") == "tool_call_completed" for event in events)
 
