@@ -96,6 +96,8 @@ void main() {
           'tool_list',
           'tool_schema',
           'tool_invoke',
+          'tool_consent_check',
+          'tool_consent_confirm',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -203,6 +205,55 @@ void main() {
       expect(result.output, contains('6 * 7 = 42'));
     });
 
+    test('runs defaultspack consent check and confirm on phone', () {
+      final check = runtime.execute(
+        const MobileToolCall(
+          id: 'consent_check_1',
+          name: 'tool_consent_check',
+          arguments: {
+            'text': 'この株の投資判断について教えて',
+          },
+        ),
+      );
+
+      expect(check.ok, isTrue);
+      final checkPayload = jsonDecode(check.output) as Map<String, dynamic>;
+      final checkData = checkPayload['data'] as Map<String, dynamic>;
+      expect(checkData['requires_consent'], isTrue);
+      expect(checkData['categories'], contains('investment'));
+      final consentId = checkData['consent_id'] as String;
+
+      final confirm = runtime.execute(
+        MobileToolCall(
+          id: 'consent_confirm_1',
+          name: 'defaultspack.tool.consent_confirm',
+          arguments: {
+            'consent_id': consentId,
+            'accepted': true,
+          },
+        ),
+      );
+
+      expect(confirm.ok, isTrue);
+      final confirmPayload = jsonDecode(confirm.output) as Map<String, dynamic>;
+      final confirmData = confirmPayload['data'] as Map<String, dynamic>;
+      expect(confirmData['consent_id'], consentId);
+      expect(confirmData['accepted'], isTrue);
+
+      final schema = runtime.execute(
+        const MobileToolCall(
+          id: 'consent_schema_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tool_consent_check'},
+        ),
+      );
+      final schemaPayload = jsonDecode(schema.output) as Map<String, dynamic>;
+      final schemaData = schemaPayload['data'] as Map<String, dynamic>;
+      expect(schemaData['mobile_compatible'], isTrue);
+      expect(schemaData['execution_route'], 'phone');
+      expect(schemaData['callable'], isTrue);
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -307,6 +358,26 @@ void main() {
       expect(delegate.lastCall?.name, 'tool_invoke');
     });
 
+    test('executeAsync delegates direct host-bound defaultspack tool names',
+        () async {
+      final delegate = _FakePcToolDelegate();
+      final runtime = MobileToolRuntime(pcDelegate: delegate);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'agent_multi_1',
+          name: 'agent_multi_execute',
+          arguments: {'task': 'summarize the current thread'},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(delegate.lastCall?.name, 'agent_multi_execute');
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['execution_location'], 'pc');
+    });
+
     test('executeAsync keeps phone-compatible tools on phone', () async {
       final delegate = _FakePcToolDelegate();
       final runtime = MobileToolRuntime(pcDelegate: delegate);
@@ -342,6 +413,11 @@ void main() {
       final payload = jsonDecode(schema.output) as Map<String, dynamic>;
       final data = payload['data'] as Map<String, dynamic>;
       expect(data['mobile_compatible'], isFalse);
+      expect(data['callable'], isTrue);
+      expect(data['execution_route'], 'pc');
+      final routing = data['automatic_routing'] as Map<String, dynamic>;
+      expect(routing['one_tool_surface'], isTrue);
+      expect(routing['selected_route'], 'pc');
       expect(data['pc_delegation_available'], isTrue);
       expect(data['unavailable_reason'], contains('tool_invoke'));
       final delegation = data['pc_delegation'] as Map<String, dynamic>;
@@ -409,6 +485,9 @@ void main() {
       final swiftPayload =
           jsonDecode(swiftTools.output) as Map<String, dynamic>;
       final swiftData = swiftPayload['data'] as Map<String, dynamic>;
+      final surface = swiftData['tool_surface'] as Map<String, dynamic>;
+      expect(surface['mode'], 'unified');
+      expect(surface['one_tool_surface'], isTrue);
       final swiftIds = (swiftData['tools'] as List)
           .map((entry) => '${entry['function_id'] ?? entry['tool_id']}')
           .toSet();

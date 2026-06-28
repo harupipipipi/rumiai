@@ -40,6 +40,126 @@ const _assistantProgressStatuses = <String>{
   'blocked',
 };
 const _taskBoardDefaultColumns = <String>['Backlog', 'Doing', 'Review', 'Done'];
+const _mobileConsentCategories = <String, Map<String, Object>>{
+  'investment': {
+    'keywords': <String>[
+      '投資',
+      '株',
+      '株式',
+      '株価',
+      '銘柄',
+      'ポートフォリオ',
+      '資産運用',
+      '利回り',
+      '配当',
+      '投資信託',
+      'ファンド',
+      'fx',
+      '為替',
+      '仮想通貨',
+      '暗号資産',
+      'ビットコイン',
+      'etf',
+      'nisa',
+      'ideco',
+      '信用取引',
+      '空売り',
+      'investment',
+      'stock',
+      'portfolio',
+      'dividend',
+      'fund',
+      'forex',
+      'crypto',
+      'bitcoin',
+      'trading',
+    ],
+    'disclaimer':
+        'この回答は一般的な情報提供のみを目的としており、特定の金融商品の購入・売却を推奨するものではありません。投資判断はご自身の責任で行ってください。',
+  },
+  'tax': {
+    'keywords': <String>[
+      '税金',
+      '確定申告',
+      '所得税',
+      '住民税',
+      '消費税',
+      '法人税',
+      '相続税',
+      '贈与税',
+      '控除',
+      '節税',
+      '税務',
+      '年末調整',
+      '源泉徴収',
+      '経費',
+      '減価償却',
+      'tax',
+      'deduction',
+      'income tax',
+      'tax return',
+    ],
+    'disclaimer':
+        'この回答は一般的な税務情報の提供を目的としており、個別の税務アドバイスではありません。具体的な税務判断については、税理士等の専門家にご相談ください。',
+  },
+  'medical': {
+    'keywords': <String>[
+      '診断',
+      '治療',
+      '処方',
+      '薬',
+      '服薬',
+      '投薬',
+      '症状',
+      '病気',
+      '疾患',
+      '手術',
+      '副作用',
+      '医療',
+      '医師',
+      '病院',
+      'クリニック',
+      'diagnosis',
+      'treatment',
+      'prescription',
+      'medication',
+      'symptom',
+      'disease',
+      'surgery',
+      'side effect',
+    ],
+    'disclaimer':
+        'この回答は一般的な医療情報の提供を目的としており、医学的な診断・治療の代替となるものではありません。健康上の問題については、必ず医師にご相談ください。',
+  },
+  'legal': {
+    'keywords': <String>[
+      '訴訟',
+      '裁判',
+      '弁護士',
+      '法律相談',
+      '契約書',
+      '損害賠償',
+      '慰謝料',
+      '示談',
+      '告訴',
+      '起訴',
+      '法的',
+      '判例',
+      '法令',
+      '条文',
+      '権利',
+      'lawsuit',
+      'attorney',
+      'legal advice',
+      'contract',
+      'liability',
+      'damages',
+      'litigation',
+    ],
+    'disclaimer':
+        'この回答は一般的な法律情報の提供を目的としており、個別の法的アドバイスではありません。具体的な法律問題については、弁護士等の専門家にご相談ください。',
+  },
+};
 const _defaultMobilePlatforms = <String>['ios', 'android'];
 const _flutterRuntimeLayers = <String>['flutter', 'dart'];
 const _nativeUrlRuntimeLayers = <String>[
@@ -158,6 +278,53 @@ class MobileToolRuntime {
           },
         },
         'required': ['expression'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tool_consent_check',
+      description:
+          'Run the defaultspack consent check locally on this phone using the built-in keyword classifier.',
+      tags: ['tool', 'consent', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_consent_check',
+        'defaultspack_tool_consent_check',
+        'defaults.tool.consent.check',
+        'defaults.tool.consent_check',
+        'defaultspack.tool.consent.check',
+        'defaultspack.tool.consent_check',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'use_ai': {'type': 'boolean', 'default': false},
+          'model': {'type': 'string'},
+        },
+        'required': ['text'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'tool_consent_confirm',
+      description:
+          'Confirm a phone-local defaultspack consent record created by tool_consent_check.',
+      tags: ['tool', 'consent', mobileCompatibleTag],
+      aliases: [
+        'defaults_tool_consent_confirm',
+        'defaultspack_tool_consent_confirm',
+        'defaults.tool.consent.confirm',
+        'defaults.tool.consent_confirm',
+        'defaultspack.tool.consent.confirm',
+        'defaultspack.tool.consent_confirm',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'consent_id': {'type': 'string'},
+          'accepted': {'type': 'boolean'},
+        },
+        'required': ['consent_id', 'accepted'],
       },
     ),
     MobileToolDefinition(
@@ -787,6 +954,10 @@ class MobileToolRuntime {
     switch (name) {
       case 'calculator':
         return _calculator(call.arguments);
+      case 'tool_consent_check':
+        return _toolConsentCheck(call.arguments);
+      case 'tool_consent_confirm':
+        return _toolConsentConfirm(call.arguments);
       case 'current_time':
         return _currentTime(call.arguments);
       case 'mobile_platform_info':
@@ -898,7 +1069,7 @@ class MobileToolRuntime {
 
   String _openAiToolDescription(MobileToolDefinition tool) {
     if (tool.name == 'tool_invoke' && pcDelegationAvailable) {
-      return '${tool.description} When PC tool delegation is enabled, host-bound defaultspack tools are executed on the connected PC runtime instead of failing on the phone.';
+      return '${tool.description} The mobile tool surface is unified: phone-compatible tools run locally, and host-bound defaultspack tools route to the connected PC runtime when PC delegation is enabled.';
     }
     return tool.description;
   }
@@ -918,6 +1089,8 @@ class MobileToolRuntime {
       'tool_task_board',
       'task_board',
       'calculator',
+      'tool_consent_check',
+      'tool_consent_confirm',
       'current_time',
       'mobile_platform_info',
       'mobile_json',
@@ -969,6 +1142,127 @@ class MobileToolRuntime {
         output: '計算できませんでした: $error',
       );
     }
+  }
+
+  MobileToolResult _toolConsentCheck(Map<String, dynamic> args) {
+    final text = '${args['text'] ?? args['input'] ?? ''}';
+    if (text.trim().isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'text is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {'code': 'MISSING_PARAM', 'message': 'text is required'},
+        }),
+      );
+    }
+    final lower = text.toLowerCase();
+    final categories = <String>[];
+    for (final entry in _mobileConsentCategories.entries) {
+      final keywords = entry.value['keywords'];
+      if (keywords is! List<String>) continue;
+      if (keywords.any((keyword) => lower.contains(keyword.toLowerCase()))) {
+        categories.add(entry.key);
+      }
+    }
+    categories.sort();
+    final requiresConsent = categories.isNotEmpty;
+    String? consentId;
+    final disclaimers = <String, String>{};
+    if (requiresConsent) {
+      consentId = _nextToolId('consent');
+      for (final category in categories) {
+        final disclaimer = _mobileConsentCategories[category]?['disclaimer'];
+        if (disclaimer is String) disclaimers[category] = disclaimer;
+      }
+      _mobileConsents[consentId] = {
+        'consent_id': consentId,
+        'categories': categories,
+        'accepted': false,
+        'created_at': DateTime.now().toUtc().toIso8601String(),
+        'accepted_at': null,
+      };
+    }
+    final useAi = args['use_ai'] == true;
+    return MobileToolResult(
+      ok: true,
+      summary: requiresConsent
+          ? 'consent required: ${categories.join(', ')}'
+          : 'consent not required',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'requires_consent': requiresConsent,
+          'categories': categories,
+          'consent_id': consentId,
+          'disclaimers': disclaimers,
+          'classifier': 'mobile_keyword',
+          if (useAi)
+            'ai_classification_skipped':
+                'mobile tool_consent_check currently uses the built-in keyword classifier; AI consent classification can be delegated to the PC runtime.',
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _toolConsentConfirm(Map<String, dynamic> args) {
+    final consentId = '${args['consent_id'] ?? args['id'] ?? ''}'.trim();
+    if (consentId.isEmpty) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'consent_id is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'MISSING_PARAM',
+            'message': 'consent_id is required',
+          },
+        }),
+      );
+    }
+    final accepted = args['accepted'];
+    if (accepted is! bool) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'accepted is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'INVALID_PARAM',
+            'message': 'accepted must be a boolean',
+          },
+        }),
+      );
+    }
+    final record = _mobileConsents[consentId];
+    if (record == null) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'consent not found',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'NOT_FOUND',
+            'message': "consent_id '$consentId' not found",
+          },
+        }),
+      );
+    }
+    record['accepted'] = accepted;
+    record['accepted_at'] =
+        accepted ? DateTime.now().toUtc().toIso8601String() : null;
+    return MobileToolResult(
+      ok: true,
+      summary: accepted ? 'consent accepted' : 'consent rejected',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'consent_id': consentId,
+          'accepted': accepted,
+          'accepted_at': record['accepted_at'],
+        },
+      }),
+    );
   }
 
   MobileToolResult _currentTime(Map<String, dynamic> args) {
@@ -1430,6 +1724,7 @@ class MobileToolRuntime {
       summary: '${records.length} tools',
       output: jsonEncode({
         'agent_template': _agentTemplateRecord(),
+        'tool_surface': _toolSurfaceRecord(pcDelegationAvailable),
         'platform_filter': platformFilter,
         'tools': records,
       }),
@@ -1492,6 +1787,7 @@ class MobileToolRuntime {
         'status': 'ok',
         'data': {
           'agent_template': _agentTemplateRecord(),
+          'tool_surface': _toolSurfaceRecord(pcDelegationAvailable),
           'platform_filter': platformFilter,
           'platform_summary': _platformSummary(allRecords),
           'tools': records,
@@ -1628,8 +1924,26 @@ class MobileToolRuntime {
 
   Map<String, dynamic> _decorateCatalogRecord(Map<String, dynamic> record) {
     final decorated = Map<String, dynamic>.from(record);
+    final phoneCompatible = decorated['mobile_compatible'] == true;
+    final executionRoute = phoneCompatible
+        ? 'phone'
+        : pcDelegationAvailable
+            ? 'pc'
+            : 'unavailable';
     decorated['pc_delegation_available'] = pcDelegationAvailable;
-    if (decorated['mobile_compatible'] != true) {
+    decorated['callable'] = phoneCompatible || pcDelegationAvailable;
+    decorated['callable_on_current_device'] =
+        phoneCompatible || pcDelegationAvailable;
+    decorated['execution_route'] = executionRoute;
+    decorated['automatic_routing'] = {
+      'enabled': true,
+      'one_tool_surface': true,
+      'selected_route': executionRoute,
+      'phone_local': phoneCompatible,
+      'pc_delegation_available': pcDelegationAvailable,
+      'pc_delegation_route': '/api/mobile/v1/tools/invoke',
+    };
+    if (!phoneCompatible) {
       decorated['pc_delegation'] = {
         'available': pcDelegationAvailable,
         'route': '/api/mobile/v1/tools/invoke',
@@ -1817,6 +2131,16 @@ Map<String, dynamic> _agentTemplateRecord() => {
       'template_id': mobileAgentTemplateId,
       'ai_input_id': mobileAgentAiInputId,
       'tool_policy_id': mobileAgentToolPolicyId,
+    };
+
+Map<String, dynamic> _toolSurfaceRecord(bool pcDelegationAvailable) => {
+      'mode': 'unified',
+      'one_tool_surface': true,
+      'phone_local_route': 'phone',
+      'pc_delegation_route': '/api/mobile/v1/tools/invoke',
+      'pc_delegation_available': pcDelegationAvailable,
+      'routing':
+          'Call the defaultspack tool name directly. Phone-compatible tools run locally; host-bound tools route to the connected PC when PC delegation is available.',
     };
 
 MobileToolDefinition? _findToolDefinition(String name) {
@@ -2115,6 +2439,7 @@ List<String> _mobilePlatformTags({
 String _openAiCatalogDescription(Map<String, dynamic> record) {
   final summary = '${record['summary'] ?? ''}'.trim();
   final location = '${record['execution_location'] ?? ''}'.trim();
+  final route = '${record['execution_route'] ?? ''}'.trim();
   final platforms =
       (record['execution_platforms'] as List? ?? const []).join(', ');
   final runtimeLayers =
@@ -2128,6 +2453,14 @@ String _openAiCatalogDescription(Map<String, dynamic> record) {
     ].join(' ');
   }
   final reason = '${record['unavailable_reason'] ?? ''}'.trim();
+  if (record['callable'] == true && route == 'pc') {
+    return [
+      if (summary.isNotEmpty) summary,
+      'Execution: same mobile tool surface, delegated to the connected PC defaultspack runtime.',
+      if (runtimeLayers.isNotEmpty) 'Runtime layers: $runtimeLayers.',
+      if (reason.isNotEmpty) 'Phone-local note: $reason',
+    ].join(' ');
+  }
   return [
     if (summary.isNotEmpty) summary,
     'Execution: not phone-executable; calling this function returns the unavailable reason.',
@@ -2396,6 +2729,7 @@ final Map<String, dynamic> _mobileTaskBoard = {
 };
 final List<Map<String, dynamic>> _mobileTaskCards = [];
 final List<Map<String, dynamic>> _mobileAgentPlans = [];
+final Map<String, Map<String, dynamic>> _mobileConsents = {};
 int _mobileToolIdSequence = 0;
 
 String _nextToolId(String prefix) {

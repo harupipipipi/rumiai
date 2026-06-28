@@ -49,6 +49,21 @@ def mobile_agent_template() -> dict[str, str]:
     return dict(MOBILE_AGENT_TEMPLATE)
 
 
+def mobile_tool_surface(*, pc_delegation_available: bool = True) -> dict[str, Any]:
+    return {
+        "mode": "unified",
+        "one_tool_surface": True,
+        "phone_local_route": "phone",
+        "pc_delegation_route": "/api/mobile/v1/tools/invoke",
+        "pc_delegation_available": pc_delegation_available,
+        "routing": (
+            "Call the defaultspack tool name directly. Phone-compatible tools run "
+            "locally; host-bound tools route to the connected PC when PC delegation "
+            "is available."
+        ),
+    }
+
+
 def annotate_mobile_tool_record(record: dict[str, Any], tool: dict[str, Any]) -> dict[str, Any]:
     annotated = dict(record)
     compatibility = mobile_tool_compatibility(tool, record)
@@ -58,6 +73,17 @@ def annotate_mobile_tool_record(record: dict[str, Any], tool: dict[str, Any]) ->
     annotated["mobile_compatible"] = bool(compatibility.get("compatible"))
     annotated["mobile_unavailable_reason"] = str(compatibility.get("unavailable_reason") or "")
     annotated["execution_location"] = str(compatibility.get("execution_location") or "pc")
+    annotated["callable"] = bool(compatibility.get("compatible")) and bool(compatibility.get("available", True))
+    annotated["callable_on_current_device"] = annotated["callable"]
+    annotated["execution_route"] = str(
+        compatibility.get("execution_route")
+        or ("pc" if annotated["callable"] else "unavailable")
+    )
+    annotated["automatic_routing"] = {
+        **mobile_tool_surface(pc_delegation_available=True),
+        "selected_route": annotated["execution_route"],
+        "phone_local": compatibility.get("execution_location") == "phone",
+    }
     return annotated
 
 
@@ -93,6 +119,7 @@ def mobile_tool_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
             "pc_delegated": MOBILE_PC_DELEGATED_TAG,
         },
         "agent_template": mobile_agent_template(),
+        "tool_surface": mobile_tool_surface(pc_delegation_available=True),
     }
 
 
@@ -111,6 +138,7 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
             "compatible": False,
             "available": False,
             "execution_location": "unsupported",
+            "execution_route": "unavailable",
             "unavailable_reason": blocked_reason,
             "platforms": plan["platforms"],
             "runtime_layers": plan["runtime_layers"],
@@ -130,6 +158,7 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
         "compatible": True,
         "available": not unavailable_reason,
         "execution_location": "pc",
+        "execution_route": "pc",
         "unavailable_reason": unavailable_reason,
         "platforms": ["ios", "android"],
         "runtime_layers": ["flutter", "pc-defaultspack-runtime"],

@@ -492,7 +492,7 @@ class OpenAiClient {
       jsonEncode(available),
       'Generated defaultspack catalog: $catalogCount tool/agent manifests are known to the phone runtime. $hostBoundCount are not phone-executable and require PC/defaultspack runtime.',
       toolRuntime.pcDelegationAvailable
-          ? 'PC tool delegation is enabled. For host-bound defaultspack tools, call tool_search or tool_schema first, then invoke the tool through tool_invoke so it can run on the connected PC runtime.'
+          ? 'PC tool delegation is enabled. Use one tool surface: call the defaultspack tool name directly when you know it. Phone-compatible tools run locally; host-bound tools route automatically to the connected PC runtime. Use tool_search or tool_schema only when you need discovery or schema details; tool_invoke is optional compatibility.'
           : 'For unknown/defaultspack tools, call tool_search or tool_schema first. If a tool result says unavailable, explain that reason and suggest switching to the PC space.',
     ].join('\n');
   }
