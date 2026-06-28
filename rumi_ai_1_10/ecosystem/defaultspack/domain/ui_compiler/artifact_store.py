@@ -49,7 +49,7 @@ class UICompilerArtifactStore:
         lock_fd = _acquire_lock(lock_path)
         staging = self.root / "runs" / ".staging" / f"{run_id}-{uuid.uuid4().hex}"
         blueprint = plan.to_dict()
-        plan_hash = _hash_payload(blueprint)
+        plan_hash = _hash_payload(_plan_hash_payload(blueprint))
         try:
             if run_root.exists():
                 existing = _read_manifest(run_root)
@@ -392,6 +392,12 @@ def _read_json(path: Path) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _plan_hash_payload(blueprint: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(blueprint)
+    payload.pop("createdAt", None)
+    return payload
 
 
 def _update_manifest_status(run_root: Path, report: dict[str, Any]) -> None:
