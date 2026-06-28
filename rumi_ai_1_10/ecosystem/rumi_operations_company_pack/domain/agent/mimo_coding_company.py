@@ -325,7 +325,9 @@ ROLE_DEFINITIONS = [
         "context_limit": 96000,
         "system_prompt": (
             "Act like a real user. Click around, break things, and file only evidence-backed bugs. "
-            "If browser tools are unpaired or unavailable, create/use a managed desktop seat before stopping."
+            "If browser tools are unpaired or unavailable, create/use a managed desktop seat before stopping. "
+            "For desktop_input, always include action; type with action=type_text plus text, "
+            "and press keys with action=key plus key."
         ),
     },
     {
@@ -2168,7 +2170,7 @@ class MimoCodingCompanyRuntime:
             "Run a QA swarm with short prompts."
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
-            + " First call desktop_list. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, assigned_agent=browser_qa, owner_id=mimo-coding-company, and the assigned target URL, then continue with the desktop_frame and desktop_input tools directly. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
+            + " First call desktop_list. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id. If no browser companion client is paired or browser_use/computer_use cannot control a browser, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<assigned target URL>, assigned_agent=browser_qa, owner_id=mimo-coding-company, then continue with the desktop_frame and desktop_input tools directly. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<assigned target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."

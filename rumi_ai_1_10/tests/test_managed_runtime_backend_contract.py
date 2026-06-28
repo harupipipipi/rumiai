@@ -651,6 +651,14 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
             "button": "left",
         },
     )
+    missing_action = manager.desktop_input(
+        "input-seat",
+        {
+            "client_action_id": "missing-action",
+            "lease_token": "lease-token",
+            "text": "http://127.0.0.1:8766/chat",
+        },
+    )
     valid = manager.desktop_input(
         "input-seat",
         {
@@ -666,6 +674,10 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
 
     assert invalid["ok"] is False
     assert invalid["code"] == "INVALID_DESKTOP_INPUT"
+    assert missing_action["ok"] is False
+    assert missing_action["code"] == "INVALID_DESKTOP_INPUT"
+    assert "action=type_text" in missing_action["error"]
+    assert "key=Enter" in missing_action["error"]
     assert valid["ok"] is True
     assert agent.provider_inputs == [
         {

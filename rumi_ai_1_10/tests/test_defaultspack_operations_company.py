@@ -203,6 +203,9 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "template_id=desktop.browser" in qa_schedule["task"]["message"]
     assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
     assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
+    assert "action=type_text" in qa_schedule["task"]["message"]
+    assert "action=key" in qa_schedule["task"]["message"]
+    assert "never send a text-only payload" in qa_schedule["task"]["message"]
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
@@ -261,6 +264,9 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     assert "First call desktop_list" in qa_schedule["task"]["message"]
     assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
     assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
+    assert "action=type_text" in qa_schedule["task"]["message"]
+    assert "action=key" in qa_schedule["task"]["message"]
+    assert "never send a text-only payload" in qa_schedule["task"]["message"]
     assert "Do not use rumi_api for desktop frames or inputs" in qa_schedule["task"]["message"]
     assert "/api/desktops/{seat_id}/frame is a GET route, never POST" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
