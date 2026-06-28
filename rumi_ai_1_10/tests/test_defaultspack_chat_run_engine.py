@@ -1079,7 +1079,14 @@ def test_stream_engine_ir_preserves_tool_call_ids(tmp_path, monkeypatch):
     ChatStore._instance = None
 
 
-def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
+def _run_text_tool_call_response(
+    tmp_path,
+    monkeypatch,
+    first_text,
+    *,
+    metadata=None,
+    request_context=None,
+):
     from domain.chat.store import ChatStore
     from domain.chat.run_request import PreparedChatRun
     from domain.chat.stream_engine import ChatRunEngine
@@ -1094,16 +1101,7 @@ def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
             self.complete_requests.append(request)
             if len(self.complete_requests) == 1:
                 return {
-                    "content": [{
-                        "type": "text",
-                        "text": (
-                            "<tool_call>\n"
-                            "<function=rumi_api>\n"
-                            "<parameter=action>list_routes</parameter>\n"
-                            "</function>\n"
-                            "</tool_call>"
-                        ),
-                    }],
+                    "content": [{"type": "text", "text": first_text}],
                     "finish_reason": "stop",
                     "usage": {},
                 }
@@ -1144,6 +1142,8 @@ def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
         "content": "check routes",
         "sequence_number": 1,
     }
+    if metadata:
+        user_message["metadata"] = metadata
     provider_tools = [{
         "type": "function",
         "function": {
@@ -1158,11 +1158,11 @@ def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
         input_data={},
         request_id="req-text-tool",
         content=[],
-        metadata={},
+        metadata=metadata or {},
         user_message=user_message,
         model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
         params={},
-        request_context={},
+        request_context=request_context or {},
         tool_context={},
         standard_messages=[{"role": "user", "content": "check routes"}],
         user_text="check routes",
@@ -1179,12 +1179,75 @@ def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
     engine = ChatRunEngine(store=store, gateway=gateway)
     events = list(engine.stream({}, {}, stream_mode=False))
     stored = store.get_conversation(conversation["id"])["messages"][-1]
+    ChatStore._instance = None
+    return calls, gateway, events, stored
 
+
+def test_stream_engine_recovers_single_text_tool_call(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "<tool_call>\n"
+            "<function=rumi_api>\n"
+            "<parameter=action>list_routes</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+    )
     assert calls == [("rumi_api", {"action": "list_routes"})]
     assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
     assert stored["raw_text"] == "routes checked"
     assert any(event.get("type") == "tool_call_completed" for event in events)
-    ChatStore._instance = None
+
+
+def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "Got desktops. I will inspect the selected frame.\n\n"
+            "<tool_call>\n"
+            "<function=rumi_api>\n"
+            "<parameter=action>request</parameter>\n"
+            "<parameter=method>GET</parameter>\n"
+            "<parameter=path>/api/desktops/seat-1/frame</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+        metadata={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    assert calls == [
+        (
+            "rumi_api",
+            {
+                "action": "request",
+                "method": "GET",
+                "path": "/api/desktops/seat-1/frame",
+            },
+        )
+    ]
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
+def test_stream_engine_ignores_prefaced_text_tool_call_outside_mimo_scheduler(tmp_path, monkeypatch):
+    raw_text = (
+        "For example, a model might write this instead of calling the tool.\n\n"
+        "<tool_call>\n"
+        "<function=rumi_api>\n"
+        "<parameter=action>list_routes</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(tmp_path, monkeypatch, raw_text)
+
+    assert calls == []
+    assert len(gateway.complete_requests) == 1
+    assert stored["raw_text"] == raw_text
+    assert not any(event.get("type") == "tool_call_completed" for event in events)
 
 
 def test_stream_engine_provider_trace_metadata(tmp_path, monkeypatch):

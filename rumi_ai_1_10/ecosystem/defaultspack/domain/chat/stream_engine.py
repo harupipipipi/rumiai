@@ -89,6 +89,10 @@ _TEXT_TOOL_CALL_RE = re.compile(
     r"^\s*<tool_call>\s*<function=([A-Za-z0-9_.:-]+)>\s*(?P<body>.*?)\s*</function>\s*</tool_call>\s*$",
     re.DOTALL,
 )
+_TEXT_TOOL_CALL_BLOCK_RE = re.compile(
+    r"<tool_call>\s*<function=([A-Za-z0-9_.:-]+)>\s*(?P<body>.*?)\s*</function>\s*</tool_call>",
+    re.DOTALL,
+)
 _TEXT_TOOL_PARAMETER_RE = re.compile(
     r"<parameter=([A-Za-z0-9_.:-]+)>(.*?)</parameter>",
     re.DOTALL,
@@ -321,13 +325,41 @@ def _parse_text_tool_parameter_value(value: str) -> Any:
     return text
 
 
-def _text_tool_call_blocks(response: dict[str, Any], connected_tool_names: set[str]) -> list[dict[str, Any]]:
+def _prefaced_text_tool_calls_allowed(prepared: PreparedChatRun) -> bool:
+    metadata_value = prepared.user_message.get("metadata")
+    metadata = metadata_value if isinstance(metadata_value, dict) else {}
+    profile_id = str(
+        metadata.get("profile_id")
+        or prepared.request_context.get("profile_id")
+        or ""
+    ).strip()
+    source = str(
+        metadata.get("source")
+        or prepared.request_context.get("source")
+        or ""
+    ).strip()
+    return source == "scheduler" and profile_id == "defaultspack.mimo_coding_company"
+
+
+def _text_tool_call_blocks(
+    response: dict[str, Any],
+    connected_tool_names: set[str],
+    *,
+    allow_preface: bool = False,
+) -> list[dict[str, Any]]:
     text = ChatRunEngine._response_text(response).strip()
     if not text:
         return []
     match = _TEXT_TOOL_CALL_RE.match(text)
     if not match:
-        return []
+        if not allow_preface:
+            return []
+        matches = list(_TEXT_TOOL_CALL_BLOCK_RE.finditer(text))
+        if len(matches) != 1:
+            return []
+        match = matches[0]
+        if text[match.end():].strip():
+            return []
     connected = {str(name) for name in connected_tool_names if name}
     tool_name = html.unescape(str(match.group(1) or "").strip())
     if not tool_name or tool_name not in connected:
@@ -2030,7 +2062,11 @@ class ChatRunEngine:
                 "metadata": {},
             }
         if not tool_uses:
-            tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
+            tool_uses = _text_tool_call_blocks(
+                response,
+                prepared.connected_tool_names,
+                allow_preface=_prefaced_text_tool_calls_allowed(prepared),
+            )
         return response, tool_uses
 
     def _model_turn_via_complete(
@@ -2042,7 +2078,11 @@ class ChatRunEngine:
         response = self._complete_turn(prepared, messages)
         tool_uses = _tool_use_blocks(response)
         if not tool_uses:
-            tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
+            tool_uses = _text_tool_call_blocks(
+                response,
+                prepared.connected_tool_names,
+                allow_preface=_prefaced_text_tool_calls_allowed(prepared),
+            )
         if not tool_uses and self._stream_mode:
             text = self._response_text(response)
             if text:
@@ -2069,7 +2109,11 @@ class ChatRunEngine:
             response = self._complete_turn(prepared, sealed.messages)
             tool_uses = _tool_use_blocks(response)
             if not tool_uses:
-                tool_uses = _text_tool_call_blocks(response, prepared.connected_tool_names)
+                tool_uses = _text_tool_call_blocks(
+                    response,
+                    prepared.connected_tool_names,
+                    allow_preface=_prefaced_text_tool_calls_allowed(prepared),
+                )
             if tool_uses:
                 return response, tool_uses
             check = service.verify_and_strip(
