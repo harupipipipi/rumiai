@@ -422,13 +422,31 @@ def _text_tool_call_blocks_for_prepared(
     prepared: PreparedChatRun,
 ) -> list[dict[str, Any]]:
     tool_context = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
-    if tool_context.get("approval_replayed"):
-        return []
-    return _text_tool_call_blocks(
+    tool_uses = _text_tool_call_blocks(
         response,
         prepared.connected_tool_names,
         allow_preface=_prefaced_text_tool_calls_allowed(prepared),
     )
+    replayed = tool_context.get("approval_replayed")
+    if not replayed:
+        return tool_uses
+    if not tool_uses or not _prefaced_text_tool_calls_allowed(prepared):
+        return []
+    if not isinstance(replayed, dict) or replayed.get("duplicate"):
+        return []
+    replayed_name = str(replayed.get("tool_name") or "").strip()
+    replayed_arguments = replayed.get("arguments") if isinstance(replayed.get("arguments"), dict) else None
+    filtered: list[dict[str, Any]] = []
+    for block in tool_uses:
+        tool_name = str(block.get("name") or block.get("tool_name") or "").strip()
+        if not replayed_name or not _tool_identity_text_matches(tool_name, replayed_name):
+            filtered.append(block)
+            continue
+        block_arguments = block.get("input", block.get("arguments", {}))
+        block_arguments = block_arguments if isinstance(block_arguments, dict) else {}
+        if replayed_arguments is not None and block_arguments != replayed_arguments:
+            filtered.append(block)
+    return filtered
 
 
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -2682,6 +2700,7 @@ class ChatRunEngine:
                 "tool_name": tool_name,
                 "tool_call_id": tool_call_id,
                 "request_id": request_id,
+                "arguments": dict(stored_args or {}),
             }
         return None
 

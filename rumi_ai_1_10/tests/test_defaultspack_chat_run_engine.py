@@ -1264,7 +1264,59 @@ def test_stream_engine_recovers_prefaced_text_tool_call_for_mimo_scheduler_follo
     assert any(event.get("type") == "tool_call_completed" for event in events)
 
 
-def test_stream_engine_suppresses_text_tool_recovery_after_approval_replay(tmp_path, monkeypatch):
+def test_stream_engine_recovers_next_text_tool_call_after_different_approval_replay(tmp_path, monkeypatch):
+    raw_text = (
+        "Found 1 running desktop: `QA-Swarm-Browser-1` (seat `90646b09`). Taking screenshot.\n\n"
+        "<tool_call>\n"
+        "<function=desktop_frame>\n"
+        "<parameter=owner_id>local-user</parameter>\n"
+        "<parameter=seat_id>90646b09-a548-48e0-8b57-f6f34e7275b7</parameter>\n"
+        "</function>\n"
+        "</tool_call>"
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        raw_text,
+        metadata={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={
+            "approval_replayed": {
+                "tool_name": "rumi_api",
+                "tool_call_id": "call-approved",
+                "request_id": "apr-approved",
+                "arguments": {
+                    "action": "request",
+                    "method": "GET",
+                    "path": "/api/desktops",
+                },
+            },
+            "tool_approval_tokens": {"rumi_api": "spent-token"},
+        },
+        tool_names=("rumi_api", "desktop_frame"),
+    )
+
+    assert calls == [
+        (
+            "desktop_frame",
+            {
+                "owner_id": "local-user",
+                "seat_id": "90646b09-a548-48e0-8b57-f6f34e7275b7",
+            },
+        )
+    ]
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "desktop_frame"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
+def test_stream_engine_suppresses_same_text_tool_recovery_after_approval_replay(tmp_path, monkeypatch):
     raw_text = (
         "<tool_call>\n"
         "<function=desktop_frame>\n"
