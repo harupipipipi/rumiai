@@ -93,6 +93,10 @@ _TEXT_TOOL_CALL_BLOCK_RE = re.compile(
     r"<tool_call>\s*<function=([A-Za-z0-9_.:-]+)>\s*(?P<body>.*?)\s*</function>\s*</tool_call>",
     re.DOTALL,
 )
+_TEXT_TOOL_INVOCATION_BLOCK_RE = re.compile(
+    r"<tool_invocation\s+name=(?P<quote>[\"'])(?P<name>[A-Za-z0-9_.:-]+)(?P=quote)\s+arguments=(?P<arguments>\{.*?\})\s*/>",
+    re.DOTALL,
+)
 _TEXT_TOOL_PARAMETER_RE = re.compile(
     r"<parameter=([A-Za-z0-9_.:-]+)>(.*?)</parameter>",
     re.DOTALL,
@@ -354,45 +358,61 @@ def _text_tool_call_blocks(
     if not text:
         return []
     match = _TEXT_TOOL_CALL_RE.match(text)
-    matches: list[re.Match[str]]
+    matches: list[tuple[str, re.Match[str]]]
     if match:
-        matches = [match]
+        matches = [("tool_call", match)]
     else:
         if not allow_preface:
             return []
-        matches = list(_TEXT_TOOL_CALL_BLOCK_RE.finditer(text))
-        if not matches:
+        call_matches = list(_TEXT_TOOL_CALL_BLOCK_RE.finditer(text))
+        invocation_matches: list[re.Match[str]] = []
+        raw_matches = call_matches
+        if not raw_matches:
+            invocation_matches = list(_TEXT_TOOL_INVOCATION_BLOCK_RE.finditer(text))
+            raw_matches = invocation_matches
+        if not raw_matches:
             return []
-        if text[matches[-1].end():].strip():
+        if text[raw_matches[-1].end():].strip():
             return []
-        previous_end = matches[0].end()
-        for next_match in matches[1:]:
+        previous_end = raw_matches[0].end()
+        for next_match in raw_matches[1:]:
             if text[previous_end:next_match.start()].strip():
                 return []
             previous_end = next_match.end()
+        kind = "tool_invocation" if invocation_matches else "tool_call"
+        matches = [(kind, item) for item in raw_matches]
     connected = {str(name) for name in connected_tool_names if name}
     tool_uses: list[dict[str, Any]] = []
-    for item in matches:
-        tool_name = html.unescape(str(item.group(1) or "").strip())
+    for kind, item in matches:
+        tool_name = html.unescape(str(item.group(1) if kind == "tool_call" else item.group("name") or "").strip())
         if not tool_name or (tool_name not in connected and not is_assistant_progress_tool_name(tool_name)):
             return []
-        body = str(item.group("body") or "")
-        arguments: dict[str, Any] = {}
-        for parameter in _TEXT_TOOL_PARAMETER_RE.finditer(body):
-            key = html.unescape(str(parameter.group(1) or "").strip())
-            if key:
-                arguments[key] = _parse_text_tool_parameter_value(str(parameter.group(2) or ""))
-        if not arguments and body.strip():
-            return []
-        if _TEXT_TOOL_PARAMETER_RE.sub("", body).strip():
-            return []
+        if kind == "tool_invocation":
+            try:
+                parsed_arguments = json.loads(html.unescape(str(item.group("arguments") or "")))
+            except Exception:
+                return []
+            if not isinstance(parsed_arguments, dict):
+                return []
+            arguments = parsed_arguments
+        else:
+            body = str(item.group("body") or "")
+            arguments: dict[str, Any] = {}
+            for parameter in _TEXT_TOOL_PARAMETER_RE.finditer(body):
+                key = html.unescape(str(parameter.group(1) or "").strip())
+                if key:
+                    arguments[key] = _parse_text_tool_parameter_value(str(parameter.group(2) or ""))
+            if not arguments and body.strip():
+                return []
+            if _TEXT_TOOL_PARAMETER_RE.sub("", body).strip():
+                return []
         tool_name, arguments = _normalize_tool_call_name_and_arguments(tool_name, arguments)
         tool_uses.append({
             "type": "tool_use",
             "id": gen_id(),
             "name": tool_name,
             "input": arguments,
-            "metadata": {"recovered_from_text_tool_call": True},
+            "metadata": {"recovered_from_text_tool_call": True, "text_tool_syntax": kind},
         })
     return tool_uses
 

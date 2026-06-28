@@ -1326,6 +1326,30 @@ def test_stream_engine_recovers_text_assistant_progress_without_connected_tool(t
     assert any(event.get("type") == "assistant_progress" for event in events)
 
 
+def test_stream_engine_recovers_text_tool_invocation_for_mimo_scheduler(tmp_path, monkeypatch):
+    raw_text = (
+        "Desktop input accepted! Let me take a screenshot to see the result.\n\n"
+        '<tool_invocation name="rumi_api" arguments={"action":"request","method":"GET","path":"/api/desktops/seat-1/frame"} />'
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        raw_text,
+        metadata={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+        tool_names=("rumi_api",),
+    )
+
+    assert calls == [
+        (
+            "rumi_api",
+            {"action": "request", "method": "GET", "path": "/api/desktops/seat-1/frame"},
+        )
+    ]
+    assert gateway.complete_requests[1]["messages"][-2]["tool_calls"][0]["function"]["name"] == "rumi_api"
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+
+
 def test_stream_engine_ignores_prefaced_text_tool_call_outside_mimo_scheduler(tmp_path, monkeypatch):
     raw_text = (
         "For example, a model might write this instead of calling the tool.\n\n"
@@ -1334,6 +1358,19 @@ def test_stream_engine_ignores_prefaced_text_tool_call_outside_mimo_scheduler(tm
         "<parameter=action>list_routes</parameter>\n"
         "</function>\n"
         "</tool_call>"
+    )
+    calls, gateway, events, stored = _run_text_tool_call_response(tmp_path, monkeypatch, raw_text)
+
+    assert calls == []
+    assert len(gateway.complete_requests) == 1
+    assert stored["raw_text"] == raw_text
+    assert not any(event.get("type") == "tool_call_completed" for event in events)
+
+
+def test_stream_engine_ignores_text_tool_invocation_outside_mimo_scheduler(tmp_path, monkeypatch):
+    raw_text = (
+        "For example, a model might write this instead of calling the tool.\n\n"
+        '<tool_invocation name="rumi_api" arguments={"action":"list_routes"} />'
     )
     calls, gateway, events, stored = _run_text_tool_call_response(tmp_path, monkeypatch, raw_text)
 
