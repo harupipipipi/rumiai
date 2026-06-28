@@ -843,6 +843,36 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'webapp_build',
+      description:
+          'Mark a phone-local static webapp artifact as build-ready after mobile approval. Real package commands remain PC-delegated.',
+      tags: [
+        'tool',
+        'webapp',
+        'build',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_webapp_build',
+        'defaultspack_webapp_build',
+        'defaults.webapp.build',
+        'defaultspack.webapp.build',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_static_webapp_build_plan',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'command': {},
+          'timeout': {'type': 'integer'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'project_scaffold',
       description:
           'Create a phone-local static webapp scaffold in the artifact workspace. Static HTML, plain JS, and Vite React file layouts are supported; package install/build still delegates to PC.',
@@ -1262,6 +1292,37 @@ class MobileToolRuntime {
         'properties': {
           'path': {'type': 'string'},
           'source_path': {'type': 'string'},
+          'output_path': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'research_report_export',
+      description:
+          'Export a phone-local research report artifact or provided report content to Markdown, HTML, JSON, or text. Binary exports remain PC-delegated.',
+      tags: [
+        'tool',
+        'research',
+        'export',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_research_report_export',
+        'defaultspack_research_report_export',
+        'defaults.research.report_export',
+        'defaultspack.research.report_export',
+      ],
+      implementationStatus: 'implemented_phone_research_report_export',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'report_path': {'type': 'string'},
+          'content': {'type': 'string'},
+          'report': {'type': 'string'},
+          'format': {'type': 'string'},
           'output_path': {'type': 'string'},
         },
       },
@@ -2557,6 +2618,35 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'package_install_plan',
+      description:
+          'Plan pip/npm/pnpm/yarn package installation commands on this phone without executing them. Actual install execution remains PC-delegated.',
+      tags: [
+        'tool',
+        'package',
+        'sandbox',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_package_install_plan',
+        'defaultspack_package_install_plan',
+        'defaults.package.install_plan',
+        'defaultspack.package.install_plan',
+      ],
+      implementationStatus: 'implemented_phone_install_plan',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'manager': {'type': 'string'},
+          'packages': {},
+          'dev': {'type': 'boolean'},
+          'global': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'job_create',
       description:
           'Create a phone-local artifact-backed job record. run_immediately marks the local record completed and writes a result artifact without PC execution.',
@@ -2999,6 +3089,8 @@ class MobileToolRuntime {
         return _webappPreview(call.arguments);
       case 'webapp_lint':
         return _webappLint(call.arguments);
+      case 'webapp_build':
+        return _asyncOnlyTool(name);
       case 'project_scaffold':
         return _projectScaffold(call.arguments);
       case 'doc_create':
@@ -3027,6 +3119,8 @@ class MobileToolRuntime {
         return _asyncOnlyTool(name);
       case 'artifact_zip':
         return _artifactZip(call.arguments);
+      case 'research_report_export':
+        return _researchReportExport(call.arguments);
       case 'artifact_export':
         return _artifactExport(call.arguments);
       case 'static_site_export':
@@ -3087,6 +3181,8 @@ class MobileToolRuntime {
         return _toolInvoke(call.arguments);
       case 'tool_batch':
         return _asyncOnlyTool(name);
+      case 'package_install_plan':
+        return _packageInstallPlan(call.arguments);
       case 'job_create':
         return _jobCreate(call.arguments);
       case 'job_status':
@@ -3117,9 +3213,15 @@ class MobileToolRuntime {
   Future<MobileToolResult> executeAsync(MobileToolCall call) async {
     final name = _canonicalToolName(call.name);
     if (_isAsyncPhoneToolName(name)) {
-      return _executeAsyncPhoneTool(
+      final result = await _executeAsyncPhoneTool(
         MobileToolCall(id: call.id, name: name, arguments: call.arguments),
       );
+      if (_pcDelegate != null &&
+          !result.ok &&
+          _shouldDelegateToPc(call, result)) {
+        return _pcDelegate.invoke(call);
+      }
+      return result;
     }
     if (name == 'tool_invoke') {
       final requested =
@@ -3175,6 +3277,8 @@ class MobileToolRuntime {
       case 'job_cancel':
       case 'job_resume':
         return _jobMutation(name, call.arguments);
+      case 'webapp_build':
+        return _webappBuild(call.arguments);
       case 'tool_batch':
         return _toolBatch(call.arguments);
       default:
@@ -5627,6 +5731,91 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _webappBuild(Map<String, dynamic> args) async {
+    final command = _phoneStringList(args['command']);
+    if (command.isNotEmpty &&
+        !const {'static', 'noop', 'no-op', 'mark-ready'}
+            .contains(command.join(' ').trim().toLowerCase())) {
+      return _pcDelegationRequired(
+        'webapp_build',
+        'Phone-local webapp_build can mark static artifacts as build-ready only. Custom build commands require the connected PC runtime.',
+      );
+    }
+    final root = _normalizePhoneArtifactPath(args['path'], allowRoot: true);
+    if (root == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final entries = _phoneZipSourceEntries(root);
+    if (entries.isEmpty) {
+      return _phoneArtifactError(
+        'WEBAPP_BUILD_FAILED',
+        'webapp source not found in phone artifact workspace',
+        path: root,
+      );
+    }
+    final indexPath = root == '.' ? 'index.html' : '$root/index.html';
+    if (!_mobileArtifactFiles.containsKey(indexPath)) {
+      return _phoneArtifactError(
+        'WEBAPP_BUILD_FAILED',
+        'phone-local static webapp build requires index.html',
+        path: root,
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'webapp_build',
+      prompt: 'このスマホ内のwebapp artifactへbuild-ready manifestを書き込みます。対象: $root',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('webapp_build');
+    final packagePath = root == '.' ? 'package.json' : '$root/package.json';
+    final buildPath = root == '.' ? 'build.rumi.json' : '$root/build.rumi.json';
+    final files = entries.map((entry) => entry.path).toList();
+    final manifest = const JsonEncoder.withIndent('  ').convert({
+      'path': root,
+      'status': 'build_ready',
+      'build_type': 'phone_static_manifest',
+      'files': files,
+      'entrypoint': indexPath,
+      'package_json':
+          _mobileArtifactFiles.containsKey(packagePath) ? packagePath : null,
+      'pc_build_note':
+          'Use PC delegation for npm/pnpm/yarn build commands or bundler output.',
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    });
+    final data = _putPhoneArtifactContent(
+      buildPath,
+      '$manifest\n',
+      source: 'webapp_build',
+      mimeType: 'application/json',
+      metadata: {
+        'source_path': root,
+        'build_type': 'phone_static_manifest',
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'marked static webapp build-ready',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'source_path': root,
+          'build_type': 'phone_static_manifest',
+          'files': files.length,
+          'entrypoint': indexPath,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _projectScaffold(Map<String, dynamic> args) {
     final name = _slugifyPhoneArtifactName(
       '${args['name'] ?? 'webapp'}',
@@ -6439,6 +6628,95 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _researchReportExport(Map<String, dynamic> args) {
+    final rawPath = '${args['path'] ?? args['report_path'] ?? ''}'.trim();
+    final sourcePath =
+        rawPath.isEmpty ? null : _normalizePhoneArtifactPath(rawPath);
+    if (rawPath.isNotEmpty && sourcePath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final sourceContent = sourcePath == null
+        ? _phoneReportContentFromArgs(args)
+        : _mobileArtifactFiles[sourcePath]?['content'];
+    if (sourceContent == null) {
+      return _phoneArtifactError(
+        'RESEARCH_REPORT_EXPORT_FAILED',
+        sourcePath == null
+            ? 'report content or path is required'
+            : 'research report source not found in phone artifact workspace',
+        path: sourcePath,
+      );
+    }
+    final requestedFormat = '${args['format'] ?? ''}'.trim().toLowerCase();
+    final outputPath = _normalizePhoneArtifactPath(
+      args['output_path'] ??
+          'exports/${_phoneArtifactStem(sourcePath ?? 'research-report')}.${requestedFormat.isEmpty ? 'md' : requestedFormat.replaceFirst(RegExp(r'^\.'), '')}',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final format = _phoneArtifactExtension(outputPath).isEmpty
+        ? (requestedFormat.isEmpty ? 'md' : requestedFormat)
+        : _phoneArtifactExtension(outputPath);
+    final normalizedFormat = switch (format.replaceFirst(RegExp(r'^\.'), '')) {
+      'markdown' => 'md',
+      'text' => 'txt',
+      final value => value,
+    };
+    if (const {'pdf', 'docx', 'pptx', 'xlsx', 'png'}
+        .contains(normalizedFormat)) {
+      return _pcDelegationRequired(
+        'research_report_export',
+        'Phone-local research_report_export supports Markdown, HTML, JSON, and text only. Use PC delegation for $normalizedFormat output.',
+      );
+    }
+    if (!const {'md', 'html', 'htm', 'json', 'txt'}
+        .contains(normalizedFormat)) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PHONE_REPORT_FORMAT',
+        'Unsupported phone-local research report export format: $normalizedFormat',
+        path: sourcePath,
+      );
+    }
+    final exportContent = _phoneFileExportContent(
+      sourcePath ?? 'research-report',
+      '$sourceContent',
+      normalizedFormat,
+    );
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      exportContent.content,
+      source: 'research_report_export',
+      mimeType: exportContent.mimeType,
+      metadata: {
+        if (sourcePath != null) 'source_path': sourcePath,
+        'format': normalizedFormat,
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'exported research report $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          if (sourcePath != null) 'source_path': sourcePath,
+          'format': normalizedFormat,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _artifactExport(Map<String, dynamic> args) {
     final sourcePath =
         _normalizePhoneArtifactPath(args['path'], allowRoot: true);
@@ -7182,6 +7460,85 @@ class MobileToolRuntime {
     return decorated;
   }
 
+  MobileToolResult _packageInstallPlan(Map<String, dynamic> args) {
+    final rawManager = '${args['manager'] ?? 'npm'}'.trim().toLowerCase();
+    final manager = switch (rawManager) {
+      'node' || 'npm' => 'npm',
+      'pnpm' => 'pnpm',
+      'yarn' => 'yarn',
+      'pip' || 'pip3' || 'python' || 'python3' => 'pip',
+      _ => rawManager,
+    };
+    if (!const {'npm', 'pnpm', 'yarn', 'pip'}.contains(manager)) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'unsupported package manager',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_PACKAGE_MANAGER',
+            'message':
+                'Phone-local package_install_plan supports npm, pnpm, yarn, and pip.',
+            'manager': rawManager,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    final packages = _phoneStringList(args['packages']);
+    final dev = _boolArg(args['dev'], fallback: false);
+    final global = _boolArg(args['global'], fallback: false);
+    final command = <String>[
+      if (manager == 'pip') ...[
+        'python',
+        '-m',
+        'pip',
+        'install',
+        if (global) '--user',
+        ...packages,
+      ] else if (manager == 'npm') ...[
+        'npm',
+        'install',
+        if (global) '-g',
+        if (dev) '--save-dev',
+        ...packages,
+      ] else if (manager == 'pnpm') ...[
+        'pnpm',
+        packages.isEmpty ? 'install' : 'add',
+        if (global) '-g',
+        if (dev) '-D',
+        ...packages,
+      ] else ...[
+        'yarn',
+        packages.isEmpty ? 'install' : 'add',
+        if (global) 'global',
+        if (dev && packages.isNotEmpty) '--dev',
+        ...packages,
+      ],
+    ];
+    return MobileToolResult(
+      ok: true,
+      summary: '$manager install plan',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'manager': manager,
+          'packages': packages,
+          'command': command,
+          'dry_run': true,
+          'execute': false,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+          'implementation_status': 'implemented_phone_install_plan',
+          'pc_execute_note':
+              'Use PC delegation to execute package installation commands.',
+        },
+      }),
+    );
+  }
+
   MobileToolResult _jobCreate(Map<String, dynamic> args) {
     final requestedId = '${args['job_id'] ?? args['id'] ?? ''}'.trim();
     final generatedId = _nextToolId('job');
@@ -7693,6 +8050,7 @@ bool _isAsyncPhoneToolName(String name) {
     'artifact_file_delete',
     'mobile_url_open',
     'tool_batch',
+    'webapp_build',
     'sheet_update',
     'doc_update',
     'slides_update',
@@ -8346,6 +8704,11 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'webapp_preview',
     'webapp_lint',
   }.contains(normalized);
+  final isPhonePackageWebappTool = const {
+    'package_install_plan',
+    'webapp_build',
+    'research_report_export',
+  }.contains(normalized);
   final isPhoneArtifactGeneratorTool = const {
     'project_scaffold',
     'doc_create',
@@ -8552,6 +8915,20 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_phone_artifact_html',
+    };
+  }
+  if (isPhonePackageWebappTool) {
+    final status = switch (normalized) {
+      'package_install_plan' => 'implemented_phone_install_plan',
+      'webapp_build' => 'implemented_phone_static_webapp_build_plan',
+      _ => 'implemented_phone_research_report_export',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': normalized == 'webapp_build',
+      'implementation_status': status,
     };
   }
   if (isPhoneArtifactGeneratorTool) {
@@ -11632,6 +12009,57 @@ MobileToolResult _phoneArtifactError(
       },
     }),
   );
+}
+
+MobileToolResult _pcDelegationRequired(String toolName, String message) {
+  return MobileToolResult(
+    ok: false,
+    summary: '$toolName requires PC runtime',
+    output: jsonEncode({
+      'status': 'error',
+      'error': {
+        'code': 'PC_DELEGATION_REQUIRED',
+        'message': message,
+        'tool_name': toolName,
+        'execution_location': 'pc',
+        'runtime_layers': ['pc-defaultspack-runtime'],
+      },
+    }),
+  );
+}
+
+List<String> _phoneStringList(Object? value) {
+  if (value is List) {
+    return value.map((entry) => '$entry'.trim()).where((entry) {
+      return entry.isNotEmpty;
+    }).toList();
+  }
+  final text = '${value ?? ''}'.trim();
+  if (text.isEmpty) return const [];
+  if (text.startsWith('[')) {
+    try {
+      final decoded = jsonDecode(text);
+      if (decoded is List) return _phoneStringList(decoded);
+    } catch (_) {
+      // Fall through to shell-ish splitting.
+    }
+  }
+  return text
+      .split(RegExp(r'[\s,]+'))
+      .map((entry) => entry.trim())
+      .where((entry) => entry.isNotEmpty)
+      .toList();
+}
+
+String? _phoneReportContentFromArgs(Map<String, dynamic> args) {
+  for (final key in ['content', 'report', 'markdown', 'text']) {
+    final value = args[key];
+    if (value is String && value.trim().isNotEmpty) return value;
+    if (value is Map || value is List) {
+      return const JsonEncoder.withIndent('  ').convert(value);
+    }
+  }
+  return null;
 }
 
 Map<String, dynamic> _phoneJobInput(Map<String, dynamic> args) {

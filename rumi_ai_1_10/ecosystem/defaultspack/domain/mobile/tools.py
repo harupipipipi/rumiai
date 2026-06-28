@@ -74,6 +74,11 @@ _PHONE_ARTIFACT_HTML_TOOLS = {
     "webapp_preview",
     "webapp_lint",
 }
+_PHONE_PACKAGE_WEBAPP_TOOLS = {
+    "package_install_plan": ("implemented_phone_install_plan", False),
+    "webapp_build": ("implemented_phone_static_webapp_build_plan", True),
+    "research_report_export": ("implemented_phone_research_report_export", False),
+}
 _PHONE_ARTIFACT_GENERATOR_TOOLS = {
     "project_scaffold": "implemented_phone_artifact_scaffold",
     "doc_create": "implemented_phone_document_text",
@@ -295,6 +300,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": False,
             "implementation_status": "implemented_phone_artifact_html",
+        }
+    if tool_id in _PHONE_PACKAGE_WEBAPP_TOOLS:
+        status, requires_approval = _PHONE_PACKAGE_WEBAPP_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
         }
     if tool_id in _PHONE_ARTIFACT_GENERATOR_TOOLS:
         return {

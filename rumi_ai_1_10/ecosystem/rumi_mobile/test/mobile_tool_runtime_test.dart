@@ -219,6 +219,7 @@ void main() {
           'tool_schema',
           'tool_invoke',
           'tool_batch',
+          'package_install_plan',
           'job_create',
           'job_status',
           'job_history',
@@ -235,6 +236,7 @@ void main() {
           'browser_save_page',
           'webapp_preview',
           'webapp_lint',
+          'webapp_build',
           'project_scaffold',
           'doc_create',
           'doc_update',
@@ -249,6 +251,7 @@ void main() {
           'sheet_update',
           'sheet_export',
           'artifact_zip',
+          'research_report_export',
           'artifact_export',
           'static_site_export',
           'webapp_export_static',
@@ -601,6 +604,82 @@ void main() {
       final data = payload['data'] as Map<String, dynamic>;
       expect(data['ok'], isFalse);
       expect(data['issues'], contains('missing index.html'));
+    });
+
+    test('plans packages builds static webapps and exports research reports',
+        () async {
+      final buildRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(true),
+      );
+
+      final plan = buildRuntime.execute(
+        const MobileToolCall(
+          id: 'package_plan_1',
+          name: 'package_install_plan',
+          arguments: {
+            'manager': 'pnpm',
+            'packages': ['vite', 'react'],
+            'dev': true,
+          },
+        ),
+      );
+      expect(plan.ok, isTrue);
+      final planPayload = jsonDecode(plan.output) as Map<String, dynamic>;
+      final planData = planPayload['data'] as Map<String, dynamic>;
+      expect(planData['dry_run'], isTrue);
+      expect(planData['command'], ['pnpm', 'add', '-D', 'vite', 'react']);
+
+      final scaffold = buildRuntime.execute(
+        const MobileToolCall(
+          id: 'build_scaffold_1',
+          name: 'project_scaffold',
+          arguments: {'name': 'Build Demo', 'template': 'plain_js'},
+        ),
+      );
+      expect(scaffold.ok, isTrue);
+
+      final built = await buildRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'webapp_build_1',
+          name: 'webapp_build',
+          arguments: {'path': 'webapps/build-demo'},
+        ),
+      );
+      expect(built.ok, isTrue);
+      final builtPayload = jsonDecode(built.output) as Map<String, dynamic>;
+      final builtData = builtPayload['data'] as Map<String, dynamic>;
+      expect(builtData['path'], 'webapps/build-demo/build.rumi.json');
+      expect(builtData['requires_mobile_approval'], isTrue);
+
+      final reportSource = buildRuntime.execute(
+        const MobileToolCall(
+          id: 'report_source_1',
+          name: 'doc_create',
+          arguments: {
+            'title': 'Research Notes',
+            'content': 'finding one',
+            'output_path': 'reports/research.md',
+          },
+        ),
+      );
+      expect(reportSource.ok, isTrue);
+
+      final report = buildRuntime.execute(
+        const MobileToolCall(
+          id: 'research_export_1',
+          name: 'research_report_export',
+          arguments: {
+            'path': 'reports/research.md',
+            'format': 'html',
+            'output_path': 'exports/research.html',
+          },
+        ),
+      );
+      expect(report.ok, isTrue);
+      final reportPayload = jsonDecode(report.output) as Map<String, dynamic>;
+      final reportData = reportPayload['data'] as Map<String, dynamic>;
+      expect(reportData['path'], 'exports/research.html');
+      expect(reportData['format'], 'html');
     });
 
     test('creates phone-local project document slides and chart artifacts', () {
@@ -2453,6 +2532,20 @@ void main() {
 
       expect(slidePptx.ok, isTrue);
       expect(delegate.lastCall?.name, 'slides_create');
+
+      final webappCommand = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'webapp_build_pc_1',
+          name: 'webapp_build',
+          arguments: {
+            'path': 'webapps/app',
+            'command': ['pnpm', 'build'],
+          },
+        ),
+      );
+
+      expect(webappCommand.ok, isTrue);
+      expect(delegate.lastCall?.name, 'webapp_build');
     });
 
     test(
@@ -3087,6 +3180,32 @@ void main() {
           'implemented_mobile_batch_router');
       expect(batchMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(batchData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'package_install_plan': ['implemented_phone_install_plan', false],
+        'webapp_build': ['implemented_phone_static_webapp_build_plan', true],
+        'research_report_export': [
+          'implemented_phone_research_report_export',
+          false
+        ],
+      }.entries) {
+        final schema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final mobile = data['mobile'] as Map<String, dynamic>;
+        expect(data['mobile_compatible'], isTrue);
+        expect(data['execution_route'], 'phone');
+        expect(mobile['implementation_status'], entry.value[0]);
+        expect(mobile['requires_mobile_approval'], entry.value[1]);
+        expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(data['tags'], contains(mobileFlutterTag));
+      }
 
       for (final entry in const {
         'job_create': false,

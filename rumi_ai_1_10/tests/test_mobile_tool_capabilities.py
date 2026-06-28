@@ -202,6 +202,24 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["webapp", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "webapp_build",
+                "name": "webapp_build",
+                "summary": "Build static webapp",
+                "tags": ["webapp", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "package_install_plan",
+                "name": "package_install_plan",
+                "summary": "Plan package install commands",
+                "tags": ["sandbox", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "research_report_export",
+                "name": "research_report_export",
+                "summary": "Export research report",
+                "tags": ["research", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -559,6 +577,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     )
     assert "flutter" in by_id["tool_batch"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["tool_batch"]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "package_install_plan": ("implemented_phone_install_plan", False),
+        "webapp_build": ("implemented_phone_static_webapp_build_plan", True),
+        "research_report_export": ("implemented_phone_research_report_export", False),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, requires_approval in {
         "job_create": False,
