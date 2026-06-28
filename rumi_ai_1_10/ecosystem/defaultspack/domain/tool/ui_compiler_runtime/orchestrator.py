@@ -232,12 +232,66 @@ class RecursiveUIBuildOrchestrator:
                     run_root=run_root,
                 )
                 if not decision.passed:
+                    retry_bundle = candidate_generator.generate_retry_for_contract(
+                        run_id=plan.run_id,
+                        run_root=run_root,
+                        contract=contract,
+                        foundation=accepted_foundation.spec.to_dict(),
+                        attempt=1,
+                        context=context,
+                        fake_failures=_fake_failures(data),
+                    )
+                    candidate_map.setdefault(contract.id, []).append(retry_bundle)
+                    retry_matrix = render_runner.render_candidate(
+                        run_id=plan.run_id,
+                        bundle=retry_bundle,
+                        viewports=options["viewports"],
+                        scenarios=options["scenarios"],
+                        text_scales=options["textScales"],
+                        browser_render=options["browserRender"],
+                    )
+                    retry_report = inspector.inspect_candidate(
+                        bundle=retry_bundle,
+                        contract=contract.to_dict(),
+                        render_matrix=retry_matrix,
+                    )
+                    store.save_inspection_report(
+                        run_id=plan.run_id,
+                        node_id=contract.id,
+                        candidate_id=retry_bundle.candidate_id,
+                        report=retry_report.to_dict(),
+                    )
+                    inspection_objects_by_node.setdefault(contract.id, {})[retry_bundle.candidate_id] = retry_report
+                    inspections_by_node.setdefault(contract.id, {})[retry_bundle.candidate_id] = retry_report.to_dict()
+                    decision = selector.select(
+                        run_id=plan.run_id,
+                        node_id=contract.id,
+                        candidates=candidate_map.get(contract.id, []),
+                        inspections=inspection_objects_by_node.get(contract.id, {}),
+                        run_root=run_root,
+                    )
+                if not decision.passed:
                     final = _final_report(
                         plan=plan,
                         artifacts=artifacts,
                         status="error",
-                        summary=_summary(plan, foundations, candidate_map, accepted, compression_failures=1, build_status="skipped"),
-                        failure={"code": "UI_RECURSIVE_BUILD_FAILED", "failedNodeId": contract.id},
+                        summary=_summary(
+                            plan,
+                            foundations,
+                            candidate_map,
+                            accepted,
+                            compression_failures=_compression_failure_count(inspections_by_node),
+                            build_status="skipped",
+                        ),
+                        failure={
+                            "code": "UI_RECURSIVE_BUILD_FAILED",
+                            "failedNodeId": contract.id,
+                            "attempts": [
+                                "initial-candidates",
+                                "regenerate-empty-directory-candidate",
+                                "semantic-split-recommended",
+                            ],
+                        },
                         inspections=inspections_by_node,
                     )
                     report_path = store.save_final_report(run_id=plan.run_id, report=final)

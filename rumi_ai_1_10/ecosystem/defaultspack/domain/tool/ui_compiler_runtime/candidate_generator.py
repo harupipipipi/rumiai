@@ -106,6 +106,68 @@ class CandidateGenerator:
             bundles.append(bundle)
         return bundles
 
+    def generate_retry_for_contract(
+        self,
+        *,
+        run_id: str,
+        run_root: Path,
+        contract: ComponentContract,
+        foundation: dict[str, Any],
+        attempt: int,
+        context: dict[str, Any] | None = None,
+        fake_failures: dict[str, str] | None = None,
+    ) -> CandidateBundle:
+        candidate_id = f"candidate-retry-{max(1, int(attempt))}"
+        contract_payload = contract.to_dict()
+        output_dir = run_root / "candidates" / contract.id / candidate_id
+        fail_key = f"{contract.id}/{candidate_id}"
+        task = UIAgentTask(
+            task_id=f"{run_id}-{contract.id}-{candidate_id}",
+            run_id=run_id,
+            node_id=contract.id,
+            candidate_id=candidate_id,
+            kind="leaf",
+            prompt=leaf_prompt(contract=contract_payload, foundation=foundation, candidate_id=candidate_id),
+            output_dir=str(output_dir),
+            allowed_paths=[str(output_dir)],
+            metadata={
+                "contract": contract_payload,
+                "foundation": foundation,
+                "retryAttempt": attempt,
+                "regenerateInsteadOfPatch": True,
+                "fakeFailMode": (fake_failures or {}).get(fail_key, ""),
+            },
+        )
+        self.store.save_agent_task(run_id=run_id, task_id=task.task_id, task=task.to_dict())
+        result = self.backend.run_task(task, context)
+        validation = validate_candidate_bundle(output_dir, contract_payload) if result.ok else {
+            "status": "fail",
+            "issues": [{"code": "AGENT_FAILED", "severity": "blocker", "evidence": result.to_dict()}],
+            "manifest": {},
+            "designIntent": {},
+        }
+        manifest = _manifest_from_payload(contract, candidate_id, validation)
+        bundle = CandidateBundle(
+            node_id=contract.id,
+            candidate_id=candidate_id,
+            root=str(output_dir),
+            manifest=manifest,
+            agent_result=result,
+        )
+        self.store.save_candidate_bundle(
+            run_id=run_id,
+            node_id=contract.id,
+            candidate_id=candidate_id,
+            bundle=bundle.to_dict(),
+            status={
+                "status": validation["status"],
+                "validation": validation,
+                "agentResult": result.to_dict(),
+                "retryAttempt": attempt,
+            },
+        )
+        return bundle
+
 
 def _manifest_from_payload(
     contract: ComponentContract,

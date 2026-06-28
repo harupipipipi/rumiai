@@ -33,6 +33,7 @@ def test_composer_requires_every_contract_to_have_an_accepted_bundle(tmp_path: P
     args = build_args("composer-fail")
     args["options"]["fakeFailures"] = {
         "inbox-toolbar/candidate-1": "action-pressure",
+        "inbox-toolbar/candidate-retry-1": "action-pressure",
     }
 
     result = ui_build_recursive(args, fake_context(tmp_path))

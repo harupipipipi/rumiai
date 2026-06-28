@@ -97,7 +97,7 @@ def test_candidate_count_output_dirs_are_isolated_and_do_not_include_previous_so
     assert all("previous candidate" not in payload["prompt"].lower() for payload in payloads)
 
 
-def test_failed_candidate_is_not_accepted_and_all_failed_node_fails_run(tmp_path: Path) -> None:
+def test_failed_candidate_is_not_accepted_and_failed_node_is_regenerated(tmp_path: Path) -> None:
     write_pass_package(tmp_path / "project")
     partial = build_args("selector-run")
     partial["options"]["fakeFailures"] = {"reply-composer/candidate-1": "action-pressure"}
@@ -112,13 +112,43 @@ def test_failed_candidate_is_not_accepted_and_all_failed_node_fails_run(tmp_path
         "reply-composer/candidate-1": "action-pressure",
         "reply-composer/candidate-2": "action-pressure",
     }
-    failed_result = ui_build_recursive(all_failed, fake_context(tmp_path))
+    regenerated_result = ui_build_recursive(all_failed, fake_context(tmp_path))
+    regenerated_selection = json.loads(
+        (tmp_path / ".rumi" / "ui" / "runs" / "selector-fail" / "accepted" / "reply-composer" / "selection.json")
+        .read_text(encoding="utf-8")
+    )
 
     assert partial_result["status"] == "ok"
     assert selection["acceptedCandidateId"] == "candidate-2"
     assert any(item["candidateId"] == "candidate-1" for item in selection["rejected"])
-    assert failed_result["status"] == "error"
-    assert failed_result["error"]["code"] == "UI_RECURSIVE_BUILD_FAILED"
+    assert regenerated_result["status"] == "ok"
+    assert regenerated_selection["acceptedCandidateId"] == "candidate-retry-1"
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "selector-fail" / "candidates" / "reply-composer" / "candidate-retry-1").is_dir()
+
+
+def test_regeneration_failure_fails_run_with_split_recommendation(tmp_path: Path) -> None:
+    write_pass_package(tmp_path / "project")
+    args = build_args("selector-regeneration-fail")
+    args["options"]["fakeFailures"] = {
+        "reply-composer/candidate-1": "action-pressure",
+        "reply-composer/candidate-2": "action-pressure",
+        "reply-composer/candidate-retry-1": "action-pressure",
+    }
+
+    result = ui_build_recursive(args, fake_context(tmp_path))
+    final = json.loads(
+        (tmp_path / ".rumi" / "ui" / "runs" / "selector-regeneration-fail" / "reports" / "final.json")
+        .read_text(encoding="utf-8")
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "UI_RECURSIVE_BUILD_FAILED"
+    assert final["failure"]["failedNodeId"] == "reply-composer"
+    assert final["failure"]["attempts"] == [
+        "initial-candidates",
+        "regenerate-empty-directory-candidate",
+        "semantic-split-recommended",
+    ]
 
 
 def test_rerun_with_same_idempotency_key_returns_existing_final_report(tmp_path: Path) -> None:

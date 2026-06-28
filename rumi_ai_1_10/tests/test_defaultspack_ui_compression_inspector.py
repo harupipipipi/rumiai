@@ -24,7 +24,8 @@ def test_compression_inspector_reports_action_pressure_and_overflow(tmp_path: Pa
         .read_text(encoding="utf-8")
     )
 
-    assert result["status"] == "error"
+    assert result["status"] == "ok"
+    assert result["data"]["summary"]["acceptedBundles"] == 3
     assert any(issue["code"] in {"ACTION_PRESSURE", "HORIZONTAL_OVERFLOW"} for issue in report["issues"])
 
 
@@ -62,7 +63,21 @@ def test_compression_hard_gates_fail_the_candidate(tmp_path: Path, fail_mode: st
         ).read_text(encoding="utf-8")
     )
 
-    assert result["status"] == "error"
+    selection = json.loads(
+        (
+            tmp_path
+            / ".rumi"
+            / "ui"
+            / "runs"
+            / run_id
+            / "accepted"
+            / "reply-composer"
+            / "selection.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert result["status"] == "ok"
+    assert selection["acceptedCandidateId"] == "candidate-retry-1"
     assert any(issue["code"] == issue_code for issue in report["issues"])
 
 
