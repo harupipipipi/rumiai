@@ -21,6 +21,9 @@ import android.util.Base64
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.security.KeyStore
@@ -43,6 +46,7 @@ class MainActivity : FlutterActivity() {
         registerMediaPickerChannel(flutterEngine)
         registerScreenshotChannel(flutterEngine)
         registerImageTransformerChannel(flutterEngine)
+        registerOcrChannel(flutterEngine)
     }
 
     private fun registerSecureStorageChannel(flutterEngine: FlutterEngine) {
@@ -242,6 +246,20 @@ class MainActivity : FlutterActivity() {
             }
             val args = call.arguments as? Map<*, *>
             result.success(transformImagePayload(args))
+        }
+    }
+
+    private fun registerOcrChannel(flutterEngine: FlutterEngine) {
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "ai.rumi.remote/ocr",
+        ).setMethodCallHandler { call, result ->
+            if (call.method != "recognize") {
+                result.notImplemented()
+                return@setMethodCallHandler
+            }
+            val args = call.arguments as? Map<*, *>
+            recognizeTextPayload(args, result)
         }
     }
 
@@ -490,6 +508,73 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun recognizeTextPayload(args: Map<*, *>?, result: MethodChannel.Result) {
+        val rawBase64 = (args?.get("base64") as? String)?.trim()
+        if (rawBase64.isNullOrEmpty()) {
+            result.success(mediaPickerError("invalid_image", "Image base64 is required"))
+            return
+        }
+        val maxBytes = ((args?.get("max_bytes") as? Number)?.toLong()
+            ?: DEFAULT_OCR_MAX_BYTES)
+            .coerceIn(1L, HARD_OCR_MAX_BYTES)
+        val input = try {
+            Base64.decode(rawBase64, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            result.success(mediaPickerError("invalid_image", "Image base64 could not be decoded"))
+            return
+        }
+        if (input.size.toLong() > maxBytes) {
+            result.success(mediaPickerError("too_large", "Image is larger than max_bytes"))
+            return
+        }
+        val bitmap = BitmapFactory.decodeByteArray(input, 0, input.size)
+        if (bitmap == null) {
+            result.success(mediaPickerError("invalid_image", "Image data could not be decoded"))
+            return
+        }
+        val image = InputImage.fromBitmap(bitmap, 0)
+        val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        recognizer.process(image)
+            .addOnSuccessListener { visionText ->
+                val blocks = visionText.textBlocks.map { block ->
+                    val box = block.boundingBox
+                    val blockMap = mutableMapOf<String, Any>(
+                        "text" to block.text,
+                    )
+                    if (box != null) {
+                        blockMap["bounding_box"] = mapOf(
+                            "left" to box.left,
+                            "top" to box.top,
+                            "right" to box.right,
+                            "bottom" to box.bottom,
+                            "width" to box.width(),
+                            "height" to box.height(),
+                            "unit" to "pixels",
+                        )
+                    }
+                    blockMap
+                }
+                bitmap.recycle()
+                recognizer.close()
+                val languageHint = (args?.get("language_hint") as? String)
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                val payload = mutableMapOf<String, Any>(
+                    "text" to visionText.text,
+                    "blocks" to blocks,
+                )
+                if (languageHint != null) {
+                    payload["language_code"] = languageHint
+                }
+                result.success(payload)
+            }
+            .addOnFailureListener { error ->
+                bitmap.recycle()
+                recognizer.close()
+                result.success(mediaPickerError("ocr_failed", error.message ?: "OCR failed"))
+            }
+    }
+
     private fun immutablePendingIntentFlag(): Int {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             PendingIntent.FLAG_IMMUTABLE
@@ -510,6 +595,8 @@ class MainActivity : FlutterActivity() {
         const val HARD_SCREENSHOT_MAX_DIMENSION = 4096
         const val DEFAULT_IMAGE_TRANSFORM_MAX_BYTES = 8L * 1024L * 1024L
         const val HARD_IMAGE_TRANSFORM_MAX_BYTES = 16L * 1024L * 1024L
+        const val DEFAULT_OCR_MAX_BYTES = 8L * 1024L * 1024L
+        const val HARD_OCR_MAX_BYTES = 16L * 1024L * 1024L
     }
 }
 

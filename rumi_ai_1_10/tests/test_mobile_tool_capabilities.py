@@ -112,6 +112,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["media", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "media_ocr",
+                "name": "media_ocr",
+                "summary": "Run OCR",
+                "tags": ["media", "tool"],
+            },
+            {
+                "tool_id": "ocr_extract",
+                "name": "ocr_extract",
+                "summary": "Extract OCR text",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "media_doc_parse",
                 "name": "media_doc_parse",
                 "summary": "Parse a text document",
@@ -214,6 +226,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["image_convert"]["mobile"]["implementation_status"] == "implemented_payload_only"
     assert "ios-swift" in by_id["image_convert"]["mobile"]["runtime_layers"]
     assert "android-kotlin" in by_id["image_convert"]["mobile"]["runtime_layers"]
+
+    assert by_id["media_ocr"]["mobile_compatible"] is True
+    assert by_id["media_ocr"]["execution_route"] == "phone"
+    assert by_id["media_ocr"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["media_ocr"]["mobile"]["implementation_status"] == "implemented_native_ocr_bridge"
+    assert "ios-swift" in by_id["media_ocr"]["mobile"]["runtime_layers"]
+    assert "android-kotlin" in by_id["media_ocr"]["mobile"]["runtime_layers"]
+
+    assert by_id["ocr_extract"]["mobile_compatible"] is True
+    assert by_id["ocr_extract"]["execution_route"] == "phone"
+    assert by_id["ocr_extract"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["ocr_extract"]["mobile"]["implementation_status"] == "implemented_payload_only_native_ocr"
+    assert "ios-swift" in by_id["ocr_extract"]["mobile"]["runtime_layers"]
+    assert "android-kotlin" in by_id["ocr_extract"]["mobile"]["runtime_layers"]
 
     assert by_id["media_doc_parse"]["mobile_compatible"] is True
     assert by_id["media_doc_parse"]["execution_route"] == "phone"

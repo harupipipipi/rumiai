@@ -4,6 +4,7 @@ import Security
 import UniformTypeIdentifiers
 import UIKit
 import UserNotifications
+import Vision
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -25,6 +26,7 @@ import UserNotifications
     registerMediaPickerChannel()
     registerScreenshotChannel()
     registerImageTransformerChannel()
+    registerOcrChannel()
     UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
@@ -416,6 +418,24 @@ import UserNotifications
     }
   }
 
+  private func registerOcrChannel() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      return
+    }
+    let channel = FlutterMethodChannel(
+      name: "ai.rumi.remote/ocr",
+      binaryMessenger: controller.binaryMessenger
+    )
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "recognize" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let args = call.arguments as? [String: Any]
+      self.recognizeTextPayload(args: args, result: result)
+    }
+  }
+
   private func transformImagePayload(args: [String: Any]?) -> [String: Any] {
     guard let rawBase64 = (args?["base64"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
           !rawBase64.isEmpty,
@@ -479,6 +499,86 @@ import UserNotifications
     let renderer = UIGraphicsImageRenderer(size: targetSize, format: format)
     return renderer.image { _ in
       image.draw(in: CGRect(origin: .zero, size: targetSize))
+    }
+  }
+
+  private func recognizeTextPayload(args: [String: Any]?, result: @escaping FlutterResult) {
+    guard #available(iOS 13.0, *) else {
+      result(mediaPickerError(code: "not_available", message: "iOS Vision OCR requires iOS 13 or newer"))
+      return
+    }
+    guard let rawBase64 = (args?["base64"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+          !rawBase64.isEmpty,
+          let imageData = Data(base64Encoded: rawBase64) else {
+      result(mediaPickerError(code: "invalid_image", message: "Image base64 could not be decoded"))
+      return
+    }
+    let maxBytes = max(1, min((args?["max_bytes"] as? NSNumber)?.intValue ?? 8 * 1024 * 1024, 16 * 1024 * 1024))
+    guard imageData.count <= maxBytes else {
+      result(mediaPickerError(code: "too_large", message: "Image is larger than max_bytes"))
+      return
+    }
+    guard let image = UIImage(data: imageData), let cgImage = image.cgImage else {
+      result(mediaPickerError(code: "invalid_image", message: "Image data could not be decoded"))
+      return
+    }
+    let languageHint = (args?["language_hint"] as? String)?
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+
+    DispatchQueue.global(qos: .userInitiated).async {
+      var requestError: Error?
+      var blocks: [[String: Any]] = []
+      let request = VNRecognizeTextRequest { request, error in
+        requestError = error
+        guard error == nil,
+              let observations = request.results as? [VNRecognizedTextObservation] else {
+          return
+        }
+        blocks = observations.compactMap { observation in
+          guard let candidate = observation.topCandidates(1).first else {
+            return nil
+          }
+          let box = observation.boundingBox
+          return [
+            "text": candidate.string,
+            "confidence": Double(candidate.confidence),
+            "bounding_box": [
+              "x": Double(box.origin.x),
+              "y": Double(box.origin.y),
+              "width": Double(box.size.width),
+              "height": Double(box.size.height),
+              "unit": "normalized",
+            ],
+          ]
+        }
+      }
+      request.recognitionLevel = .accurate
+      request.usesLanguageCorrection = true
+      if let languageHint, !languageHint.isEmpty {
+        request.recognitionLanguages = [languageHint]
+      }
+
+      do {
+        try VNImageRequestHandler(cgImage: cgImage, options: [:]).perform([request])
+        let text = blocks
+          .compactMap { $0["text"] as? String }
+          .joined(separator: "\n")
+        var payload: [String: Any] = [
+          "text": text,
+          "blocks": blocks,
+        ]
+        if let languageHint, !languageHint.isEmpty {
+          payload["language_code"] = languageHint
+        }
+        DispatchQueue.main.async {
+          result(payload)
+        }
+      } catch {
+        let message = requestError?.localizedDescription ?? error.localizedDescription
+        DispatchQueue.main.async {
+          result(self.mediaPickerError(code: "ocr_failed", message: message))
+        }
+      }
     }
   }
 

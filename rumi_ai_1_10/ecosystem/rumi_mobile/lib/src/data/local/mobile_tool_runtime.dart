@@ -183,6 +183,11 @@ const _nativeImageTransformRuntimeLayers = <String>[
   'ios-swift',
   'android-kotlin',
 ];
+const _nativeOcrRuntimeLayers = <String>[
+  'flutter',
+  'ios-swift',
+  'android-kotlin',
+];
 const _defaultMediaPickMaxBytes = 4 * 1024 * 1024;
 const _hardMediaPickMaxBytes = 8 * 1024 * 1024;
 const _defaultScreenshotMaxBytes = 6 * 1024 * 1024;
@@ -196,6 +201,8 @@ const _hardImageTransformOutputMaxBytes = 16 * 1024 * 1024;
 const _hardImageTransformInputMaxBytes = 24 * 1024 * 1024;
 const _defaultImageTransformMaxDimension = 2048;
 const _hardImageTransformMaxDimension = 4096;
+const _defaultOcrMaxBytes = 8 * 1024 * 1024;
+const _hardOcrMaxBytes = 16 * 1024 * 1024;
 const _defaultDocParseMaxBytes = 2 * 1024 * 1024;
 const _hardDocParseMaxBytes = 8 * 1024 * 1024;
 const _defaultDocParseMaxChars = 120000;
@@ -324,13 +331,15 @@ class MobileToolRuntime {
         const PlatformScreenshotCapture(),
     PlatformImageTransformer imageTransformer =
         const PlatformImageTransformer(),
+    PlatformOcrRecognizer ocrRecognizer = const PlatformOcrRecognizer(),
   })  : _pcDelegate = pcDelegate,
         _approvalDelegate = approvalDelegate,
         _urlLauncher = urlLauncher,
         _clipboard = clipboard,
         _mediaPicker = mediaPicker,
         _screenshotCapture = screenshotCapture,
-        _imageTransformer = imageTransformer;
+        _imageTransformer = imageTransformer,
+        _ocrRecognizer = ocrRecognizer;
 
   final MobileToolDelegate? _pcDelegate;
   final MobileToolApprovalDelegate? _approvalDelegate;
@@ -339,6 +348,7 @@ class MobileToolRuntime {
   final PlatformMediaPicker _mediaPicker;
   final PlatformScreenshotCapture _screenshotCapture;
   final PlatformImageTransformer _imageTransformer;
+  final PlatformOcrRecognizer _ocrRecognizer;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
 
@@ -879,6 +889,91 @@ class MobileToolRuntime {
             'minimum': 1,
             'maximum': _hardImageTransformInputMaxBytes,
             'default': _hardImageTransformInputMaxBytes,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'media_ocr',
+      description:
+          'Extract OCR text from image bytes already provided to this phone runtime using native iOS Vision or Android ML Kit.',
+      tags: ['tool', 'media', 'image', 'ocr', mobileCompatibleTag],
+      aliases: [
+        'ocr',
+        'defaults_media_ocr',
+        'defaultspack_media_ocr',
+        'defaults.media.ocr',
+        'defaultspack.media.ocr',
+      ],
+      runtimeLayers: _nativeOcrRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift Vision VNRecognizeTextRequest',
+        'android:Kotlin ML Kit TextRecognition',
+      ],
+      implementationStatus: 'implemented_native_ocr_bridge',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'language_hint': {'type': 'string'},
+          'language': {'type': 'string'},
+          'locale': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardOcrMaxBytes,
+            'default': _defaultOcrMaxBytes,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ocr_extract',
+      description:
+          'Extract OCR text from image bytes already provided to this phone runtime. PC artifact paths are delegated to the PC runtime.',
+      tags: [
+        'tool',
+        'media',
+        'image',
+        'ocr',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_ocr_extract',
+        'defaultspack_ocr_extract',
+        'defaults.ocr.extract',
+        'defaultspack.ocr.extract',
+      ],
+      runtimeLayers: _nativeOcrRuntimeLayers,
+      nativeLayers: [
+        'ios:Swift Vision VNRecognizeTextRequest',
+        'android:Kotlin ML Kit TextRecognition',
+      ],
+      implementationStatus: 'implemented_payload_only_native_ocr',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'path': {'type': 'string'},
+          'language_hint': {'type': 'string'},
+          'language': {'type': 'string'},
+          'locale': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardOcrMaxBytes,
+            'default': _defaultOcrMaxBytes,
           },
         },
       },
@@ -1697,6 +1792,8 @@ class MobileToolRuntime {
       case 'media_file_pick':
       case 'media_screenshot':
       case 'media_image_transform':
+      case 'media_ocr':
+      case 'ocr_extract':
       case 'image_resize':
       case 'image_convert':
         return _asyncOnlyTool(name);
@@ -1783,6 +1880,9 @@ class MobileToolRuntime {
         return _mediaScreenshot(call.arguments);
       case 'media_image_transform':
         return _mediaImageTransform(call.arguments);
+      case 'media_ocr':
+      case 'ocr_extract':
+        return _mediaOcr(call.arguments, toolName: name);
       case 'image_resize':
       case 'image_convert':
         return _mediaImageTransform(
@@ -1859,6 +1959,8 @@ class MobileToolRuntime {
       'media_file_pick',
       'media_screenshot',
       'media_image_transform',
+      'media_ocr',
+      'ocr_extract',
       'media_image_read',
       'media_doc_parse',
       'media_pdf_parse',
@@ -2588,6 +2690,109 @@ class MobileToolRuntime {
           'status': 'error',
           'error': {
             'code': 'IMAGE_TRANSFORM_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
+  Future<MobileToolResult> _mediaOcr(
+    Map<String, dynamic> args, {
+    required String toolName,
+  }) async {
+    final base64Image = _extractImageBase64(args);
+    if (base64Image == null || base64Image.trim().isEmpty) {
+      final path = '${args['path'] ?? ''}'.trim();
+      return MobileToolResult(
+        ok: false,
+        summary: 'image bytes are required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': path.isEmpty ? 'MISSING_IMAGE_BYTES' : 'UNSUPPORTED_PATH',
+            'message': path.isEmpty
+                ? 'base64, image_base64, data_url, image.base64, or file.base64 is required.'
+                : 'Phone-local $toolName cannot read host artifact paths. Use media_file_pick/pass image bytes or route this call to the connected PC runtime.',
+            if (path.isNotEmpty) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    try {
+      final bytes = base64Decode(_stripDataUrlPrefix(base64Image));
+      final maxBytes = _boundedOcrMaxBytes(args['max_bytes']);
+      if (bytes.length > maxBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'image is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'IMAGE_TOO_LARGE',
+              'message': 'Image bytes are larger than max_bytes.',
+              'size_bytes': bytes.length,
+              'max_bytes': maxBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      final metadata = _readImageHeader(bytes);
+      final languageHint = _stringOrNull(
+        args['language_hint'] ?? args['language'] ?? args['locale'],
+      );
+      final recognized = await _ocrRecognizer.recognize(
+        base64Data: base64Encode(bytes),
+        maxBytes: maxBytes,
+        languageHint: languageHint,
+      );
+      final text = recognized.text.trim();
+      return MobileToolResult(
+        ok: true,
+        summary: text.isEmpty
+            ? 'OCR found no text'
+            : 'OCR ${text.length} chars: ${_clampText(text.replaceAll(RegExp(r'\s+'), ' '), 80)}',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'text': text,
+            'content': text,
+            'length': text.length,
+            'blocks': recognized.blocks.map((block) => block.toJson()).toList(),
+            'block_count': recognized.blocks.length,
+            if (recognized.languageCode != null)
+              'language_code': recognized.languageCode,
+            'input': {
+              'size_bytes': bytes.length,
+              if (metadata != null) 'width': metadata.width,
+              if (metadata != null) 'height': metadata.height,
+              if (metadata != null) 'format': metadata.format,
+              if (metadata != null) 'mime_type': metadata.mimeType,
+            },
+            'metadata': {
+              'tool': toolName,
+              'payload_only': true,
+              'native_ocr': true,
+              if (languageHint != null) 'language_hint': languageHint,
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _nativeOcrRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'OCR failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'OCR_FAILED',
             'message': '$error',
             'execution_location': 'phone',
           },
@@ -3904,6 +4109,8 @@ bool _isAsyncPhoneToolName(String name) {
     'media_file_pick',
     'media_screenshot',
     'media_image_transform',
+    'media_ocr',
+    'ocr_extract',
     'image_resize',
     'image_convert',
     'mobile_url_open',
@@ -4126,6 +4333,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isImageTransform = normalized == 'media_image_transform';
   final isImagePayloadTool =
       normalized == 'image_resize' || normalized == 'image_convert';
+  final isOcrTool = normalized == 'media_ocr' || normalized == 'ocr_extract';
   final isDocParse = normalized == 'media_doc_parse';
   final isPdfParse = normalized == 'media_pdf_parse';
   final isPdfPayloadTool =
@@ -4201,6 +4409,20 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       ],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_payload_only',
+    };
+  }
+  if (isOcrTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _nativeOcrRuntimeLayers,
+      'native_layers': const [
+        'ios:Swift Vision VNRecognizeTextRequest',
+        'android:Kotlin ML Kit TextRecognition',
+      ],
+      'requires_mobile_approval': false,
+      'implementation_status': normalized == 'ocr_extract'
+          ? 'implemented_payload_only_native_ocr'
+          : 'implemented_native_ocr_bridge',
     };
   }
   if (isDocParse) {
@@ -4512,6 +4734,12 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   if (normalized == 'image_resize' || normalized == 'image_convert') {
     return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinの画像resize/encode bridgeで渡されたimage bytesのpayload-only変換にスマホ対応済みです。PC artifact path入出力はPC runtimeへ委譲してください。';
   }
+  if (normalized == 'media_ocr') {
+    return 'このdefaultspack-compatible toolはiOS Swift Vision / Android Kotlin ML KitのOCR bridgeでスマホ実装済みです。';
+  }
+  if (normalized == 'ocr_extract') {
+    return 'このdefaultspack-compatible toolはiOS Swift Vision / Android Kotlin ML Kitで渡されたimage bytesのpayload-only OCRにスマホ対応済みです。PC artifact pathはPC runtimeへ委譲してください。';
+  }
   if (normalized == 'media_doc_parse') {
     return 'このdefaultspack-compatible toolはDartでtext/markdown/json/csv/html/xml等のテキスト系document parseをスマホ実装済みです。PDF/docx等はPC runtimeへ委譲してください。';
   }
@@ -4760,6 +4988,17 @@ int _boundedImageQuality(Object? value) {
   final parsed = int.tryParse('${value ?? ''}'.trim());
   if (parsed != null) return math.max(1, math.min(100, parsed));
   return 90;
+}
+
+int _boundedOcrMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardOcrMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardOcrMaxBytes, parsed));
+  }
+  return _defaultOcrMaxBytes;
 }
 
 int? _positiveImageTransformDimension(Object? value) {

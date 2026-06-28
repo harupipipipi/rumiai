@@ -190,6 +190,83 @@ class PlatformImageTransformer {
   }
 }
 
+class PlatformOcrBlock {
+  const PlatformOcrBlock({
+    required this.text,
+    required this.confidence,
+    required this.boundingBox,
+  });
+
+  final String text;
+  final double? confidence;
+  final Map<String, dynamic> boundingBox;
+
+  Map<String, dynamic> toJson() => {
+        'text': text,
+        if (confidence != null) 'confidence': confidence,
+        if (boundingBox.isNotEmpty) 'bounding_box': boundingBox,
+      };
+}
+
+class PlatformOcrResult {
+  const PlatformOcrResult({
+    required this.text,
+    required this.blocks,
+    required this.languageCode,
+  });
+
+  final String text;
+  final List<PlatformOcrBlock> blocks;
+  final String? languageCode;
+}
+
+class PlatformOcrRecognizer {
+  const PlatformOcrRecognizer();
+
+  static const _channel = MethodChannel('ai.rumi.remote/ocr');
+
+  Future<PlatformOcrResult> recognize({
+    required String base64Data,
+    required int maxBytes,
+    String? languageHint,
+  }) async {
+    final raw = await _channel.invokeMapMethod<String, dynamic>('recognize', {
+      'base64': base64Data,
+      'max_bytes': maxBytes,
+      'language_hint': languageHint,
+    });
+    final map = raw ?? const <String, dynamic>{};
+    final errorCode = '${map['error_code'] ?? ''}'.trim();
+    if (errorCode.isNotEmpty) {
+      throw PlatformException(
+        code: errorCode,
+        message: '${map['message'] ?? 'OCR failed'}',
+      );
+    }
+    final rawBlocks = map['blocks'];
+    final blocks = rawBlocks is List
+        ? rawBlocks.whereType<Map>().map((block) {
+            final box = block['bounding_box'];
+            return PlatformOcrBlock(
+              text: '${block['text'] ?? ''}',
+              confidence: block['confidence'] is num
+                  ? (block['confidence'] as num).toDouble()
+                  : null,
+              boundingBox: box is Map
+                  ? box.map((key, value) => MapEntry('$key', value))
+                  : const <String, dynamic>{},
+            );
+          }).toList()
+        : const <PlatformOcrBlock>[];
+    final language = '${map['language_code'] ?? ''}'.trim();
+    return PlatformOcrResult(
+      text: '${map['text'] ?? ''}',
+      blocks: blocks,
+      languageCode: language.isEmpty ? null : language,
+    );
+  }
+}
+
 class PlatformNotifications {
   const PlatformNotifications();
 

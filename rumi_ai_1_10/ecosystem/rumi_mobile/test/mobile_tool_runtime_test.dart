@@ -125,6 +125,29 @@ class _FakeImageTransformer extends PlatformImageTransformer {
   }
 }
 
+class _FakeOcrRecognizer extends PlatformOcrRecognizer {
+  _FakeOcrRecognizer(this.result);
+
+  final PlatformOcrResult result;
+  bool called = false;
+  String? lastBase64Data;
+  int? lastMaxBytes;
+  String? lastLanguageHint;
+
+  @override
+  Future<PlatformOcrResult> recognize({
+    required String base64Data,
+    required int maxBytes,
+    String? languageHint,
+  }) async {
+    called = true;
+    lastBase64Data = base64Data;
+    lastMaxBytes = maxBytes;
+    lastLanguageHint = languageHint;
+    return result;
+  }
+}
+
 class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
   _FakeMobileToolApproval(this.approved);
 
@@ -203,6 +226,8 @@ void main() {
           'media_screenshot',
           'media_image_read',
           'media_image_transform',
+          'media_ocr',
+          'ocr_extract',
           'image_resize',
           'image_convert',
           'media_doc_parse',
@@ -875,6 +900,103 @@ void main() {
       expect(data['base64'], transformedBase64);
     });
 
+    test('runs media_ocr through the phone native OCR bridge', () async {
+      final imageBase64 = base64Encode([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+      ]);
+      final recognizer = _FakeOcrRecognizer(
+        const PlatformOcrResult(
+          text: 'Hello OCR',
+          languageCode: 'en',
+          blocks: [
+            PlatformOcrBlock(
+              text: 'Hello OCR',
+              confidence: 0.91,
+              boundingBox: {'x': 0.1, 'y': 0.2, 'width': 0.7, 'height': 0.1},
+            ),
+          ],
+        ),
+      );
+      final runtime = MobileToolRuntime(ocrRecognizer: recognizer);
+
+      final result = await runtime.executeAsync(
+        MobileToolCall(
+          id: 'media_ocr_1',
+          name: 'defaultspack.media.ocr',
+          arguments: {
+            'data_url': 'data:image/png;base64,$imageBase64',
+            'language_hint': 'en',
+            'max_bytes': 2048,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      expect(recognizer.called, isTrue);
+      expect(recognizer.lastBase64Data, imageBase64);
+      expect(recognizer.lastMaxBytes, 2048);
+      expect(recognizer.lastLanguageHint, 'en');
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final blocks = data['blocks'] as List<dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['text'], 'Hello OCR');
+      expect(data['content'], 'Hello OCR');
+      expect(data['language_code'], 'en');
+      expect(blocks.single, containsPair('text', 'Hello OCR'));
+      expect(metadata['tool'], 'media_ocr');
+      expect(metadata['native_ocr'], isTrue);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+    });
+
+    test('ocr_extract rejects host artifact paths on phone', () async {
+      final recognizer = _FakeOcrRecognizer(
+        const PlatformOcrResult(
+            text: 'ignored', blocks: [], languageCode: null),
+      );
+      final runtime = MobileToolRuntime(ocrRecognizer: recognizer);
+
+      final result = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ocr_extract_path_1',
+          name: 'ocr_extract',
+          arguments: {'path': '/tmp/image.png'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      expect(recognizer.called, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+      expect(error['path'], '/tmp/image.png');
+    });
+
     test('generates phone-local TTS fallback WAV payload', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -1505,6 +1627,47 @@ void main() {
           containsAll(['flutter', 'ios-swift', 'android-kotlin']));
       expect(imageConvertData['tags'], contains(mobileSwiftNativeTag));
       expect(imageConvertData['tags'], contains(mobileKotlinNativeTag));
+
+      final ocrSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_ocr_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_ocr'},
+        ),
+      );
+      final ocrPayload = jsonDecode(ocrSchema.output) as Map<String, dynamic>;
+      final ocrData = ocrPayload['data'] as Map<String, dynamic>;
+      final ocrMobile = ocrData['mobile'] as Map<String, dynamic>;
+      expect(ocrData['mobile_compatible'], isTrue);
+      expect(ocrData['execution_route'], 'phone');
+      expect(ocrMobile['requires_mobile_approval'], isFalse);
+      expect(
+          ocrMobile['implementation_status'], 'implemented_native_ocr_bridge');
+      expect(ocrMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(ocrData['tags'], contains(mobileSwiftNativeTag));
+      expect(ocrData['tags'], contains(mobileKotlinNativeTag));
+
+      final ocrExtractSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_ocr_extract_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'ocr_extract'},
+        ),
+      );
+      final ocrExtractPayload =
+          jsonDecode(ocrExtractSchema.output) as Map<String, dynamic>;
+      final ocrExtractData = ocrExtractPayload['data'] as Map<String, dynamic>;
+      final ocrExtractMobile = ocrExtractData['mobile'] as Map<String, dynamic>;
+      expect(ocrExtractData['mobile_compatible'], isTrue);
+      expect(ocrExtractData['execution_route'], 'phone');
+      expect(ocrExtractMobile['requires_mobile_approval'], isFalse);
+      expect(ocrExtractMobile['implementation_status'],
+          'implemented_payload_only_native_ocr');
+      expect(ocrExtractMobile['runtime_layers'],
+          containsAll(['flutter', 'ios-swift', 'android-kotlin']));
+      expect(ocrExtractData['tags'], contains(mobileSwiftNativeTag));
+      expect(ocrExtractData['tags'], contains(mobileKotlinNativeTag));
 
       final docParseSchema = runtime.execute(
         const MobileToolCall(

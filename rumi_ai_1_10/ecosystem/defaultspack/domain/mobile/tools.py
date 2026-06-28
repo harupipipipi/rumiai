@@ -288,6 +288,21 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "requires_mobile_approval": False,
             "implementation_status": "implemented_payload_only",
         }
+    if tool_id in {"media_ocr", "ocr_extract"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift Vision VNRecognizeTextRequest",
+                "android:Kotlin ML Kit TextRecognition",
+            ],
+            "requires_mobile_approval": False,
+            "implementation_status": (
+                "implemented_payload_only_native_ocr"
+                if tool_id == "ocr_extract"
+                else "implemented_native_ocr_bridge"
+            ),
+        }
     if tool_id == "media_doc_parse":
         return {
             "platforms": ["ios", "android"],
@@ -415,6 +430,21 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             ],
             "requires_mobile_approval": False,
             "implementation_status": "implemented_payload_only",
+        }
+    if tool_id in {"media_ocr", "ocr_extract"}:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "ios-swift", "android-kotlin"],
+            "native_layers": [
+                "ios:Swift Vision VNRecognizeTextRequest",
+                "android:Kotlin ML Kit TextRecognition",
+            ],
+            "requires_mobile_approval": False,
+            "implementation_status": (
+                "implemented_payload_only_native_ocr"
+                if tool_id == "ocr_extract"
+                else "implemented_native_ocr_bridge"
+            ),
         }
     if tool_id == "media_doc_parse":
         return {
