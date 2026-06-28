@@ -200,6 +200,10 @@ const _defaultDocParseMaxBytes = 2 * 1024 * 1024;
 const _hardDocParseMaxBytes = 8 * 1024 * 1024;
 const _defaultDocParseMaxChars = 120000;
 const _hardDocParseMaxChars = 400000;
+const _defaultPdfParseMaxBytes = 8 * 1024 * 1024;
+const _hardPdfParseMaxBytes = 16 * 1024 * 1024;
+const _defaultPdfParseMaxChars = 120000;
+const _hardPdfParseMaxChars = 400000;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -920,6 +924,48 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'media_pdf_parse',
+      description:
+          'Extract best-effort text from PDF bytes already provided to this phone runtime. Does not read host file paths and does not perform full layout/table parsing.',
+      tags: ['tool', 'media', 'pdf', 'document', mobileCompatibleTag],
+      aliases: [
+        'pdf_parse',
+        'defaults_media_pdf_parse',
+        'defaultspack_media_pdf_parse',
+        'defaults.media.pdf.parse',
+        'defaults.media.pdf_parse',
+        'defaultspack.media.pdf.parse',
+        'defaultspack.media.pdf_parse',
+      ],
+      implementationStatus: 'implemented_best_effort_bytes',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'pdf_base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'name': {'type': 'string'},
+          'mime_type': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardPdfParseMaxBytes,
+            'default': _defaultPdfParseMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardPdfParseMaxChars,
+            'default': _defaultPdfParseMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -1362,6 +1408,8 @@ class MobileToolRuntime {
         return _mediaImageRead(call.arguments);
       case 'media_doc_parse':
         return _mediaDocParse(call.arguments);
+      case 'media_pdf_parse':
+        return _mediaPdfParse(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case 'tool_names':
@@ -1501,6 +1549,7 @@ class MobileToolRuntime {
       'media_image_transform',
       'media_image_read',
       'media_doc_parse',
+      'media_pdf_parse',
     }.contains(name)) {
       return false;
     }
@@ -2375,6 +2424,119 @@ class MobileToolRuntime {
           'status': 'error',
           'error': {
             'code': 'DOCUMENT_PARSE_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
+  MobileToolResult _mediaPdfParse(Map<String, dynamic> args) {
+    final _DocumentPayload? payload;
+    try {
+      payload = _extractDocumentPayload(args);
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'PDF content is invalid',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'INVALID_PDF_CONTENT',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    if (payload == null) {
+      final path = '${args['path'] ?? ''}'.trim();
+      return MobileToolResult(
+        ok: false,
+        summary: 'PDF bytes are required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': path.isEmpty ? 'MISSING_PDF_BYTES' : 'UNSUPPORTED_PATH',
+            'message': path.isEmpty
+                ? 'base64, pdf_base64, data_url, file.base64, or document.base64 is required.'
+                : 'Phone-local media_pdf_parse cannot read host file paths. Use media_file_pick or pass PDF base64 bytes.',
+            if (path.isNotEmpty) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    final maxBytes = _boundedPdfParseMaxBytes(args['max_bytes']);
+    final maxChars = _boundedPdfParseMaxChars(args['max_chars']);
+    if (payload.sizeBytes > maxBytes) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'PDF is too large',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'PDF_TOO_LARGE',
+            'message': 'PDF content is larger than max_bytes.',
+            'size_bytes': payload.sizeBytes,
+            'max_bytes': maxBytes,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    try {
+      final bytes = payload.bytes ??
+          Uint8List.fromList(latin1.encode(payload.text ?? ''));
+      final raw = _decodePdfBytesForScan(bytes);
+      final looksPdf = raw.startsWith('%PDF') ||
+          (payload.mimeType ?? '').trim().toLowerCase() == 'application/pdf' ||
+          (payload.name ?? '').trim().toLowerCase().endsWith('.pdf');
+      final extraction = _extractBestEffortPdfText(raw);
+      final text = extraction.text;
+      final truncated = text.length > maxChars;
+      final content = truncated ? text.substring(0, maxChars) : text;
+      return MobileToolResult(
+        ok: true,
+        summary: content.isEmpty
+            ? 'PDF parsed with no extractable text'
+            : 'parsed PDF ${content.length} chars',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'content': content,
+            'text': content,
+            'truncated': truncated,
+            'length': text.length,
+            'returned_length': content.length,
+            'metadata': {
+              'format': 'pdf',
+              if (payload.name != null) 'name': payload.name,
+              if (payload.mimeType != null) 'mime_type': payload.mimeType,
+              'source': payload.source,
+              'size_bytes': payload.sizeBytes,
+              'looks_like_pdf': looksPdf,
+              'method': extraction.method,
+              'best_effort': true,
+              'full_layout_supported': false,
+              'tables_supported': false,
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'PDF parse failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'PDF_PARSE_FAILED',
             'message': '$error',
             'execution_location': 'phone',
           },
@@ -3387,6 +3549,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isImageRead = normalized == 'media_image_read';
   final isImageTransform = normalized == 'media_image_transform';
   final isDocParse = normalized == 'media_doc_parse';
+  final isPdfParse = normalized == 'media_pdf_parse';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -3451,6 +3614,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_text_documents',
+    };
+  }
+  if (isPdfParse) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_best_effort_bytes',
     };
   }
   if (tagSet.contains('media') ||
@@ -3712,6 +3884,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'media_doc_parse') {
     return 'このdefaultspack-compatible toolはDartでtext/markdown/json/csv/html/xml等のテキスト系document parseをスマホ実装済みです。PDF/docx等はPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'media_pdf_parse') {
+    return 'このdefaultspack-compatible toolはDartで渡されたPDF bytesのbest-effort text抽出にスマホ対応済みです。フルlayout/table抽出はPC runtimeへ委譲してください。';
   }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
@@ -4067,6 +4242,211 @@ int _boundedDocParseMaxChars(Object? value) {
   return _defaultDocParseMaxChars;
 }
 
+int _boundedPdfParseMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardPdfParseMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardPdfParseMaxBytes, parsed));
+  }
+  return _defaultPdfParseMaxBytes;
+}
+
+int _boundedPdfParseMaxChars(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardPdfParseMaxChars, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardPdfParseMaxChars, parsed));
+  }
+  return _defaultPdfParseMaxChars;
+}
+
+String _decodePdfBytesForScan(Uint8List bytes) {
+  return latin1.decode(bytes, allowInvalid: true);
+}
+
+_PdfTextExtraction _extractBestEffortPdfText(String raw) {
+  final literalStrings = _extractPdfLiteralStrings(raw);
+  final hexStrings = _extractPdfHexStrings(raw);
+  final candidates = <String>[
+    ...literalStrings,
+    ...hexStrings,
+  ].map(_cleanPdfExtractedText).where((text) => text.isNotEmpty).toList();
+  if (candidates.isNotEmpty) {
+    return _PdfTextExtraction(
+      _dedupeAdjacentLines(candidates).join('\n').trim(),
+      'literal_and_hex_strings',
+    );
+  }
+  final fallback = _printablePdfScan(raw);
+  return _PdfTextExtraction(fallback, 'latin1_printable_scan');
+}
+
+List<String> _extractPdfLiteralStrings(String raw) {
+  final strings = <String>[];
+  var index = 0;
+  while (index < raw.length && strings.length < 5000) {
+    if (raw.codeUnitAt(index) != 0x28) {
+      index += 1;
+      continue;
+    }
+    final buffer = StringBuffer();
+    var depth = 1;
+    var cursor = index + 1;
+    var escaped = false;
+    while (cursor < raw.length && depth > 0) {
+      final code = raw.codeUnitAt(cursor);
+      final char = raw[cursor];
+      if (escaped) {
+        if (char == 'n') {
+          buffer.write('\n');
+        } else if (char == 'r') {
+          buffer.write('\r');
+        } else if (char == 't') {
+          buffer.write('\t');
+        } else if (char == 'b') {
+          buffer.write('\b');
+        } else if (char == 'f') {
+          buffer.write('\f');
+        } else if (_isOctalDigit(code)) {
+          var octal = char;
+          var lookahead = cursor + 1;
+          while (lookahead < raw.length &&
+              octal.length < 3 &&
+              _isOctalDigit(raw.codeUnitAt(lookahead))) {
+            octal += raw[lookahead];
+            lookahead += 1;
+          }
+          buffer.writeCharCode(
+            int.parse(octal, radix: 8).clamp(0, 255).toInt(),
+          );
+          cursor = lookahead - 1;
+        } else {
+          buffer.write(char);
+        }
+        escaped = false;
+      } else if (code == 0x5c) {
+        escaped = true;
+      } else if (code == 0x28) {
+        depth += 1;
+        buffer.write(char);
+      } else if (code == 0x29) {
+        depth -= 1;
+        if (depth > 0) buffer.write(char);
+      } else {
+        buffer.write(char);
+      }
+      cursor += 1;
+      if (buffer.length > 20000) break;
+    }
+    if (depth == 0) {
+      final value = buffer.toString();
+      if (_looksLikeHumanText(value)) strings.add(value);
+      index = cursor;
+    } else {
+      index += 1;
+    }
+  }
+  return strings;
+}
+
+List<String> _extractPdfHexStrings(String raw) {
+  final output = <String>[];
+  final pattern = RegExp(r'<([0-9A-Fa-f\s]{4,})>');
+  for (final match in pattern.allMatches(raw).take(1000)) {
+    final start = match.start;
+    final end = match.end;
+    if ((start > 0 && raw[start - 1] == '<') ||
+        (end < raw.length && raw[end] == '>')) {
+      continue;
+    }
+    final hex = match.group(1)?.replaceAll(RegExp(r'\s+'), '') ?? '';
+    if (hex.length < 4 || hex.length.isOdd) continue;
+    final bytes = <int>[];
+    for (var index = 0; index + 1 < hex.length; index += 2) {
+      bytes.add(int.parse(hex.substring(index, index + 2), radix: 16));
+    }
+    final decoded = _decodePdfHexBytes(Uint8List.fromList(bytes));
+    if (_looksLikeHumanText(decoded)) output.add(decoded);
+  }
+  return output;
+}
+
+String _decodePdfHexBytes(Uint8List bytes) {
+  if (bytes.length >= 2 && bytes[0] == 0xfe && bytes[1] == 0xff) {
+    return _decodeUtf16(bytes.sublist(2), littleEndian: false);
+  }
+  if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {
+    return _decodeUtf16(bytes.sublist(2), littleEndian: true);
+  }
+  final hasUtf16Nulls = bytes.length >= 4 &&
+      bytes.length.isEven &&
+      Iterable<int>.generate(math.min(bytes.length ~/ 2, 20))
+              .where((index) => bytes[index * 2] == 0)
+              .length >=
+          2;
+  if (hasUtf16Nulls) {
+    return _decodeUtf16(bytes, littleEndian: false);
+  }
+  return utf8.decode(bytes, allowMalformed: true);
+}
+
+String _printablePdfScan(String raw) {
+  final chunks = RegExp(r'[\x09\x0A\x0D\x20-\x7E]{4,}')
+      .allMatches(raw)
+      .map((match) => match.group(0) ?? '')
+      .map(_cleanPdfExtractedText)
+      .where((text) => text.length >= 4 && !_isPdfSyntaxNoise(text))
+      .take(2000)
+      .toList();
+  return _dedupeAdjacentLines(chunks).join('\n').trim();
+}
+
+String _cleanPdfExtractedText(String value) {
+  return value
+      .replaceAll('\u0000', '')
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r'\s*\n\s*'), '\n')
+      .trim();
+}
+
+List<String> _dedupeAdjacentLines(List<String> values) {
+  final output = <String>[];
+  for (final value in values) {
+    final text = value.trim();
+    if (text.isEmpty) continue;
+    if (output.isNotEmpty && output.last == text) continue;
+    output.add(text);
+  }
+  return output;
+}
+
+bool _looksLikeHumanText(String value) {
+  final text = value.trim();
+  if (text.length < 2) return false;
+  final printable = text.codeUnits.where((code) {
+    return code == 0x09 || code == 0x0a || code == 0x0d || code >= 0x20;
+  }).length;
+  return printable / math.max(1, text.length) > 0.8 && !_isPdfSyntaxNoise(text);
+}
+
+bool _isPdfSyntaxNoise(String value) {
+  final text = value.trim();
+  if (text.isEmpty) return true;
+  if (RegExp(r'^(obj|endobj|stream|endstream|xref|trailer|startxref)$')
+      .hasMatch(text)) {
+    return true;
+  }
+  if (RegExp(r'^/?[A-Za-z0-9]+\s+\d+(\.\d+)?$').hasMatch(text)) return true;
+  if (RegExp(r'^[<>{}\[\]/\d\s\.\-]+$').hasMatch(text)) return true;
+  return false;
+}
+
+bool _isOctalDigit(int code) => code >= 0x30 && code <= 0x37;
+
 _DocumentPayload? _extractDocumentPayload(Map<String, dynamic> args) {
   return _documentPayloadFromMap(args, source: 'arguments');
 }
@@ -4087,6 +4467,7 @@ _DocumentPayload? _documentPayloadFromMap(
 
   for (final key in const [
     'base64',
+    'pdf_base64',
     'document_base64',
     'data_base64',
     'file_base64',
@@ -4685,6 +5066,13 @@ class _UnsupportedDocumentEncoding implements Exception {
   const _UnsupportedDocumentEncoding(this.message);
 
   final String message;
+}
+
+class _PdfTextExtraction {
+  const _PdfTextExtraction(this.text, this.method);
+
+  final String text;
+  final String method;
 }
 
 const _phoneTextDocumentFormats = <String>{
