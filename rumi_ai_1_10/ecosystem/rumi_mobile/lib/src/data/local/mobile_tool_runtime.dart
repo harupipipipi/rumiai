@@ -295,6 +295,27 @@ const _phonePromptMutationToolIds = <String>{
   'prompt_system_set',
   'prompt_update',
 };
+const _phoneMemoryToolIds = <String>{
+  'memory_store',
+  'memory_list',
+  'memory_recall',
+  'memory_update',
+  'memory_delete',
+  'memory_compact',
+  'memory_project_context',
+  'memory_resolve_for_agent',
+  'memory_memo',
+  'memory_memo_folders',
+  'memory_memo_notes',
+};
+const _phoneMemoryMutationToolIds = <String>{
+  'memory_store',
+  'memory_update',
+  'memory_delete',
+  'memory_memo',
+  'memory_memo_folders',
+  'memory_memo_notes',
+};
 const _mobileThinkingLevels = <String>{
   'none',
   'low',
@@ -1271,6 +1292,219 @@ class MobileToolRuntime {
           'template': {'type': 'string'},
           'prompt': {'type': 'string'},
           'variables': {'type': 'object'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_store',
+      description: 'Store a phone-local memory record after mobile approval.',
+      tags: ['tool', 'memory', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_memory_store', 'defaultspack_memory_store'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memory_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'summary': {'type': 'string'},
+          'tags': {},
+          'importance': {'type': 'number'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_list',
+      description: 'List phone-local memory records.',
+      tags: ['tool', 'memory', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_memory_list', 'defaultspack_memory_list'],
+      implementationStatus: 'implemented_phone_memory_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'tag': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_recall',
+      description:
+          'Recall phone-local memories using lightweight lexical ranking.',
+      tags: ['tool', 'memory', 'search', mobileCompatibleTag],
+      aliases: ['defaults_memory_recall', 'defaultspack_memory_recall'],
+      implementationStatus: 'implemented_phone_memory_search',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_update',
+      description: 'Update a phone-local memory record after mobile approval.',
+      tags: ['tool', 'memory', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_memory_update', 'defaultspack_memory_update'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memory_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'memory_id': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+          'summary': {'type': 'string'},
+          'tags': {},
+          'importance': {'type': 'number'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_delete',
+      description: 'Delete a phone-local memory record after mobile approval.',
+      tags: ['tool', 'memory', 'local_store', mobileCompatibleTag],
+      aliases: ['defaults_memory_delete', 'defaultspack_memory_delete'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memory_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'memory_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_compact',
+      description:
+          'Build a compact phone-local memory summary without calling a provider.',
+      tags: ['tool', 'memory', 'compact', mobileCompatibleTag],
+      aliases: ['defaults_memory_compact', 'defaultspack_memory_compact'],
+      implementationStatus: 'implemented_phone_memory_summary',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'limit': {'type': 'integer'},
+          'max_chars': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_project_context',
+      description:
+          'Return phone-local memory context for a mobile project or conversation.',
+      tags: ['tool', 'memory', 'context', mobileCompatibleTag],
+      aliases: [
+        'defaults_memory_project_context',
+        'defaultspack_memory_project_context',
+      ],
+      implementationStatus: 'implemented_phone_memory_context',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'project_id': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_resolve_for_agent',
+      description:
+          'Resolve phone-local memories for the mobile agent template.',
+      tags: ['tool', 'memory', 'agent', mobileCompatibleTag],
+      aliases: [
+        'defaults_memory_resolve_for_agent',
+        'defaultspack_memory_resolve_for_agent',
+      ],
+      implementationStatus: 'implemented_phone_memory_context',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'query': {'type': 'string'},
+          'agent_id': {'type': 'string'},
+          'limit': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_memo_folders',
+      description: 'Create, update, delete, or list phone-local memo folders.',
+      tags: ['tool', 'memory', 'memo', mobileCompatibleTag],
+      aliases: [
+        'defaults_memory_memo_folders',
+        'defaultspack_memory_memo_folders',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memo_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {'type': 'string'},
+          'id': {'type': 'string'},
+          'folder_id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'name': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_memo_notes',
+      description: 'Create, update, delete, or list phone-local memo notes.',
+      tags: ['tool', 'memory', 'memo', mobileCompatibleTag],
+      aliases: [
+        'defaults_memory_memo_notes',
+        'defaultspack_memory_memo_notes',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memo_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'action': {'type': 'string'},
+          'id': {'type': 'string'},
+          'note_id': {'type': 'string'},
+          'folder_id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'text': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'memory_memo',
+      description:
+          'Dispatch phone-local memo folder or note operations after mobile approval for mutations.',
+      tags: ['tool', 'memory', 'memo', mobileCompatibleTag],
+      aliases: ['defaults_memory_memo', 'defaultspack_memory_memo'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_memo_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'target': {'type': 'string'},
+          'kind': {'type': 'string'},
+          'action': {'type': 'string'},
+          'id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'folder_id': {'type': 'string'},
         },
       },
     ),
@@ -3749,6 +3983,18 @@ class MobileToolRuntime {
       case 'prompt_update':
       case 'prompt_validate_template':
         return _asyncOnlyTool(name);
+      case 'memory_store':
+      case 'memory_list':
+      case 'memory_recall':
+      case 'memory_update':
+      case 'memory_delete':
+      case 'memory_compact':
+      case 'memory_project_context':
+      case 'memory_resolve_for_agent':
+      case 'memory_memo':
+      case 'memory_memo_folders':
+      case 'memory_memo_notes':
+        return _asyncOnlyTool(name);
       case 'artifact_file_list':
         return _artifactFileList(call.arguments);
       case 'artifact_file_read':
@@ -3988,6 +4234,18 @@ class MobileToolRuntime {
       case 'prompt_update':
       case 'prompt_validate_template':
         return _promptTool(name, call.arguments);
+      case 'memory_store':
+      case 'memory_list':
+      case 'memory_recall':
+      case 'memory_update':
+      case 'memory_delete':
+      case 'memory_compact':
+      case 'memory_project_context':
+      case 'memory_resolve_for_agent':
+      case 'memory_memo':
+      case 'memory_memo_folders':
+      case 'memory_memo_notes':
+        return _memoryTool(name, call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -10219,6 +10477,722 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _memoryTool(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    switch (toolName) {
+      case 'memory_store':
+        return _memoryStore(args);
+      case 'memory_list':
+        return _memoryList(args);
+      case 'memory_recall':
+        return _memoryRecall(args);
+      case 'memory_update':
+        return _memoryUpdate(args);
+      case 'memory_delete':
+        return _memoryDelete(args);
+      case 'memory_compact':
+        return _memoryCompact(args);
+      case 'memory_project_context':
+      case 'memory_resolve_for_agent':
+        return _memoryContext(toolName, args);
+      case 'memory_memo_folders':
+        return _memoryMemoFolders(args);
+      case 'memory_memo_notes':
+        return _memoryMemoNotes(args);
+      case 'memory_memo':
+        return _memoryMemo(args);
+      default:
+        return _memoryToolError(
+          toolName,
+          'UNSUPPORTED_MEMORY_TOOL',
+          '$toolName is not a phone memory tool.',
+        );
+    }
+  }
+
+  Future<MobileToolResult> _memoryStore(Map<String, dynamic> args) async {
+    final content = _memoryContentArg(args);
+    if (content.isEmpty) {
+      return _memoryToolError(
+        'memory_store',
+        'MISSING_MEMORY_CONTENT',
+        "'content', 'text', or 'summary' is required.",
+      );
+    }
+    final now = DateTime.now().toUtc().toIso8601String();
+    final title = _firstText(args, const ['title', 'label']).isEmpty
+        ? _clampText(content.replaceAll(RegExp(r'\s+'), ' '), 48)
+        : _firstText(args, const ['title', 'label']);
+    final id = _firstText(args, const ['id', 'memory_id']).isEmpty
+        ? _nextToolId('mem')
+        : _slugifyPhoneArtifactName(
+            _firstText(args, const ['id', 'memory_id']),
+            fallback: _nextToolId('mem'),
+          );
+    final record = {
+      'id': id,
+      'title': title,
+      'content': content,
+      'tags': _memoryTags(args['tags'] ?? args['tag']),
+      'importance': _memoryImportance(args['importance']),
+      'source': 'phone',
+      'created_at': now,
+      'updated_at': now,
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'memory_store',
+      prompt: 'このスマホにphone-local memoryを保存します。対象: $title',
+      arguments: {
+        ...args,
+        'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('memory_store');
+    await _store.upsertMemoryRecord(record);
+    return _memoryToolOk(
+      'memory_store',
+      'stored phone memory $id',
+      {
+        'memory': _normalizeMemoryRecord(record),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryList(Map<String, dynamic> args) async {
+    final records = await _filteredMemoryRecords(args);
+    return _memoryToolOk(
+      'memory_list',
+      '${records.length} phone memories',
+      {
+        'memories': records,
+        'count': records.length,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryRecall(Map<String, dynamic> args) async {
+    final records = await _rankedMemoryRecords(args);
+    return _memoryToolOk(
+      'memory_recall',
+      '${records.length} recalled phone memories',
+      {
+        'memories': records,
+        'count': records.length,
+        'query': _firstText(args, const ['query', 'text', 'prompt']),
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryUpdate(Map<String, dynamic> args) async {
+    final id = _memoryIdArg(args);
+    if (id.isEmpty) {
+      return _memoryToolError(
+        'memory_update',
+        'MISSING_MEMORY_ID',
+        "'id' or 'memory_id' is required.",
+      );
+    }
+    final records = await _store.loadMemoryRecords();
+    final index =
+        records.indexWhere((record) => '${record['id'] ?? ''}'.trim() == id);
+    if (index < 0) {
+      return _memoryToolError(
+        'memory_update',
+        'MEMORY_NOT_FOUND',
+        'Phone-local memory not found: $id.',
+      );
+    }
+    final existing = Map<String, dynamic>.from(records[index]);
+    final content = _memoryContentArg(args);
+    final title = _firstText(args, const ['title', 'label']);
+    final updated = {
+      ...existing,
+      if (title.isNotEmpty) 'title': title,
+      if (content.isNotEmpty) 'content': content,
+      if (args.containsKey('tags') || args.containsKey('tag'))
+        'tags': _memoryTags(args['tags'] ?? args['tag']),
+      if (args.containsKey('importance'))
+        'importance': _memoryImportance(args['importance']),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'memory_update',
+      prompt: 'このスマホのphone-local memoryを更新します。対象: $id',
+      arguments: {
+        ...args,
+        if (content.isNotEmpty) 'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('memory_update');
+    records[index] = updated;
+    await _store.saveMemoryRecords(records);
+    return _memoryToolOk(
+      'memory_update',
+      'updated phone memory $id',
+      {
+        'memory': _normalizeMemoryRecord(updated),
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryDelete(Map<String, dynamic> args) async {
+    final id = _memoryIdArg(args);
+    if (id.isEmpty) {
+      return _memoryToolError(
+        'memory_delete',
+        'MISSING_MEMORY_ID',
+        "'id' or 'memory_id' is required.",
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'memory_delete',
+      prompt: 'このスマホのphone-local memoryを削除します。対象: $id',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('memory_delete');
+    await _store.deleteMemoryRecord(id);
+    return _memoryToolOk(
+      'memory_delete',
+      'deleted phone memory $id',
+      {
+        'deleted': id,
+        'requires_mobile_approval': true,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryCompact(Map<String, dynamic> args) async {
+    final maxChars = _boundedInt(args['max_chars'], 3000, 200, 100000);
+    final records = await _rankedMemoryRecords(args);
+    final summary = _compactPromptText(
+      records
+          .map((record) => '- ${record['title']}: ${record['content']}')
+          .join('\n'),
+      maxChars: maxChars,
+    );
+    return _memoryToolOk(
+      'memory_compact',
+      'compacted ${records.length} phone memories',
+      {
+        'summary': summary,
+        'memories': records,
+        'count': records.length,
+        'char_count': summary.length,
+        'max_chars': maxChars,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryContext(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final records = await _rankedMemoryRecords(args);
+    final context = records
+        .map((record) => '- ${record['title']}: ${record['content']}')
+        .join('\n');
+    return _memoryToolOk(
+      toolName,
+      '${records.length} phone memory context records',
+      {
+        'context': context,
+        'memories': records,
+        'count': records.length,
+        'project_id': _firstText(args, const ['project_id', 'project']),
+        'agent_id': _firstText(args, const ['agent_id', 'agent']),
+        'agent_template': _agentTemplateRecord(),
+      },
+    );
+  }
+
+  Future<MobileToolResult> _memoryMemo(Map<String, dynamic> args) {
+    final target =
+        _firstText(args, const ['target', 'kind', 'type']).toLowerCase();
+    if (target.contains('folder')) return _memoryMemoFolders(args);
+    return _memoryMemoNotes(args);
+  }
+
+  Future<MobileToolResult> _memoryMemoFolders(Map<String, dynamic> args) async {
+    final action = _memoAction(args);
+    if (action == 'list' || action == 'show') {
+      final folders =
+          (await _store.loadMemoFolders()).map(_normalizeMemoFolder).toList();
+      return _memoryToolOk(
+        'memory_memo_folders',
+        '${folders.length} phone memo folders',
+        {'folders': folders, 'count': folders.length},
+      );
+    }
+    if (action == 'create' || action == 'add') {
+      final title = _firstText(args, const ['title', 'name']).isEmpty
+          ? 'Memo folder'
+          : _firstText(args, const ['title', 'name']);
+      final id = _memoIdArg(args).isEmpty
+          ? _slugifyPhoneArtifactName(title, fallback: _nextToolId('folder'))
+          : _memoIdArg(args);
+      final now = DateTime.now().toUtc().toIso8601String();
+      final record = {
+        'id': id,
+        'title': title,
+        'created_at': now,
+        'updated_at': now,
+        'source': 'phone',
+      };
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_folders',
+        prompt: 'このスマホにmemo folderを作成します。対象: $title',
+        arguments: args,
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_folders');
+      await _store.upsertMemoFolder(record);
+      return _memoryToolOk(
+        'memory_memo_folders',
+        'created phone memo folder $id',
+        {
+          'folder': _normalizeMemoFolder(record),
+          'requires_mobile_approval': true,
+        },
+      );
+    }
+    if (action == 'update' || action == 'edit') {
+      final id = _memoIdArg(args);
+      if (id.isEmpty) {
+        return _memoryToolError(
+          'memory_memo_folders',
+          'MISSING_FOLDER_ID',
+          "'id' or 'folder_id' is required.",
+        );
+      }
+      final folders = await _store.loadMemoFolders();
+      final index =
+          folders.indexWhere((folder) => '${folder['id'] ?? ''}' == id);
+      if (index < 0) {
+        return _memoryToolError(
+          'memory_memo_folders',
+          'FOLDER_NOT_FOUND',
+          'Phone memo folder not found: $id.',
+        );
+      }
+      final title = _firstText(args, const ['title', 'name']);
+      final updated = {
+        ...folders[index],
+        if (title.isNotEmpty) 'title': title,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_folders',
+        prompt: 'このスマホのmemo folderを更新します。対象: $id',
+        arguments: args,
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_folders');
+      folders[index] = updated;
+      await _store.saveMemoFolders(folders);
+      return _memoryToolOk(
+        'memory_memo_folders',
+        'updated phone memo folder $id',
+        {
+          'folder': _normalizeMemoFolder(updated),
+          'requires_mobile_approval': true,
+        },
+      );
+    }
+    if (action == 'delete' || action == 'remove') {
+      final id = _memoIdArg(args);
+      if (id.isEmpty) {
+        return _memoryToolError(
+          'memory_memo_folders',
+          'MISSING_FOLDER_ID',
+          "'id' or 'folder_id' is required.",
+        );
+      }
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_folders',
+        prompt: 'このスマホのmemo folderと配下notesを削除します。対象: $id',
+        arguments: args,
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_folders');
+      await _store.deleteMemoFolder(id);
+      final notes = await _store.loadMemoNotes();
+      await _store.saveMemoNotes(
+        notes.where((note) => '${note['folder_id'] ?? ''}' != id).toList(),
+      );
+      return _memoryToolOk(
+        'memory_memo_folders',
+        'deleted phone memo folder $id',
+        {'deleted': id, 'requires_mobile_approval': true},
+      );
+    }
+    return _memoryToolError(
+      'memory_memo_folders',
+      'UNSUPPORTED_MEMO_ACTION',
+      'Unsupported memo folder action: $action.',
+    );
+  }
+
+  Future<MobileToolResult> _memoryMemoNotes(Map<String, dynamic> args) async {
+    final action = _memoAction(args);
+    if (action == 'list' || action == 'show') {
+      final folderId = _firstText(args, const ['folder_id', 'folder']);
+      final query = _firstText(args, const ['query', 'search']);
+      var notes =
+          (await _store.loadMemoNotes()).map(_normalizeMemoNote).toList();
+      if (folderId.isNotEmpty) {
+        notes = notes.where((note) => note['folder_id'] == folderId).toList();
+      }
+      if (query.isNotEmpty) {
+        notes = notes
+            .where((note) =>
+                _memorySearchScore(
+                    '${note['title']} ${note['content']}', query) >
+                0)
+            .toList();
+      }
+      return _memoryToolOk(
+        'memory_memo_notes',
+        '${notes.length} phone memo notes',
+        {'notes': notes, 'count': notes.length},
+      );
+    }
+    if (action == 'create' || action == 'add') {
+      final content = _firstText(args, const ['content', 'text', 'body']);
+      if (content.isEmpty) {
+        return _memoryToolError(
+          'memory_memo_notes',
+          'MISSING_NOTE_CONTENT',
+          "'content' or 'text' is required.",
+        );
+      }
+      final title = _firstText(args, const ['title', 'name']).isEmpty
+          ? _clampText(content.replaceAll(RegExp(r'\s+'), ' '), 48)
+          : _firstText(args, const ['title', 'name']);
+      final id =
+          _memoIdArg(args).isEmpty ? _nextToolId('note') : _memoIdArg(args);
+      final now = DateTime.now().toUtc().toIso8601String();
+      final record = {
+        'id': id,
+        'folder_id': _firstText(args, const ['folder_id', 'folder']),
+        'title': title,
+        'content': content,
+        'created_at': now,
+        'updated_at': now,
+        'source': 'phone',
+      };
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_notes',
+        prompt: 'このスマホにmemo noteを作成します。対象: $title',
+        arguments: {
+          ...args,
+          'content_preview': _clampText(content, 160),
+        },
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_notes');
+      await _store.upsertMemoNote(record);
+      return _memoryToolOk(
+        'memory_memo_notes',
+        'created phone memo note $id',
+        {'note': _normalizeMemoNote(record), 'requires_mobile_approval': true},
+      );
+    }
+    if (action == 'update' || action == 'edit') {
+      final id = _memoIdArg(args);
+      if (id.isEmpty) {
+        return _memoryToolError(
+          'memory_memo_notes',
+          'MISSING_NOTE_ID',
+          "'id' or 'note_id' is required.",
+        );
+      }
+      final notes = await _store.loadMemoNotes();
+      final index = notes.indexWhere((note) => '${note['id'] ?? ''}' == id);
+      if (index < 0) {
+        return _memoryToolError(
+          'memory_memo_notes',
+          'NOTE_NOT_FOUND',
+          'Phone memo note not found: $id.',
+        );
+      }
+      final content = _firstText(args, const ['content', 'text', 'body']);
+      final title = _firstText(args, const ['title', 'name']);
+      final folderId = _firstText(args, const ['folder_id', 'folder']);
+      final updated = {
+        ...notes[index],
+        if (title.isNotEmpty) 'title': title,
+        if (content.isNotEmpty) 'content': content,
+        if (folderId.isNotEmpty) 'folder_id': folderId,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_notes',
+        prompt: 'このスマホのmemo noteを更新します。対象: $id',
+        arguments: {
+          ...args,
+          if (content.isNotEmpty) 'content_preview': _clampText(content, 160),
+        },
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_notes');
+      notes[index] = updated;
+      await _store.saveMemoNotes(notes);
+      return _memoryToolOk(
+        'memory_memo_notes',
+        'updated phone memo note $id',
+        {'note': _normalizeMemoNote(updated), 'requires_mobile_approval': true},
+      );
+    }
+    if (action == 'delete' || action == 'remove') {
+      final id = _memoIdArg(args);
+      if (id.isEmpty) {
+        return _memoryToolError(
+          'memory_memo_notes',
+          'MISSING_NOTE_ID',
+          "'id' or 'note_id' is required.",
+        );
+      }
+      final approved = await _requestMobileApproval(
+        toolName: 'memory_memo_notes',
+        prompt: 'このスマホのmemo noteを削除します。対象: $id',
+        arguments: args,
+        risk: 'medium',
+      );
+      if (!approved) return _mobileApprovalRequired('memory_memo_notes');
+      await _store.deleteMemoNote(id);
+      return _memoryToolOk(
+        'memory_memo_notes',
+        'deleted phone memo note $id',
+        {'deleted': id, 'requires_mobile_approval': true},
+      );
+    }
+    return _memoryToolError(
+      'memory_memo_notes',
+      'UNSUPPORTED_MEMO_ACTION',
+      'Unsupported memo note action: $action.',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _filteredMemoryRecords(
+    Map<String, dynamic> args,
+  ) async {
+    final query = _firstText(args, const ['query', 'search', 'text']);
+    final tag = _firstText(args, const ['tag']).toLowerCase();
+    final limit = _boundedInt(args['limit'], 50, 1, 500);
+    var records =
+        (await _store.loadMemoryRecords()).map(_normalizeMemoryRecord).toList();
+    if (tag.isNotEmpty) {
+      records = records
+          .where((record) => (record['tags'] as List? ?? const [])
+              .map((item) => '$item'.toLowerCase())
+              .contains(tag))
+          .toList();
+    }
+    if (query.isNotEmpty) {
+      records = records
+          .where((record) => _memoryRecordScore(record, query) > 0)
+          .toList();
+    }
+    records.sort((a, b) {
+      final importance = ((b['importance'] as num?)?.toDouble() ?? 0)
+          .compareTo((a['importance'] as num?)?.toDouble() ?? 0);
+      if (importance != 0) return importance;
+      return '${b['updated_at'] ?? ''}'.compareTo('${a['updated_at'] ?? ''}');
+    });
+    return records.take(limit).toList();
+  }
+
+  Future<List<Map<String, dynamic>>> _rankedMemoryRecords(
+    Map<String, dynamic> args,
+  ) async {
+    final query = _firstText(args, const ['query', 'search', 'text', 'prompt']);
+    final limit = _boundedInt(args['limit'], 8, 1, 100);
+    final records =
+        (await _store.loadMemoryRecords()).map(_normalizeMemoryRecord).toList();
+    final scored = [
+      for (final record in records)
+        {
+          ...record,
+          'score': query.isEmpty ? 1.0 : _memoryRecordScore(record, query),
+        }
+    ]..sort((a, b) {
+        final score = ((b['score'] as num?)?.toDouble() ?? 0)
+            .compareTo((a['score'] as num?)?.toDouble() ?? 0);
+        if (score != 0) return score;
+        return '${b['updated_at'] ?? ''}'.compareTo('${a['updated_at'] ?? ''}');
+      });
+    return scored
+        .where(
+            (record) => query.isEmpty || ((record['score'] as num?) ?? 0) > 0)
+        .take(limit)
+        .toList();
+  }
+
+  Map<String, dynamic> _normalizeMemoryRecord(Map<String, dynamic> record) {
+    final content = '${record['content'] ?? record['text'] ?? ''}';
+    final id = '${record['id'] ?? ''}'.trim();
+    return {
+      'id': id,
+      'title': '${record['title'] ?? record['label'] ?? id}'.trim(),
+      'content': content,
+      'tags': _memoryTags(record['tags'] ?? record['tag']),
+      'importance': _memoryImportance(record['importance']),
+      'source': '${record['source'] ?? 'phone'}',
+      'char_count': content.length,
+      if (record['created_at'] != null) 'created_at': record['created_at'],
+      if (record['updated_at'] != null) 'updated_at': record['updated_at'],
+    };
+  }
+
+  Map<String, dynamic> _normalizeMemoFolder(Map<String, dynamic> record) {
+    final id = '${record['id'] ?? record['folder_id'] ?? ''}'.trim();
+    return {
+      'id': id,
+      'title': '${record['title'] ?? record['name'] ?? id}'.trim(),
+      'source': '${record['source'] ?? 'phone'}',
+      if (record['created_at'] != null) 'created_at': record['created_at'],
+      if (record['updated_at'] != null) 'updated_at': record['updated_at'],
+    };
+  }
+
+  Map<String, dynamic> _normalizeMemoNote(Map<String, dynamic> record) {
+    final content = '${record['content'] ?? record['text'] ?? ''}';
+    final id = '${record['id'] ?? record['note_id'] ?? ''}'.trim();
+    return {
+      'id': id,
+      'folder_id': '${record['folder_id'] ?? record['folder'] ?? ''}'.trim(),
+      'title': '${record['title'] ?? record['name'] ?? id}'.trim(),
+      'content': content,
+      'source': '${record['source'] ?? 'phone'}',
+      'char_count': content.length,
+      if (record['created_at'] != null) 'created_at': record['created_at'],
+      if (record['updated_at'] != null) 'updated_at': record['updated_at'],
+    };
+  }
+
+  String _memoryContentArg(Map<String, dynamic> args) {
+    return _firstText(args, const ['content', 'text', 'summary', 'memory']);
+  }
+
+  String _memoryIdArg(Map<String, dynamic> args) {
+    return _firstText(args, const ['id', 'memory_id']);
+  }
+
+  String _memoIdArg(Map<String, dynamic> args) {
+    return _firstText(args, const ['id', 'memo_id', 'folder_id', 'note_id']);
+  }
+
+  String _memoAction(Map<String, dynamic> args) {
+    final action =
+        _firstText(args, const ['action', 'operation']).toLowerCase();
+    return action.isEmpty ? 'list' : action;
+  }
+
+  List<String> _memoryTags(Object? value) {
+    if (value is List) {
+      return _orderedStrings(
+        value
+            .map((item) => '$item'.trim().toLowerCase())
+            .where((item) => item.isNotEmpty),
+      );
+    }
+    final text = '${value ?? ''}'.trim();
+    if (text.isEmpty) return const [];
+    return _orderedStrings(
+      text
+          .split(RegExp(r'[,\s]+'))
+          .map((item) => item.trim().toLowerCase())
+          .where((item) => item.isNotEmpty),
+    );
+  }
+
+  double _memoryImportance(Object? value) {
+    if (value is num) return value.toDouble().clamp(0, 1).toDouble();
+    final parsed = double.tryParse('${value ?? ''}'.trim());
+    if (parsed == null) return 0.5;
+    return parsed.clamp(0, 1).toDouble();
+  }
+
+  double _memoryRecordScore(Map<String, dynamic> record, String query) {
+    final text = [
+      record['title'],
+      record['content'],
+      ...(record['tags'] as List? ?? const []),
+    ].join(' ');
+    final base = _memorySearchScore(text, query);
+    final importance = (record['importance'] as num?)?.toDouble() ?? 0.5;
+    return base + importance * 0.1;
+  }
+
+  double _memorySearchScore(String text, String query) {
+    final haystack = text.toLowerCase();
+    final terms = query
+        .toLowerCase()
+        .split(RegExp(r'\s+'))
+        .map((term) => term.trim())
+        .where((term) => term.isNotEmpty)
+        .toList();
+    if (terms.isEmpty) return 1;
+    var score = 0.0;
+    for (final term in terms) {
+      if (haystack.contains(term)) score += 1;
+    }
+    return score / terms.length;
+  }
+
+  MobileToolResult _memoryToolOk(
+    String toolName,
+    String summary,
+    Map<String, dynamic> data, {
+    bool ok = true,
+  }) {
+    return MobileToolResult(
+      ok: ok,
+      summary: summary,
+      output: jsonEncode({
+        'status': ok ? 'ok' : 'error',
+        'data': {
+          ...data,
+          'tool': toolName,
+          'mobile_compatible': true,
+          'requires_pc': false,
+          'execution_location': 'phone',
+          'runtime_layers': [..._flutterRuntimeLayers, 'mobile-memory-store'],
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _memoryToolError(
+    String toolName,
+    String code,
+    String message,
+  ) {
+    return MobileToolResult(
+      ok: false,
+      summary: message,
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': code,
+          'message': message,
+          'tool': toolName,
+          'execution_location': 'phone',
+          'runtime_layers': [..._flutterRuntimeLayers, 'mobile-memory-store'],
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -10295,6 +11269,7 @@ bool _isAsyncPhoneToolName(String name) {
   final normalized = name.trim().toLowerCase();
   if (_phoneAiModelToolIds.contains(normalized)) return true;
   if (_phonePromptToolIds.contains(normalized)) return true;
+  if (_phoneMemoryToolIds.contains(normalized)) return true;
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
@@ -10872,7 +11847,9 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
       ? _orderedStrings([...tool.runtimeLayers, 'mobile-provider-config'])
       : _phonePromptToolIds.contains(tool.name)
           ? _orderedStrings([...tool.runtimeLayers, 'mobile-prompt-store'])
-          : tool.runtimeLayers;
+          : _phoneMemoryToolIds.contains(tool.name)
+              ? _orderedStrings([...tool.runtimeLayers, 'mobile-memory-store'])
+              : tool.runtimeLayers;
   return {
     'compatible': true,
     'available': true,
@@ -10966,6 +11943,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       normalized == 'tts_generate' || normalized == 'tts_generate_local';
   final isPhoneAiModelTool = _phoneAiModelToolIds.contains(normalized);
   final isPhonePromptTool = _phonePromptToolIds.contains(normalized);
+  final isPhoneMemoryTool = _phoneMemoryToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -11222,6 +12200,28 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval':
           _phonePromptMutationToolIds.contains(normalized),
+      'implementation_status': status,
+    };
+  }
+  if (isPhoneMemoryTool) {
+    final status = switch (normalized) {
+      'memory_recall' => 'implemented_phone_memory_search',
+      'memory_compact' => 'implemented_phone_memory_summary',
+      'memory_project_context' ||
+      'memory_resolve_for_agent' =>
+        'implemented_phone_memory_context',
+      'memory_memo' ||
+      'memory_memo_folders' ||
+      'memory_memo_notes' =>
+        'implemented_phone_memo_store',
+      _ => 'implemented_phone_memory_store',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': [..._flutterRuntimeLayers, 'mobile-memory-store'],
+      'native_layers': [],
+      'requires_mobile_approval':
+          _phoneMemoryMutationToolIds.contains(normalized),
       'implementation_status': status,
     };
   }

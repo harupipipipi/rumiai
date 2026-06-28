@@ -459,6 +459,9 @@ class ApiConfigStore {
   static const _modelRuntimeSettingsKey =
       'rumi.mobile_model_runtime_settings.v1';
   static const _promptRecordsKey = 'rumi.mobile_prompt_records.v1';
+  static const _memoryRecordsKey = 'rumi.mobile_memory_records.v1';
+  static const _memoFoldersKey = 'rumi.mobile_memo_folders.v1';
+  static const _memoNotesKey = 'rumi.mobile_memo_notes.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
   static const _notificationKey = 'rumi.mobile_notifications.v1';
 
@@ -658,6 +661,61 @@ class ApiConfigStore {
     );
   }
 
+  Future<List<Map<String, dynamic>>> loadMemoryRecords() {
+    return _loadRecordList(_memoryRecordsKey);
+  }
+
+  Future<void> saveMemoryRecords(List<Map<String, dynamic>> records) {
+    return _saveRecordList(_memoryRecordsKey, records);
+  }
+
+  Future<void> upsertMemoryRecord(Map<String, dynamic> record) async {
+    final id = '${record['id'] ?? ''}'.trim();
+    if (id.isEmpty) return;
+    final records = await loadMemoryRecords();
+    await saveMemoryRecords([
+      for (final existing in records)
+        if ('${existing['id'] ?? ''}'.trim() != id) existing,
+      Map<String, dynamic>.from(record),
+    ]);
+  }
+
+  Future<void> deleteMemoryRecord(String id) async {
+    await _deleteRecord(_memoryRecordsKey, id);
+  }
+
+  Future<List<Map<String, dynamic>>> loadMemoFolders() {
+    return _loadRecordList(_memoFoldersKey);
+  }
+
+  Future<void> saveMemoFolders(List<Map<String, dynamic>> records) {
+    return _saveRecordList(_memoFoldersKey, records);
+  }
+
+  Future<void> upsertMemoFolder(Map<String, dynamic> record) async {
+    await _upsertRecord(_memoFoldersKey, record);
+  }
+
+  Future<void> deleteMemoFolder(String id) async {
+    await _deleteRecord(_memoFoldersKey, id);
+  }
+
+  Future<List<Map<String, dynamic>>> loadMemoNotes() {
+    return _loadRecordList(_memoNotesKey);
+  }
+
+  Future<void> saveMemoNotes(List<Map<String, dynamic>> records) {
+    return _saveRecordList(_memoNotesKey, records);
+  }
+
+  Future<void> upsertMemoNote(Map<String, dynamic> record) async {
+    await _upsertRecord(_memoNotesKey, record);
+  }
+
+  Future<void> deleteMemoNote(String id) async {
+    await _deleteRecord(_memoNotesKey, id);
+  }
+
   Future<PcConnection?> loadPc() async {
     try {
       final raw = await _storage.read(_pcKey);
@@ -702,6 +760,65 @@ class ApiConfigStore {
     } catch (_) {
       // ignore secure storage failures
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadRecordList(String key) async {
+    try {
+      final raw = await _storage.read(key);
+      if (raw == null || raw.trim().isEmpty) return [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .where((entry) => '${entry['id'] ?? ''}'.trim().isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> _saveRecordList(
+    String key,
+    List<Map<String, dynamic>> records,
+  ) async {
+    try {
+      final byId = <String, Map<String, dynamic>>{};
+      for (final record in records) {
+        final id = '${record['id'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        byId[id] = Map<String, dynamic>.from(record);
+      }
+      await _storage.write(key, jsonEncode(byId.values.toList()));
+    } catch (_) {
+      // ignore secure storage failures
+    }
+  }
+
+  Future<void> _upsertRecord(
+    String key,
+    Map<String, dynamic> record,
+  ) async {
+    final id = '${record['id'] ?? ''}'.trim();
+    if (id.isEmpty) return;
+    final records = await _loadRecordList(key);
+    await _saveRecordList(key, [
+      for (final existing in records)
+        if ('${existing['id'] ?? ''}'.trim() != id) existing,
+      Map<String, dynamic>.from(record),
+    ]);
+  }
+
+  Future<void> _deleteRecord(String key, String id) async {
+    final normalized = id.trim();
+    if (normalized.isEmpty) return;
+    final records = await _loadRecordList(key);
+    await _saveRecordList(
+      key,
+      records
+          .where((record) => '${record['id'] ?? ''}'.trim() != normalized)
+          .toList(),
+    );
   }
 }
 

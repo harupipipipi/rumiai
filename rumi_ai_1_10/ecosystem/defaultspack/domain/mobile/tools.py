@@ -97,6 +97,19 @@ _PHONE_PROMPT_TOOLS = {
     "prompt_resolve_for_conversation": ("implemented_phone_prompt_effective", False),
     "prompt_preview_toggle": ("implemented_phone_prompt_preview", False),
 }
+_PHONE_MEMORY_TOOLS = {
+    "memory_store": ("implemented_phone_memory_store", True),
+    "memory_list": ("implemented_phone_memory_store", False),
+    "memory_recall": ("implemented_phone_memory_search", False),
+    "memory_update": ("implemented_phone_memory_store", True),
+    "memory_delete": ("implemented_phone_memory_store", True),
+    "memory_compact": ("implemented_phone_memory_summary", False),
+    "memory_project_context": ("implemented_phone_memory_context", False),
+    "memory_resolve_for_agent": ("implemented_phone_memory_context", False),
+    "memory_memo": ("implemented_phone_memo_store", True),
+    "memory_memo_folders": ("implemented_phone_memo_store", True),
+    "memory_memo_notes": ("implemented_phone_memo_store", True),
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -333,6 +346,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart", "mobile-prompt-store"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
+        }
+    if tool_id in _PHONE_MEMORY_TOOLS:
+        status, requires_approval = _PHONE_MEMORY_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-memory-store"],
             "native_layers": [],
             "requires_mobile_approval": requires_approval,
             "implementation_status": status,

@@ -406,6 +406,72 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["prompt"],
             },
             {
+                "tool_id": "memory_store",
+                "name": "memory_store",
+                "summary": "Store memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_list",
+                "name": "memory_list",
+                "summary": "List memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_recall",
+                "name": "memory_recall",
+                "summary": "Recall memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_update",
+                "name": "memory_update",
+                "summary": "Update memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_delete",
+                "name": "memory_delete",
+                "summary": "Delete memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_compact",
+                "name": "memory_compact",
+                "summary": "Compact memory",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_project_context",
+                "name": "memory_project_context",
+                "summary": "Project memory context",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_resolve_for_agent",
+                "name": "memory_resolve_for_agent",
+                "summary": "Resolve memory for agent",
+                "tags": ["memory"],
+            },
+            {
+                "tool_id": "memory_memo",
+                "name": "memory_memo",
+                "summary": "Dispatch memo operation",
+                "tags": ["memory", "memo"],
+            },
+            {
+                "tool_id": "memory_memo_folders",
+                "name": "memory_memo_folders",
+                "summary": "Manage memo folders",
+                "tags": ["memory", "memo"],
+            },
+            {
+                "tool_id": "memory_memo_notes",
+                "name": "memory_memo_notes",
+                "summary": "Manage memo notes",
+                "tags": ["memory", "memo"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -838,6 +904,27 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "mobile-prompt-store" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "memory_store": ("implemented_phone_memory_store", True),
+        "memory_list": ("implemented_phone_memory_store", False),
+        "memory_recall": ("implemented_phone_memory_search", False),
+        "memory_update": ("implemented_phone_memory_store", True),
+        "memory_delete": ("implemented_phone_memory_store", True),
+        "memory_compact": ("implemented_phone_memory_summary", False),
+        "memory_project_context": ("implemented_phone_memory_context", False),
+        "memory_resolve_for_agent": ("implemented_phone_memory_context", False),
+        "memory_memo": ("implemented_phone_memo_store", True),
+        "memory_memo_folders": ("implemented_phone_memo_store", True),
+        "memory_memo_notes": ("implemented_phone_memo_store", True),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-memory-store" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, requires_approval in {
         "job_create": False,

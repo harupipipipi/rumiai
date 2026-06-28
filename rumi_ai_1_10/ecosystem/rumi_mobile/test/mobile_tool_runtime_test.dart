@@ -337,6 +337,17 @@ void main() {
           'prompt_resolve_for_conversation',
           'prompt_preview_toggle',
           'prompt_test',
+          'memory_store',
+          'memory_list',
+          'memory_recall',
+          'memory_update',
+          'memory_delete',
+          'memory_compact',
+          'memory_project_context',
+          'memory_resolve_for_agent',
+          'memory_memo',
+          'memory_memo_folders',
+          'memory_memo_notes',
           'browser_open_url',
           'agent_plan',
           'agent_progress',
@@ -555,6 +566,94 @@ void main() {
       final lintData = (jsonDecode(lint.output) as Map<String, dynamic>)['data']
           as Map<String, dynamic>;
       expect(lintData['issues'], isNotEmpty);
+    });
+
+    test('runs phone-local memory and memo store tools', () async {
+      final storage = _FakeSecureStorage();
+      final approval = _FakeMobileToolApproval(true);
+      final runtime = MobileToolRuntime(
+        configStore: ApiConfigStore(storage: storage),
+        approvalDelegate: approval,
+      );
+
+      final stored = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memory_store',
+          name: 'memory_store',
+          arguments: {
+            'content': 'Haru prefers short Japanese status updates.',
+            'tags': ['preference', 'language'],
+            'importance': 0.9,
+          },
+        ),
+      );
+      expect(stored.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'memory_store');
+      final storedData = (jsonDecode(stored.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      final memory = storedData['memory'] as Map<String, dynamic>;
+      expect(memory['tags'], contains('preference'));
+
+      final recall = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memory_recall',
+          name: 'memory_recall',
+          arguments: {'query': 'Japanese updates'},
+        ),
+      );
+      expect(recall.ok, isTrue);
+      final recallData = (jsonDecode(recall.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(recallData['memories'], isNotEmpty);
+      expect(recallData['runtime_layers'], contains('mobile-memory-store'));
+
+      final compact = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memory_compact',
+          name: 'memory_compact',
+          arguments: {'max_chars': 120},
+        ),
+      );
+      expect(compact.ok, isTrue);
+      final compactData = (jsonDecode(compact.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(compactData['summary'], contains('Haru'));
+
+      final folder = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memo_folder',
+          name: 'memory_memo_folders',
+          arguments: {'action': 'create', 'id': 'ideas', 'title': 'Ideas'},
+        ),
+      );
+      expect(folder.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'memory_memo_folders');
+
+      final note = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memo_note',
+          name: 'memory_memo_notes',
+          arguments: {
+            'action': 'create',
+            'folder_id': 'ideas',
+            'title': 'Mobile tools',
+            'content': 'Keep phone tools unified with PC names.',
+          },
+        ),
+      );
+      expect(note.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'memory_memo_notes');
+
+      final notes = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'memo_notes',
+          name: 'memory_memo_notes',
+          arguments: {'action': 'list', 'folder_id': 'ideas'},
+        ),
+      );
+      final notesData = (jsonDecode(notes.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(notesData['notes'], hasLength(1));
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -3510,6 +3609,38 @@ void main() {
         expect(mobile['requires_mobile_approval'], entry.value[1]);
         expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
         expect(mobile['runtime_layers'], contains('mobile-prompt-store'));
+        expect(data['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'memory_store': ['implemented_phone_memory_store', true],
+        'memory_list': ['implemented_phone_memory_store', false],
+        'memory_recall': ['implemented_phone_memory_search', false],
+        'memory_update': ['implemented_phone_memory_store', true],
+        'memory_delete': ['implemented_phone_memory_store', true],
+        'memory_compact': ['implemented_phone_memory_summary', false],
+        'memory_project_context': ['implemented_phone_memory_context', false],
+        'memory_resolve_for_agent': ['implemented_phone_memory_context', false],
+        'memory_memo': ['implemented_phone_memo_store', true],
+        'memory_memo_folders': ['implemented_phone_memo_store', true],
+        'memory_memo_notes': ['implemented_phone_memo_store', true],
+      }.entries) {
+        final schema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final mobile = data['mobile'] as Map<String, dynamic>;
+        expect(data['mobile_compatible'], isTrue);
+        expect(data['execution_route'], 'phone');
+        expect(mobile['implementation_status'], entry.value[0]);
+        expect(mobile['requires_mobile_approval'], entry.value[1]);
+        expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(mobile['runtime_layers'], contains('mobile-memory-store'));
         expect(data['tags'], contains(mobileFlutterTag));
       }
 
