@@ -3,6 +3,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error
 from domain.agent.engine import AgentEngine
+from domain.ai_client.request_timeout import apply_execution_timeout_to_params
 from blocks.agent._state import set_engine
 
 
@@ -21,8 +22,10 @@ def run(input_data, context):
     for key in ("required_capabilities", "attachments", "target", "delivery"):
         if key in input_data and input_data.get(key) not in (None, "", []):
             context[key] = input_data.get(key)
-    if isinstance(input_data.get("params"), dict):
-        context["params"] = dict(input_data["params"])
+    params = dict(input_data.get("params")) if isinstance(input_data.get("params"), dict) else {}
+    apply_execution_timeout_to_params(params, input_data.get("timeout_seconds"))
+    if params:
+        context["params"] = params
     engine = AgentEngine()
     result = engine.execute(task, tools, model, system_prompt, context)
     execution_id = result.get("execution_id", "")

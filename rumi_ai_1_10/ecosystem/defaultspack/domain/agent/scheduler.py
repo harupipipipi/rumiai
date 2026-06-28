@@ -24,6 +24,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
+from domain.ai_client.request_timeout import apply_execution_timeout_to_params
 from domain.agent.schedule_store import (
     current_schedules_dir,
     save_schedule,
@@ -251,7 +252,11 @@ def _followup_params(params: dict[str, Any]) -> dict[str, Any]:
     return followup
 
 
-def _scheduler_chat_params_and_tools(task_cfg: dict[str, Any]) -> tuple[dict[str, Any], list[Any] | None]:
+def _scheduler_chat_params_and_tools(
+    task_cfg: dict[str, Any],
+    *,
+    timeout_seconds: Any = None,
+) -> tuple[dict[str, Any], list[Any] | None]:
     params: dict[str, Any] = {}
     if task_cfg.get("model"):
         params["model"] = task_cfg.get("model")
@@ -264,6 +269,7 @@ def _scheduler_chat_params_and_tools(task_cfg: dict[str, Any]) -> tuple[dict[str
         initial_tool_choice = _initial_tool_choice(task_cfg)
         if initial_tool_choice is not None:
             params["tool_choice"] = initial_tool_choice
+    apply_execution_timeout_to_params(params, timeout_seconds)
     return params, tools
 
 
@@ -924,8 +930,8 @@ class Scheduler:
         source_metadata = current.get("source_metadata") if isinstance(current.get("source_metadata"), dict) else {}
         exec_id = str(source_metadata.get("schedule_execution_id") or recovered_exec_id).strip()
         trigger = str(source_metadata.get("trigger") or "scheduled").strip() or "scheduled"
-        params, tools = _scheduler_chat_params_and_tools(task_cfg)
         timeout_seconds = _task_timeout_seconds(task_cfg.get("timeout", 300))
+        params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
         deadline = time.monotonic() + timeout_seconds
         cancel_event = threading.Event()
         auto_approvals: list[dict[str, Any]] = []
@@ -1341,7 +1347,7 @@ class Scheduler:
                 try:
                     from blocks.chat.send import run as chat_send_run
 
-                    params, tools = _scheduler_chat_params_and_tools(task_cfg)
+                    params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
 
                     def run_chat_task():
                         chat_result = chat_send_run(
@@ -1392,9 +1398,14 @@ class Scheduler:
                 messages.append({"role": "user", "content": message})
 
                 empty_context = {}
+                completion_params: dict[str, Any] = {}
+                apply_execution_timeout_to_params(completion_params, timeout_seconds)
 
                 def run_completion_task():
-                    return ai_complete_run({"messages": messages, "model": model}, empty_context)
+                    payload = {"messages": messages, "model": model}
+                    if completion_params:
+                        payload["params"] = completion_params
+                    return ai_complete_run(payload, empty_context)
 
                 result = _run_with_timeout(
                     run_completion_task,

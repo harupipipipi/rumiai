@@ -414,6 +414,7 @@ class DefaultsHttpServer:
                 context["_defaultspack_http_route_adapter"] = True
                 qualified_name = f"defaultspack:{function_id}"
                 timeout_seconds = self._fallback_function_timeout_seconds(module_name, payload)
+                payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
                 result = invoke_function(
                     qualified_name,
                     payload,
@@ -531,6 +532,7 @@ class DefaultsHttpServer:
                 fallback_block_module,
                 payload,
             )
+            payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
             result = invoke_function(
                 function_name,
                 payload,
@@ -618,6 +620,16 @@ class DefaultsHttpServer:
         if module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
             return _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS
         return None
+
+    @staticmethod
+    def _payload_with_fallback_timeout(payload, timeout_seconds):
+        if timeout_seconds is None:
+            return payload
+        if not isinstance(payload, dict) or "timeout_seconds" in payload:
+            return payload
+        enriched = dict(payload)
+        enriched["timeout_seconds"] = timeout_seconds
+        return enriched
 
     def _dev_auto_approve_pack(self, pack_id):
         rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
