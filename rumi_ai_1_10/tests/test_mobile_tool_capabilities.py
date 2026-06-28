@@ -208,6 +208,42 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["tool", "broker", "batch"],
             },
             {
+                "tool_id": "job_create",
+                "name": "job_create",
+                "summary": "Create local job",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "job_status",
+                "name": "job_status",
+                "summary": "Read local job status",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "job_history",
+                "name": "job_history",
+                "summary": "Read local job history",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "job_artifacts",
+                "name": "job_artifacts",
+                "summary": "List local job artifacts",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "job_cancel",
+                "name": "job_cancel",
+                "summary": "Cancel local job",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "job_resume",
+                "name": "job_resume",
+                "summary": "Resume local job",
+                "tags": ["job", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "project_scaffold",
                 "name": "project_scaffold",
                 "summary": "Create static webapp files",
@@ -523,6 +559,24 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     )
     assert "flutter" in by_id["tool_batch"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["tool_batch"]["mobile"]["runtime_layers"]
+
+    for tool_id, requires_approval in {
+        "job_create": False,
+        "job_status": False,
+        "job_history": False,
+        "job_artifacts": False,
+        "job_cancel": True,
+        "job_resume": True,
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert (
+            by_id[tool_id]["mobile"]["implementation_status"]
+            == "implemented_phone_job_record"
+        )
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, status in {
         "project_scaffold": "implemented_phone_artifact_scaffold",

@@ -86,6 +86,14 @@ _PHONE_DOCUMENT_SLIDE_TOOLS = {
     "slides_update": ("implemented_phone_slide_outline", True),
     "slides_export": ("implemented_phone_slide_export", False),
 }
+_PHONE_JOB_TOOLS = {
+    "job_create": ("implemented_phone_job_record", False),
+    "job_status": ("implemented_phone_job_record", False),
+    "job_history": ("implemented_phone_job_record", False),
+    "job_artifacts": ("implemented_phone_job_record", False),
+    "job_cancel": ("implemented_phone_job_record", True),
+    "job_resume": ("implemented_phone_job_record", True),
+}
 _PHONE_SHEET_TOOLS = {
     "sheet_create": ("implemented_phone_sheet_text", False),
     "sheet_read": ("implemented_phone_sheet_text", False),
@@ -298,6 +306,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
         }
     if tool_id in _PHONE_DOCUMENT_SLIDE_TOOLS:
         status, requires_approval = _PHONE_DOCUMENT_SLIDE_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
+        }
+    if tool_id in _PHONE_JOB_TOOLS:
+        status, requires_approval = _PHONE_JOB_TOOLS[tool_id]
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart"],

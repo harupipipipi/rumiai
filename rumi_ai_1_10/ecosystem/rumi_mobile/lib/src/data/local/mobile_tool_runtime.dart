@@ -2557,6 +2557,135 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'job_create',
+      description:
+          'Create a phone-local artifact-backed job record. run_immediately marks the local record completed and writes a result artifact without PC execution.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_create',
+        'defaultspack_job_create',
+        'defaults.job.create',
+        'defaultspack.job.create',
+      ],
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'kind': {'type': 'string'},
+          'job_id': {'type': 'string'},
+          'input': {'type': 'object'},
+          'query': {'type': 'string'},
+          'run_immediately': {'type': 'boolean', 'default': false},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'job_status',
+      description:
+          'Read a phone-local job record or list all phone-local job records.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_status',
+        'defaultspack_job_status',
+        'defaults.job.status',
+        'defaultspack.job.status',
+      ],
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'job_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'job_history',
+      description: 'Read phone-local job event history.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_history',
+        'defaultspack_job_history',
+        'defaults.job.history',
+        'defaultspack.job.history',
+      ],
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'job_id': {'type': 'string'},
+        },
+        'required': ['job_id'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'job_artifacts',
+      description:
+          'List artifacts attached to a phone-local artifact-backed job record.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_artifacts',
+        'defaultspack_job_artifacts',
+        'defaults.job.artifacts',
+        'defaultspack.job.artifacts',
+      ],
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'job_id': {'type': 'string'},
+        },
+        'required': ['job_id'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'job_cancel',
+      description:
+          'Cancel a phone-local job record after mobile approval. This only updates the phone-local record.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_cancel',
+        'defaultspack_job_cancel',
+        'defaults.job.cancel',
+        'defaultspack.job.cancel',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'job_id': {'type': 'string'},
+        },
+        'required': ['job_id'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'job_resume',
+      description:
+          'Resume a phone-local job record after mobile approval. This only updates the phone-local record.',
+      tags: ['tool', 'job', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_job_resume',
+        'defaultspack_job_resume',
+        'defaults.job.resume',
+        'defaultspack.job.resume',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_job_record',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'job_id': {'type': 'string'},
+        },
+        'required': ['job_id'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'agent_plan',
       description:
           'Create a lightweight phone-local agent plan using the defaultspack agent_plan convention.',
@@ -2958,6 +3087,17 @@ class MobileToolRuntime {
         return _toolInvoke(call.arguments);
       case 'tool_batch':
         return _asyncOnlyTool(name);
+      case 'job_create':
+        return _jobCreate(call.arguments);
+      case 'job_status':
+        return _jobStatus(call.arguments);
+      case 'job_history':
+        return _jobHistory(call.arguments);
+      case 'job_artifacts':
+        return _jobArtifacts(call.arguments);
+      case 'job_cancel':
+      case 'job_resume':
+        return _asyncOnlyTool(name);
       case 'agent_plan':
         return _agentPlan(call.arguments);
       case 'agent_progress':
@@ -3032,6 +3172,9 @@ class MobileToolRuntime {
         return _docUpdate(call.arguments);
       case 'slides_update':
         return _slidesUpdate(call.arguments);
+      case 'job_cancel':
+      case 'job_resume':
+        return _jobMutation(name, call.arguments);
       case 'tool_batch':
         return _toolBatch(call.arguments);
       default:
@@ -3220,6 +3363,12 @@ class MobileToolRuntime {
       'tool_list',
       'tool_schema',
       'tool_batch',
+      'job_create',
+      'job_status',
+      'job_history',
+      'job_artifacts',
+      'job_cancel',
+      'job_resume',
       'agent_plan',
       'agent_progress',
       'agent_status',
@@ -7033,6 +7182,239 @@ class MobileToolRuntime {
     return decorated;
   }
 
+  MobileToolResult _jobCreate(Map<String, dynamic> args) {
+    final requestedId = '${args['job_id'] ?? args['id'] ?? ''}'.trim();
+    final generatedId = _nextToolId('job');
+    final jobId = _slugifyPhoneArtifactName(
+      requestedId.isEmpty ? generatedId : requestedId,
+      fallback: generatedId,
+    );
+    if (_mobileJobs.containsKey(jobId)) {
+      return _phoneJobError(
+        'JOB_ALREADY_EXISTS',
+        'phone-local job already exists',
+        jobId: jobId,
+      );
+    }
+    final input = _phoneJobInput(args);
+    final runImmediately = _boolArg(args['run_immediately'], fallback: false);
+    final now = DateTime.now().toUtc().toIso8601String();
+    final job = <String, dynamic>{
+      'job_id': jobId,
+      'kind': '${args['kind'] ?? 'local'}'.trim().isEmpty
+          ? 'local'
+          : '${args['kind'] ?? 'local'}'.trim(),
+      'status': runImmediately ? 'completed' : 'queued',
+      'input': input,
+      'created_at': now,
+      'updated_at': now,
+      'workspace': 'phone',
+      'execution_location': 'phone',
+      'runtime_layers': _flutterRuntimeLayers,
+      'artifacts': <String>[],
+    };
+    _mobileJobs[jobId] = job;
+    _appendPhoneJobEvent(jobId, 'created', {'run_immediately': runImmediately});
+    _persistPhoneJob(jobId);
+    if (runImmediately) {
+      final resultPath = 'jobs/$jobId/result.json';
+      final resultContent = const JsonEncoder.withIndent('  ').convert({
+        'job_id': jobId,
+        'status': 'completed',
+        'input': input,
+        'note':
+            'Completed by the phone-local job runtime. No PC process was executed.',
+      });
+      _putPhoneArtifactContent(
+        resultPath,
+        '$resultContent\n',
+        source: 'job_create',
+        mimeType: 'application/json',
+        metadata: {'job_id': jobId, 'artifact_role': 'result'},
+      );
+      _phoneJobArtifacts(jobId).add(resultPath);
+      _appendPhoneJobEvent(jobId, 'completed', {'artifact_path': resultPath});
+      _persistPhoneJob(jobId);
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: 'created phone-local job $jobId',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneJobRecord(jobId),
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _jobStatus(Map<String, dynamic> args) {
+    final jobId = '${args['job_id'] ?? args['id'] ?? ''}'.trim();
+    if (jobId.isEmpty) {
+      final jobs = _mobileJobs.keys.map(_phoneJobRecord).toList()
+        ..sort((a, b) => '${a['created_at']}'.compareTo('${b['created_at']}'));
+      return MobileToolResult(
+        ok: true,
+        summary: '${jobs.length} phone-local jobs',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'jobs': jobs,
+            'count': jobs.length,
+            'workspace': 'phone',
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    }
+    final normalized = _slugifyPhoneArtifactName(jobId, fallback: jobId);
+    if (!_mobileJobs.containsKey(normalized)) {
+      return _phoneJobError(
+        'JOB_NOT_FOUND',
+        'phone-local job not found',
+        jobId: normalized,
+      );
+    }
+    return MobileToolResult(
+      ok: true,
+      summary: 'job $normalized ${_mobileJobs[normalized]?['status']}',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneJobRecord(normalized),
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _jobHistory(Map<String, dynamic> args) {
+    final jobId = _requiredPhoneJobId(args);
+    if (jobId == null) {
+      return _phoneJobError(
+        'INVALID_INPUT',
+        "'job_id' is required for job_history.",
+      );
+    }
+    if (!_mobileJobs.containsKey(jobId)) {
+      return _phoneJobError('JOB_NOT_FOUND', 'phone-local job not found',
+          jobId: jobId);
+    }
+    final events = List<Map<String, dynamic>>.from(
+      _mobileJobEvents[jobId] ?? const [],
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: '${events.length} job events',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'job_id': jobId,
+          'events': events,
+          'count': events.length,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _jobArtifacts(Map<String, dynamic> args) {
+    final jobId = _requiredPhoneJobId(args);
+    if (jobId == null) {
+      return _phoneJobError(
+        'INVALID_INPUT',
+        "'job_id' is required for job_artifacts.",
+      );
+    }
+    if (!_mobileJobs.containsKey(jobId)) {
+      return _phoneJobError('JOB_NOT_FOUND', 'phone-local job not found',
+          jobId: jobId);
+    }
+    final artifacts =
+        _phoneJobArtifacts(jobId).where(_mobileArtifactFiles.containsKey).map(
+      (path) {
+        final file = _mobileArtifactFiles[path]!;
+        return {
+          'path': path,
+          'size':
+              file['size'] ?? utf8.encode('${file['content'] ?? ''}').length,
+          'mime_type': file['mime_type'],
+          'metadata': file['metadata'],
+        };
+      },
+    ).toList();
+    return MobileToolResult(
+      ok: true,
+      summary: '${artifacts.length} job artifacts',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'job_id': jobId,
+          'artifacts': artifacts,
+          'count': artifacts.length,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _jobMutation(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final jobId = _requiredPhoneJobId(args);
+    if (jobId == null) {
+      return _phoneJobError(
+        'INVALID_INPUT',
+        "'job_id' is required for $toolName.",
+      );
+    }
+    final job = _mobileJobs[jobId];
+    if (job == null) {
+      return _phoneJobError('JOB_NOT_FOUND', 'phone-local job not found',
+          jobId: jobId);
+    }
+    final approved = await _requestMobileApproval(
+      toolName: toolName,
+      prompt: 'このスマホ内のjob recordを更新します。対象: $jobId',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired(toolName);
+    final now = DateTime.now().toUtc().toIso8601String();
+    if (toolName == 'job_cancel') {
+      job['status'] = 'canceled';
+      job['canceled_at'] = now;
+      _appendPhoneJobEvent(jobId, 'canceled', const {});
+    } else {
+      job['status'] = 'queued';
+      job['resumed_at'] = now;
+      _appendPhoneJobEvent(jobId, 'resumed', const {});
+    }
+    job['updated_at'] = now;
+    _persistPhoneJob(jobId);
+    return MobileToolResult(
+      ok: true,
+      summary: '$toolName updated $jobId',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ..._phoneJobRecord(jobId),
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
   MobileToolResult _agentPlan(Map<String, dynamic> args) {
     final action = '${args['action'] ?? 'create'}'.trim().toLowerCase();
     if (action == 'clear') {
@@ -7314,6 +7696,8 @@ bool _isAsyncPhoneToolName(String name) {
     'sheet_update',
     'doc_update',
     'slides_update',
+    'job_cancel',
+    'job_resume',
   }.contains(name.trim().toLowerCase());
 }
 
@@ -7974,6 +8358,14 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
     'slides_update',
   }.contains(normalized);
   final isPhoneSlideExportTool = normalized == 'slides_export';
+  final isPhoneJobTool = const {
+    'job_create',
+    'job_status',
+    'job_history',
+    'job_artifacts',
+    'job_cancel',
+    'job_resume',
+  }.contains(normalized);
   final isPhoneSheetTool = const {
     'sheet_create',
     'sheet_read',
@@ -8191,6 +8583,16 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': isPhoneDocumentSlideMutationTool,
       'implementation_status': status,
+    };
+  }
+  if (isPhoneJobTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval':
+          normalized == 'job_cancel' || normalized == 'job_resume',
+      'implementation_status': 'implemented_phone_job_record',
     };
   }
   if (isPhoneSheetTool) {
@@ -10197,6 +10599,8 @@ final List<Map<String, dynamic>> _mobileTaskCards = [];
 final List<Map<String, dynamic>> _mobileAgentPlans = [];
 final Map<String, Map<String, dynamic>> _mobileArtifactFiles = {};
 final Map<String, Map<String, dynamic>> _mobileConsents = {};
+final Map<String, Map<String, dynamic>> _mobileJobs = {};
+final Map<String, List<Map<String, dynamic>>> _mobileJobEvents = {};
 int _mobileToolIdSequence = 0;
 
 String _nextToolId(String prefix) {
@@ -11223,6 +11627,103 @@ MobileToolResult _phoneArtifactError(
         'code': code,
         'message': message,
         if (path != null) 'path': path,
+        'workspace': 'phone',
+        'execution_location': 'phone',
+      },
+    }),
+  );
+}
+
+Map<String, dynamic> _phoneJobInput(Map<String, dynamic> args) {
+  final input = args['input'];
+  if (input is Map<String, dynamic>) return Map<String, dynamic>.from(input);
+  if (input is Map) return input.map((key, value) => MapEntry('$key', value));
+  final query = '${args['query'] ?? ''}'.trim();
+  return {
+    if (query.isNotEmpty) 'query': query,
+  };
+}
+
+String? _requiredPhoneJobId(Map<String, dynamic> args) {
+  final raw = '${args['job_id'] ?? args['id'] ?? ''}'.trim();
+  if (raw.isEmpty) return null;
+  return _slugifyPhoneArtifactName(raw, fallback: raw);
+}
+
+List<String> _phoneJobArtifacts(String jobId) {
+  final job = _mobileJobs[jobId];
+  if (job == null) return <String>[];
+  final artifacts = job['artifacts'];
+  if (artifacts is List<String>) return artifacts;
+  if (artifacts is List) {
+    final normalized = artifacts.map((entry) => '$entry').toList();
+    job['artifacts'] = normalized;
+    return normalized;
+  }
+  final normalized = <String>[];
+  job['artifacts'] = normalized;
+  return normalized;
+}
+
+void _appendPhoneJobEvent(
+  String jobId,
+  String type,
+  Map<String, dynamic> data,
+) {
+  final events = _mobileJobEvents.putIfAbsent(jobId, () => []);
+  events.add({
+    'id': _nextToolId('job_event'),
+    'job_id': jobId,
+    'type': type,
+    'data': data,
+    'created_at': DateTime.now().toUtc().toIso8601String(),
+    'workspace': 'phone',
+  });
+}
+
+void _persistPhoneJob(String jobId) {
+  final job = _mobileJobs[jobId];
+  if (job == null) return;
+  final path = 'jobs/$jobId/job.json';
+  if (!_phoneJobArtifacts(jobId).contains(path)) {
+    _phoneJobArtifacts(jobId).insert(0, path);
+  }
+  _putPhoneArtifactContent(
+    path,
+    '${const JsonEncoder.withIndent('  ').convert(_phoneJobRecord(jobId))}\n',
+    source: 'job_record',
+    mimeType: 'application/json',
+    metadata: {'job_id': jobId, 'artifact_role': 'job_record'},
+  );
+}
+
+Map<String, dynamic> _phoneJobRecord(String jobId) {
+  final job = _mobileJobs[jobId];
+  if (job == null) return {'job_id': jobId, 'status': 'missing'};
+  return {
+    ...job,
+    'artifacts': List<String>.from(_phoneJobArtifacts(jobId)),
+    'event_count': _mobileJobEvents[jobId]?.length ?? 0,
+    'workspace': 'phone',
+    'execution_location': 'phone',
+    'runtime_layers': _flutterRuntimeLayers,
+  };
+}
+
+MobileToolResult _phoneJobError(
+  String code,
+  String message, {
+  String? jobId,
+}) {
+  return MobileToolResult(
+    ok: false,
+    summary: message,
+    output: jsonEncode({
+      'status': 'error',
+      'error': {
+        'code': code,
+        'message': message,
+        if (jobId != null) 'job_id': jobId,
         'workspace': 'phone',
         'execution_location': 'phone',
       },

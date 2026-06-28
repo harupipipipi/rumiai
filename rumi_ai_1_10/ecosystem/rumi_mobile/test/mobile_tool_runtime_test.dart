@@ -219,6 +219,12 @@ void main() {
           'tool_schema',
           'tool_invoke',
           'tool_batch',
+          'job_create',
+          'job_status',
+          'job_history',
+          'job_artifacts',
+          'job_cancel',
+          'job_resume',
           'tool_consent_check',
           'tool_consent_confirm',
           'artifact_file_list',
@@ -2496,6 +2502,106 @@ void main() {
       expect(delegate.lastCall?.name, 'python_exec');
     });
 
+    test('runs phone-local artifact-backed job records', () async {
+      final jobRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(true),
+      );
+
+      final created = jobRuntime.execute(
+        const MobileToolCall(
+          id: 'job_create_1',
+          name: 'job_create',
+          arguments: {
+            'job_id': 'Morning Report',
+            'kind': 'research',
+            'query': 'mobile tools',
+            'run_immediately': true,
+          },
+        ),
+      );
+      expect(created.ok, isTrue);
+      final createdPayload = jsonDecode(created.output) as Map<String, dynamic>;
+      final createdData = createdPayload['data'] as Map<String, dynamic>;
+      expect(createdData['job_id'], 'morning-report');
+      expect(createdData['status'], 'completed');
+      expect(
+          createdData['artifacts'], contains('jobs/morning-report/job.json'));
+      expect(createdData['artifacts'],
+          contains('jobs/morning-report/result.json'));
+
+      final status = jobRuntime.execute(
+        const MobileToolCall(
+          id: 'job_status_1',
+          name: 'job_status',
+          arguments: {'job_id': 'morning-report'},
+        ),
+      );
+      final statusPayload = jsonDecode(status.output) as Map<String, dynamic>;
+      final statusData = statusPayload['data'] as Map<String, dynamic>;
+      expect(statusData['status'], 'completed');
+      expect(statusData['runtime_layers'], containsAll(['flutter', 'dart']));
+
+      final history = jobRuntime.execute(
+        const MobileToolCall(
+          id: 'job_history_1',
+          name: 'job_history',
+          arguments: {'job_id': 'morning-report'},
+        ),
+      );
+      final historyPayload = jsonDecode(history.output) as Map<String, dynamic>;
+      final historyData = historyPayload['data'] as Map<String, dynamic>;
+      expect(historyData['count'], 2);
+
+      final artifacts = jobRuntime.execute(
+        const MobileToolCall(
+          id: 'job_artifacts_1',
+          name: 'job_artifacts',
+          arguments: {'job_id': 'morning-report'},
+        ),
+      );
+      final artifactsPayload =
+          jsonDecode(artifacts.output) as Map<String, dynamic>;
+      final artifactsData = artifactsPayload['data'] as Map<String, dynamic>;
+      expect(artifactsData['count'], 2);
+
+      final cancel = await jobRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'job_cancel_1',
+          name: 'job_cancel',
+          arguments: {'job_id': 'morning-report'},
+        ),
+      );
+      expect(cancel.ok, isTrue);
+      final cancelPayload = jsonDecode(cancel.output) as Map<String, dynamic>;
+      final cancelData = cancelPayload['data'] as Map<String, dynamic>;
+      expect(cancelData['status'], 'canceled');
+      expect(cancelData['requires_mobile_approval'], isTrue);
+
+      final resume = await jobRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'job_resume_1',
+          name: 'job_resume',
+          arguments: {'job_id': 'morning-report'},
+        ),
+      );
+      expect(resume.ok, isTrue);
+      final resumePayload = jsonDecode(resume.output) as Map<String, dynamic>;
+      final resumeData = resumePayload['data'] as Map<String, dynamic>;
+      expect(resumeData['status'], 'queued');
+      expect(resumeData['requires_mobile_approval'], isTrue);
+
+      final listed = jobRuntime.execute(
+        const MobileToolCall(
+          id: 'job_status_list_1',
+          name: 'job_status',
+          arguments: {},
+        ),
+      );
+      final listedPayload = jsonDecode(listed.output) as Map<String, dynamic>;
+      final listedData = listedPayload['data'] as Map<String, dynamic>;
+      expect(listedData['count'], greaterThanOrEqualTo(1));
+    });
+
     test('runs connector dry-run plans on phone', () {
       final github = runtime.execute(
         const MobileToolCall(
@@ -2981,6 +3087,33 @@ void main() {
           'implemented_mobile_batch_router');
       expect(batchMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(batchData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'job_create': false,
+        'job_status': false,
+        'job_history': false,
+        'job_artifacts': false,
+        'job_cancel': true,
+        'job_resume': true,
+      }.entries) {
+        final jobSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final jobPayload = jsonDecode(jobSchema.output) as Map<String, dynamic>;
+        final jobData = jobPayload['data'] as Map<String, dynamic>;
+        final jobMobile = jobData['mobile'] as Map<String, dynamic>;
+        expect(jobData['mobile_compatible'], isTrue);
+        expect(jobData['execution_route'], 'phone');
+        expect(
+            jobMobile['implementation_status'], 'implemented_phone_job_record');
+        expect(jobMobile['requires_mobile_approval'], entry.value);
+        expect(jobMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(jobData['tags'], contains(mobileFlutterTag));
+      }
 
       for (final entry in const {
         'project_scaffold': 'implemented_phone_artifact_scaffold',
