@@ -86,7 +86,13 @@ def _run_stage(
     arguments: dict[str, Any] | None,
     context: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    result = ui_build_recursive(arguments, context)
+    data = dict(arguments or {}) if isinstance(arguments, dict) else {}
+    options = dict(data.get("options") if isinstance(data.get("options"), dict) else {})
+    stop_after = _STAGE_TO_STOP_AFTER.get(stage)
+    if stop_after:
+        options["stopAfter"] = stop_after
+        data["options"] = options
+    result = ui_build_recursive(data, context)
     if isinstance(result, dict):
         widget = result.get("widget")
         if isinstance(widget, dict):
@@ -95,6 +101,16 @@ def _run_stage(
         if isinstance(data, dict):
             data["stage"] = stage
     return result
+
+
+_STAGE_TO_STOP_AFTER = {
+    "tool_ui_generate_foundation": "foundation",
+    "tool_ui_generate_candidates": "candidates",
+    "tool_ui_render_matrix": "renderMatrix",
+    "tool_ui_inspect_compression": "inspectCompression",
+    "tool_ui_select_candidates": "selectCandidates",
+    "tool_ui_compose_page": "composePage",
+}
 
 
 def _authorized(context: dict[str, Any] | None) -> bool:

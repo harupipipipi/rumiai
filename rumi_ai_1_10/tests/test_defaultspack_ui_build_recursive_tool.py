@@ -8,6 +8,7 @@ from tests.ui_compiler_test_utils import build_args, fake_context, write_pass_pa
 from domain.tool.executor import ToolExecutor
 from domain.tool.registry import ToolRegistry
 from domain.tool.ui_compiler_tools import ui_build_recursive
+from domain.tool.ui_compiler_runtime import run_recursive_build
 from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
 from domain.ui_compiler import UIAgentTask
 from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
@@ -65,6 +66,21 @@ def test_raw_yolo_context_cannot_call_runtime_directly(tmp_path: Path) -> None:
     assert result["error"]["code"] == "APPROVAL_REQUIRED"
 
 
+def test_exported_runtime_helper_does_not_bypass_approval(tmp_path: Path) -> None:
+    write_pass_package(tmp_path / "project")
+    result = run_recursive_build(
+        build_args("raw-helper"),
+        {
+            "profile_policy": {"yolo_mode": True},
+            "conversation_workspace_dir": str(tmp_path),
+            "_ui_compiler_backend": "fake",
+        },
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "APPROVAL_REQUIRED"
+
+
 def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> None:
     write_pass_package(tmp_path / "project")
     result = ui_build_recursive(build_args("report-run"), fake_context(tmp_path))
@@ -111,3 +127,34 @@ def test_subagent_tool_backend_runs_real_delegate_path(tmp_path: Path, monkeypat
     assert result.ok
     assert result.files == ["result.txt"]
     assert result.metadata["subagent"]["route_kind"] == "agent.delegate"
+
+
+def test_subagent_compat_forwards_output_contract_to_delegate_params(tmp_path: Path, monkeypatch) -> None:
+    from domain.agent.subagent_orchestrator import run_subagent_compat
+    from domain.input import dispatcher
+
+    captured = {}
+
+    def fake_dispatch(envelope, context):
+        captured["envelope"] = envelope.as_dict()
+        captured["context"] = dict(context)
+        return {"status": "ok", "delegate": {"status": "completed"}}
+
+    monkeypatch.setattr(dispatcher, "dispatch_input", fake_dispatch)
+    output_dir = tmp_path / "candidate"
+    result = run_subagent_compat(
+        "delegate",
+        {
+            "task": "create candidate bundle",
+            "output_dir": str(output_dir),
+            "allowed_paths": [str(output_dir)],
+            "metadata": {"nodeId": "reply-composer"},
+        },
+        context={},
+    )
+
+    params = captured["envelope"]["params"]["params"]
+    assert result["route_kind"] == "agent.delegate"
+    assert params["output_dir"] == str(output_dir)
+    assert params["allowed_paths"] == [str(output_dir)]
+    assert params["workspace_write_contract"]["mode"] == "create-from-empty-directory"

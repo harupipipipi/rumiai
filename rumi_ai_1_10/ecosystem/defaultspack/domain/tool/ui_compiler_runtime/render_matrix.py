@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import struct
 import zlib
+from html import escape
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ class RenderMatrixRunner:
         viewports: list[int],
         scenarios: list[str],
         text_scales: list[float],
+        browser_render: bool = False,
     ) -> RenderMatrix:
         root = Path(bundle.root)
         manifest = read_candidate_manifest(root)
@@ -35,6 +37,7 @@ class RenderMatrixRunner:
             viewports=viewports,
             scenarios=scenarios,
             text_scales=text_scales,
+            browser_render=browser_render,
         )
         matrix = RenderMatrix(subject_id=bundle.node_id, candidate_id=bundle.candidate_id, snapshots=snapshots)
         self.store.save_render_matrix(
@@ -55,6 +58,7 @@ class RenderMatrixRunner:
         viewports: list[int],
         scenarios: list[str],
         text_scales: list[float],
+        browser_render: bool = False,
     ) -> RenderMatrix:
         snapshots = self._render_subject(
             root=run_root / "renders" / "page",
@@ -64,6 +68,7 @@ class RenderMatrixRunner:
             viewports=viewports,
             scenarios=scenarios,
             text_scales=text_scales,
+            browser_render=browser_render,
         )
         matrix = RenderMatrix(subject_id="page", candidate_id="composition", snapshots=snapshots)
         self.store.save_render_matrix(
@@ -85,6 +90,7 @@ class RenderMatrixRunner:
         viewports: list[int],
         scenarios: list[str],
         text_scales: list[float],
+        browser_render: bool,
     ) -> list[RenderSnapshot]:
         snapshots: list[RenderSnapshot] = []
         visible_actions = int(manifest.get("visibleActionCount") or min(2, int(manifest.get("visibleActionBudget") or 2)))
@@ -103,10 +109,39 @@ class RenderMatrixRunner:
                     dom_path = root / f"dom-{key}.json"
                     console_path = root / f"console-{key}.json"
                     html_path = root / f"{key}.html"
-                    _write_png(image_path, width=min(max(viewport, 120), 720), height=180, seed=subject_id + candidate_id)
-                    write_json(dom_path, {"subjectId": subject_id, "candidateId": candidate_id, "metrics": metrics})
-                    write_json(console_path, {"errors": []})
-                    write_text(html_path, _html(subject_id=subject_id, candidate_id=candidate_id, manifest=manifest))
+                    write_text(
+                        html_path,
+                        _html(
+                            subject_id=subject_id,
+                            candidate_id=candidate_id,
+                            manifest=manifest,
+                            metrics=metrics,
+                        ),
+                    )
+                    if browser_render and _capture_with_browser(
+                        html_path=html_path,
+                        image_path=image_path,
+                        dom_path=dom_path,
+                        console_path=console_path,
+                        viewport=viewport,
+                        text_scale=text_scale,
+                        subject_id=subject_id,
+                        candidate_id=candidate_id,
+                        metrics=metrics,
+                    ):
+                        pass
+                    else:
+                        _write_png(image_path, width=min(max(viewport, 120), 720), height=180, seed=subject_id + candidate_id)
+                        write_json(
+                            dom_path,
+                            {
+                                "subjectId": subject_id,
+                                "candidateId": candidate_id,
+                                "renderer": "synthetic",
+                                "metrics": metrics,
+                            },
+                        )
+                        write_json(console_path, {"renderer": "synthetic", "errors": []})
                     snapshots.append(
                         RenderSnapshot(
                             subject_id=subject_id,
@@ -139,7 +174,16 @@ def _metrics(
     required_padding = 16 if viewport < 600 else 20
     action_width = visible_actions * 94 + max(0, visible_actions - 1) * 8
     content_width = max(1, viewport - required_padding * 2)
-    line_height = 20 * float(text_scale)
+    forced_overflow = bool(manifest.get("forceHorizontalOverflow"))
+    font_size = float(manifest.get("fontSize") or 14) * float(text_scale)
+    line_height = float(manifest.get("lineHeight") or 20) * float(text_scale)
+    actual_padding = float(manifest.get("actualPadding") or required_padding)
+    actual_gap = float(manifest.get("actualGap") or 12)
+    toolbar_rows = int(manifest.get("toolbarRows") or 1)
+    primary_action_reachable = manifest.get("primaryActionReachable", True) is not False
+    scroll_width = max(content_width, action_width)
+    if forced_overflow:
+        scroll_width = content_width + 48
     return {
         "viewport": viewport,
         "scenario": scenario,
@@ -147,31 +191,158 @@ def _metrics(
         "visibleActions": visible_actions,
         "allowedActions": int(manifest.get("visibleActionBudget") or 3),
         "contentWidth": content_width,
-        "scrollWidth": max(content_width, action_width),
-        "horizontalOverflow": action_width > content_width,
+        "scrollWidth": scroll_width,
+        "horizontalOverflow": scroll_width > content_width,
         "minPadding": required_padding,
-        "actualPadding": required_padding,
+        "actualPadding": actual_padding,
         "minGap": 12,
-        "actualGap": 12,
+        "actualGap": actual_gap,
         "lineHeight": line_height,
-        "fontSize": 14 * float(text_scale),
-        "surfaceDepth": 1,
+        "fontSize": font_size,
+        "surfaceDepth": int(manifest.get("surfaceDepth") or 1),
+        "shadowCount": int(manifest.get("shadowCount") or 0),
+        "dividerCount": int(manifest.get("dividerCount") or 0),
+        "hierarchyContrast": float(manifest.get("hierarchyContrast") or 0.65),
+        "toolbarRows": toolbar_rows,
+        "primaryActionReachable": primary_action_reachable,
         "consoleErrors": 0,
-        "primaryClipped": scenario == "long" and bool(manifest.get("forcePrimaryClipped")),
-        "touchTargetMin": 36,
+        "primaryClipped": bool(manifest.get("forcePrimaryClipped")) or (scenario == "long" and bool(manifest.get("longTextClipped"))),
+        "touchTargetMin": int(manifest.get("touchTargetMin") or 36),
         "requiredStates": list(manifest.get("requiredStates") if isinstance(manifest.get("requiredStates"), list) else []),
     }
 
 
-def _html(*, subject_id: str, candidate_id: str, manifest: dict[str, Any]) -> str:
-    title = subject_id.replace("-", " ").title()
-    return (
-        "<!doctype html><meta charset=\"utf-8\"><title>Rumi Render</title>"
-        "<body style=\"font-family:system-ui;margin:0;padding:24px\">"
-        f"<main data-subject=\"{subject_id}\" data-candidate=\"{candidate_id}\">"
-        f"<h1>{title}</h1><p>{manifest.get('implementationMode', 'component')}</p>"
-        "</main></body>"
+def _html(*, subject_id: str, candidate_id: str, manifest: dict[str, Any], metrics: dict[str, Any]) -> str:
+    title = escape(subject_id.replace("-", " ").title())
+    mode = escape(str(manifest.get("implementationMode", "component")))
+    action_count = int(metrics.get("visibleActions") or 1)
+    surface_depth = int(metrics.get("surfaceDepth") or 1)
+    gap = int(float(metrics.get("actualGap") or 12))
+    padding = int(float(metrics.get("actualPadding") or 16))
+    font_size = float(metrics.get("fontSize") or 14)
+    line_height = float(metrics.get("lineHeight") or 20)
+    hierarchy_contrast = float(metrics.get("hierarchyContrast") or 0.65)
+    force_overflow = bool(manifest.get("forceHorizontalOverflow"))
+    toolbar_rows = int(metrics.get("toolbarRows") or 1)
+    actions = "".join(
+        f"<button class=\"rui-action\">Action {index + 1}</button>"
+        for index in range(action_count)
     )
+    nested_surfaces = "".join(
+        "<div class=\"rui-nested\"><span></span><span></span></div>"
+        for _ in range(max(0, surface_depth - 1))
+    )
+    return (
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Rumi Render</title>"
+        "<style>"
+        ":root{--rui-canvas:rgb(248 249 251);--rui-surface:rgb(255 255 255);"
+        "--rui-text-primary:rgb(18 24 32);--rui-text-secondary:rgb(79 90 106);"
+        "--rui-border-subtle:rgb(218 224 232);--rui-action-primary:rgb(28 105 212);}"
+        f"body{{margin:0;background:var(--rui-canvas);font-family:system-ui,-apple-system,sans-serif;font-size:{font_size}px;line-height:{line_height / max(font_size, 1):.3f};}}"
+        f".rui-root{{box-sizing:border-box;margin:18px;padding:{padding}px;display:grid;gap:{gap}px;background:var(--rui-surface);color:var(--rui-text-primary);border:1px solid var(--rui-border-subtle);border-radius:6px;min-width:{'calc(100vw + 48px)' if force_overflow else '0'};}}"
+        ".rui-title{font-size:18px;font-weight:650;margin:0;color:var(--rui-text-primary)}"
+        f".rui-copy{{margin:0;color:rgba(79,90,106,{max(0.2, min(hierarchy_contrast, 1))});max-width:70ch;}}"
+        f".rui-actions{{display:flex;flex-wrap:wrap;gap:8px;align-content:flex-start;max-height:{toolbar_rows * 44}px;overflow:hidden;}}"
+        ".rui-action{min-height:36px;padding:0 12px;border:0;border-radius:6px;background:var(--rui-action-primary);color:var(--rui-surface);font:inherit;}"
+        ".rui-nested{border:1px solid var(--rui-border-subtle);padding:10px;display:grid;gap:8px;background:rgb(252 253 254)}"
+        ".rui-nested span{display:block;height:8px;background:var(--rui-border-subtle);border-radius:999px}"
+        "</style></head>"
+        "<body>"
+        f"<main class=\"rui-root\" data-subject=\"{escape(subject_id)}\" data-candidate=\"{escape(candidate_id)}\">"
+        f"<h1 class=\"rui-title\">{title}</h1>"
+        f"<p class=\"rui-copy\">{mode}: 日本語の長文、数値 12,345、状態差分、主要アクションが読み取れるかを検査します。</p>"
+        f"<div class=\"rui-actions\">{actions}</div>"
+        f"{nested_surfaces}"
+        "</main></body></html>"
+    )
+
+
+def _capture_with_browser(
+    *,
+    html_path: Path,
+    image_path: Path,
+    dom_path: Path,
+    console_path: Path,
+    viewport: int,
+    text_scale: float,
+    subject_id: str,
+    candidate_id: str,
+    metrics: dict[str, Any],
+) -> bool:
+    executable_path = _browser_executable_path()
+    if not executable_path:
+        return False
+    try:
+        from playwright.sync_api import sync_playwright
+    except Exception:
+        return False
+    image_path.parent.mkdir(parents=True, exist_ok=True)
+    console_errors: list[str] = []
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch(headless=True, executable_path=executable_path)
+            page = browser.new_page(viewport={"width": int(viewport), "height": 260}, device_scale_factor=1)
+            page.on("console", lambda msg: console_errors.append(msg.text) if msg.type == "error" else None)
+            page.goto(html_path.resolve().as_uri(), wait_until="load")
+            page.evaluate("(scale) => { document.documentElement.style.fontSize = `${16 * scale}px`; }", float(text_scale))
+            dom = page.evaluate(
+                """() => {
+                    const root = document.querySelector('[data-subject]');
+                    const actions = Array.from(document.querySelectorAll('button'));
+                    const rect = root ? root.getBoundingClientRect() : null;
+                    return {
+                        document: {
+                            scrollWidth: document.documentElement.scrollWidth,
+                            clientWidth: document.documentElement.clientWidth,
+                            scrollHeight: document.documentElement.scrollHeight,
+                            clientHeight: document.documentElement.clientHeight
+                        },
+                        root: rect ? {
+                            x: rect.x, y: rect.y, width: rect.width, height: rect.height
+                        } : null,
+                        actions: actions.map((item) => {
+                            const box = item.getBoundingClientRect();
+                            return { text: item.textContent, x: box.x, y: box.y, width: box.width, height: box.height };
+                        })
+                    };
+                }"""
+            )
+            page.screenshot(path=str(image_path), full_page=True)
+            browser.close()
+    except Exception as exc:
+        write_json(console_path, {"renderer": "playwright", "errors": [str(exc)]})
+        return False
+    browser_metrics = dict(metrics)
+    document = dom.get("document") if isinstance(dom, dict) and isinstance(dom.get("document"), dict) else {}
+    browser_metrics["scrollWidth"] = int(document.get("scrollWidth") or browser_metrics.get("scrollWidth") or 0)
+    browser_metrics["contentWidth"] = int(document.get("clientWidth") or browser_metrics.get("contentWidth") or 0)
+    browser_metrics["horizontalOverflow"] = browser_metrics["scrollWidth"] > browser_metrics["contentWidth"]
+    browser_metrics["consoleErrors"] = len(console_errors)
+    write_json(
+        dom_path,
+        {
+            "subjectId": subject_id,
+            "candidateId": candidate_id,
+            "renderer": "playwright",
+            "metrics": browser_metrics,
+            "dom": dom,
+        },
+    )
+    write_json(console_path, {"renderer": "playwright", "errors": console_errors})
+    metrics.update(browser_metrics)
+    return True
+
+
+def _browser_executable_path() -> str:
+    candidates = [
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    ]
+    for candidate in candidates:
+        if Path(candidate).is_file():
+            return candidate
+    return ""
 
 
 def _write_png(path: Path, *, width: int, height: int, seed: str) -> None:

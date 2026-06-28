@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from domain.tool_policy.internal_context import (
+    internal_tool_decision_allows,
+    tool_server_approval_context_is_internal,
+)
 from domain.ui_compiler import (
     UICompilerArtifactStore,
     UICompilerConfig,
@@ -116,6 +120,15 @@ class RecursiveUIBuildOrchestrator:
                 context=context,
             )
             accepted_foundation = foundation_generator.select(run_id=plan.run_id, candidates=foundations)
+            if options["stopAfter"] == "foundation":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="foundation",
+                    summary=_summary(plan, foundations, {}, {}, compression_failures=0, build_status="stage-foundation"),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                )
             candidate_generator = CandidateGenerator(backend=self.agent_backend, store=store)
             candidate_map = candidate_generator.generate_for_contracts(
                 run_id=plan.run_id,
@@ -125,13 +138,24 @@ class RecursiveUIBuildOrchestrator:
                 context=context,
                 fake_failures=_fake_failures(data),
             )
+            if options["stopAfter"] == "candidates":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="candidates",
+                    summary=_summary(plan, foundations, candidate_map, {}, compression_failures=0, build_status="stage-candidates"),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                )
             render_runner = RenderMatrixRunner(store=store)
             inspector = CompressionInspector()
             selector = CandidateSelector(store=store)
             accepted: dict[str, Any] = {}
+            inspection_objects_by_node: dict[str, dict[str, Any]] = {}
             inspections_by_node: dict[str, dict[str, Any]] = {}
+            render_matrices_by_node: dict[str, dict[str, Any]] = {}
             for contract in plan.contracts():
-                inspections = {}
+                render_matrices: dict[str, Any] = {}
                 for bundle in candidate_map.get(contract.id, []):
                     matrix = render_runner.render_candidate(
                         run_id=plan.run_id,
@@ -139,7 +163,32 @@ class RecursiveUIBuildOrchestrator:
                         viewports=options["viewports"],
                         scenarios=options["scenarios"],
                         text_scales=options["textScales"],
+                        browser_render=options["browserRender"],
                     )
+                    render_matrices[bundle.candidate_id] = matrix
+                render_matrices_by_node[contract.id] = render_matrices
+            if options["stopAfter"] == "renderMatrix":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="renderMatrix",
+                    summary=_summary(plan, foundations, candidate_map, {}, compression_failures=0, build_status="stage-render-matrix"),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                    extra={
+                        "renderMatrices": {
+                            node_id: {
+                                candidate_id: matrix.to_dict()
+                                for candidate_id, matrix in matrices.items()
+                            }
+                            for node_id, matrices in render_matrices_by_node.items()
+                        }
+                    },
+                )
+            for contract in plan.contracts():
+                inspections = {}
+                for bundle in candidate_map.get(contract.id, []):
+                    matrix = render_matrices_by_node[contract.id][bundle.candidate_id]
                     report = inspector.inspect_candidate(
                         bundle=bundle,
                         contract=contract.to_dict(),
@@ -152,17 +201,36 @@ class RecursiveUIBuildOrchestrator:
                         report=report.to_dict(),
                     )
                     inspections[bundle.candidate_id] = report
-                decision = selector.select(
-                    run_id=plan.run_id,
-                    node_id=contract.id,
-                    candidates=candidate_map.get(contract.id, []),
-                    inspections=inspections,
-                    run_root=run_root,
-                )
+                inspection_objects_by_node[contract.id] = inspections
                 inspections_by_node[contract.id] = {
                     candidate_id: report.to_dict()
                     for candidate_id, report in inspections.items()
                 }
+            if options["stopAfter"] == "inspectCompression":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="inspectCompression",
+                    summary=_summary(
+                        plan,
+                        foundations,
+                        candidate_map,
+                        {},
+                        compression_failures=_compression_failure_count(inspections_by_node),
+                        build_status="stage-inspect-compression",
+                    ),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                    inspections=inspections_by_node,
+                )
+            for contract in plan.contracts():
+                decision = selector.select(
+                    run_id=plan.run_id,
+                    node_id=contract.id,
+                    candidates=candidate_map.get(contract.id, []),
+                    inspections=inspection_objects_by_node.get(contract.id, {}),
+                    run_root=run_root,
+                )
                 if not decision.passed:
                     final = _final_report(
                         plan=plan,
@@ -179,6 +247,24 @@ class RecursiveUIBuildOrchestrator:
                         data={"runId": plan.run_id, "failedNodeId": contract.id, "report": report_path},
                     )
                 accepted[contract.id] = decision
+            if options["stopAfter"] == "selectCandidates":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="selectCandidates",
+                    summary=_summary(
+                        plan,
+                        foundations,
+                        candidate_map,
+                        accepted,
+                        compression_failures=_compression_failure_count(inspections_by_node),
+                        build_status="stage-select-candidates",
+                    ),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                    accepted={node_id: decision.to_dict() for node_id, decision in accepted.items()},
+                    inspections=inspections_by_node,
+                )
             composition = PageComposer(store=store).compose(
                 run_id=plan.run_id,
                 run_root=run_root,
@@ -186,6 +272,25 @@ class RecursiveUIBuildOrchestrator:
                 accepted_decisions=accepted,
                 target=data.get("target") if isinstance(data.get("target"), dict) else {},
             )
+            if options["stopAfter"] == "composePage":
+                return _stage_ok(
+                    store=store,
+                    plan=plan,
+                    artifacts=artifacts,
+                    stage="composePage",
+                    summary=_summary(
+                        plan,
+                        foundations,
+                        candidate_map,
+                        accepted,
+                        compression_failures=_compression_failure_count(inspections_by_node),
+                        build_status="stage-compose-page",
+                    ),
+                    accepted_foundation=accepted_foundation.to_dict(),
+                    accepted={node_id: decision.to_dict() for node_id, decision in accepted.items()},
+                    composition=composition.to_dict(),
+                    inspections=inspections_by_node,
+                )
             page_manifest = composition.to_dict()
             page_matrix = render_runner.render_page(
                 run_id=plan.run_id,
@@ -198,6 +303,7 @@ class RecursiveUIBuildOrchestrator:
                 viewports=options["viewports"],
                 scenarios=options["scenarios"],
                 text_scales=options["textScales"],
+                browser_render=options["browserRender"],
             )
             page_compression = inspector.inspect_page(render_matrix=page_matrix, accepted_count=len(accepted))
             verification = self.verifier.verify(
@@ -261,7 +367,7 @@ def run_recursive_build(arguments: dict[str, Any] | None, context: dict[str, Any
     return RecursiveUIBuildOrchestrator(agent_backend=SubagentToolBackend()).run(
         arguments,
         workspace_root=(context or {}).get("conversation_workspace_dir") if isinstance(context, dict) else None,
-        authorized=True,
+        authorized=_authorized(context),
         context=context,
     )
 
@@ -287,6 +393,10 @@ def backend_from_context(context: dict[str, Any] | None) -> UIAgentBackend:
     return SubagentToolBackend()
 
 
+def _authorized(context: dict[str, Any] | None) -> bool:
+    return tool_server_approval_context_is_internal(context) or internal_tool_decision_allows(context)
+
+
 def _options(value: Any) -> dict[str, Any]:
     data = value if isinstance(value, dict) else {}
     return {
@@ -295,6 +405,8 @@ def _options(value: Any) -> dict[str, Any]:
         "scenarios": _str_list(data.get("scenarios"), DEFAULT_SCENARIOS, 8),
         "textScales": _float_list(data.get("textScales"), DEFAULT_TEXT_SCALES, 6),
         "runBuild": bool(data.get("runBuild", True)),
+        "stopAfter": _stage_name(data.get("stopAfter") or data.get("stop_after")),
+        "browserRender": bool(data.get("browserRender") or data.get("browser_render")),
     }
 
 
@@ -412,6 +524,83 @@ def _str_list(value: Any, default: list[str], max_items: int) -> list[str]:
         return list(default)
     result = [str(item).strip() for item in value[:max_items] if str(item).strip()]
     return result or list(default)
+
+
+def _stage_name(value: Any) -> str:
+    stage = str(value or "").strip()
+    return stage if stage in _STOP_AFTER_STAGES else ""
+
+
+_STOP_AFTER_STAGES = {
+    "foundation",
+    "candidates",
+    "renderMatrix",
+    "inspectCompression",
+    "selectCandidates",
+    "composePage",
+}
+
+
+def _compression_failure_count(inspections_by_node: dict[str, dict[str, Any]]) -> int:
+    return sum(
+        1
+        for reports in inspections_by_node.values()
+        for report in reports.values()
+        if isinstance(report, dict) and report.get("status") != "pass"
+    )
+
+
+def _stage_ok(
+    *,
+    store: UICompilerArtifactStore,
+    plan: UIPlan,
+    artifacts: dict[str, Any],
+    stage: str,
+    summary: dict[str, Any],
+    accepted_foundation: dict[str, Any] | None = None,
+    accepted: dict[str, Any] | None = None,
+    composition: dict[str, Any] | None = None,
+    inspections: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    final = _final_report(
+        plan=plan,
+        artifacts=artifacts,
+        status="ok",
+        summary=summary,
+        accepted_foundation=accepted_foundation,
+        accepted=accepted,
+        composition=composition,
+        inspections=inspections,
+    )
+    final["stage"] = stage
+    if extra:
+        final.update(extra)
+    report_path = store.save_final_report(run_id=plan.run_id, report=final)
+    data: dict[str, Any] = {
+        "runId": plan.run_id,
+        "artifacts": artifacts,
+        "summary": summary,
+        "report": report_path,
+        "stage": stage,
+    }
+    if accepted_foundation:
+        data["acceptedFoundation"] = accepted_foundation
+    if accepted:
+        data["accepted"] = accepted
+    if composition:
+        data["composition"] = composition
+    return {
+        "status": "ok",
+        "data": data,
+        "widget": {
+            "type": "ui_build_recursive_stage",
+            "stage": stage,
+            "run_id": plan.run_id,
+            "report": report_path,
+            "summary": summary,
+        },
+    }
 
 
 def _error(message: str, code: str, *, data: dict[str, Any] | None = None) -> dict[str, Any]:

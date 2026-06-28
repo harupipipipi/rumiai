@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from domain.ui_compiler import CompositionManifest, UIPlan, UICompilerArtifactStore
+from domain.ui_compiler import CompositionManifest, PlannedNode, UIPlan, UICompilerArtifactStore
 
 from .project_writer import write_json, write_text
 
@@ -43,8 +43,9 @@ class PageComposer:
                 }
             )
         slot_mappings = _slot_mappings(plan)
+        render_tree = _render_tree(plan.root)
         write_text(source_root / "generated-index.ts", _generated_index(imports))
-        write_text(source_root / "App.tsx", _app_source(imports, slot_mappings))
+        write_text(source_root / "App.tsx", _app_source(slot_mappings, render_tree))
         write_json(
             source_root / "adapters" / "slot-mappings.json",
             {"slotMappings": slot_mappings, "target": target},
@@ -64,6 +65,7 @@ class PageComposer:
                 "leafSourceEdited": False,
                 "imports": imports,
                 "slotMappings": slot_mappings,
+                "renderTree": _render_tree_data(plan.root),
             },
         )
         return manifest
@@ -89,18 +91,27 @@ def _generated_index(imports: list[dict[str, Any]]) -> str:
     return "\n".join([*import_lines, "", *entries])
 
 
-def _app_source(imports: list[dict[str, Any]], slot_mappings: list[dict[str, Any]]) -> str:
+def _app_source(slot_mappings: list[dict[str, Any]], render_tree: str) -> str:
     return "\n".join(
         [
+            "import type { ReactNode } from 'react';",
             "import { rumiComponents } from './generated-index';",
             "",
             "export default function App() {",
             f"  const slotMappings = {json.dumps(slot_mappings, ensure_ascii=False)};",
+            "  const components = rumiComponents as Record<string, any>;",
+            "  const renderNode = (nodeId: string, slotId: string | null, children: ReactNode[] = []) => {",
+            "    const Component = components[nodeId];",
+            "    if (!Component) return null;",
+            "    return (",
+            "      <Component key={nodeId} slotMappings={slotMappings} data-rumi-node={nodeId} data-rumi-slot={slotId || undefined}>",
+            "        {children}",
+            "      </Component>",
+            "    );",
+            "  };",
             "  return (",
             "    <main data-rumi-composition=\"recursive-ui\">",
-            "      {Object.entries(rumiComponents).map(([nodeId, Component]) => (",
-            "        <Component key={nodeId} slotMappings={slotMappings} />",
-            "      ))}",
+            *["      " + line for line in _jsx_expression(render_tree)],
             "    </main>",
             "  );",
             "}",
@@ -110,3 +121,66 @@ def _app_source(imports: list[dict[str, Any]], slot_mappings: list[dict[str, Any
 
 def _symbol(node_id: str) -> str:
     return "Component" + "".join(part.capitalize() for part in node_id.split("-"))
+
+
+def _render_tree(node: PlannedNode, *, depth: int = 0, slot_id: str | None = None) -> str:
+    child_sources = []
+    for child in _ordered_children(node):
+        child_slot_id = _slot_id_for_child(node, child)
+        child_sources.append(_render_tree(child, depth=depth + 1, slot_id=child_slot_id))
+    children = "\n".join(source + "," for source in child_sources if source.strip())
+    indent = "  " * depth
+    contract = node.contract
+    if contract is None:
+        return children
+    slot_value = json.dumps(slot_id) if slot_id else "null"
+    if children:
+        return "\n".join(
+            [
+                f"{indent}renderNode({json.dumps(contract.id)}, {slot_value}, [",
+                children,
+                f"{indent}])",
+            ]
+        )
+    return f"{indent}renderNode({json.dumps(contract.id)}, {slot_value})"
+
+
+def _ordered_children(node: PlannedNode) -> list[PlannedNode]:
+    if not node.children:
+        return []
+    slot_order = {
+        slot.accepts_node_id: index
+        for index, slot in enumerate(node.node.slots)
+        if slot.accepts_node_id
+    }
+    return sorted(
+        node.children,
+        key=lambda child: (
+            slot_order.get(child.node.id, len(slot_order)),
+            child.node.id,
+        ),
+    )
+
+
+def _slot_id_for_child(parent: PlannedNode, child: PlannedNode) -> str | None:
+    for slot in parent.node.slots:
+        if slot.accepts_node_id == child.node.id:
+            return slot.id
+    return None
+
+
+def _render_tree_data(node: PlannedNode) -> dict[str, Any]:
+    return {
+        "nodeId": node.node.id,
+        "contractId": node.contract.id if node.contract else None,
+        "children": [_render_tree_data(child) for child in _ordered_children(node)],
+    }
+
+
+def _jsx_expression(expression: str) -> list[str]:
+    lines = expression.splitlines() or ["null"]
+    if len(lines) == 1:
+        return ["{" + lines[0] + "}"]
+    lines[0] = "{" + lines[0]
+    lines[-1] = lines[-1] + "}"
+    return lines

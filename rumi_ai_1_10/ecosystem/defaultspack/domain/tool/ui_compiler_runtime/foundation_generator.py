@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -50,13 +51,23 @@ class FoundationGenerator:
                 )
                 continue
             candidate = self._read_candidate(candidate_id, output_dir)
+            validation_report = _validate_foundation_output(output_dir, candidate.report)
             self.store.save_foundation_candidate(
                 run_id=run_id,
                 candidate_id=candidate_id,
                 foundation=candidate.spec.to_dict(),
-                report=candidate.report,
+                report=validation_report,
                 tokens_css=_read_text(output_dir / "tokens.css"),
                 primitive_manifest=_read_json(output_dir / "primitive-manifest.json"),
+            )
+            if validation_report["status"] != "pass":
+                continue
+            candidate = FoundationCandidate(
+                candidate_id=candidate.candidate_id,
+                root=candidate.root,
+                spec=candidate.spec,
+                score=float(validation_report.get("score") or candidate.score),
+                report=validation_report,
             )
             candidates.append(candidate)
         return candidates
@@ -120,3 +131,73 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError:
         return ""
+
+
+HEX_COLOR_RE = re.compile(r"#[0-9a-fA-F]{3,8}\b")
+
+
+def _validate_foundation_output(root: Path, base_report: dict[str, Any]) -> dict[str, Any]:
+    issues: list[dict[str, Any]] = []
+    required = [
+        "foundation.json",
+        "tokens.css",
+        "primitive-manifest.json",
+        "specimen/type-specimen.html",
+        "specimen/color-specimen.html",
+        "specimen/density-specimen.html",
+        "specimen/primitive-gallery.html",
+    ]
+    missing = [rel for rel in required if not (root / rel).is_file()]
+    if missing:
+        issues.append({"code": "MISSING_FOUNDATION_FILES", "severity": "blocker", "evidence": {"missing": missing}})
+    primitive_manifest = _read_json(root / "primitive-manifest.json")
+    primitives = primitive_manifest.get("primitives")
+    if not isinstance(primitives, list) or not primitives:
+        issues.append({"code": "MISSING_PRIMITIVE_MANIFEST", "severity": "blocker", "evidence": {}})
+    else:
+        missing_primitives = [
+            str(name)
+            for name in primitives
+            if not (root / "primitives" / f"{name}.tsx").is_file()
+        ]
+        if missing_primitives:
+            issues.append(
+                {
+                    "code": "MISSING_PRIMITIVE_SOURCE",
+                    "severity": "blocker",
+                    "evidence": {"missing": missing_primitives},
+                }
+            )
+    non_token_colors = _non_token_color_files(root)
+    if non_token_colors:
+        issues.append(
+            {
+                "code": "FOUNDATION_NON_TOKEN_COLOR",
+                "severity": "blocker",
+                "evidence": {"files": non_token_colors},
+            }
+        )
+    report = dict(base_report or {})
+    report["issues"] = [*list(report.get("issues") if isinstance(report.get("issues"), list) else []), *issues]
+    report["status"] = "fail" if any(issue["severity"] == "blocker" for issue in report["issues"]) else "pass"
+    if report["status"] == "fail":
+        report["score"] = 1.0
+    else:
+        report["score"] = float(report.get("score") or 0.5)
+    return report
+
+
+def _non_token_color_files(root: Path) -> list[str]:
+    offenders: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file() or path.name == "tokens.css":
+            continue
+        if path.suffix not in {".css", ".tsx", ".ts", ".jsx", ".js", ".html", ".json"}:
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if HEX_COLOR_RE.search(text):
+            offenders.append(str(path.relative_to(root)))
+    return sorted(offenders)

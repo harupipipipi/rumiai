@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.ui_compiler_test_utils import build_args, fake_context, fixture_tree, write_pass_package
 
 from domain.tool.ui_compiler_tools import ui_build_recursive
+from domain.tool.ui_compiler_tools import ui_generate_foundation, ui_render_matrix
+from domain.tool.ui_compiler_runtime.render_matrix import _browser_executable_path
 from domain.tool_policy.internal_context import mark_tool_server_approval_context
 from domain.ui_compiler import RecursiveUIPlanner
 
@@ -37,6 +41,48 @@ def test_build_recursive_creates_run_bundle_tasks_and_candidates(tmp_path: Path)
     assert (run_root / "reports" / "final.json").is_file()
     assert len(task_files) == 8
     assert all("outputDir" in json.loads(path.read_text(encoding="utf-8")) for path in task_files)
+
+
+def test_stage_tools_stop_after_the_requested_runtime_stage(tmp_path: Path) -> None:
+    write_pass_package(tmp_path / "project")
+    foundation = ui_generate_foundation(build_args("stage-foundation"), fake_context(tmp_path))
+    render = ui_render_matrix(build_args("stage-render"), fake_context(tmp_path))
+
+    assert foundation["status"] == "ok"
+    assert foundation["data"]["stage"] == "tool_ui_generate_foundation"
+    assert foundation["data"]["summary"]["candidateBundles"] == 0
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "stage-foundation" / "foundation" / "accepted" / "foundation.json").is_file()
+    assert not (tmp_path / ".rumi" / "ui" / "runs" / "stage-foundation" / "composition" / "page.manifest.json").exists()
+    assert render["status"] == "ok"
+    assert render["data"]["stage"] == "tool_ui_render_matrix"
+    assert (tmp_path / ".rumi" / "ui" / "runs" / "stage-render" / "candidates" / "reply-composer" / "candidate-1" / "renders" / "matrix.json").is_file()
+    assert not (tmp_path / ".rumi" / "ui" / "runs" / "stage-render" / "accepted" / "reply-composer").exists()
+
+
+def test_render_matrix_uses_browser_when_local_chrome_is_available(tmp_path: Path) -> None:
+    if not _browser_executable_path():
+        pytest.skip("local Chrome or Chromium is not installed")
+    write_pass_package(tmp_path / "project")
+    args = build_args("browser-render")
+    args["options"]["browserRender"] = True
+    result = ui_render_matrix(args, fake_context(tmp_path))
+    render_root = (
+        tmp_path
+        / ".rumi"
+        / "ui"
+        / "runs"
+        / "browser-render"
+        / "candidates"
+        / "reply-composer"
+        / "candidate-1"
+        / "renders"
+    )
+    dom_path = next(render_root.glob("dom-390-default-text-*.json"))
+    dom = json.loads(dom_path.read_text(encoding="utf-8"))
+
+    assert result["status"] == "ok"
+    assert dom["renderer"] == "playwright"
+    assert dom["dom"]["document"]["clientWidth"] == 390
 
 
 def test_candidate_count_output_dirs_are_isolated_and_do_not_include_previous_source(tmp_path: Path) -> None:

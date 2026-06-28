@@ -100,6 +100,17 @@ class FakeUIAgentBackend:
         }
         write_json(output_dir / "foundation.json", foundation)
         write_json(output_dir / "primitive-manifest.json", {"primitives": primitives})
+        for primitive in primitives:
+            write_text(
+                output_dir / "primitives" / f"{primitive}.tsx",
+                "\n".join(
+                    [
+                        f"export function {primitive}(props: Record<string, unknown>) {{",
+                        f"  return <div data-rui-primitive=\"{primitive}\" {{...props}} />;",
+                        "}",
+                    ]
+                ),
+            )
         write_text(
             output_dir / "tokens.css",
             "\n".join(
@@ -123,6 +134,8 @@ class FakeUIAgentBackend:
         )
         write_text(output_dir / "specimen" / "type-specimen.html", "<main><h1>Rumi UI Foundation</h1><p>日本語の長文と数値 12345</p></main>")
         write_text(output_dir / "specimen" / "color-specimen.html", "<main><p>semantic color roles</p></main>")
+        write_text(output_dir / "specimen" / "density-specimen.html", "<main><section>comfortable compact data dense</section></main>")
+        write_text(output_dir / "specimen" / "primitive-gallery.html", "<main><button>Button</button><input aria-label=\"Text input\"></main>")
         write_json(output_dir / "report.json", {"status": "pass", "score": round(0.08 + variant_index * 0.03, 3)})
 
     def _write_component(self, task: UIAgentTask, output_dir: Path) -> None:
@@ -164,6 +177,7 @@ class FakeUIAgentBackend:
             "slotMappings": slot_mappings,
             "designIntent": design_intent,
         }
+        manifest.update(_compression_failure_manifest(fail_mode))
         css_extra = " color: #123456;" if fail_mode == "non-token-color" else ""
         write_json(output_dir / "design-intent.json", design_intent)
         write_json(output_dir / "component.manifest.json", manifest)
@@ -231,3 +245,27 @@ def _title(node_id: str) -> str:
 
 def _purpose(contract: dict[str, Any]) -> str:
     return str(contract.get("purpose") or "Generated Rumi UI component.")
+
+
+def _compression_failure_manifest(fail_mode: str) -> dict[str, Any]:
+    if fail_mode == "gap-pressure":
+        return {"actualGap": 4}
+    if fail_mode == "boundary-pressure":
+        return {"actualPadding": 6}
+    if fail_mode == "primary-clipped":
+        return {"forcePrimaryClipped": True}
+    if fail_mode == "horizontal-overflow":
+        return {"forceHorizontalOverflow": True}
+    if fail_mode == "nested-surfaces":
+        return {"surfaceDepth": 3, "dividerCount": 6, "shadowCount": 2}
+    if fail_mode == "flat-hierarchy":
+        return {"hierarchyContrast": 0.1}
+    if fail_mode == "tiny-font":
+        return {"fontSize": 10, "lineHeight": 13}
+    if fail_mode == "touch-target":
+        return {"touchTargetMin": 28}
+    if fail_mode == "toolbar-overflow":
+        return {"toolbarRows": 3}
+    if fail_mode == "primary-action-unreachable":
+        return {"primaryActionReachable": False}
+    return {}

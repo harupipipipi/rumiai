@@ -65,9 +65,27 @@ def _aggregate_metrics(render_matrix: RenderMatrix) -> dict[str, float]:
             "responsiveStress": 1,
             "consoleErrors": 1,
             "horizontalOverflow": 1,
+            "touchTargetFailures": 1,
+            "tinyFontUsage": 1,
+            "primaryActionUnreachable": 1,
+            "toolbarOverflow": 1,
         }
-    worst_gap = max(0.0, max((12 - float(item.metrics.get("actualGap") or 0)) / 12 for item in snapshots))
-    worst_boundary = max(0.0, max((16 - float(item.metrics.get("actualPadding") or 0)) / 16 for item in snapshots))
+    worst_gap = max(
+        0.0,
+        max(
+            (float(item.metrics.get("minGap") or 12) - float(item.metrics.get("actualGap") or 0))
+            / max(float(item.metrics.get("minGap") or 12), 1)
+            for item in snapshots
+        ),
+    )
+    worst_boundary = max(
+        0.0,
+        max(
+            (float(item.metrics.get("minPadding") or 16) - float(item.metrics.get("actualPadding") or 0))
+            / max(float(item.metrics.get("minPadding") or 16), 1)
+            for item in snapshots
+        ),
+    )
     text_pressure = 1.0 if any(item.metrics.get("primaryClipped") for item in snapshots) else 0.0
     action_pressure = max(
         0.0,
@@ -77,17 +95,39 @@ def _aggregate_metrics(render_matrix: RenderMatrix) -> dict[str, float]:
             for item in snapshots
         ),
     )
-    responsive = 1.0 if any(item.metrics.get("horizontalOverflow") and int(item.metrics.get("viewport") or 0) <= 390 for item in snapshots) else 0.0
+    surface_pressure = max(
+        0.0,
+        max((float(item.metrics.get("surfaceDepth") or 1) - 1) / 3 for item in snapshots),
+    )
+    hierarchy_flattening = max(
+        0.0,
+        max((0.45 - float(item.metrics.get("hierarchyContrast") or 0)) / 0.45 for item in snapshots),
+    )
+    touch_target_failures = float(sum(1 for item in snapshots if float(item.metrics.get("touchTargetMin") or 0) < 36))
+    tiny_font_usage = float(sum(1 for item in snapshots if float(item.metrics.get("fontSize") or 0) < 12))
+    primary_unreachable = float(sum(1 for item in snapshots if item.metrics.get("primaryActionReachable") is False))
+    toolbar_overflow = float(sum(1 for item in snapshots if int(item.metrics.get("toolbarRows") or 1) > 2))
+    responsive = (
+        1.0
+        if any(item.metrics.get("horizontalOverflow") and int(item.metrics.get("viewport") or 0) <= 390 for item in snapshots)
+        or primary_unreachable
+        or toolbar_overflow
+        else 0.0
+    )
     return {
         "gapPressure": round(min(worst_gap, 1), 3),
         "boundaryPressure": round(min(worst_boundary, 1), 3),
         "textPressure": text_pressure,
         "actionPressure": round(min(action_pressure, 1), 3),
-        "surfacePressure": 0.0,
-        "hierarchyFlattening": 0.0,
+        "surfacePressure": round(min(surface_pressure, 1), 3),
+        "hierarchyFlattening": round(min(hierarchy_flattening, 1), 3),
         "responsiveStress": responsive,
         "consoleErrors": float(sum(int(item.metrics.get("consoleErrors") or 0) for item in snapshots)),
         "horizontalOverflow": float(sum(1 for item in snapshots if item.metrics.get("horizontalOverflow"))),
+        "touchTargetFailures": touch_target_failures,
+        "tinyFontUsage": tiny_font_usage,
+        "primaryActionUnreachable": primary_unreachable,
+        "toolbarOverflow": toolbar_overflow,
     }
 
 
@@ -115,9 +155,27 @@ def _metric_issues(metrics: dict[str, float], contract: dict[str, Any]) -> list[
         issues.append(
             CompressionIssue(
                 code="ACTION_PRESSURE",
-                severity="major",
+                severity="blocker",
                 message="visible actions exceed the contract budget",
                 evidence={"pressure": metrics["actionPressure"], "allowed": contract.get("visibleActionBudget")},
+            )
+        )
+    if metrics["gapPressure"] > 0.25:
+        issues.append(
+            CompressionIssue(
+                code="GAP_PRESSURE",
+                severity="major",
+                message="measured spacing is below the foundation relationship",
+                evidence={"pressure": metrics["gapPressure"]},
+            )
+        )
+    if metrics["boundaryPressure"] > 0.25:
+        issues.append(
+            CompressionIssue(
+                code="BOUNDARY_PRESSURE",
+                severity="major",
+                message="content sits too close to its container edge",
+                evidence={"pressure": metrics["boundaryPressure"]},
             )
         )
     if metrics["textPressure"] > 0:
@@ -127,6 +185,60 @@ def _metric_issues(metrics: dict[str, float], contract: dict[str, Any]) -> list[
                 severity="blocker",
                 message="primary content is clipped or collapsed",
                 evidence={"pressure": metrics["textPressure"]},
+            )
+        )
+    if metrics["surfacePressure"] > 0:
+        issues.append(
+            CompressionIssue(
+                code="SURFACE_PRESSURE",
+                severity="major",
+                message="nested or repeated surfaces exceed the accepted foundation policy",
+                evidence={"pressure": metrics["surfacePressure"]},
+            )
+        )
+    if metrics["hierarchyFlattening"] > 0.25:
+        issues.append(
+            CompressionIssue(
+                code="HIERARCHY_FLATTENING",
+                severity="major",
+                message="primary, secondary, and metadata hierarchy are too similar",
+                evidence={"pressure": metrics["hierarchyFlattening"]},
+            )
+        )
+    if metrics["touchTargetFailures"] > 0:
+        issues.append(
+            CompressionIssue(
+                code="TOUCH_TARGET_TOO_SMALL",
+                severity="blocker",
+                message="interactive targets are below the minimum touch size",
+                evidence={"count": metrics["touchTargetFailures"]},
+            )
+        )
+    if metrics["tinyFontUsage"] > 0:
+        issues.append(
+            CompressionIssue(
+                code="TINY_FONT_ESCAPE",
+                severity="blocker",
+                message="font size was reduced below the readability floor",
+                evidence={"count": metrics["tinyFontUsage"]},
+            )
+        )
+    if metrics["primaryActionUnreachable"] > 0:
+        issues.append(
+            CompressionIssue(
+                code="PRIMARY_ACTION_UNREACHABLE",
+                severity="blocker",
+                message="primary action is unreachable in at least one render snapshot",
+                evidence={"count": metrics["primaryActionUnreachable"]},
+            )
+        )
+    if metrics["toolbarOverflow"] > 0:
+        issues.append(
+            CompressionIssue(
+                code="RESPONSIVE_STRESS",
+                severity="blocker",
+                message="responsive toolbar overflowed beyond the allowed row count",
+                evidence={"toolbarOverflow": metrics["toolbarOverflow"]},
             )
         )
     return issues

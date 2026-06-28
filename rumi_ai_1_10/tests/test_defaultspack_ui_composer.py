@@ -19,8 +19,13 @@ def test_composer_connects_slot_mappings_without_editing_leaf_source(tmp_path: P
     assert result["status"] == "ok"
     assert {"slotId": "reply-composer", "nodeId": "reply-composer", "parentNodeId": "inbox-page-frame"} in composition["slotMappings"]
     assert report["leafSourceEdited"] is False
+    assert report["renderTree"]["nodeId"] == "inbox-page-frame"
+    assert [child["nodeId"] for child in report["renderTree"]["children"]] == ["inbox-toolbar", "reply-composer"]
     assert source_before == (run_root / "accepted" / "reply-composer" / "source" / "Component.tsx").read_text(encoding="utf-8")
     assert "reply-composer" in (run_root / "composition" / "source" / "generated-index.ts").read_text(encoding="utf-8")
+    app_source = (run_root / "composition" / "source" / "App.tsx").read_text(encoding="utf-8")
+    assert 'renderNode("inbox-page-frame", null' in app_source
+    assert 'renderNode("reply-composer", "reply-composer")' in app_source
 
 
 def test_composer_requires_every_contract_to_have_an_accepted_bundle(tmp_path: Path) -> None:
