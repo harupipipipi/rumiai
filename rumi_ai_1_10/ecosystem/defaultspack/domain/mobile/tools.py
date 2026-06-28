@@ -62,6 +62,13 @@ _CONNECTOR_PAYLOAD_DRY_RUN_TOOLS = {
     "discord_send",
     "line_push",
 }
+_PHONE_ARTIFACT_WORKSPACE_TOOLS = {
+    "artifact_file_list",
+    "artifact_file_read",
+    "artifact_file_write",
+    "artifact_file_patch",
+    "artifact_file_delete",
+}
 
 
 def mobile_agent_template() -> dict[str, str]:
@@ -230,6 +237,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
                 if tool_id in _CLI_DRY_RUN_TOOLS
                 else "implemented_connector_dry_run"
             ),
+        }
+    if tool_id in _PHONE_ARTIFACT_WORKSPACE_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": tool_id
+            in {"artifact_file_write", "artifact_file_patch", "artifact_file_delete"},
+            "implementation_status": "implemented_phone_artifact_workspace",
         }
     if tool_id in {
         "agent_plan",

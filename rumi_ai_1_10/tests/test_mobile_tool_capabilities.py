@@ -154,6 +154,36 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["preview", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "artifact_file_list",
+                "name": "artifact_file_list",
+                "summary": "List phone artifacts",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "artifact_file_read",
+                "name": "artifact_file_read",
+                "summary": "Read phone artifact",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "artifact_file_write",
+                "name": "artifact_file_write",
+                "summary": "Write phone artifact",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "artifact_file_patch",
+                "name": "artifact_file_patch",
+                "summary": "Patch phone artifact",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "artifact_file_delete",
+                "name": "artifact_file_delete",
+                "summary": "Delete phone artifact",
+                "tags": ["artifact", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "html_preview",
                 "name": "html_preview",
                 "summary": "Preview HTML payload",
@@ -311,6 +341,23 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["artifact_preview"]["mobile"]["implementation_status"] == "implemented_payload_only_preview"
     assert "flutter" in by_id["artifact_preview"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["artifact_preview"]["mobile"]["runtime_layers"]
+
+    for tool_id, requires_approval in {
+        "artifact_file_list": False,
+        "artifact_file_read": False,
+        "artifact_file_write": True,
+        "artifact_file_patch": True,
+        "artifact_file_delete": True,
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert (
+            by_id[tool_id]["mobile"]["implementation_status"]
+            == "implemented_phone_artifact_workspace"
+        )
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id in ("html_preview", "pdf_preview"):
         assert by_id[tool_id]["mobile_compatible"] is True

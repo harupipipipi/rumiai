@@ -633,6 +633,127 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'artifact_file_list',
+      description:
+          'List files inside this phone-local artifact workspace. This does not read the connected PC artifact workspace.',
+      tags: ['tool', 'artifact', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_artifact_file_list',
+        'defaultspack_artifact_file_list',
+        'defaults.artifact.file.list',
+        'defaultspack.artifact.file.list',
+      ],
+      implementationStatus: 'implemented_phone_artifact_workspace',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'recursive': {'type': 'boolean', 'default': false},
+          'include_hidden': {'type': 'boolean', 'default': false},
+          'max_entries': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': 500,
+            'default': 200,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'artifact_file_read',
+      description:
+          'Read a text file from this phone-local artifact workspace. This does not read PC artifact paths.',
+      tags: ['tool', 'artifact', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_artifact_file_read',
+        'defaultspack_artifact_file_read',
+        'defaults.artifact.file.read',
+        'defaultspack.artifact.file.read',
+      ],
+      implementationStatus: 'implemented_phone_artifact_workspace',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'artifact_file_write',
+      description:
+          'Write a text file inside this phone-local artifact workspace after mobile approval.',
+      tags: ['tool', 'artifact', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_artifact_file_write',
+        'defaultspack_artifact_file_write',
+        'defaults.artifact.file.write',
+        'defaultspack.artifact.file.write',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_artifact_workspace',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'content': {'type': 'string'},
+          'checkpoint': {'type': 'boolean', 'default': true},
+        },
+        'required': ['path', 'content'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'artifact_file_patch',
+      description:
+          'Patch text inside a phone-local artifact file after mobile approval.',
+      tags: ['tool', 'artifact', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_artifact_file_patch',
+        'defaultspack_artifact_file_patch',
+        'defaults.artifact.file.patch',
+        'defaultspack.artifact.file.patch',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_artifact_workspace',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'old_text': {'type': 'string'},
+          'new_text': {'type': 'string'},
+          'expected_replacements': {'type': 'integer'},
+        },
+        'required': ['path', 'old_text', 'new_text'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'artifact_file_delete',
+      description:
+          'Delete a file inside this phone-local artifact workspace after mobile approval.',
+      tags: ['tool', 'artifact', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'defaults_artifact_file_delete',
+        'defaultspack_artifact_file_delete',
+        'defaults.artifact.file.delete',
+        'defaultspack.artifact.file.delete',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_artifact_workspace',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'checkpoint': {'type': 'boolean', 'default': true},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'mobile_url_open',
       description:
           'Open an http/https URL visibly on this phone. Implemented through Flutter with iOS Swift and Android Kotlin native bridges.',
@@ -2012,6 +2133,14 @@ class MobileToolRuntime {
         return _mobileBase64(call.arguments);
       case 'mobile_uuid':
         return _mobileUuid(call.arguments);
+      case 'artifact_file_list':
+        return _artifactFileList(call.arguments);
+      case 'artifact_file_read':
+        return _artifactFileRead(call.arguments);
+      case 'artifact_file_write':
+      case 'artifact_file_patch':
+      case 'artifact_file_delete':
+        return _asyncOnlyTool(name);
       case 'mobile_url_open':
       case 'media_clipboard_read':
       case 'media_clipboard_write':
@@ -2122,6 +2251,10 @@ class MobileToolRuntime {
         return _mediaImageTransform(
           _imageToolTransformArguments(call.arguments, toolName: name),
         );
+      case 'artifact_file_write':
+      case 'artifact_file_patch':
+      case 'artifact_file_delete':
+        return _artifactFileMutation(name, call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -2187,6 +2320,11 @@ class MobileToolRuntime {
       'mobile_json',
       'mobile_base64',
       'mobile_uuid',
+      'artifact_file_list',
+      'artifact_file_read',
+      'artifact_file_write',
+      'artifact_file_patch',
+      'artifact_file_delete',
       'mobile_url_open',
       'media_clipboard_read',
       'media_clipboard_write',
@@ -4002,6 +4140,273 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _artifactFileList(Map<String, dynamic> args) {
+    final rawPath = '${args['path'] ?? '.'}'.trim();
+    final basePath = _normalizePhoneArtifactPath(rawPath, allowRoot: true);
+    if (basePath == null) {
+      return _phoneArtifactError('LIST_FAILED', 'Invalid artifact path.');
+    }
+    final recursive = _boolArg(args['recursive'], fallback: false);
+    final includeHidden = _boolArg(args['include_hidden'], fallback: false);
+    final maxEntries = _boundedConnectorLimit(
+      args['max_entries'],
+      defaultValue: 200,
+    );
+    final entries = <Map<String, dynamic>>[];
+    final seenDirs = <String>{};
+    for (final entry in _mobileArtifactFiles.entries) {
+      final path = entry.key;
+      if (!_artifactPathInBase(path, basePath, recursive: recursive)) continue;
+      final relative =
+          basePath == '.' ? path : path.substring(basePath.length + 1);
+      final firstPart = relative.split('/').first;
+      if (!recursive && relative.contains('/')) {
+        final dirPath = basePath == '.' ? firstPart : '$basePath/$firstPart';
+        if (!_artifactPathVisible(dirPath, includeHidden)) continue;
+        if (seenDirs.add(dirPath)) {
+          entries.add({
+            'name': firstPart,
+            'path': dirPath,
+            'is_dir': true,
+            'size': 0,
+          });
+        }
+      } else {
+        if (!_artifactPathVisible(path, includeHidden)) continue;
+        final file = entry.value;
+        entries.add({
+          'name': path.split('/').last,
+          'path': path,
+          'is_dir': false,
+          'size': file['size'] ?? 0,
+          'updated_at': file['updated_at'],
+        });
+      }
+      if (entries.length >= maxEntries) break;
+    }
+    entries.sort((a, b) => '${a['path']}'.compareTo('${b['path']}'));
+    return MobileToolResult(
+      ok: true,
+      summary: '${entries.length} phone artifacts',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': basePath,
+          'entries': entries,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _artifactFileRead(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' is required and must stay inside the phone artifact workspace.",
+      );
+    }
+    final file = _mobileArtifactFiles[path];
+    if (file == null) {
+      return _phoneArtifactError('READ_FAILED', 'artifact file not found',
+          path: path);
+    }
+    final content = '${file['content'] ?? ''}';
+    return MobileToolResult(
+      ok: true,
+      summary: 'read $path (${content.length} chars)',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': path,
+          'content': content,
+          'size': utf8.encode(content).length,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  Future<MobileToolResult> _artifactFileMutation(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final risk = toolName == 'artifact_file_write' ? 'medium' : 'high';
+    final path = '${args['path'] ?? ''}'.trim();
+    final approved = await _requestMobileApproval(
+      toolName: toolName,
+      prompt:
+          'このスマホ内のartifact workspaceで $toolName を実行します。対象: ${path.isEmpty ? '(未指定)' : path}',
+      arguments: args,
+      risk: risk,
+    );
+    if (!approved) return _mobileApprovalRequired(toolName);
+    return switch (toolName) {
+      'artifact_file_write' => _artifactFileWrite(args),
+      'artifact_file_patch' => _artifactFilePatch(args),
+      'artifact_file_delete' => _artifactFileDelete(args),
+      _ =>
+        _phoneArtifactError('INVALID_INPUT', 'Unsupported artifact mutation'),
+    };
+  }
+
+  MobileToolResult _artifactFileWrite(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null || !args.containsKey('content')) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path' and 'content' are required.",
+      );
+    }
+    final content = '${args['content'] ?? ''}';
+    final before = '${_mobileArtifactFiles[path]?['content'] ?? ''}';
+    final checkpoint = _boolArg(args['checkpoint'], fallback: true)
+        ? _phoneArtifactCheckpoint('artifact.file.write', path, before)
+        : null;
+    final now = DateTime.now().toUtc().toIso8601String();
+    _mobileArtifactFiles[path] = {
+      'path': path,
+      'content': content,
+      'size': utf8.encode(content).length,
+      'created_at': _mobileArtifactFiles[path]?['created_at'] ?? now,
+      'updated_at': now,
+    };
+    return MobileToolResult(
+      ok: true,
+      summary: 'wrote $path',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': path,
+          'size': utf8.encode(content).length,
+          'diff': _simpleTextDiff(before, content, path: path),
+          'checkpoint': checkpoint,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _artifactFilePatch(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    final oldText = args['old_text'];
+    final newText = args['new_text'];
+    if (path == null || oldText == null || newText == null) {
+      return _phoneArtifactError(
+        'INVALID_INPUT',
+        "'path', 'old_text', and 'new_text' are required.",
+      );
+    }
+    final file = _mobileArtifactFiles[path];
+    if (file == null) {
+      return _phoneArtifactError('PATCH_FAILED', 'artifact file not found',
+          path: path);
+    }
+    final content = '${file['content'] ?? ''}';
+    final oldValue = '$oldText';
+    final newValue = '$newText';
+    final found = _countOccurrences(content, oldValue);
+    final expectedRaw = args['expected_replacements'];
+    final expected = expectedRaw == null
+        ? 1
+        : expectedRaw is num
+            ? expectedRaw.toInt()
+            : int.tryParse('$expectedRaw'.trim()) ?? 1;
+    if (found != expected) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'replacement count mismatch',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'REPLACEMENT_COUNT_MISMATCH',
+            'message': 'expected $expected replacements but found $found',
+            'found': found,
+            'expected': expected,
+            'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    final updated = content.replaceAll(oldValue, newValue);
+    final checkpoint = _boolArg(args['checkpoint'], fallback: true)
+        ? _phoneArtifactCheckpoint('artifact.file.patch', path, content)
+        : null;
+    final now = DateTime.now().toUtc().toIso8601String();
+    _mobileArtifactFiles[path] = {
+      ...file,
+      'content': updated,
+      'size': utf8.encode(updated).length,
+      'updated_at': now,
+    };
+    return MobileToolResult(
+      ok: true,
+      summary: 'patched $path',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': path,
+          'patched': true,
+          'replacements': expected,
+          'size': utf8.encode(updated).length,
+          'diff': _simpleTextDiff(content, updated, path: path),
+          'checkpoint': checkpoint,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _artifactFileDelete(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      return _phoneArtifactError('INVALID_INPUT', "'path' is required.");
+    }
+    final file = _mobileArtifactFiles[path];
+    if (file == null) {
+      return _phoneArtifactError('DELETE_FAILED', 'artifact file not found',
+          path: path);
+    }
+    final checkpoint = _boolArg(args['checkpoint'], fallback: true)
+        ? _phoneArtifactCheckpoint(
+            'artifact.file.delete',
+            path,
+            '${file['content'] ?? ''}',
+          )
+        : null;
+    _mobileArtifactFiles.remove(path);
+    return MobileToolResult(
+      ok: true,
+      summary: 'deleted $path',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': path,
+          'deleted': true,
+          'checkpoint': checkpoint,
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': true,
+        },
+      }),
+    );
+  }
+
   Future<MobileToolResult> _mobileUrlOpen(Map<String, dynamic> args) async {
     final raw = '${args['url'] ?? args['href'] ?? args['input'] ?? ''}'.trim();
     if (raw.isEmpty) {
@@ -4893,6 +5298,9 @@ bool _isAsyncPhoneToolName(String name) {
     'ocr_extract',
     'image_resize',
     'image_convert',
+    'artifact_file_write',
+    'artifact_file_patch',
+    'artifact_file_delete',
     'mobile_url_open',
   }.contains(name.trim().toLowerCase());
 }
@@ -5530,6 +5938,13 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isBrowserExtractTable = normalized == 'browser_extract_table';
   final isTtsFallbackTool =
       normalized == 'tts_generate' || normalized == 'tts_generate_local';
+  final isPhoneArtifactWorkspaceTool = const {
+    'artifact_file_list',
+    'artifact_file_read',
+    'artifact_file_write',
+    'artifact_file_patch',
+    'artifact_file_delete',
+  }.contains(normalized);
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -5678,6 +6093,19 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_silent_wav_fallback',
+    };
+  }
+  if (isPhoneArtifactWorkspaceTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': const {
+        'artifact_file_write',
+        'artifact_file_patch',
+        'artifact_file_delete',
+      }.contains(normalized),
+      'implementation_status': 'implemented_phone_artifact_workspace',
     };
   }
   if (tagSet.contains('media') ||
@@ -7632,6 +8060,7 @@ final Map<String, dynamic> _mobileTaskBoard = {
 };
 final List<Map<String, dynamic>> _mobileTaskCards = [];
 final List<Map<String, dynamic>> _mobileAgentPlans = [];
+final Map<String, Map<String, dynamic>> _mobileArtifactFiles = {};
 final Map<String, Map<String, dynamic>> _mobileConsents = {};
 int _mobileToolIdSequence = 0;
 
@@ -7642,6 +8071,99 @@ String _nextToolId(String prefix) {
 
 String _argId(Map<String, dynamic> args, String primaryKey) {
   return '${args[primaryKey] ?? args['id'] ?? ''}'.trim();
+}
+
+String? _normalizePhoneArtifactPath(Object? value, {bool allowRoot = false}) {
+  final raw = '${value ?? ''}'.trim().replaceAll('\\', '/');
+  if (raw.isEmpty) return allowRoot ? '.' : null;
+  if (raw.startsWith('/')) return null;
+  final parts = <String>[];
+  for (final part in raw.split('/')) {
+    final trimmed = part.trim();
+    if (trimmed.isEmpty || trimmed == '.') continue;
+    if (trimmed == '..') return null;
+    parts.add(trimmed);
+  }
+  if (parts.isEmpty) return allowRoot ? '.' : null;
+  return parts.join('/');
+}
+
+bool _artifactPathInBase(
+  String path,
+  String basePath, {
+  required bool recursive,
+}) {
+  if (basePath == '.') {
+    return recursive || !path.contains('/');
+  }
+  if (path == basePath) return true;
+  if (!path.startsWith('$basePath/')) return false;
+  if (recursive) return true;
+  return !path.substring(basePath.length + 1).contains('/');
+}
+
+bool _artifactPathVisible(String path, bool includeHidden) {
+  if (includeHidden) return true;
+  return !path.split('/').any((part) => part.startsWith('.'));
+}
+
+Map<String, dynamic> _phoneArtifactCheckpoint(
+  String action,
+  String path,
+  String before,
+) {
+  return {
+    'id': _nextToolId('artifact_checkpoint'),
+    'action': action,
+    'path': path,
+    'size': utf8.encode(before).length,
+    'created_at': DateTime.now().toUtc().toIso8601String(),
+    'workspace': 'phone',
+  };
+}
+
+MobileToolResult _phoneArtifactError(
+  String code,
+  String message, {
+  String? path,
+}) {
+  return MobileToolResult(
+    ok: false,
+    summary: message,
+    output: jsonEncode({
+      'status': 'error',
+      'error': {
+        'code': code,
+        'message': message,
+        if (path != null) 'path': path,
+        'workspace': 'phone',
+        'execution_location': 'phone',
+      },
+    }),
+  );
+}
+
+String _simpleTextDiff(String before, String after, {required String path}) {
+  if (before == after) return '';
+  return [
+    '--- a/$path',
+    '+++ b/$path',
+    '@@',
+    if (before.isNotEmpty) '-$before',
+    if (after.isNotEmpty) '+$after',
+  ].join('\n');
+}
+
+int _countOccurrences(String text, String needle) {
+  if (needle.isEmpty) return 0;
+  var count = 0;
+  var index = 0;
+  while (true) {
+    final found = text.indexOf(needle, index);
+    if (found < 0) return count;
+    count += 1;
+    index = found + needle.length;
+  }
 }
 
 Map<String, dynamic>? _findById(

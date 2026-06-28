@@ -220,6 +220,11 @@ void main() {
           'tool_invoke',
           'tool_consent_check',
           'tool_consent_confirm',
+          'artifact_file_list',
+          'artifact_file_read',
+          'artifact_file_write',
+          'artifact_file_patch',
+          'artifact_file_delete',
           'media_clipboard_read',
           'media_clipboard_write',
           'media_file_pick',
@@ -396,6 +401,108 @@ void main() {
       expect(schemaData['mobile_compatible'], isTrue);
       expect(schemaData['execution_route'], 'phone');
       expect(schemaData['callable'], isTrue);
+    });
+
+    test('runs phone-local artifact workspace tools with approval', () async {
+      final approval = _FakeMobileToolApproval(true);
+      final artifactRuntime = MobileToolRuntime(approvalDelegate: approval);
+      const path = 'notes/hello.txt';
+
+      final write = await artifactRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'artifact_write_1',
+          name: 'artifact_file_write',
+          arguments: {
+            'path': path,
+            'content': 'hello mobile artifact',
+          },
+        ),
+      );
+
+      expect(write.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'artifact_file_write');
+      final writePayload = jsonDecode(write.output) as Map<String, dynamic>;
+      final writeData = writePayload['data'] as Map<String, dynamic>;
+      expect(writeData['path'], path);
+      expect(writeData['workspace'], 'phone');
+      expect(writeData['checkpoint'], isA<Map>());
+
+      final read = artifactRuntime.execute(
+        const MobileToolCall(
+          id: 'artifact_read_1',
+          name: 'artifact_file_read',
+          arguments: {'path': path},
+        ),
+      );
+      expect(read.ok, isTrue);
+      final readPayload = jsonDecode(read.output) as Map<String, dynamic>;
+      final readData = readPayload['data'] as Map<String, dynamic>;
+      expect(readData['content'], 'hello mobile artifact');
+      expect(readData['runtime_layers'], containsAll(['flutter', 'dart']));
+
+      final patch = await artifactRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'artifact_patch_1',
+          name: 'artifact_file_patch',
+          arguments: {
+            'path': path,
+            'old_text': 'mobile',
+            'new_text': 'phone',
+            'expected_replacements': 1,
+          },
+        ),
+      );
+      expect(patch.ok, isTrue);
+      final patchPayload = jsonDecode(patch.output) as Map<String, dynamic>;
+      final patchData = patchPayload['data'] as Map<String, dynamic>;
+      expect(patchData['patched'], isTrue);
+      expect(patchData['replacements'], 1);
+
+      final list = artifactRuntime.execute(
+        const MobileToolCall(
+          id: 'artifact_list_1',
+          name: 'artifact_file_list',
+          arguments: {'path': '.', 'recursive': true},
+        ),
+      );
+      expect(list.ok, isTrue);
+      final listPayload = jsonDecode(list.output) as Map<String, dynamic>;
+      final listData = listPayload['data'] as Map<String, dynamic>;
+      final entries = listData['entries'] as List;
+      expect(entries.map((entry) => entry['path']), contains(path));
+
+      final delete = await artifactRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'artifact_delete_1',
+          name: 'artifact_file_delete',
+          arguments: {'path': path},
+        ),
+      );
+      expect(delete.ok, isTrue);
+      final deletePayload = jsonDecode(delete.output) as Map<String, dynamic>;
+      final deleteData = deletePayload['data'] as Map<String, dynamic>;
+      expect(deleteData['deleted'], isTrue);
+    });
+
+    test('artifact workspace mutations fail closed without approval', () async {
+      final artifactRuntime = MobileToolRuntime(
+        approvalDelegate: _FakeMobileToolApproval(false),
+      );
+      final result = await artifactRuntime.executeAsync(
+        const MobileToolCall(
+          id: 'artifact_write_denied_1',
+          name: 'artifact_file_write',
+          arguments: {
+            'path': 'denied.txt',
+            'content': 'nope',
+          },
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
     });
 
     test('runs mobile clipboard tools after explicit phone approval', () async {
@@ -2091,6 +2198,34 @@ void main() {
       expect(artifactPreviewMobile['runtime_layers'],
           containsAll(['flutter', 'dart']));
       expect(artifactPreviewData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'artifact_file_list': false,
+        'artifact_file_read': false,
+        'artifact_file_write': true,
+        'artifact_file_patch': true,
+        'artifact_file_delete': true,
+      }.entries) {
+        final artifactSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final artifactPayload =
+            jsonDecode(artifactSchema.output) as Map<String, dynamic>;
+        final artifactData = artifactPayload['data'] as Map<String, dynamic>;
+        final artifactMobile = artifactData['mobile'] as Map<String, dynamic>;
+        expect(artifactData['mobile_compatible'], isTrue);
+        expect(artifactData['execution_route'], 'phone');
+        expect(artifactMobile['requires_mobile_approval'], entry.value);
+        expect(artifactMobile['implementation_status'],
+            'implemented_phone_artifact_workspace');
+        expect(
+            artifactMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(artifactData['tags'], contains(mobileFlutterTag));
+      }
 
       for (final toolName in const ['html_preview', 'pdf_preview']) {
         final previewSchema = runtime.execute(
