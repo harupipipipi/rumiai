@@ -144,7 +144,7 @@ def mobile_tool_compatibility(tool: dict[str, Any], record: dict[str, Any] | Non
             "native_layers": phone_plan["native_layers"],
             "requires_pc": False,
             "requires_mobile_approval": phone_plan["requires_mobile_approval"],
-            "implementation_status": "implemented",
+            "implementation_status": phone_plan.get("implementation_status") or "implemented",
             "tags": [
                 MOBILE_COMPATIBLE_TAG,
                 *_platform_tags(phone_plan, pc_delegated=False),
@@ -277,6 +277,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             ],
             "requires_mobile_approval": False,
         }
+    if tool_id == "media_doc_parse":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_text_documents",
+        }
     return None
 
 
@@ -347,6 +355,14 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
             ],
             "requires_mobile_approval": False,
             "implementation_status": "implemented",
+        }
+    if tool_id == "media_doc_parse":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": "implemented_text_documents",
         }
     if "media" in tags or tool_id.startswith(("audio_", "image_", "ocr_")):
         return {

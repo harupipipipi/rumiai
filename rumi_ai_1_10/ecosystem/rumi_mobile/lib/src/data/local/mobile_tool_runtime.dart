@@ -196,6 +196,10 @@ const _hardImageTransformOutputMaxBytes = 16 * 1024 * 1024;
 const _hardImageTransformInputMaxBytes = 24 * 1024 * 1024;
 const _defaultImageTransformMaxDimension = 2048;
 const _hardImageTransformMaxDimension = 4096;
+const _defaultDocParseMaxBytes = 2 * 1024 * 1024;
+const _hardDocParseMaxBytes = 8 * 1024 * 1024;
+const _defaultDocParseMaxChars = 120000;
+const _hardDocParseMaxChars = 400000;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -209,6 +213,7 @@ class MobileToolDefinition {
     this.runtimeLayers = _flutterRuntimeLayers,
     this.nativeLayers = const [],
     this.requiresMobileApproval = false,
+    this.implementationStatus = 'implemented',
   });
 
   final String name;
@@ -221,6 +226,7 @@ class MobileToolDefinition {
   final List<String> runtimeLayers;
   final List<String> nativeLayers;
   final bool requiresMobileApproval;
+  final String implementationStatus;
 
   bool get available => unavailableReason.trim().isEmpty;
 
@@ -867,6 +873,53 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'media_doc_parse',
+      description:
+          'Parse text-like document bytes or text already provided to this phone runtime. Supports txt, markdown, json, csv, html, xml, and similar UTF text; does not read host file paths.',
+      tags: ['tool', 'media', 'document', 'text', mobileCompatibleTag],
+      aliases: [
+        'doc_parse',
+        'document_parse',
+        'defaults_media_doc_parse',
+        'defaultspack_media_doc_parse',
+        'defaults.media.doc.parse',
+        'defaults.media.doc_parse',
+        'defaultspack.media.doc.parse',
+        'defaultspack.media.doc_parse',
+      ],
+      implementationStatus: 'implemented_text_documents',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'content': {'type': 'string'},
+          'base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'name': {'type': 'string'},
+          'mime_type': {'type': 'string'},
+          'format': {'type': 'string'},
+          'encoding': {'type': 'string'},
+          'strip_html': {'type': 'boolean', 'default': true},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardDocParseMaxBytes,
+            'default': _defaultDocParseMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardDocParseMaxChars,
+            'default': _defaultDocParseMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -1307,6 +1360,8 @@ class MobileToolRuntime {
         return _asyncOnlyTool(name);
       case 'media_image_read':
         return _mediaImageRead(call.arguments);
+      case 'media_doc_parse':
+        return _mediaDocParse(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case 'tool_names':
@@ -1445,6 +1500,7 @@ class MobileToolRuntime {
       'media_screenshot',
       'media_image_transform',
       'media_image_read',
+      'media_doc_parse',
     }.contains(name)) {
       return false;
     }
@@ -2168,6 +2224,157 @@ class MobileToolRuntime {
           'status': 'error',
           'error': {
             'code': 'IMAGE_TRANSFORM_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+  }
+
+  MobileToolResult _mediaDocParse(Map<String, dynamic> args) {
+    final _DocumentPayload? payload;
+    try {
+      payload = _extractDocumentPayload(args);
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'document content is invalid',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'INVALID_DOCUMENT_CONTENT',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    if (payload == null) {
+      final path = '${args['path'] ?? ''}'.trim();
+      return MobileToolResult(
+        ok: false,
+        summary: 'document content is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code':
+                path.isEmpty ? 'MISSING_DOCUMENT_CONTENT' : 'UNSUPPORTED_PATH',
+            'message': path.isEmpty
+                ? 'text, content, base64, data_url, file.base64, or document.base64 is required.'
+                : 'Phone-local media_doc_parse cannot read host file paths. Use media_file_pick or pass document text/base64.',
+            if (path.isNotEmpty) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    final maxBytes = _boundedDocParseMaxBytes(args['max_bytes']);
+    final maxChars = _boundedDocParseMaxChars(args['max_chars']);
+    if (payload.sizeBytes > maxBytes) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'document is too large',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'DOCUMENT_TOO_LARGE',
+            'message': 'Document content is larger than max_bytes.',
+            'size_bytes': payload.sizeBytes,
+            'max_bytes': maxBytes,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    final format = _normalizeDocumentFormat(
+      args['format'] ?? payload.format,
+      mimeType: '${args['mime_type'] ?? payload.mimeType ?? ''}',
+      name: '${args['name'] ?? payload.name ?? ''}',
+    );
+    final unsupportedReason = _unsupportedPhoneDocumentReason(
+      format: format,
+      mimeType: payload.mimeType,
+      name: payload.name,
+      explicitText: payload.text != null,
+    );
+    if (unsupportedReason != null) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'document format is unsupported on phone',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_DOCUMENT_FORMAT',
+            'message': unsupportedReason,
+            'format': format,
+            if (payload.mimeType != null) 'mime_type': payload.mimeType,
+            if (payload.name != null) 'name': payload.name,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+
+    try {
+      final decoded = payload.text == null
+          ? _decodeDocumentBytes(payload.bytes ?? Uint8List(0), maxBytes)
+          : null;
+      final decodedText = payload.text ?? decoded!.text;
+      final parsed = _parsePhoneDocumentText(
+        decodedText,
+        format: format,
+        stripHtml: args['strip_html'] != false,
+      );
+      final truncated = parsed.length > maxChars;
+      final content = truncated ? parsed.substring(0, maxChars) : parsed;
+      return MobileToolResult(
+        ok: true,
+        summary: 'parsed ${content.length} chars',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'content': content,
+            'truncated': truncated,
+            'length': parsed.length,
+            'returned_length': content.length,
+            'metadata': {
+              'format': format,
+              if (payload.name != null) 'name': payload.name,
+              if (payload.mimeType != null) 'mime_type': payload.mimeType,
+              'encoding': payload.text != null ? 'string' : decoded!.encoding,
+              'source': payload.source,
+              'size_bytes': payload.sizeBytes,
+              'supported_formats': _phoneTextDocumentFormats.toList()..sort(),
+            },
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    } on _UnsupportedDocumentEncoding catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'document encoding unsupported',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'UNSUPPORTED_DOCUMENT_ENCODING',
+            'message': error.message,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'document parse failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'DOCUMENT_PARSE_FAILED',
             'message': '$error',
             'execution_location': 'phone',
           },
@@ -3135,7 +3342,7 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
     'native_layers': tool.nativeLayers,
     'requires_pc': false,
     'requires_mobile_approval': tool.requiresMobileApproval,
-    'implementation_status': 'implemented',
+    'implementation_status': tool.implementationStatus,
     'tags': _mobilePlatformTags(
       platforms: tool.executionPlatforms,
       runtimeLayers: tool.runtimeLayers,
@@ -3179,6 +3386,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isScreenshot = normalized == 'media_screenshot';
   final isImageRead = normalized == 'media_image_read';
   final isImageTransform = normalized == 'media_image_transform';
+  final isDocParse = normalized == 'media_doc_parse';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -3234,6 +3442,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       ],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented',
+    };
+  }
+  if (isDocParse) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': 'implemented_text_documents',
     };
   }
   if (tagSet.contains('media') ||
@@ -3492,6 +3709,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'media_image_transform') {
     return 'このdefaultspack-compatible toolはiOS Swift/Android Kotlinの画像resize/encode bridgeでスマホ実装済みです。';
+  }
+  if (normalized == 'media_doc_parse') {
+    return 'このdefaultspack-compatible toolはDartでtext/markdown/json/csv/html/xml等のテキスト系document parseをスマホ実装済みです。PDF/docx等はPC runtimeへ委譲してください。';
   }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
@@ -3825,6 +4045,363 @@ String _mimeToImageFormat(String mimeType, String fallback) {
   return fallback;
 }
 
+int _boundedDocParseMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardDocParseMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardDocParseMaxBytes, parsed));
+  }
+  return _defaultDocParseMaxBytes;
+}
+
+int _boundedDocParseMaxChars(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardDocParseMaxChars, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardDocParseMaxChars, parsed));
+  }
+  return _defaultDocParseMaxChars;
+}
+
+_DocumentPayload? _extractDocumentPayload(Map<String, dynamic> args) {
+  return _documentPayloadFromMap(args, source: 'arguments');
+}
+
+_DocumentPayload? _documentPayloadFromMap(
+  Map<dynamic, dynamic> value, {
+  required String source,
+  int depth = 0,
+}) {
+  if (depth > 4) return null;
+  final name = _stringOrNull(
+    value['name'] ?? value['filename'] ?? value['file_name'] ?? value['path'],
+  );
+  final mimeType = _stringOrNull(
+    value['mime_type'] ?? value['mimeType'] ?? value['content_type'],
+  );
+  final format = _stringOrNull(value['format'] ?? value['extension']);
+
+  for (final key in const [
+    'base64',
+    'document_base64',
+    'data_base64',
+    'file_base64',
+  ]) {
+    final encoded = _stringOrNull(value[key]);
+    if (encoded != null) {
+      return _documentPayloadFromEncoded(
+        encoded,
+        name: name,
+        mimeType: mimeType,
+        format: format,
+        source: '$source.$key',
+      );
+    }
+  }
+
+  final dataUrl = _stringOrNull(value['data_url']);
+  if (dataUrl != null) {
+    return _documentPayloadFromEncoded(
+      dataUrl,
+      name: name,
+      mimeType: mimeType,
+      format: format,
+      source: '$source.data_url',
+    );
+  }
+
+  for (final key in const ['file', 'document', 'doc', 'result', 'output']) {
+    final nested = value[key];
+    if (nested is Map) {
+      final found = _documentPayloadFromMap(
+        nested,
+        source: '$source.$key',
+        depth: depth + 1,
+      );
+      if (found != null) {
+        return found.withFallbacks(
+          name: name,
+          mimeType: mimeType,
+          format: format,
+        );
+      }
+    }
+  }
+
+  for (final key in const ['text', 'content', 'markdown', 'html']) {
+    final text = _stringOrNull(value[key]);
+    if (text == null) continue;
+    final encoding = '${value['encoding'] ?? ''}'.trim().toLowerCase();
+    if (encoding == 'base64' || text.startsWith('data:')) {
+      return _documentPayloadFromEncoded(
+        text,
+        name: name,
+        mimeType: mimeType,
+        format: format ?? (key == 'html' ? 'html' : null),
+        source: '$source.$key',
+      );
+    }
+    return _DocumentPayload(
+      text: text,
+      name: name,
+      mimeType: mimeType,
+      format: format ?? (key == 'html' ? 'html' : null),
+      source: '$source.$key',
+    );
+  }
+
+  return null;
+}
+
+_DocumentPayload _documentPayloadFromEncoded(
+  String raw, {
+  required String? name,
+  required String? mimeType,
+  required String? format,
+  required String source,
+}) {
+  final text = raw.trim();
+  if (text.startsWith('data:')) {
+    final comma = text.indexOf(',');
+    if (comma <= 5) {
+      throw const FormatException('Invalid data URL');
+    }
+    final meta = text.substring(5, comma);
+    final data = text.substring(comma + 1);
+    final parts = meta.split(';').where((part) => part.isNotEmpty).toList();
+    final dataMime = parts.isNotEmpty && !parts.first.contains('=')
+        ? parts.first.trim()
+        : null;
+    final isBase64 = parts.any((part) => part.toLowerCase() == 'base64');
+    if (!isBase64) {
+      return _DocumentPayload(
+        text: Uri.decodeComponent(data),
+        name: name,
+        mimeType: mimeType ?? dataMime,
+        format: format,
+        source: source,
+      );
+    }
+    return _DocumentPayload(
+      bytes: base64Decode(_normalizeBase64ForDecode(data)),
+      name: name,
+      mimeType: mimeType ?? dataMime,
+      format: format,
+      source: source,
+    );
+  }
+  return _DocumentPayload(
+    bytes: base64Decode(_normalizeBase64ForDecode(text)),
+    name: name,
+    mimeType: mimeType,
+    format: format,
+    source: source,
+  );
+}
+
+String _normalizeBase64ForDecode(String value) {
+  var text = value
+      .replaceAll(RegExp(r'\s+'), '')
+      .replaceAll('-', '+')
+      .replaceAll('_', '/');
+  final padding = text.length % 4;
+  if (padding != 0) text = text.padRight(text.length + (4 - padding), '=');
+  return text;
+}
+
+String _normalizeDocumentFormat(
+  Object? value, {
+  required String mimeType,
+  required String name,
+}) {
+  final explicit = _stringOrNull(value);
+  if (explicit != null) return _canonicalDocumentFormat(explicit);
+  final mime = mimeType.trim().toLowerCase();
+  if (mime.startsWith('text/')) {
+    final subtype = mime.substring('text/'.length).split(';').first;
+    return _canonicalDocumentFormat(subtype.isEmpty ? 'txt' : subtype);
+  }
+  const mimeFormats = {
+    'application/json': 'json',
+    'application/ld+json': 'json',
+    'application/xml': 'xml',
+    'application/xhtml+xml': 'html',
+    'application/javascript': 'javascript',
+    'application/x-javascript': 'javascript',
+    'application/x-yaml': 'yaml',
+    'application/yaml': 'yaml',
+    'text/yaml': 'yaml',
+    'text/x-yaml': 'yaml',
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+        'docx',
+  };
+  if (mimeFormats.containsKey(mime)) return mimeFormats[mime]!;
+  final filename = name.trim();
+  final dot = filename.lastIndexOf('.');
+  if (dot >= 0 && dot + 1 < filename.length) {
+    return _canonicalDocumentFormat(filename.substring(dot + 1));
+  }
+  return '';
+}
+
+String _canonicalDocumentFormat(String value) {
+  final format = value.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
+  return switch (format) {
+    'text' => 'txt',
+    'mdown' => 'markdown',
+    'md' => 'markdown',
+    'htm' => 'html',
+    'xhtml' => 'html',
+    'yml' => 'yaml',
+    'js' => 'javascript',
+    _ => format,
+  };
+}
+
+String? _unsupportedPhoneDocumentReason({
+  required String format,
+  required String? mimeType,
+  required String? name,
+  required bool explicitText,
+}) {
+  if (explicitText) return null;
+  final mime = (mimeType ?? '').trim().toLowerCase();
+  if (format.isEmpty &&
+      (mime.isEmpty ||
+          mime == 'application/octet-stream' ||
+          mime == 'binary/octet-stream')) {
+    return null;
+  }
+  if (_phoneTextDocumentFormats.contains(format)) return null;
+  if (mime.startsWith('text/')) return null;
+  if (mime.contains('json') ||
+      mime.contains('xml') ||
+      mime.contains('yaml') ||
+      mime.contains('csv') ||
+      mime.contains('javascript')) {
+    return null;
+  }
+  final label = [
+    if (format.isNotEmpty) format,
+    if (mime.isNotEmpty) mime,
+    if ((name ?? '').trim().isNotEmpty) name,
+  ].join(' / ');
+  return 'Phone-local media_doc_parse supports UTF text documents only. $label requires PC/provider parsing.';
+}
+
+_DecodedDocumentText _decodeDocumentBytes(Uint8List bytes, int maxBytes) {
+  if (bytes.length > maxBytes) {
+    throw const _UnsupportedDocumentEncoding(
+      'Document content is larger than max_bytes.',
+    );
+  }
+  if (bytes.isEmpty) return const _DecodedDocumentText('', 'utf-8');
+  if (bytes.length >= 2 && bytes[0] == 0xff && bytes[1] == 0xfe) {
+    return _DecodedDocumentText(
+        _decodeUtf16(bytes.sublist(2), littleEndian: true), 'utf-16le');
+  }
+  if (bytes.length >= 2 && bytes[0] == 0xfe && bytes[1] == 0xff) {
+    return _DecodedDocumentText(
+        _decodeUtf16(bytes.sublist(2), littleEndian: false), 'utf-16be');
+  }
+  if (bytes.length >= 3 &&
+      bytes[0] == 0xef &&
+      bytes[1] == 0xbb &&
+      bytes[2] == 0xbf) {
+    return _DecodedDocumentText(
+        utf8.decode(bytes.sublist(3), allowMalformed: true), 'utf-8-bom');
+  }
+  if (_looksBinaryDocumentBytes(bytes)) {
+    throw const _UnsupportedDocumentEncoding(
+      'Document bytes look binary, not UTF text.',
+    );
+  }
+  try {
+    return _DecodedDocumentText(utf8.decode(bytes), 'utf-8');
+  } on FormatException {
+    return _DecodedDocumentText(
+        utf8.decode(bytes, allowMalformed: true), 'utf-8-lossy');
+  }
+}
+
+String _decodeUtf16(Uint8List bytes, {required bool littleEndian}) {
+  final codes = <int>[];
+  for (var index = 0; index + 1 < bytes.length; index += 2) {
+    final code = littleEndian
+        ? bytes[index] | (bytes[index + 1] << 8)
+        : (bytes[index] << 8) | bytes[index + 1];
+    codes.add(code);
+  }
+  return String.fromCharCodes(codes);
+}
+
+bool _looksBinaryDocumentBytes(Uint8List bytes) {
+  final scanLength = math.min(bytes.length, 4096);
+  if (scanLength == 0) return false;
+  var suspicious = 0;
+  for (var index = 0; index < scanLength; index += 1) {
+    final byte = bytes[index];
+    final allowedControl =
+        byte == 0x09 || byte == 0x0a || byte == 0x0d || byte == 0x1b;
+    if (byte == 0 || (byte < 0x08 && !allowedControl)) suspicious += 1;
+  }
+  return suspicious > math.max(4, scanLength ~/ 20);
+}
+
+String _parsePhoneDocumentText(
+  String text, {
+  required String format,
+  required bool stripHtml,
+}) {
+  var output = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  if (stripHtml && format == 'html') {
+    output = _stripHtmlToText(output);
+  }
+  return output.trim();
+}
+
+String _stripHtmlToText(String html) {
+  var text = html
+      .replaceAll(
+          RegExp(r'<script\b[^>]*>.*?</script>',
+              caseSensitive: false, dotAll: true),
+          ' ')
+      .replaceAll(
+          RegExp(r'<style\b[^>]*>.*?</style>',
+              caseSensitive: false, dotAll: true),
+          ' ')
+      .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'</p\s*>', caseSensitive: false), '\n')
+      .replaceAll(RegExp(r'<[^>]+>'), ' ');
+  const entities = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&nbsp;': ' ',
+  };
+  for (final entry in entities.entries) {
+    text = text.replaceAll(entry.key, entry.value);
+  }
+  return text
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n');
+}
+
+String? _stringOrNull(Object? value) {
+  if (value == null) return null;
+  final text = '$value'.trim();
+  if (text.isEmpty || text == 'null') return null;
+  return text;
+}
+
 String? _extractImageBase64(Object? value, [int depth = 0]) {
   if (depth > 4 || value == null) return null;
   if (value is String) {
@@ -4061,6 +4638,74 @@ class _ImageTransformDimensions {
   final int? maxWidth;
   final int? maxHeight;
 }
+
+class _DocumentPayload {
+  const _DocumentPayload({
+    this.text,
+    this.bytes,
+    this.name,
+    this.mimeType,
+    this.format,
+    required this.source,
+  });
+
+  final String? text;
+  final Uint8List? bytes;
+  final String? name;
+  final String? mimeType;
+  final String? format;
+  final String source;
+
+  int get sizeBytes => bytes?.length ?? utf8.encode(text ?? '').length;
+
+  _DocumentPayload withFallbacks({
+    required String? name,
+    required String? mimeType,
+    required String? format,
+  }) {
+    return _DocumentPayload(
+      text: text,
+      bytes: bytes,
+      name: this.name ?? name,
+      mimeType: this.mimeType ?? mimeType,
+      format: this.format ?? format,
+      source: source,
+    );
+  }
+}
+
+class _DecodedDocumentText {
+  const _DecodedDocumentText(this.text, this.encoding);
+
+  final String text;
+  final String encoding;
+}
+
+class _UnsupportedDocumentEncoding implements Exception {
+  const _UnsupportedDocumentEncoding(this.message);
+
+  final String message;
+}
+
+const _phoneTextDocumentFormats = <String>{
+  '',
+  'txt',
+  'text',
+  'markdown',
+  'json',
+  'jsonl',
+  'csv',
+  'tsv',
+  'html',
+  'xml',
+  'yaml',
+  'toml',
+  'ini',
+  'log',
+  'javascript',
+  'css',
+  'svg',
+};
 
 final List<Map<String, dynamic>> _mobileTodos = [];
 final Map<String, dynamic> _mobileTaskBoard = {

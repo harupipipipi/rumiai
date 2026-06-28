@@ -203,6 +203,7 @@ void main() {
           'media_screenshot',
           'media_image_read',
           'media_image_transform',
+          'media_doc_parse',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -741,6 +742,93 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('parses phone-provided text documents through media_doc_parse', () {
+      final markdown = '# Hello\n\nmobile docs';
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'doc_parse_1',
+          name: 'defaultspack.media.doc_parse',
+          arguments: {
+            'file': {
+              'name': 'note.md',
+              'mime_type': 'text/markdown',
+              'base64': base64Encode(utf8.encode(markdown)),
+            },
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['content'], markdown);
+      expect(metadata['format'], 'markdown');
+      expect(metadata['name'], 'note.md');
+      expect(metadata['mime_type'], 'text/markdown');
+      expect(data['execution_location'], 'phone');
+      expect(data['requires_mobile_approval'], isFalse);
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('media_doc_parse strips simple html when requested', () {
+      final html = '<html><body><h1>Title</h1><p>A &amp; B</p></body></html>';
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'doc_parse_html_1',
+          name: 'media_doc_parse',
+          arguments: {
+            'data_url':
+                'data:text/html;base64,${base64Encode(utf8.encode(html))}',
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['content'], contains('Title'));
+      expect(data['content'], contains('A & B'));
+      expect(data['content'], isNot(contains('<h1>')));
+    });
+
+    test('media_doc_parse does not read host paths on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'doc_parse_path_1',
+          name: 'media_doc_parse',
+          arguments: {'path': '/tmp/note.md'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+    });
+
+    test('media_doc_parse rejects binary document formats on phone', () {
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'doc_parse_pdf_1',
+          name: 'media_doc_parse',
+          arguments: {
+            'file': {
+              'name': 'report.pdf',
+              'mime_type': 'application/pdf',
+              'base64': base64Encode(utf8.encode('%PDF-1.7')),
+            },
+          },
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_DOCUMENT_FORMAT');
+      expect(error['message'], contains('PC/provider'));
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -1021,6 +1109,26 @@ void main() {
           containsAll(['flutter', 'ios-swift', 'android-kotlin']));
       expect(imageTransformData['tags'], contains(mobileSwiftNativeTag));
       expect(imageTransformData['tags'], contains(mobileKotlinNativeTag));
+
+      final docParseSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_doc_parse_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_doc_parse'},
+        ),
+      );
+      final docParsePayload =
+          jsonDecode(docParseSchema.output) as Map<String, dynamic>;
+      final docParseData = docParsePayload['data'] as Map<String, dynamic>;
+      final docParseMobile = docParseData['mobile'] as Map<String, dynamic>;
+      expect(docParseData['mobile_compatible'], isTrue);
+      expect(docParseData['execution_route'], 'phone');
+      expect(docParseMobile['requires_mobile_approval'], isFalse);
+      expect(docParseMobile['implementation_status'],
+          'implemented_text_documents');
+      expect(
+          docParseMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(docParseData['tags'], contains(mobileFlutterTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(
