@@ -316,6 +316,96 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["ai", "model", "routing"],
             },
             {
+                "tool_id": "prompt_validate_template",
+                "name": "prompt_validate_template",
+                "summary": "Validate prompt template",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_render",
+                "name": "prompt_render",
+                "summary": "Render prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_lint_prompt",
+                "name": "prompt_lint_prompt",
+                "summary": "Lint prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_compact_prompt",
+                "name": "prompt_compact_prompt",
+                "summary": "Compact prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_test",
+                "name": "prompt_test",
+                "summary": "Test prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_system_get",
+                "name": "prompt_system_get",
+                "summary": "Get system prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_system_set",
+                "name": "prompt_system_set",
+                "summary": "Set system prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_list",
+                "name": "prompt_list",
+                "summary": "List prompts",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_create",
+                "name": "prompt_create",
+                "summary": "Create prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_update",
+                "name": "prompt_update",
+                "summary": "Update prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_delete",
+                "name": "prompt_delete",
+                "summary": "Delete prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_active",
+                "name": "prompt_active",
+                "summary": "Active prompts",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_load_effective",
+                "name": "prompt_load_effective",
+                "summary": "Load effective prompt",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_resolve_for_conversation",
+                "name": "prompt_resolve_for_conversation",
+                "summary": "Resolve prompt for conversation",
+                "tags": ["prompt"],
+            },
+            {
+                "tool_id": "prompt_preview_toggle",
+                "name": "prompt_preview_toggle",
+                "summary": "Preview prompt toggle",
+                "tags": ["prompt"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -720,6 +810,34 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "mobile-provider-config" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "prompt_validate_template": ("implemented_phone_prompt_text", False),
+        "prompt_render": ("implemented_phone_prompt_text", False),
+        "prompt_lint_prompt": ("implemented_phone_prompt_text", False),
+        "prompt_compact_prompt": ("implemented_phone_prompt_text", False),
+        "prompt_test": ("implemented_phone_prompt_text", False),
+        "prompt_system_get": ("implemented_phone_prompt_system", False),
+        "prompt_system_set": ("implemented_phone_prompt_system", True),
+        "prompt_list": ("implemented_phone_prompt_store", False),
+        "prompt_create": ("implemented_phone_prompt_store", True),
+        "prompt_update": ("implemented_phone_prompt_store", True),
+        "prompt_delete": ("implemented_phone_prompt_store", True),
+        "prompt_active": ("implemented_phone_prompt_effective", False),
+        "prompt_load_effective": ("implemented_phone_prompt_effective", False),
+        "prompt_resolve_for_conversation": (
+            "implemented_phone_prompt_effective",
+            False,
+        ),
+        "prompt_preview_toggle": ("implemented_phone_prompt_preview", False),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-prompt-store" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, requires_approval in {
         "job_create": False,

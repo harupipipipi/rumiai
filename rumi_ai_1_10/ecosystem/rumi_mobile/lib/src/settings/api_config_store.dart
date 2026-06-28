@@ -458,6 +458,7 @@ class ApiConfigStore {
   static const _modelFavoritesKey = 'rumi.mobile_model_favorites.v1';
   static const _modelRuntimeSettingsKey =
       'rumi.mobile_model_runtime_settings.v1';
+  static const _promptRecordsKey = 'rumi.mobile_prompt_records.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
   static const _notificationKey = 'rumi.mobile_notifications.v1';
 
@@ -603,6 +604,58 @@ class ApiConfigStore {
     } catch (_) {
       // ignore secure storage failures
     }
+  }
+
+  Future<List<Map<String, dynamic>>> loadPromptRecords() async {
+    try {
+      final raw = await _storage.read(_promptRecordsKey);
+      if (raw == null || raw.trim().isEmpty) return [];
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      return decoded
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .where((entry) => '${entry['id'] ?? ''}'.trim().isNotEmpty)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<void> savePromptRecords(List<Map<String, dynamic>> records) async {
+    try {
+      final byId = <String, Map<String, dynamic>>{};
+      for (final record in records) {
+        final id = '${record['id'] ?? ''}'.trim();
+        if (id.isEmpty) continue;
+        byId[id] = Map<String, dynamic>.from(record);
+      }
+      await _storage.write(_promptRecordsKey, jsonEncode(byId.values.toList()));
+    } catch (_) {
+      // ignore secure storage failures
+    }
+  }
+
+  Future<void> upsertPromptRecord(Map<String, dynamic> record) async {
+    final id = '${record['id'] ?? ''}'.trim();
+    if (id.isEmpty) return;
+    final records = await loadPromptRecords();
+    await savePromptRecords([
+      for (final existing in records)
+        if ('${existing['id'] ?? ''}'.trim() != id) existing,
+      Map<String, dynamic>.from(record),
+    ]);
+  }
+
+  Future<void> deletePromptRecord(String id) async {
+    final normalized = id.trim();
+    if (normalized.isEmpty) return;
+    final records = await loadPromptRecords();
+    await savePromptRecords(
+      records
+          .where((record) => '${record['id'] ?? ''}'.trim() != normalized)
+          .toList(),
+    );
   }
 
   Future<PcConnection?> loadPc() async {

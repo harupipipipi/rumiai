@@ -272,6 +272,29 @@ const _phoneAiModelMutationToolIds = <String>{
   'ai_set_preferred_model',
   'ai_set_thinking_level',
 };
+const _phonePromptToolIds = <String>{
+  'prompt_active',
+  'prompt_compact_prompt',
+  'prompt_create',
+  'prompt_delete',
+  'prompt_lint_prompt',
+  'prompt_list',
+  'prompt_load_effective',
+  'prompt_preview_toggle',
+  'prompt_render',
+  'prompt_resolve_for_conversation',
+  'prompt_system_get',
+  'prompt_system_set',
+  'prompt_test',
+  'prompt_update',
+  'prompt_validate_template',
+};
+const _phonePromptMutationToolIds = <String>{
+  'prompt_create',
+  'prompt_delete',
+  'prompt_system_set',
+  'prompt_update',
+};
 const _mobileThinkingLevels = <String>{
   'none',
   'low',
@@ -992,6 +1015,262 @@ class MobileToolRuntime {
           'provider': {'type': 'string'},
           'provider_id': {'type': 'string'},
           'reason': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_validate_template',
+      description:
+          'Validate a prompt template locally on this phone and report variables or syntax issues.',
+      tags: ['tool', 'prompt', 'template', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_validate_template',
+        'defaultspack_prompt_validate_template',
+      ],
+      implementationStatus: 'implemented_phone_prompt_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'template': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'variables': {'type': 'object'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_render',
+      description:
+          'Render a prompt template locally on this phone using provided variables.',
+      tags: ['tool', 'prompt', 'template', mobileCompatibleTag],
+      aliases: ['defaults_prompt_render', 'defaultspack_prompt_render'],
+      implementationStatus: 'implemented_phone_prompt_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'template': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'variables': {'type': 'object'},
+          'strict': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_lint_prompt',
+      description:
+          'Lint prompt text locally for unresolved variables, repeated lines, and size risk.',
+      tags: ['tool', 'prompt', 'lint', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_lint_prompt',
+        'defaultspack_prompt_lint_prompt'
+      ],
+      implementationStatus: 'implemented_phone_prompt_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'prompt': {'type': 'string'},
+          'template': {'type': 'string'},
+          'max_chars': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_compact_prompt',
+      description:
+          'Create a phone-local compacted prompt draft without calling an AI provider.',
+      tags: ['tool', 'prompt', 'compact', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_compact_prompt',
+        'defaultspack_prompt_compact_prompt',
+      ],
+      implementationStatus: 'implemented_phone_prompt_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'prompt': {'type': 'string'},
+          'text': {'type': 'string'},
+          'max_chars': {'type': 'integer'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_system_get',
+      description:
+          'Get the phone-local system prompt from this phone API configuration.',
+      tags: ['tool', 'prompt', 'system', mobileCompatibleTag],
+      aliases: ['defaults_prompt_system_get', 'defaultspack_prompt_system_get'],
+      implementationStatus: 'implemented_phone_prompt_system',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_system_set',
+      description: 'Set the phone-local system prompt after mobile approval.',
+      tags: ['tool', 'prompt', 'system', mobileCompatibleTag],
+      aliases: ['defaults_prompt_system_set', 'defaultspack_prompt_system_set'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_prompt_system',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'system_prompt': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'content': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_list',
+      description:
+          'List phone-local prompt records and the active mobile system prompt.',
+      tags: ['tool', 'prompt', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_prompt_list', 'defaultspack_prompt_list'],
+      implementationStatus: 'implemented_phone_prompt_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'include_system': {'type': 'boolean'},
+          'enabled_only': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_create',
+      description: 'Create a phone-local prompt record after mobile approval.',
+      tags: ['tool', 'prompt', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_prompt_create', 'defaultspack_prompt_create'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_prompt_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'enabled': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_update',
+      description: 'Update a phone-local prompt record after mobile approval.',
+      tags: ['tool', 'prompt', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_prompt_update', 'defaultspack_prompt_update'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_prompt_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'prompt_id': {'type': 'string'},
+          'title': {'type': 'string'},
+          'content': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'enabled': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_delete',
+      description: 'Delete a phone-local prompt record after mobile approval.',
+      tags: ['tool', 'prompt', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_prompt_delete', 'defaultspack_prompt_delete'],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_prompt_store',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'prompt_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_active',
+      description:
+          'Summarize active phone-local prompt segments for the mobile agent.',
+      tags: ['tool', 'prompt', 'effective', mobileCompatibleTag],
+      aliases: ['defaults_prompt_active', 'defaultspack_prompt_active'],
+      implementationStatus: 'implemented_phone_prompt_effective',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_load_effective',
+      description:
+          'Load the effective phone-local prompt assembled from system and enabled prompt records.',
+      tags: ['tool', 'prompt', 'effective', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_load_effective',
+        'defaultspack_prompt_load_effective',
+      ],
+      implementationStatus: 'implemented_phone_prompt_effective',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_resolve_for_conversation',
+      description:
+          'Resolve phone-local prompt context for a mobile conversation.',
+      tags: ['tool', 'prompt', 'effective', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_resolve_for_conversation',
+        'defaultspack_prompt_resolve_for_conversation',
+      ],
+      implementationStatus: 'implemented_phone_prompt_effective',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_preview_toggle',
+      description:
+          'Preview enabling or disabling a phone-local prompt record without saving.',
+      tags: ['tool', 'prompt', 'preview', mobileCompatibleTag],
+      aliases: [
+        'defaults_prompt_preview_toggle',
+        'defaultspack_prompt_preview_toggle',
+      ],
+      implementationStatus: 'implemented_phone_prompt_preview',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'id': {'type': 'string'},
+          'prompt_id': {'type': 'string'},
+          'enabled': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'prompt_test',
+      description: 'Run a phone-local prompt validation and render test.',
+      tags: ['tool', 'prompt', 'test', mobileCompatibleTag],
+      aliases: ['defaults_prompt_test', 'defaultspack_prompt_test'],
+      implementationStatus: 'implemented_phone_prompt_text',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'template': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'variables': {'type': 'object'},
         },
       },
     ),
@@ -3454,6 +3733,22 @@ class MobileToolRuntime {
       case 'ai_route_model':
       case 'ai_explain_model_choice':
         return _asyncOnlyTool(name);
+      case 'prompt_active':
+      case 'prompt_compact_prompt':
+      case 'prompt_create':
+      case 'prompt_delete':
+      case 'prompt_lint_prompt':
+      case 'prompt_list':
+      case 'prompt_load_effective':
+      case 'prompt_preview_toggle':
+      case 'prompt_render':
+      case 'prompt_resolve_for_conversation':
+      case 'prompt_system_get':
+      case 'prompt_system_set':
+      case 'prompt_test':
+      case 'prompt_update':
+      case 'prompt_validate_template':
+        return _asyncOnlyTool(name);
       case 'artifact_file_list':
         return _artifactFileList(call.arguments);
       case 'artifact_file_read':
@@ -3677,6 +3972,22 @@ class MobileToolRuntime {
       case 'ai_route_model':
       case 'ai_explain_model_choice':
         return _aiModelTool(name, call.arguments);
+      case 'prompt_active':
+      case 'prompt_compact_prompt':
+      case 'prompt_create':
+      case 'prompt_delete':
+      case 'prompt_lint_prompt':
+      case 'prompt_list':
+      case 'prompt_load_effective':
+      case 'prompt_preview_toggle':
+      case 'prompt_render':
+      case 'prompt_resolve_for_conversation':
+      case 'prompt_system_get':
+      case 'prompt_system_set':
+      case 'prompt_test':
+      case 'prompt_update':
+      case 'prompt_validate_template':
+        return _promptTool(name, call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -9266,6 +9577,648 @@ class MobileToolRuntime {
     return '';
   }
 
+  Future<MobileToolResult> _promptTool(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    switch (toolName) {
+      case 'prompt_validate_template':
+        return _promptValidateTemplate(args);
+      case 'prompt_render':
+        return _promptRender(args);
+      case 'prompt_lint_prompt':
+        return _promptLintPrompt(args);
+      case 'prompt_compact_prompt':
+        return _promptCompactPrompt(args);
+      case 'prompt_system_get':
+        return _promptSystemGet(args);
+      case 'prompt_system_set':
+        return _promptSystemSet(args);
+      case 'prompt_list':
+        return _promptList(args);
+      case 'prompt_create':
+        return _promptCreate(args);
+      case 'prompt_update':
+        return _promptUpdate(args);
+      case 'prompt_delete':
+        return _promptDelete(args);
+      case 'prompt_active':
+      case 'prompt_load_effective':
+      case 'prompt_resolve_for_conversation':
+        return _promptEffective(toolName, args);
+      case 'prompt_preview_toggle':
+        return _promptPreviewToggle(args);
+      case 'prompt_test':
+        return _promptTest(args);
+      default:
+        return _promptToolError(
+          toolName,
+          'UNSUPPORTED_PROMPT_TOOL',
+          '$toolName is not a phone prompt tool.',
+        );
+    }
+  }
+
+  Future<MobileToolResult> _promptValidateTemplate(
+    Map<String, dynamic> args,
+  ) async {
+    final template = _promptTextArg(args);
+    final variables = _promptVariables(args);
+    final found = _promptTemplateVariables(template).toList()..sort();
+    final issues = _promptTemplateIssues(template, variables, strict: false);
+    return _promptToolOk(
+      'prompt_validate_template',
+      issues.isEmpty ? 'prompt template valid' : '${issues.length} issues',
+      {
+        'valid': issues.isEmpty,
+        'variables': found,
+        'provided_variables': variables.keys.toList()..sort(),
+        'issues': issues,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+      ok: issues.isEmpty,
+    );
+  }
+
+  Future<MobileToolResult> _promptRender(Map<String, dynamic> args) async {
+    final template = _promptTextArg(args);
+    final variables = _promptVariables(args);
+    final strict = _boolArg(args['strict'], fallback: false);
+    final rendered = _renderPromptTemplate(template, variables);
+    final missing = _missingPromptVariables(template, variables).toList()
+      ..sort();
+    if (strict && missing.isNotEmpty) {
+      return _promptToolError(
+        'prompt_render',
+        'MISSING_TEMPLATE_VARIABLES',
+        'Missing prompt variables: ${missing.join(', ')}.',
+      );
+    }
+    return _promptToolOk(
+      'prompt_render',
+      'rendered prompt ${rendered.length} chars',
+      {
+        'rendered': rendered,
+        'missing_variables': missing,
+        'variables': _promptTemplateVariables(template).toList()..sort(),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptLintPrompt(Map<String, dynamic> args) async {
+    final prompt = _promptTextArg(args);
+    final maxChars = _boundedInt(args['max_chars'], 12000, 1000, 200000);
+    final issues = _promptLintIssues(prompt, maxChars: maxChars);
+    return _promptToolOk(
+      'prompt_lint_prompt',
+      issues.isEmpty ? 'prompt lint passed' : '${issues.length} lint issues',
+      {
+        'valid': issues.isEmpty,
+        'issues': issues,
+        'char_count': prompt.length,
+        'max_chars': maxChars,
+        'variables': _promptTemplateVariables(prompt).toList()..sort(),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+      ok: issues.isEmpty,
+    );
+  }
+
+  Future<MobileToolResult> _promptCompactPrompt(
+    Map<String, dynamic> args,
+  ) async {
+    final prompt = _promptTextArg(args);
+    final maxChars = _boundedInt(args['max_chars'], 4000, 200, 100000);
+    final compacted = _compactPromptText(prompt, maxChars: maxChars);
+    return _promptToolOk(
+      'prompt_compact_prompt',
+      'compacted prompt ${prompt.length} -> ${compacted.length} chars',
+      {
+        'prompt': compacted,
+        'original_char_count': prompt.length,
+        'char_count': compacted.length,
+        'max_chars': maxChars,
+        'changed': compacted != prompt,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptSystemGet(Map<String, dynamic> args) async {
+    final config = await _store.loadApi();
+    return _promptToolOk(
+      'prompt_system_get',
+      config.systemPrompt.trim().isEmpty
+          ? 'no phone system prompt'
+          : 'phone system prompt ${config.systemPrompt.length} chars',
+      {
+        'system_prompt': config.systemPrompt,
+        'char_count': config.systemPrompt.length,
+        'provider_id': config.providerId,
+        'model': config.model,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptSystemSet(Map<String, dynamic> args) async {
+    final systemPrompt =
+        _firstText(args, const ['system_prompt', 'prompt', 'content', 'text']);
+    final approved = await _requestMobileApproval(
+      toolName: 'prompt_system_set',
+      prompt: 'このスマホのsystem promptを更新します。',
+      arguments: {
+        ...args,
+        'system_prompt_preview': _clampText(systemPrompt, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('prompt_system_set');
+    final config = await _store.loadApi();
+    await _store.saveApi(config.copyWith(systemPrompt: systemPrompt));
+    return _promptToolOk(
+      'prompt_system_set',
+      'phone system prompt set',
+      {
+        'system_prompt': systemPrompt,
+        'char_count': systemPrompt.length,
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptList(Map<String, dynamic> args) async {
+    final includeSystem = _boolArg(args['include_system'], fallback: true);
+    final enabledOnly = _boolArg(args['enabled_only'], fallback: false);
+    final records = await _store.loadPromptRecords();
+    final config = await _store.loadApi();
+    final prompts = <Map<String, dynamic>>[
+      if (includeSystem)
+        {
+          'id': 'system',
+          'title': 'Phone system prompt',
+          'content': config.systemPrompt,
+          'enabled': config.systemPrompt.trim().isNotEmpty,
+          'source': 'phone-system',
+          'char_count': config.systemPrompt.length,
+        },
+      for (final record in records)
+        if (!enabledOnly || record['enabled'] != false)
+          _normalizePromptRecord(record),
+    ];
+    return _promptToolOk(
+      'prompt_list',
+      '${prompts.length} phone prompts',
+      {
+        'prompts': prompts,
+        'count': prompts.length,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptCreate(Map<String, dynamic> args) async {
+    final content = _promptTextArg(args);
+    if (content.trim().isEmpty) {
+      return _promptToolError(
+        'prompt_create',
+        'MISSING_PROMPT_CONTENT',
+        "'content' or 'prompt' is required.",
+      );
+    }
+    final title = _firstText(args, const ['title', 'name']).isEmpty
+        ? 'Phone prompt'
+        : _firstText(args, const ['title', 'name']);
+    final id = _firstText(args, const ['id', 'prompt_id']).isEmpty
+        ? _slugifyPhoneArtifactName(title, fallback: _nextToolId('prompt'))
+        : _slugifyPhoneArtifactName(
+            _firstText(args, const ['id', 'prompt_id']),
+            fallback: _nextToolId('prompt'),
+          );
+    final now = DateTime.now().toUtc().toIso8601String();
+    final record = {
+      'id': id,
+      'title': title,
+      'content': content,
+      'enabled': _boolArg(args['enabled'], fallback: true),
+      'source': 'phone',
+      'created_at': now,
+      'updated_at': now,
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'prompt_create',
+      prompt: 'このスマホにphone-local promptを作成します。対象: $title',
+      arguments: {
+        ...args,
+        'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('prompt_create');
+    await _store.upsertPromptRecord(record);
+    return _promptToolOk(
+      'prompt_create',
+      'created phone prompt $id',
+      {
+        'prompt': _normalizePromptRecord(record),
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptUpdate(Map<String, dynamic> args) async {
+    final id = _firstText(args, const ['id', 'prompt_id']);
+    if (id.isEmpty) {
+      return _promptToolError(
+        'prompt_update',
+        'MISSING_PROMPT_ID',
+        "'id' or 'prompt_id' is required.",
+      );
+    }
+    final records = await _store.loadPromptRecords();
+    final index =
+        records.indexWhere((record) => '${record['id'] ?? ''}'.trim() == id);
+    if (index < 0) {
+      return _promptToolError(
+        'prompt_update',
+        'PROMPT_NOT_FOUND',
+        'Phone-local prompt not found: $id.',
+      );
+    }
+    final existing = Map<String, dynamic>.from(records[index]);
+    final content = _firstText(args, const ['content', 'prompt', 'text']);
+    final title = _firstText(args, const ['title', 'name']);
+    final updated = {
+      ...existing,
+      if (title.isNotEmpty) 'title': title,
+      if (content.isNotEmpty) 'content': content,
+      if (args.containsKey('enabled'))
+        'enabled': _boolArg(args['enabled'], fallback: true),
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    final approved = await _requestMobileApproval(
+      toolName: 'prompt_update',
+      prompt: 'このスマホのphone-local promptを更新します。対象: $id',
+      arguments: {
+        ...args,
+        if (content.isNotEmpty) 'content_preview': _clampText(content, 160),
+      },
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('prompt_update');
+    records[index] = updated;
+    await _store.savePromptRecords(records);
+    return _promptToolOk(
+      'prompt_update',
+      'updated phone prompt $id',
+      {
+        'prompt': _normalizePromptRecord(updated),
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptDelete(Map<String, dynamic> args) async {
+    final id = _firstText(args, const ['id', 'prompt_id']);
+    if (id.isEmpty) {
+      return _promptToolError(
+        'prompt_delete',
+        'MISSING_PROMPT_ID',
+        "'id' or 'prompt_id' is required.",
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'prompt_delete',
+      prompt: 'このスマホのphone-local promptを削除します。対象: $id',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('prompt_delete');
+    await _store.deletePromptRecord(id);
+    return _promptToolOk(
+      'prompt_delete',
+      'deleted phone prompt $id',
+      {
+        'deleted': id,
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptEffective(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final effective = await _effectivePromptData();
+    return _promptToolOk(
+      toolName,
+      'effective phone prompt ${effective['char_count']} chars',
+      {
+        ...effective,
+        'conversation_id':
+            _firstText(args, const ['conversation_id', 'chat_id']),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptPreviewToggle(
+    Map<String, dynamic> args,
+  ) async {
+    final id = _firstText(args, const ['id', 'prompt_id']);
+    final enabled = _boolArg(args['enabled'], fallback: true);
+    final effective = await _effectivePromptData(
+      previewPromptId: id,
+      previewEnabled: enabled,
+    );
+    return _promptToolOk(
+      'prompt_preview_toggle',
+      'preview ${enabled ? 'enable' : 'disable'} $id',
+      {
+        ...effective,
+        'preview': {'id': id, 'enabled': enabled, 'saved': false},
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _promptTest(Map<String, dynamic> args) async {
+    final template = _promptTextArg(args);
+    final variables = _promptVariables(args);
+    final issues = _promptTemplateIssues(template, variables, strict: false);
+    final rendered = _renderPromptTemplate(template, variables);
+    return _promptToolOk(
+      'prompt_test',
+      issues.isEmpty ? 'prompt test passed' : '${issues.length} prompt issues',
+      {
+        'valid': issues.isEmpty,
+        'issues': issues,
+        'rendered': rendered,
+        'variables': _promptTemplateVariables(template).toList()..sort(),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+      ok: issues.isEmpty,
+    );
+  }
+
+  Future<Map<String, dynamic>> _effectivePromptData({
+    String previewPromptId = '',
+    bool? previewEnabled,
+  }) async {
+    final config = await _store.loadApi();
+    final records = await _store.loadPromptRecords();
+    final segments = <Map<String, dynamic>>[];
+    if (config.systemPrompt.trim().isNotEmpty) {
+      segments.add({
+        'id': 'system',
+        'title': 'Phone system prompt',
+        'content': config.systemPrompt,
+        'source': 'phone-system',
+        'enabled': true,
+      });
+    }
+    for (final raw in records) {
+      final record = _normalizePromptRecord(raw);
+      final id = '${record['id'] ?? ''}'.trim();
+      var enabled = record['enabled'] != false;
+      if (previewPromptId.isNotEmpty && id == previewPromptId) {
+        enabled = previewEnabled ?? enabled;
+      }
+      if (!enabled) continue;
+      segments.add({...record, 'enabled': enabled});
+    }
+    final effectivePrompt = segments
+        .map((segment) => '${segment['content'] ?? ''}'.trim())
+        .where((content) => content.isNotEmpty)
+        .join('\n\n');
+    return {
+      'segments': segments,
+      'segment_count': segments.length,
+      'effective_prompt': effectivePrompt,
+      'char_count': effectivePrompt.length,
+      'source': 'phone',
+      'agent_template': _agentTemplateRecord(),
+    };
+  }
+
+  Map<String, dynamic> _normalizePromptRecord(Map<String, dynamic> record) {
+    final content = '${record['content'] ?? record['prompt'] ?? ''}';
+    final id = '${record['id'] ?? ''}'.trim();
+    return {
+      'id': id,
+      'title': '${record['title'] ?? record['name'] ?? id}'.trim(),
+      'content': content,
+      'enabled': record['enabled'] is bool ? record['enabled'] : true,
+      'source': '${record['source'] ?? 'phone'}',
+      'char_count': content.length,
+      if (record['created_at'] != null) 'created_at': record['created_at'],
+      if (record['updated_at'] != null) 'updated_at': record['updated_at'],
+    };
+  }
+
+  String _promptTextArg(Map<String, dynamic> args) {
+    return _firstText(
+      args,
+      const ['template', 'prompt', 'content', 'text', 'system_prompt'],
+    );
+  }
+
+  Map<String, String> _promptVariables(Map<String, dynamic> args) {
+    final raw = args['variables'] ?? args['vars'];
+    if (raw is! Map) return {};
+    return {
+      for (final entry in raw.entries)
+        '${entry.key}'.trim(): '${entry.value ?? ''}'
+    }..removeWhere((key, value) => key.isEmpty);
+  }
+
+  Set<String> _promptTemplateVariables(String template) {
+    final variables = <String>{};
+    for (final match in RegExp(
+      r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*\}\}',
+    ).allMatches(template)) {
+      variables.add(match.group(1)!);
+    }
+    return variables;
+  }
+
+  Set<String> _missingPromptVariables(
+    String template,
+    Map<String, String> variables,
+  ) {
+    final found = _promptTemplateVariables(template);
+    return found.where((name) => !variables.containsKey(name)).toSet();
+  }
+
+  List<Map<String, dynamic>> _promptTemplateIssues(
+    String template,
+    Map<String, String> variables, {
+    required bool strict,
+  }) {
+    final issues = <Map<String, dynamic>>[];
+    final openCount = RegExp(r'\{\{').allMatches(template).length;
+    final closeCount = RegExp(r'\}\}').allMatches(template).length;
+    if (openCount != closeCount) {
+      issues.add({
+        'code': 'UNBALANCED_MUSTACHE',
+        'message': 'Template has unbalanced {{ }} markers.',
+      });
+    }
+    final invalid = RegExp(r'\{\{([^}]*)\}\}').allMatches(template).where(
+      (match) {
+        final name = (match.group(1) ?? '').trim();
+        return !RegExp(r'^[a-zA-Z_][a-zA-Z0-9_.-]*$').hasMatch(name);
+      },
+    );
+    for (final match in invalid) {
+      issues.add({
+        'code': 'INVALID_VARIABLE_NAME',
+        'message': 'Invalid variable name: ${match.group(1)}',
+      });
+    }
+    final missing = _missingPromptVariables(template, variables).toList()
+      ..sort();
+    if (strict && missing.isNotEmpty) {
+      issues.add({
+        'code': 'MISSING_VARIABLES',
+        'message': 'Missing variables: ${missing.join(', ')}',
+        'variables': missing,
+      });
+    }
+    return issues;
+  }
+
+  String _renderPromptTemplate(
+    String template,
+    Map<String, String> variables,
+  ) {
+    return template.replaceAllMapped(
+      RegExp(r'\{\{\s*([a-zA-Z_][a-zA-Z0-9_.-]*)\s*\}\}'),
+      (match) {
+        final name = match.group(1)!;
+        return variables.containsKey(name) ? variables[name]! : match.group(0)!;
+      },
+    );
+  }
+
+  List<Map<String, dynamic>> _promptLintIssues(
+    String prompt, {
+    required int maxChars,
+  }) {
+    final issues = <Map<String, dynamic>>[];
+    if (prompt.length > maxChars) {
+      issues.add({
+        'code': 'PROMPT_TOO_LONG',
+        'message': 'Prompt exceeds $maxChars chars.',
+        'char_count': prompt.length,
+      });
+    }
+    final lines = const LineSplitter()
+        .convert(prompt)
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
+    final seen = <String, int>{};
+    for (final line in lines) {
+      seen[line] = (seen[line] ?? 0) + 1;
+    }
+    final repeated = seen.entries
+        .where((entry) => entry.value >= 3 && entry.key.length > 12)
+        .map((entry) => entry.key)
+        .take(5)
+        .toList();
+    if (repeated.isNotEmpty) {
+      issues.add({
+        'code': 'REPEATED_LINES',
+        'message': 'Prompt contains repeated lines.',
+        'examples': repeated,
+      });
+    }
+    final unresolved = _promptTemplateVariables(prompt).toList()..sort();
+    if (unresolved.isNotEmpty) {
+      issues.add({
+        'code': 'UNRESOLVED_TEMPLATE_VARIABLES',
+        'message': 'Prompt contains unresolved template variables.',
+        'variables': unresolved,
+      });
+    }
+    return issues;
+  }
+
+  String _compactPromptText(String prompt, {required int maxChars}) {
+    if (prompt.length <= maxChars) return prompt;
+    if (maxChars <= 40) return prompt.substring(0, maxChars);
+    const marker = '\n\n[...compact...]\n\n';
+    final room = maxChars - marker.length;
+    final head = (room * 0.65).floor();
+    final tail = room - head;
+    return prompt.substring(0, head).trimRight() +
+        marker +
+        prompt.substring(prompt.length - tail).trimLeft();
+  }
+
+  MobileToolResult _promptToolOk(
+    String toolName,
+    String summary,
+    Map<String, dynamic> data, {
+    bool ok = true,
+  }) {
+    return MobileToolResult(
+      ok: ok,
+      summary: summary,
+      output: jsonEncode({
+        'status': ok ? 'ok' : 'error',
+        'data': {
+          ...data,
+          'tool': toolName,
+          'mobile_compatible': true,
+          'requires_pc': false,
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _promptToolError(
+    String toolName,
+    String code,
+    String message,
+  ) {
+    return MobileToolResult(
+      ok: false,
+      summary: message,
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': code,
+          'message': message,
+          'tool': toolName,
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -9341,6 +10294,7 @@ String _canonicalToolName(String name) {
 bool _isAsyncPhoneToolName(String name) {
   final normalized = name.trim().toLowerCase();
   if (_phoneAiModelToolIds.contains(normalized)) return true;
+  if (_phonePromptToolIds.contains(normalized)) return true;
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
@@ -9722,6 +10676,13 @@ int _boundedConnectorLimit(Object? value, {required int defaultValue}) {
   return defaultValue;
 }
 
+int _boundedInt(Object? value, int defaultValue, int min, int max) {
+  if (value is num) return math.max(min, math.min(max, value.toInt()));
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) return math.max(min, math.min(max, parsed));
+  return math.max(min, math.min(max, defaultValue));
+}
+
 Object? _redactConnectorPayload(Object? value) {
   if (value is Map) {
     return value.map((key, item) {
@@ -9909,7 +10870,9 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
   }
   final runtimeLayers = _phoneAiModelToolIds.contains(tool.name)
       ? _orderedStrings([...tool.runtimeLayers, 'mobile-provider-config'])
-      : tool.runtimeLayers;
+      : _phonePromptToolIds.contains(tool.name)
+          ? _orderedStrings([...tool.runtimeLayers, 'mobile-prompt-store'])
+          : tool.runtimeLayers;
   return {
     'compatible': true,
     'available': true,
@@ -10002,6 +10965,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isTtsFallbackTool =
       normalized == 'tts_generate' || normalized == 'tts_generate_local';
   final isPhoneAiModelTool = _phoneAiModelToolIds.contains(normalized);
+  final isPhonePromptTool = _phonePromptToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -10232,6 +11196,32 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval':
           _phoneAiModelMutationToolIds.contains(normalized),
+      'implementation_status': status,
+    };
+  }
+  if (isPhonePromptTool) {
+    final status = switch (normalized) {
+      'prompt_system_get' ||
+      'prompt_system_set' =>
+        'implemented_phone_prompt_system',
+      'prompt_list' ||
+      'prompt_create' ||
+      'prompt_update' ||
+      'prompt_delete' =>
+        'implemented_phone_prompt_store',
+      'prompt_active' ||
+      'prompt_load_effective' ||
+      'prompt_resolve_for_conversation' =>
+        'implemented_phone_prompt_effective',
+      'prompt_preview_toggle' => 'implemented_phone_prompt_preview',
+      _ => 'implemented_phone_prompt_text',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': [..._flutterRuntimeLayers, 'mobile-prompt-store'],
+      'native_layers': [],
+      'requires_mobile_approval':
+          _phonePromptMutationToolIds.contains(normalized),
       'implementation_status': status,
     };
   }

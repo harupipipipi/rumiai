@@ -322,6 +322,21 @@ void main() {
           'ai_recommend_model',
           'ai_route_model',
           'ai_explain_model_choice',
+          'prompt_validate_template',
+          'prompt_render',
+          'prompt_lint_prompt',
+          'prompt_compact_prompt',
+          'prompt_system_get',
+          'prompt_system_set',
+          'prompt_list',
+          'prompt_create',
+          'prompt_update',
+          'prompt_delete',
+          'prompt_active',
+          'prompt_load_effective',
+          'prompt_resolve_for_conversation',
+          'prompt_preview_toggle',
+          'prompt_test',
           'browser_open_url',
           'agent_plan',
           'agent_progress',
@@ -460,6 +475,86 @@ void main() {
           as Map<String, dynamic>)['data'] as Map<String, dynamic>;
       expect(routeData['selected_provider_id'], 'openai');
       expect(routeData['execution_location'], 'phone');
+    });
+
+    test('runs phone-local prompt system template and store tools', () async {
+      final storage = _FakeSecureStorage();
+      final approval = _FakeMobileToolApproval(true);
+      final runtime = MobileToolRuntime(
+        configStore: ApiConfigStore(storage: storage),
+        approvalDelegate: approval,
+      );
+
+      final setSystem = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'prompt_system_set',
+          name: 'prompt_system_set',
+          arguments: {
+            'system_prompt': 'You are concise about {{topic}}.',
+          },
+        ),
+      );
+      expect(setSystem.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'prompt_system_set');
+
+      final render = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'prompt_render',
+          name: 'prompt_render',
+          arguments: {
+            'template': 'Hello {{name}}',
+            'variables': {'name': 'Rumi'},
+          },
+        ),
+      );
+      expect(render.ok, isTrue);
+      final renderData = (jsonDecode(render.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(renderData['rendered'], 'Hello Rumi');
+
+      final create = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'prompt_create',
+          name: 'prompt_create',
+          arguments: {
+            'id': 'style',
+            'title': 'Style',
+            'content': 'Prefer short answers.',
+          },
+        ),
+      );
+      expect(create.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'prompt_create');
+
+      final effective = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'prompt_effective',
+          name: 'prompt_load_effective',
+          arguments: {},
+        ),
+      );
+      expect(effective.ok, isTrue);
+      final effectiveData = (jsonDecode(effective.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(
+        effectiveData['effective_prompt'],
+        contains('You are concise about {{topic}}.'),
+      );
+      expect(
+          effectiveData['effective_prompt'], contains('Prefer short answers.'));
+      expect(effectiveData['runtime_layers'], contains('flutter'));
+
+      final lint = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'prompt_lint',
+          name: 'prompt_lint_prompt',
+          arguments: {'prompt': 'Use {{missing}}.'},
+        ),
+      );
+      expect(lint.ok, isFalse);
+      final lintData = (jsonDecode(lint.output) as Map<String, dynamic>)['data']
+          as Map<String, dynamic>;
+      expect(lintData['issues'], isNotEmpty);
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -3376,6 +3471,45 @@ void main() {
         expect(mobile['requires_mobile_approval'], entry.value[1]);
         expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
         expect(mobile['runtime_layers'], contains('mobile-provider-config'));
+        expect(data['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'prompt_validate_template': ['implemented_phone_prompt_text', false],
+        'prompt_render': ['implemented_phone_prompt_text', false],
+        'prompt_lint_prompt': ['implemented_phone_prompt_text', false],
+        'prompt_compact_prompt': ['implemented_phone_prompt_text', false],
+        'prompt_test': ['implemented_phone_prompt_text', false],
+        'prompt_system_get': ['implemented_phone_prompt_system', false],
+        'prompt_system_set': ['implemented_phone_prompt_system', true],
+        'prompt_list': ['implemented_phone_prompt_store', false],
+        'prompt_create': ['implemented_phone_prompt_store', true],
+        'prompt_update': ['implemented_phone_prompt_store', true],
+        'prompt_delete': ['implemented_phone_prompt_store', true],
+        'prompt_active': ['implemented_phone_prompt_effective', false],
+        'prompt_load_effective': ['implemented_phone_prompt_effective', false],
+        'prompt_resolve_for_conversation': [
+          'implemented_phone_prompt_effective',
+          false
+        ],
+        'prompt_preview_toggle': ['implemented_phone_prompt_preview', false],
+      }.entries) {
+        final schema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final mobile = data['mobile'] as Map<String, dynamic>;
+        expect(data['mobile_compatible'], isTrue);
+        expect(data['execution_route'], 'phone');
+        expect(mobile['implementation_status'], entry.value[0]);
+        expect(mobile['requires_mobile_approval'], entry.value[1]);
+        expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(mobile['runtime_layers'], contains('mobile-prompt-store'));
         expect(data['tags'], contains(mobileFlutterTag));
       }
 

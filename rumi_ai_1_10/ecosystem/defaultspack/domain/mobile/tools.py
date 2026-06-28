@@ -80,6 +80,23 @@ _PHONE_AI_MODEL_TOOLS = {
     "ai_route_model": ("implemented_phone_ai_routing_hint", False),
     "ai_explain_model_choice": ("implemented_phone_ai_routing_hint", False),
 }
+_PHONE_PROMPT_TOOLS = {
+    "prompt_validate_template": ("implemented_phone_prompt_text", False),
+    "prompt_render": ("implemented_phone_prompt_text", False),
+    "prompt_lint_prompt": ("implemented_phone_prompt_text", False),
+    "prompt_compact_prompt": ("implemented_phone_prompt_text", False),
+    "prompt_test": ("implemented_phone_prompt_text", False),
+    "prompt_system_get": ("implemented_phone_prompt_system", False),
+    "prompt_system_set": ("implemented_phone_prompt_system", True),
+    "prompt_list": ("implemented_phone_prompt_store", False),
+    "prompt_create": ("implemented_phone_prompt_store", True),
+    "prompt_update": ("implemented_phone_prompt_store", True),
+    "prompt_delete": ("implemented_phone_prompt_store", True),
+    "prompt_active": ("implemented_phone_prompt_effective", False),
+    "prompt_load_effective": ("implemented_phone_prompt_effective", False),
+    "prompt_resolve_for_conversation": ("implemented_phone_prompt_effective", False),
+    "prompt_preview_toggle": ("implemented_phone_prompt_preview", False),
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -307,6 +324,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart", "mobile-provider-config"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
+        }
+    if tool_id in _PHONE_PROMPT_TOOLS:
+        status, requires_approval = _PHONE_PROMPT_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-prompt-store"],
             "native_layers": [],
             "requires_mobile_approval": requires_approval,
             "implementation_status": status,
