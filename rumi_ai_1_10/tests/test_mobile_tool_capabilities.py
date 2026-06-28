@@ -124,6 +124,18 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["media", "tool"],
             },
             {
+                "tool_id": "pdf_extract",
+                "name": "pdf_extract",
+                "summary": "Extract PDF bytes",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "pdf_extract_tables",
+                "name": "pdf_extract_tables",
+                "summary": "Extract PDF tables",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "source_extract",
                 "name": "source_extract",
                 "summary": "Extract source payload",
@@ -204,6 +216,20 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["media_pdf_parse"]["mobile"]["implementation_status"] == "implemented_best_effort_bytes"
     assert "flutter" in by_id["media_pdf_parse"]["mobile"]["runtime_layers"]
     assert "dart" in by_id["media_pdf_parse"]["mobile"]["runtime_layers"]
+
+    assert by_id["pdf_extract"]["mobile_compatible"] is True
+    assert by_id["pdf_extract"]["execution_route"] == "phone"
+    assert by_id["pdf_extract"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["pdf_extract"]["mobile"]["implementation_status"] == "implemented_best_effort_bytes"
+    assert "flutter" in by_id["pdf_extract"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["pdf_extract"]["mobile"]["runtime_layers"]
+
+    assert by_id["pdf_extract_tables"]["mobile_compatible"] is True
+    assert by_id["pdf_extract_tables"]["execution_route"] == "phone"
+    assert by_id["pdf_extract_tables"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["pdf_extract_tables"]["mobile"]["implementation_status"] == "implemented_empty_table_fallback"
+    assert "flutter" in by_id["pdf_extract_tables"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["pdf_extract_tables"]["mobile"]["runtime_layers"]
 
     assert by_id["source_extract"]["mobile_compatible"] is True
     assert by_id["source_extract"]["execution_route"] == "phone"

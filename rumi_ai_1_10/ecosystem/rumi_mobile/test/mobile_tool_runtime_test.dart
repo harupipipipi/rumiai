@@ -207,6 +207,8 @@ void main() {
           'image_convert',
           'media_doc_parse',
           'media_pdf_parse',
+          'pdf_extract',
+          'pdf_extract_tables',
           'source_extract',
           'source_rank',
           'mobile_platform_info',
@@ -1007,6 +1009,48 @@ void main() {
       expect(error['code'], 'UNSUPPORTED_PATH');
     });
 
+    test('pdf_extract returns best-effort text from phone-provided bytes', () {
+      final pdf = '%PDF-1.4\nBT (PDF extract text) Tj ET\n%%EOF';
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'pdf_extract_1',
+          name: 'pdf_extract',
+          arguments: {'pdf_base64': base64Encode(latin1.encode(pdf))},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['text'], contains('PDF extract text'));
+      expect(metadata['payload_only'], isTrue);
+      expect(metadata['tables_supported'], isFalse);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('pdf_extract_tables returns explicit phone fallback', () {
+      final pdf = '%PDF-1.4\nBT (Table-ish PDF text) Tj ET\n%%EOF';
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'pdf_extract_tables_1',
+          name: 'pdf_extract_tables',
+          arguments: {'pdf_base64': base64Encode(latin1.encode(pdf))},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['tables'], isEmpty);
+      expect(data['table_count'], 0);
+      expect(metadata['tables_supported'], isFalse);
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
     test('extracts provided HTML source payload on phone', () {
       const html = '<html><head><title>Source Title</title></head>'
           '<body><h1>Hello</h1><p>mobile research &amp; ranking</p></body></html>';
@@ -1449,6 +1493,46 @@ void main() {
       expect(
           pdfParseMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(pdfParseData['tags'], contains(mobileFlutterTag));
+
+      final pdfExtractSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_pdf_extract_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'pdf_extract'},
+        ),
+      );
+      final pdfExtractPayload =
+          jsonDecode(pdfExtractSchema.output) as Map<String, dynamic>;
+      final pdfExtractData = pdfExtractPayload['data'] as Map<String, dynamic>;
+      final pdfExtractMobile = pdfExtractData['mobile'] as Map<String, dynamic>;
+      expect(pdfExtractData['mobile_compatible'], isTrue);
+      expect(pdfExtractData['execution_route'], 'phone');
+      expect(pdfExtractMobile['requires_mobile_approval'], isFalse);
+      expect(pdfExtractMobile['implementation_status'],
+          'implemented_best_effort_bytes');
+      expect(
+          pdfExtractMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(pdfExtractData['tags'], contains(mobileFlutterTag));
+
+      final pdfTablesSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_pdf_tables_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'pdf_extract_tables'},
+        ),
+      );
+      final pdfTablesPayload =
+          jsonDecode(pdfTablesSchema.output) as Map<String, dynamic>;
+      final pdfTablesData = pdfTablesPayload['data'] as Map<String, dynamic>;
+      final pdfTablesMobile = pdfTablesData['mobile'] as Map<String, dynamic>;
+      expect(pdfTablesData['mobile_compatible'], isTrue);
+      expect(pdfTablesData['execution_route'], 'phone');
+      expect(pdfTablesMobile['requires_mobile_approval'], isFalse);
+      expect(pdfTablesMobile['implementation_status'],
+          'implemented_empty_table_fallback');
+      expect(
+          pdfTablesMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(pdfTablesData['tags'], contains(mobileFlutterTag));
 
       final sourceExtractSchema = runtime.execute(
         const MobileToolCall(

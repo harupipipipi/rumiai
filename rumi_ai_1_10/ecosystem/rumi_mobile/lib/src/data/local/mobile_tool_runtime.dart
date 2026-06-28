@@ -1054,6 +1054,76 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'pdf_extract',
+      description:
+          'Extract best-effort text from PDF bytes already provided to this phone runtime. Does not read PC artifact paths.',
+      tags: ['tool', 'media', 'pdf', 'document', mobileCompatibleTag],
+      aliases: [
+        'defaults_pdf_extract',
+        'defaultspack_pdf_extract',
+        'defaults.pdf.extract',
+        'defaultspack.pdf.extract',
+      ],
+      implementationStatus: 'implemented_best_effort_bytes',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'pdf_base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'path': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardPdfParseMaxBytes,
+            'default': _defaultPdfParseMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardPdfParseMaxChars,
+            'default': _defaultPdfParseMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'pdf_extract_tables',
+      description:
+          'Return a phone-local PDF table extraction fallback for PDF bytes already provided to this phone runtime. Full table extraction remains PC/provider-only.',
+      tags: ['tool', 'media', 'pdf', 'table', mobileCompatibleTag],
+      aliases: [
+        'defaults_pdf_extract_tables',
+        'defaultspack_pdf_extract_tables',
+        'defaults.pdf.extract_tables',
+        'defaultspack.pdf.extract_tables',
+      ],
+      implementationStatus: 'implemented_empty_table_fallback',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'pdf_base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'path': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardPdfParseMaxBytes,
+            'default': _defaultPdfParseMaxBytes,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'source_extract',
       description:
           'Extract text and title metadata from source text, HTML, or URL payloads already provided to this phone runtime. Does not read PC workspace paths.',
@@ -1565,6 +1635,10 @@ class MobileToolRuntime {
         return _mediaDocParse(call.arguments);
       case 'media_pdf_parse':
         return _mediaPdfParse(call.arguments);
+      case 'pdf_extract':
+        return _pdfExtract(call.arguments);
+      case 'pdf_extract_tables':
+        return _pdfExtractTables(call.arguments);
       case 'source_extract':
         return _sourceExtract(call.arguments);
       case 'source_rank':
@@ -2708,6 +2782,82 @@ class MobileToolRuntime {
         }),
       );
     }
+  }
+
+  MobileToolResult _pdfExtract(Map<String, dynamic> args) {
+    final parsed = _mediaPdfParse(args);
+    if (!parsed.ok) return parsed;
+    final payload = _decodeObject(parsed.output);
+    final data = payload['data'];
+    final parsedData = data is Map<String, dynamic>
+        ? data
+        : data is Map
+            ? data.map((key, value) => MapEntry('$key', value))
+            : const <String, dynamic>{};
+    final metadataRaw = parsedData['metadata'];
+    final metadata = metadataRaw is Map<String, dynamic>
+        ? metadataRaw
+        : metadataRaw is Map
+            ? metadataRaw.map((key, value) => MapEntry('$key', value))
+            : const <String, dynamic>{};
+    final text = '${parsedData['text'] ?? parsedData['content'] ?? ''}';
+    return MobileToolResult(
+      ok: true,
+      summary: 'extracted PDF ${text.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'text': text,
+          'content': text,
+          'fallback': metadata['method'] ?? 'best_effort_phone_pdf_scan',
+          'length': parsedData['length'] ?? text.length,
+          'returned_length': parsedData['returned_length'] ?? text.length,
+          'truncated': parsedData['truncated'] ?? false,
+          'metadata': {
+            ...metadata,
+            'payload_only': true,
+            'tables_supported': false,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _pdfExtractTables(Map<String, dynamic> args) {
+    final parsed = _mediaPdfParse({...args, 'max_chars': 4000});
+    if (!parsed.ok) return parsed;
+    final payload = _decodeObject(parsed.output);
+    final data = payload['data'];
+    final parsedData = data is Map<String, dynamic>
+        ? data
+        : data is Map
+            ? data.map((key, value) => MapEntry('$key', value))
+            : const <String, dynamic>{};
+    return MobileToolResult(
+      ok: true,
+      summary: 'PDF table extraction fallback returned 0 tables',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'tables': const <dynamic>[],
+          'table_count': 0,
+          'text_preview': parsedData['content'] ?? '',
+          'missing_dependency':
+              'Full PDF table extraction requires the connected PC/provider runtime.',
+          'metadata': {
+            'payload_only': true,
+            'best_effort': true,
+            'tables_supported': false,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
   }
 
   MobileToolResult _sourceExtract(Map<String, dynamic> args) {
@@ -3857,6 +4007,8 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       normalized == 'image_resize' || normalized == 'image_convert';
   final isDocParse = normalized == 'media_doc_parse';
   final isPdfParse = normalized == 'media_pdf_parse';
+  final isPdfPayloadTool =
+      normalized == 'pdf_extract' || normalized == 'pdf_extract_tables';
   final isSourcePayloadTool =
       normalized == 'source_extract' || normalized == 'source_rank';
   if (isClipboard) {
@@ -3944,6 +4096,17 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_best_effort_bytes',
+    };
+  }
+  if (isPdfPayloadTool) {
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
+      'implementation_status': normalized == 'pdf_extract_tables'
+          ? 'implemented_empty_table_fallback'
+          : 'implemented_best_effort_bytes',
     };
   }
   if (isSourcePayloadTool) {
@@ -4222,6 +4385,12 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'media_pdf_parse') {
     return 'このdefaultspack-compatible toolはDartで渡されたPDF bytesのbest-effort text抽出にスマホ対応済みです。フルlayout/table抽出はPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'pdf_extract') {
+    return 'このdefaultspack-compatible toolはDartで渡されたPDF bytesのbest-effort text抽出にスマホ対応済みです。PC artifact pathはPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'pdf_extract_tables') {
+    return 'このdefaultspack-compatible toolはスマホでは空table fallbackまで対応済みです。フルPDF table抽出はPC runtimeへ委譲してください。';
   }
   if (normalized == 'source_extract') {
     return 'このdefaultspack-compatible toolはDartで渡されたtext/html/url payloadの抽出にスマホ対応済みです。PC workspace pathはPC runtimeへ委譲してください。';
