@@ -169,6 +169,7 @@ void main() {
           'media_clipboard_write',
           'media_file_pick',
           'media_screenshot',
+          'media_image_read',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -534,6 +535,72 @@ void main() {
       expect(error['code'], 'MOBILE_APPROVAL_REQUIRED');
     });
 
+    test('reads phone-provided image metadata through media_image_read', () {
+      final pngHeader = base64Encode([
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+        0x00,
+        0x00,
+        0x00,
+        0x0d,
+        0x49,
+        0x48,
+        0x44,
+        0x52,
+        0x00,
+        0x00,
+        0x00,
+        0x02,
+        0x00,
+        0x00,
+        0x00,
+        0x03,
+      ]);
+
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'image_read_1',
+          name: 'defaultspack.media.image_read',
+          arguments: {
+            'image': {
+              'base64': 'data:image/png;base64,$pngHeader',
+            },
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      expect(data['width'], 2);
+      expect(data['height'], 3);
+      expect(data['format'], 'png');
+      expect(data['mime_type'], 'image/png');
+      expect(data['execution_location'], 'phone');
+      expect(data['requires_mobile_approval'], isFalse);
+    });
+
+    test('media_image_read does not read host paths on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'image_read_path_1',
+          name: 'media_image_read',
+          arguments: {'path': '/tmp/image.png'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+    });
+
     test('runs mobile-compatible tools through defaultspack tool_invoke', () {
       final result = runtime.execute(
         const MobileToolCall(
@@ -774,6 +841,24 @@ void main() {
           containsAll(['flutter', 'ios-swift', 'android-kotlin']));
       expect(screenshotData['tags'], contains(mobileSwiftNativeTag));
       expect(screenshotData['tags'], contains(mobileKotlinNativeTag));
+
+      final imageReadSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_image_read_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'media_image_read'},
+        ),
+      );
+      final imageReadPayload =
+          jsonDecode(imageReadSchema.output) as Map<String, dynamic>;
+      final imageReadData = imageReadPayload['data'] as Map<String, dynamic>;
+      final imageReadMobile = imageReadData['mobile'] as Map<String, dynamic>;
+      expect(imageReadData['mobile_compatible'], isTrue);
+      expect(imageReadData['execution_route'], 'phone');
+      expect(imageReadMobile['requires_mobile_approval'], isFalse);
+      expect(
+          imageReadMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+      expect(imageReadData['tags'], contains(mobileFlutterTag));
 
       final computerSchema = runtime.execute(
         const MobileToolCall(

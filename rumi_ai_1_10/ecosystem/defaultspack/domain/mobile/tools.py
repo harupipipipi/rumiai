@@ -260,6 +260,13 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             ],
             "requires_mobile_approval": True,
         }
+    if tool_id == "media_image_read":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+        }
     return None
 
 
@@ -310,6 +317,14 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
                 "android:Kotlin View drawing cache capture",
             ],
             "requires_mobile_approval": True,
+            "implementation_status": "implemented",
+        }
+    if tool_id == "media_image_read":
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
             "implementation_status": "implemented",
         }
     if "media" in tags or tool_id.startswith(("audio_", "image_", "ocr_")):

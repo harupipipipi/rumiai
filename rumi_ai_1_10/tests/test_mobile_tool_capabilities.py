@@ -87,6 +87,12 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "summary": "Capture a phone screenshot",
                 "tags": ["media", "tool"],
             },
+            {
+                "tool_id": "media_image_read",
+                "name": "media_image_read",
+                "summary": "Read image metadata",
+                "tags": ["media", "tool"],
+            },
         ]
     )
 
@@ -114,6 +120,13 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
     assert by_id["media_screenshot"]["mobile"]["implementation_status"] == "implemented"
     assert "ios-swift" in by_id["media_screenshot"]["mobile"]["runtime_layers"]
     assert "android-kotlin" in by_id["media_screenshot"]["mobile"]["runtime_layers"]
+
+    assert by_id["media_image_read"]["mobile_compatible"] is True
+    assert by_id["media_image_read"]["execution_route"] == "phone"
+    assert by_id["media_image_read"]["mobile"]["requires_mobile_approval"] is False
+    assert by_id["media_image_read"]["mobile"]["implementation_status"] == "implemented"
+    assert "flutter" in by_id["media_image_read"]["mobile"]["runtime_layers"]
+    assert "dart" in by_id["media_image_read"]["mobile"]["runtime_layers"]
 
 
 def test_mobile_tool_summary_includes_defaultspack_agent_template() -> None:

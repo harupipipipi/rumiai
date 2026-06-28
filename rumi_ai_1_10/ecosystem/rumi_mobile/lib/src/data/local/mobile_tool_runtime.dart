@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:uuid/uuid.dart';
 
@@ -183,6 +184,8 @@ const _defaultScreenshotMaxBytes = 6 * 1024 * 1024;
 const _hardScreenshotMaxBytes = 12 * 1024 * 1024;
 const _defaultScreenshotMaxDimension = 1600;
 const _hardScreenshotMaxDimension = 4096;
+const _defaultImageReadMaxBytes = 8 * 1024 * 1024;
+const _hardImageReadMaxBytes = 16 * 1024 * 1024;
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -750,6 +753,38 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'media_image_read',
+      description:
+          'Read metadata from PNG, JPEG, GIF, WebP, or BMP image bytes already provided to this phone runtime.',
+      tags: ['tool', 'media', 'image', mobileCompatibleTag],
+      aliases: [
+        'image_read',
+        'defaults_media_image_read',
+        'defaultspack_media_image_read',
+        'defaults.media.image.read',
+        'defaults.media.image_read',
+        'defaultspack.media.image.read',
+        'defaultspack.media.image_read',
+      ],
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'image_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'image': {'type': 'object'},
+          'file': {'type': 'object'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardImageReadMaxBytes,
+            'default': _defaultImageReadMaxBytes,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'tool_search',
       description:
           'Search the mobile tool catalog and explain whether defaultspack tools are available on this phone.',
@@ -1187,6 +1222,8 @@ class MobileToolRuntime {
       case 'media_file_pick':
       case 'media_screenshot':
         return _asyncOnlyTool(name);
+      case 'media_image_read':
+        return _mediaImageRead(call.arguments);
       case 'tool_search':
         return _toolSearch(call.arguments);
       case 'tool_names':
@@ -1321,6 +1358,7 @@ class MobileToolRuntime {
       'media_clipboard_write',
       'media_file_pick',
       'media_screenshot',
+      'media_image_read',
     }.contains(name)) {
       return false;
     }
@@ -1833,6 +1871,95 @@ class MobileToolRuntime {
         output: jsonEncode({
           'status': 'error',
           'error': {'code': 'INVALID_BASE64', 'message': '$error'},
+        }),
+      );
+    }
+  }
+
+  MobileToolResult _mediaImageRead(Map<String, dynamic> args) {
+    final maxBytes = _boundedImageReadMaxBytes(args['max_bytes']);
+    final base64Image = _extractImageBase64(args);
+    if (base64Image == null || base64Image.trim().isEmpty) {
+      final path = '${args['path'] ?? ''}'.trim();
+      return MobileToolResult(
+        ok: false,
+        summary: 'image bytes are required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': path.isEmpty ? 'MISSING_IMAGE_BYTES' : 'UNSUPPORTED_PATH',
+            'message': path.isEmpty
+                ? 'base64, image_base64, data_url, image.base64, or file.base64 is required.'
+                : 'Phone-local media_image_read cannot read host file paths. Use media_file_pick or pass base64 image bytes.',
+            if (path.isNotEmpty) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    try {
+      final bytes = base64Decode(_stripDataUrlPrefix(base64Image));
+      if (bytes.length > maxBytes) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'image is too large',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'IMAGE_TOO_LARGE',
+              'message': 'Image bytes are larger than max_bytes.',
+              'size_bytes': bytes.length,
+              'max_bytes': maxBytes,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      final metadata = _readImageHeader(bytes);
+      if (metadata == null) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'unsupported image format',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'UNSUPPORTED_IMAGE_FORMAT',
+              'message':
+                  'Only PNG, JPEG, GIF, WebP, and BMP headers are supported on this phone.',
+              'size_bytes': bytes.length,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      return MobileToolResult(
+        ok: true,
+        summary: '${metadata.format} ${metadata.width}x${metadata.height}',
+        output: jsonEncode({
+          'status': 'ok',
+          'data': {
+            'width': metadata.width,
+            'height': metadata.height,
+            'format': metadata.format,
+            'mime_type': metadata.mimeType,
+            'size_bytes': bytes.length,
+            'execution_location': 'phone',
+            'runtime_layers': _flutterRuntimeLayers,
+            'requires_mobile_approval': false,
+          },
+        }),
+      );
+    } catch (error) {
+      return MobileToolResult(
+        ok: false,
+        summary: 'image read failed',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': 'IMAGE_READ_FAILED',
+            'message': '$error',
+            'execution_location': 'phone',
+          },
         }),
       );
     }
@@ -2838,6 +2965,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       normalized == 'media_clipboard_write';
   final isMediaPicker = normalized == 'media_file_pick';
   final isScreenshot = normalized == 'media_screenshot';
+  final isImageRead = normalized == 'media_image_read';
   if (isClipboard) {
     return const {
       'platforms': _defaultMobilePlatforms,
@@ -2871,6 +2999,15 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
         'android:Kotlin View drawing cache capture',
       ],
       'requires_mobile_approval': true,
+      'implementation_status': 'implemented',
+    };
+  }
+  if (isImageRead) {
+    return const {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _flutterRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
       'implementation_status': 'implemented',
     };
   }
@@ -3125,6 +3262,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   if (normalized == 'media_screenshot') {
     return 'このdefaultspack-compatible toolはiOS Swift/Android KotlinのRumiアプリ画面captureでスマホ実装済みです。';
   }
+  if (normalized == 'media_image_read') {
+    return 'このdefaultspack-compatible toolはDartの画像ヘッダー解析でスマホ実装済みです。';
+  }
   if (hasAny(['desktop', 'computer_use', 'computer'])) {
     return 'このdefaultspack toolはPC側のdesktop/computer-use権限と画面状態に依存するため、このスマホ単体では実行できません。PC接続時にPC側runtimeで実行してください。';
   }
@@ -3304,6 +3444,244 @@ int _boundedScreenshotMaxDimension(Object? value) {
     return math.max(320, math.min(_hardScreenshotMaxDimension, parsed));
   }
   return _defaultScreenshotMaxDimension;
+}
+
+int _boundedImageReadMaxBytes(Object? value) {
+  if (value is num) {
+    return math.max(1, math.min(_hardImageReadMaxBytes, value.toInt()));
+  }
+  final parsed = int.tryParse('${value ?? ''}'.trim());
+  if (parsed != null) {
+    return math.max(1, math.min(_hardImageReadMaxBytes, parsed));
+  }
+  return _defaultImageReadMaxBytes;
+}
+
+String? _extractImageBase64(Object? value, [int depth = 0]) {
+  if (depth > 4 || value == null) return null;
+  if (value is String) {
+    final text = value.trim();
+    if (text.isEmpty) return null;
+    if (text.startsWith('data:image/') || _looksLikeBase64(text)) return text;
+    try {
+      final decoded = jsonDecode(text);
+      return _extractImageBase64(decoded, depth + 1);
+    } catch (_) {
+      return null;
+    }
+  }
+  if (value is Map) {
+    for (final key in const [
+      'base64',
+      'image_base64',
+      'data_base64',
+      'data_url',
+      'content',
+      'data',
+    ]) {
+      final found = _extractImageBase64(value[key], depth + 1);
+      if (found != null) return found;
+    }
+    for (final key in const ['image', 'file', 'result', 'output']) {
+      final found = _extractImageBase64(value[key], depth + 1);
+      if (found != null) return found;
+    }
+  }
+  return null;
+}
+
+String _stripDataUrlPrefix(String value) {
+  final text = value.trim();
+  final comma = text.indexOf(',');
+  if (text.startsWith('data:image/') && comma >= 0) {
+    return text.substring(comma + 1).trim();
+  }
+  return text;
+}
+
+bool _looksLikeBase64(String value) {
+  final text = _stripDataUrlPrefix(value).replaceAll(RegExp(r'\s+'), '');
+  if (text.length < 16) return false;
+  return RegExp(r'^[A-Za-z0-9+/=_-]+$').hasMatch(text);
+}
+
+_MobileImageMetadata? _readImageHeader(Uint8List bytes) {
+  if (_isPng(bytes)) {
+    return _MobileImageMetadata(
+      width: _readUint32Be(bytes, 16),
+      height: _readUint32Be(bytes, 20),
+      format: 'png',
+      mimeType: 'image/png',
+    );
+  }
+  if (_isGif(bytes)) {
+    return _MobileImageMetadata(
+      width: _readUint16Le(bytes, 6),
+      height: _readUint16Le(bytes, 8),
+      format: 'gif',
+      mimeType: 'image/gif',
+    );
+  }
+  if (_isBmp(bytes)) {
+    return _MobileImageMetadata(
+      width: _readInt32Le(bytes, 18).abs(),
+      height: _readInt32Le(bytes, 22).abs(),
+      format: 'bmp',
+      mimeType: 'image/bmp',
+    );
+  }
+  final jpeg = _readJpegHeader(bytes);
+  if (jpeg != null) return jpeg;
+  final webp = _readWebpHeader(bytes);
+  if (webp != null) return webp;
+  return null;
+}
+
+bool _isPng(Uint8List bytes) =>
+    bytes.length >= 24 &&
+    bytes[0] == 0x89 &&
+    bytes[1] == 0x50 &&
+    bytes[2] == 0x4e &&
+    bytes[3] == 0x47 &&
+    bytes[4] == 0x0d &&
+    bytes[5] == 0x0a &&
+    bytes[6] == 0x1a &&
+    bytes[7] == 0x0a;
+
+bool _isGif(Uint8List bytes) =>
+    bytes.length >= 10 &&
+    bytes[0] == 0x47 &&
+    bytes[1] == 0x49 &&
+    bytes[2] == 0x46 &&
+    bytes[3] == 0x38;
+
+bool _isBmp(Uint8List bytes) =>
+    bytes.length >= 26 && bytes[0] == 0x42 && bytes[1] == 0x4d;
+
+_MobileImageMetadata? _readJpegHeader(Uint8List bytes) {
+  if (bytes.length < 4 || bytes[0] != 0xff || bytes[1] != 0xd8) return null;
+  var offset = 2;
+  while (offset + 4 < bytes.length) {
+    while (offset < bytes.length && bytes[offset] == 0xff) {
+      offset += 1;
+    }
+    if (offset >= bytes.length) return null;
+    final marker = bytes[offset];
+    offset += 1;
+    if (marker == 0xd9 || marker == 0xda) return null;
+    if (offset + 2 > bytes.length) return null;
+    final length = _readUint16Be(bytes, offset);
+    if (length < 2 || offset + length > bytes.length) return null;
+    if (_jpegSofMarkers.contains(marker)) {
+      if (offset + 7 > bytes.length) return null;
+      return _MobileImageMetadata(
+        width: _readUint16Be(bytes, offset + 5),
+        height: _readUint16Be(bytes, offset + 3),
+        format: 'jpeg',
+        mimeType: 'image/jpeg',
+      );
+    }
+    offset += length;
+  }
+  return null;
+}
+
+const _jpegSofMarkers = <int>{
+  0xc0,
+  0xc1,
+  0xc2,
+  0xc3,
+  0xc5,
+  0xc6,
+  0xc7,
+  0xc9,
+  0xca,
+  0xcb,
+  0xcd,
+  0xce,
+  0xcf,
+};
+
+_MobileImageMetadata? _readWebpHeader(Uint8List bytes) {
+  if (bytes.length < 30 ||
+      !_asciiAt(bytes, 0, 'RIFF') ||
+      !_asciiAt(bytes, 8, 'WEBP')) {
+    return null;
+  }
+  if (_asciiAt(bytes, 12, 'VP8X')) {
+    return _MobileImageMetadata(
+      width: 1 + _readUint24Le(bytes, 24),
+      height: 1 + _readUint24Le(bytes, 27),
+      format: 'webp',
+      mimeType: 'image/webp',
+    );
+  }
+  if (_asciiAt(bytes, 12, 'VP8 ') && bytes.length >= 30) {
+    return _MobileImageMetadata(
+      width: _readUint16Le(bytes, 26) & 0x3fff,
+      height: _readUint16Le(bytes, 28) & 0x3fff,
+      format: 'webp',
+      mimeType: 'image/webp',
+    );
+  }
+  if (_asciiAt(bytes, 12, 'VP8L') && bytes.length >= 25 && bytes[20] == 0x2f) {
+    final b1 = bytes[21];
+    final b2 = bytes[22];
+    final b3 = bytes[23];
+    final b4 = bytes[24];
+    return _MobileImageMetadata(
+      width: 1 + (((b2 & 0x3f) << 8) | b1),
+      height: 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6)),
+      format: 'webp',
+      mimeType: 'image/webp',
+    );
+  }
+  return null;
+}
+
+bool _asciiAt(Uint8List bytes, int offset, String text) {
+  if (offset < 0 || offset + text.length > bytes.length) return false;
+  for (var i = 0; i < text.length; i += 1) {
+    if (bytes[offset + i] != text.codeUnitAt(i)) return false;
+  }
+  return true;
+}
+
+int _readUint16Be(Uint8List bytes, int offset) =>
+    (bytes[offset] << 8) | bytes[offset + 1];
+
+int _readUint16Le(Uint8List bytes, int offset) =>
+    bytes[offset] | (bytes[offset + 1] << 8);
+
+int _readUint24Le(Uint8List bytes, int offset) =>
+    bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16);
+
+int _readUint32Be(Uint8List bytes, int offset) =>
+    (bytes[offset] << 24) |
+    (bytes[offset + 1] << 16) |
+    (bytes[offset + 2] << 8) |
+    bytes[offset + 3];
+
+int _readInt32Le(Uint8List bytes, int offset) {
+  final value = bytes[offset] |
+      (bytes[offset + 1] << 8) |
+      (bytes[offset + 2] << 16) |
+      (bytes[offset + 3] << 24);
+  return value >= 0x80000000 ? value - 0x100000000 : value;
+}
+
+class _MobileImageMetadata {
+  const _MobileImageMetadata({
+    required this.width,
+    required this.height,
+    required this.format,
+    required this.mimeType,
+  });
+
+  final int width;
+  final int height;
+  final String format;
+  final String mimeType;
 }
 
 final List<Map<String, dynamic>> _mobileTodos = [];
