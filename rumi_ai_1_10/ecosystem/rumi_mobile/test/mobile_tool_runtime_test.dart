@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rumi_remote_app/src/data/local/defaultspack_tool_agent_manifest.g.dart';
 import 'package:rumi_remote_app/src/data/local/mobile_tool_runtime.dart';
 import 'package:rumi_remote_app/src/platform/platform_services.dart';
+import 'package:rumi_remote_app/src/settings/api_config_store.dart';
 
 class _FakePcToolDelegate implements MobileToolDelegate {
   MobileToolCall? lastCall;
@@ -148,6 +149,27 @@ class _FakeOcrRecognizer extends PlatformOcrRecognizer {
   }
 }
 
+class _FakeSecureStorage implements SecureKeyValueStorage {
+  final values = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async => values[key];
+
+  @override
+  Future<void> write(String key, String? value) async {
+    if (value == null) {
+      values.remove(key);
+      return;
+    }
+    values[key] = value;
+  }
+
+  @override
+  Future<void> delete(String key) async {
+    values.remove(key);
+  }
+}
+
 class _FakeMobileToolApproval implements MobileToolApprovalDelegate {
   _FakeMobileToolApproval(this.approved);
 
@@ -284,6 +306,22 @@ void main() {
           'mobile_json',
           'mobile_base64',
           'mobile_uuid',
+          'ai_models',
+          'ai_profiles',
+          'ai_providers',
+          'ai_get_provider_key_status',
+          'ai_set_provider_key',
+          'ai_delete_provider_key',
+          'ai_get_preferred_model',
+          'ai_set_preferred_model',
+          'ai_get_thinking_level',
+          'ai_set_thinking_level',
+          'ai_get_effective_thinking_level',
+          'ai_normalize_thinking_level',
+          'ai_validate_model_params',
+          'ai_recommend_model',
+          'ai_route_model',
+          'ai_explain_model_choice',
           'browser_open_url',
           'agent_plan',
           'agent_progress',
@@ -340,6 +378,88 @@ void main() {
       final uuidPayload = jsonDecode(uuidResult.output) as Map<String, dynamic>;
       final uuidData = uuidPayload['data'] as Map<String, dynamic>;
       expect(uuidData['uuids'], hasLength(2));
+    });
+
+    test('runs phone-local AI model and provider settings tools', () async {
+      final storage = _FakeSecureStorage();
+      final approval = _FakeMobileToolApproval(true);
+      final runtime = MobileToolRuntime(
+        configStore: ApiConfigStore(storage: storage),
+        approvalDelegate: approval,
+      );
+
+      final setKey = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ai_key',
+          name: 'ai_set_provider_key',
+          arguments: {
+            'provider': 'openai',
+            'api_key': 'sk-test-secret-1234',
+            'model': 'gpt-5.4',
+            'favorite': true,
+          },
+        ),
+      );
+      expect(setKey.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'ai_set_provider_key');
+      final setKeyData = (jsonDecode(setKey.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      final providerStatus = setKeyData['provider'] as Map<String, dynamic>;
+      expect(providerStatus['has_api_key'], isTrue);
+      expect(providerStatus.containsKey('api_key'), isFalse);
+      expect(providerStatus['key_masked'], isNot(contains('secret')));
+
+      final models = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ai_models',
+          name: 'ai_models',
+          arguments: {'configured_only': true},
+        ),
+      );
+      expect(models.ok, isTrue);
+      final modelsData = (jsonDecode(models.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(modelsData['models'], isNotEmpty);
+      expect(
+        (modelsData['models'] as List).any(
+          (entry) => entry is Map && entry['provider_id'] == 'openai',
+        ),
+        isTrue,
+      );
+
+      final setThinking = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ai_thinking',
+          name: 'ai_set_thinking_level',
+          arguments: {'level': 'max'},
+        ),
+      );
+      expect(setThinking.ok, isTrue);
+      expect(approval.lastRequest?.toolName, 'ai_set_thinking_level');
+
+      final effective = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ai_effective',
+          name: 'ai_get_effective_thinking_level',
+          arguments: {},
+        ),
+      );
+      final effectiveData = (jsonDecode(effective.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(effectiveData['thinking_level'], 'xhigh');
+
+      final route = await runtime.executeAsync(
+        const MobileToolCall(
+          id: 'ai_route',
+          name: 'ai_route_model',
+          arguments: {'provider': 'openai'},
+        ),
+      );
+      expect(route.ok, isTrue);
+      final routeData = (jsonDecode(route.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(routeData['selected_provider_id'], 'openai');
+      expect(routeData['execution_location'], 'phone');
     });
 
     test('runs defaultspack todo-compatible actions on phone', () {
@@ -3204,6 +3324,58 @@ void main() {
         expect(mobile['implementation_status'], entry.value[0]);
         expect(mobile['requires_mobile_approval'], entry.value[1]);
         expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(data['tags'], contains(mobileFlutterTag));
+      }
+
+      for (final entry in const {
+        'ai_models': ['implemented_phone_ai_catalog', false],
+        'ai_profiles': ['implemented_phone_ai_catalog', false],
+        'ai_providers': ['implemented_phone_ai_catalog', false],
+        'ai_get_provider_key_status': [
+          'implemented_phone_ai_provider_key_status',
+          false
+        ],
+        'ai_set_provider_key': ['implemented_phone_ai_provider_key', true],
+        'ai_delete_provider_key': ['implemented_phone_ai_provider_key', true],
+        'ai_get_preferred_model': [
+          'implemented_phone_ai_model_settings',
+          false
+        ],
+        'ai_set_preferred_model': ['implemented_phone_ai_model_settings', true],
+        'ai_get_thinking_level': ['implemented_phone_ai_model_settings', false],
+        'ai_set_thinking_level': ['implemented_phone_ai_model_settings', true],
+        'ai_get_effective_thinking_level': [
+          'implemented_phone_ai_model_settings',
+          false
+        ],
+        'ai_normalize_thinking_level': [
+          'implemented_phone_ai_model_settings',
+          false
+        ],
+        'ai_validate_model_params': [
+          'implemented_phone_ai_param_validation',
+          false
+        ],
+        'ai_recommend_model': ['implemented_phone_ai_routing_hint', false],
+        'ai_route_model': ['implemented_phone_ai_routing_hint', false],
+        'ai_explain_model_choice': ['implemented_phone_ai_routing_hint', false],
+      }.entries) {
+        final schema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final payload = jsonDecode(schema.output) as Map<String, dynamic>;
+        final data = payload['data'] as Map<String, dynamic>;
+        final mobile = data['mobile'] as Map<String, dynamic>;
+        expect(data['mobile_compatible'], isTrue);
+        expect(data['execution_route'], 'phone');
+        expect(mobile['implementation_status'], entry.value[0]);
+        expect(mobile['requires_mobile_approval'], entry.value[1]);
+        expect(mobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(mobile['runtime_layers'], contains('mobile-provider-config'));
         expect(data['tags'], contains(mobileFlutterTag));
       }
 

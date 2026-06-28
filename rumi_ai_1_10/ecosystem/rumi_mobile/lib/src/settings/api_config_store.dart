@@ -456,6 +456,8 @@ class ApiConfigStore {
   static const _apiKey = 'rumi.api_config.v1';
   static const _providerConfigsKey = 'rumi.mobile_provider_configs.v1';
   static const _modelFavoritesKey = 'rumi.mobile_model_favorites.v1';
+  static const _modelRuntimeSettingsKey =
+      'rumi.mobile_model_runtime_settings.v1';
   static const _pcKey = 'rumi.pc_connection.v1';
   static const _notificationKey = 'rumi.mobile_notifications.v1';
 
@@ -581,6 +583,26 @@ class ApiConfigStore {
     await saveModelFavorites(
       favorites.where((favorite) => favorite.key != normalized).toList(),
     );
+  }
+
+  Future<Map<String, dynamic>> loadModelRuntimeSettings() async {
+    try {
+      final raw = await _storage.read(_modelRuntimeSettingsKey);
+      if (raw == null || raw.trim().isEmpty) return {};
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return {};
+      return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> saveModelRuntimeSettings(Map<String, dynamic> settings) async {
+    try {
+      await _storage.write(_modelRuntimeSettingsKey, jsonEncode(settings));
+    } catch (_) {
+      // ignore secure storage failures
+    }
   }
 
   Future<PcConnection?> loadPc() async {

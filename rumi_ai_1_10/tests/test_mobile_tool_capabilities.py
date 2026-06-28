@@ -220,6 +220,102 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["research", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "ai_models",
+                "name": "ai_models",
+                "summary": "List mobile AI models",
+                "tags": ["ai", "model", "catalog"],
+            },
+            {
+                "tool_id": "ai_profiles",
+                "name": "ai_profiles",
+                "summary": "List mobile AI profiles",
+                "tags": ["ai", "profile", "catalog"],
+            },
+            {
+                "tool_id": "ai_providers",
+                "name": "ai_providers",
+                "summary": "List mobile AI providers",
+                "tags": ["ai", "provider", "catalog"],
+            },
+            {
+                "tool_id": "ai_get_provider_key_status",
+                "name": "ai_get_provider_key_status",
+                "summary": "Read mobile provider key status",
+                "tags": ["ai", "provider_key"],
+            },
+            {
+                "tool_id": "ai_set_provider_key",
+                "name": "ai_set_provider_key",
+                "summary": "Set mobile provider key",
+                "tags": ["ai", "provider_key"],
+            },
+            {
+                "tool_id": "ai_delete_provider_key",
+                "name": "ai_delete_provider_key",
+                "summary": "Delete mobile provider key",
+                "tags": ["ai", "provider_key"],
+            },
+            {
+                "tool_id": "ai_get_preferred_model",
+                "name": "ai_get_preferred_model",
+                "summary": "Get preferred mobile model",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_set_preferred_model",
+                "name": "ai_set_preferred_model",
+                "summary": "Set preferred mobile model",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_get_thinking_level",
+                "name": "ai_get_thinking_level",
+                "summary": "Get thinking level",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_set_thinking_level",
+                "name": "ai_set_thinking_level",
+                "summary": "Set thinking level",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_get_effective_thinking_level",
+                "name": "ai_get_effective_thinking_level",
+                "summary": "Get effective thinking level",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_normalize_thinking_level",
+                "name": "ai_normalize_thinking_level",
+                "summary": "Normalize thinking level",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_validate_model_params",
+                "name": "ai_validate_model_params",
+                "summary": "Validate model params",
+                "tags": ["ai", "model_runtime"],
+            },
+            {
+                "tool_id": "ai_recommend_model",
+                "name": "ai_recommend_model",
+                "summary": "Recommend mobile model",
+                "tags": ["ai", "model", "routing"],
+            },
+            {
+                "tool_id": "ai_route_model",
+                "name": "ai_route_model",
+                "summary": "Route mobile model",
+                "tags": ["ai", "model", "routing"],
+            },
+            {
+                "tool_id": "ai_explain_model_choice",
+                "name": "ai_explain_model_choice",
+                "summary": "Explain mobile model routing",
+                "tags": ["ai", "model", "routing"],
+            },
+            {
                 "tool_id": "tool_batch",
                 "name": "tool_batch",
                 "summary": "Invoke multiple tools",
@@ -589,6 +685,41 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         assert by_id[tool_id]["mobile"]["implementation_status"] == status
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, (status, requires_approval) in {
+        "ai_models": ("implemented_phone_ai_catalog", False),
+        "ai_profiles": ("implemented_phone_ai_catalog", False),
+        "ai_providers": ("implemented_phone_ai_catalog", False),
+        "ai_get_provider_key_status": (
+            "implemented_phone_ai_provider_key_status",
+            False,
+        ),
+        "ai_set_provider_key": ("implemented_phone_ai_provider_key", True),
+        "ai_delete_provider_key": ("implemented_phone_ai_provider_key", True),
+        "ai_get_preferred_model": ("implemented_phone_ai_model_settings", False),
+        "ai_set_preferred_model": ("implemented_phone_ai_model_settings", True),
+        "ai_get_thinking_level": ("implemented_phone_ai_model_settings", False),
+        "ai_set_thinking_level": ("implemented_phone_ai_model_settings", True),
+        "ai_get_effective_thinking_level": (
+            "implemented_phone_ai_model_settings",
+            False,
+        ),
+        "ai_normalize_thinking_level": (
+            "implemented_phone_ai_model_settings",
+            False,
+        ),
+        "ai_validate_model_params": ("implemented_phone_ai_param_validation", False),
+        "ai_recommend_model": ("implemented_phone_ai_routing_hint", False),
+        "ai_route_model": ("implemented_phone_ai_routing_hint", False),
+        "ai_explain_model_choice": ("implemented_phone_ai_routing_hint", False),
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is requires_approval
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-provider-config" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     for tool_id, requires_approval in {
         "job_create": False,

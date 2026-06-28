@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:uuid/uuid.dart';
 
 import '../../platform/platform_services.dart';
+import '../../settings/api_config_store.dart';
+import '../../settings/defaultspack_mobile_providers.g.dart';
 import 'defaultspack_tool_agent_manifest.g.dart';
 
 const mobileCompatibleTag = 'mobile-compatible';
@@ -246,6 +248,37 @@ const _mobileConnectorPayloadDryRunToolIds = <String>{
   'discord_send',
   'line_push',
 };
+const _phoneAiModelToolIds = <String>{
+  'ai_models',
+  'ai_profiles',
+  'ai_providers',
+  'ai_get_provider_key_status',
+  'ai_set_provider_key',
+  'ai_delete_provider_key',
+  'ai_get_preferred_model',
+  'ai_set_preferred_model',
+  'ai_get_thinking_level',
+  'ai_set_thinking_level',
+  'ai_get_effective_thinking_level',
+  'ai_normalize_thinking_level',
+  'ai_validate_model_params',
+  'ai_recommend_model',
+  'ai_route_model',
+  'ai_explain_model_choice',
+};
+const _phoneAiModelMutationToolIds = <String>{
+  'ai_set_provider_key',
+  'ai_delete_provider_key',
+  'ai_set_preferred_model',
+  'ai_set_thinking_level',
+};
+const _mobileThinkingLevels = <String>{
+  'none',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+};
 
 class MobileToolDefinition {
   const MobileToolDefinition({
@@ -360,6 +393,7 @@ class MobileToolRuntime {
     PlatformImageTransformer imageTransformer =
         const PlatformImageTransformer(),
     PlatformOcrRecognizer ocrRecognizer = const PlatformOcrRecognizer(),
+    ApiConfigStore? configStore,
   })  : _pcDelegate = pcDelegate,
         _approvalDelegate = approvalDelegate,
         _urlLauncher = urlLauncher,
@@ -367,7 +401,8 @@ class MobileToolRuntime {
         _mediaPicker = mediaPicker,
         _screenshotCapture = screenshotCapture,
         _imageTransformer = imageTransformer,
-        _ocrRecognizer = ocrRecognizer;
+        _ocrRecognizer = ocrRecognizer,
+        _configStore = configStore;
 
   final MobileToolDelegate? _pcDelegate;
   final MobileToolApprovalDelegate? _approvalDelegate;
@@ -377,8 +412,10 @@ class MobileToolRuntime {
   final PlatformScreenshotCapture _screenshotCapture;
   final PlatformImageTransformer _imageTransformer;
   final PlatformOcrRecognizer _ocrRecognizer;
+  final ApiConfigStore? _configStore;
 
   bool get pcDelegationAvailable => _pcDelegate != null;
+  ApiConfigStore get _store => _configStore ?? ApiConfigStore();
 
   static const supportedTools = <MobileToolDefinition>[
     MobileToolDefinition(
@@ -630,6 +667,331 @@ class MobileToolRuntime {
             'maximum': 20,
             'default': 1,
           },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_models',
+      description:
+          'List mobile-configured defaultspack provider models on this phone.',
+      tags: ['tool', 'ai', 'model', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_ai_models', 'defaultspack_ai_models'],
+      implementationStatus: 'implemented_phone_ai_catalog',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'provider': {'type': 'string'},
+          'configured_only': {'type': 'boolean'},
+          'favorites_only': {'type': 'boolean'},
+          'query': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_profiles',
+      description:
+          'List mobile model profiles and starred models stored on this phone.',
+      tags: ['tool', 'ai', 'profile', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_ai_profiles', 'defaultspack_ai_profiles'],
+      implementationStatus: 'implemented_phone_ai_catalog',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'configured_only': {'type': 'boolean'},
+          'favorites_only': {'type': 'boolean'},
+          'query': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_providers',
+      description:
+          'List mobile AI providers and API-key status without exposing secrets.',
+      tags: ['tool', 'ai', 'provider', 'catalog', mobileCompatibleTag],
+      aliases: ['defaults_ai_providers', 'defaultspack_ai_providers'],
+      implementationStatus: 'implemented_phone_ai_catalog',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'configured_only': {'type': 'boolean'},
+          'query': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_get_provider_key_status',
+      description:
+          'Return phone-local provider API-key status without returning key material.',
+      tags: ['tool', 'ai', 'provider_key', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_get_provider_key_status',
+        'defaultspack_ai_get_provider_key_status',
+      ],
+      implementationStatus: 'implemented_phone_ai_provider_key_status',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_set_provider_key',
+      description:
+          'Save or update a provider API key in this phone secure storage after mobile approval.',
+      tags: ['tool', 'ai', 'provider_key', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_set_provider_key',
+        'defaultspack_ai_set_provider_key'
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_ai_provider_key',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+          'api_key': {'type': 'string'},
+          'apiKey': {'type': 'string'},
+          'base_url': {'type': 'string'},
+          'baseUrl': {'type': 'string'},
+          'model': {'type': 'string'},
+          'label': {'type': 'string'},
+          'activate': {'type': 'boolean'},
+          'favorite': {'type': 'boolean'},
+          'star': {'type': 'boolean'},
+        },
+        'required': ['api_key'],
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_delete_provider_key',
+      description:
+          'Remove a provider API key from this phone secure storage after mobile approval.',
+      tags: ['tool', 'ai', 'provider_key', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_delete_provider_key',
+        'defaultspack_ai_delete_provider_key',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_ai_provider_key',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_get_preferred_model',
+      description: 'Get the phone-local preferred model and provider.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_get_preferred_model',
+        'defaultspack_ai_get_preferred_model',
+      ],
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_set_preferred_model',
+      description:
+          'Set the phone-local preferred model/provider after mobile approval.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_set_preferred_model',
+        'defaultspack_ai_set_preferred_model',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+          'model': {'type': 'string'},
+          'profile': {'type': 'string'},
+          'profile_id': {'type': 'string'},
+          'favorite': {'type': 'boolean'},
+          'star': {'type': 'boolean'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_get_thinking_level',
+      description: 'Get the phone-local model thinking level.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_get_thinking_level',
+        'defaultspack_ai_get_thinking_level',
+        'defaults_model_runtime_get_thinking_level',
+        'defaultspack_model_runtime_get_thinking_level',
+      ],
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_set_thinking_level',
+      description:
+          'Set the phone-local model thinking level after mobile approval.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_set_thinking_level',
+        'defaultspack_ai_set_thinking_level',
+        'defaults_model_runtime_set_thinking_level',
+        'defaultspack_model_runtime_set_thinking_level',
+      ],
+      requiresMobileApproval: true,
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'thinking_level': {'type': 'string'},
+          'level': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_get_effective_thinking_level',
+      description:
+          'Resolve the effective phone-local thinking level for a model request.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_get_effective_thinking_level',
+        'defaultspack_ai_get_effective_thinking_level',
+        'defaults_model_runtime_get_effective_thinking_level',
+        'defaultspack_model_runtime_get_effective_thinking_level',
+      ],
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'requested_thinking_level': {'type': 'string'},
+          'thinking_level': {'type': 'string'},
+          'model': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_normalize_thinking_level',
+      description:
+          'Normalize a thinking level to the phone-supported defaultspack levels.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_normalize_thinking_level',
+        'defaultspack_ai_normalize_thinking_level',
+        'defaults_model_runtime_normalize_thinking_level',
+        'defaultspack_model_runtime_normalize_thinking_level',
+      ],
+      implementationStatus: 'implemented_phone_ai_model_settings',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'thinking_level': {'type': 'string'},
+          'level': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_validate_model_params',
+      description:
+          'Validate model runtime parameters locally on this phone without calling a provider.',
+      tags: ['tool', 'ai', 'model_runtime', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_validate_model_params',
+        'defaultspack_ai_validate_model_params',
+      ],
+      implementationStatus: 'implemented_phone_ai_param_validation',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'model': {'type': 'string'},
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+          'temperature': {'type': 'number'},
+          'max_tokens': {'type': 'integer'},
+          'thinking_level': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_recommend_model',
+      description:
+          'Recommend a phone-local configured or starred model for a request.',
+      tags: ['tool', 'ai', 'model', 'routing', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_recommend_model',
+        'defaultspack_ai_recommend_model',
+      ],
+      implementationStatus: 'implemented_phone_ai_routing_hint',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'prompt': {'type': 'string'},
+          'task': {'type': 'string'},
+          'preferred_model': {'type': 'string'},
+          'model': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_route_model',
+      description:
+          'Route a request to a phone-local configured or starred model without calling a provider.',
+      tags: ['tool', 'ai', 'model', 'routing', mobileCompatibleTag],
+      aliases: ['defaults_ai_route_model', 'defaultspack_ai_route_model'],
+      implementationStatus: 'implemented_phone_ai_routing_hint',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'prompt': {'type': 'string'},
+          'task': {'type': 'string'},
+          'preferred_model': {'type': 'string'},
+          'model': {'type': 'string'},
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'ai_explain_model_choice',
+      description:
+          'Explain the phone-local model routing choice without calling a provider.',
+      tags: ['tool', 'ai', 'model', 'routing', mobileCompatibleTag],
+      aliases: [
+        'defaults_ai_explain_model_choice',
+        'defaultspack_ai_explain_model_choice',
+      ],
+      implementationStatus: 'implemented_phone_ai_routing_hint',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'model': {'type': 'string'},
+          'provider': {'type': 'string'},
+          'provider_id': {'type': 'string'},
+          'reason': {'type': 'string'},
         },
       },
     ),
@@ -3075,6 +3437,23 @@ class MobileToolRuntime {
         return _mobileBase64(call.arguments);
       case 'mobile_uuid':
         return _mobileUuid(call.arguments);
+      case 'ai_models':
+      case 'ai_profiles':
+      case 'ai_providers':
+      case 'ai_get_provider_key_status':
+      case 'ai_set_provider_key':
+      case 'ai_delete_provider_key':
+      case 'ai_get_preferred_model':
+      case 'ai_set_preferred_model':
+      case 'ai_get_thinking_level':
+      case 'ai_set_thinking_level':
+      case 'ai_get_effective_thinking_level':
+      case 'ai_normalize_thinking_level':
+      case 'ai_validate_model_params':
+      case 'ai_recommend_model':
+      case 'ai_route_model':
+      case 'ai_explain_model_choice':
+        return _asyncOnlyTool(name);
       case 'artifact_file_list':
         return _artifactFileList(call.arguments);
       case 'artifact_file_read':
@@ -3281,6 +3660,23 @@ class MobileToolRuntime {
         return _webappBuild(call.arguments);
       case 'tool_batch':
         return _toolBatch(call.arguments);
+      case 'ai_models':
+      case 'ai_profiles':
+      case 'ai_providers':
+      case 'ai_get_provider_key_status':
+      case 'ai_set_provider_key':
+      case 'ai_delete_provider_key':
+      case 'ai_get_preferred_model':
+      case 'ai_set_preferred_model':
+      case 'ai_get_thinking_level':
+      case 'ai_set_thinking_level':
+      case 'ai_get_effective_thinking_level':
+      case 'ai_normalize_thinking_level':
+      case 'ai_validate_model_params':
+      case 'ai_recommend_model':
+      case 'ai_route_model':
+      case 'ai_explain_model_choice':
+        return _aiModelTool(name, call.arguments);
       default:
         return Future.value(execute(call));
     }
@@ -7962,6 +8358,914 @@ class MobileToolRuntime {
     );
   }
 
+  Future<MobileToolResult> _aiModelTool(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    switch (toolName) {
+      case 'ai_models':
+        return _aiModels(args);
+      case 'ai_profiles':
+        return _aiProfiles(args);
+      case 'ai_providers':
+        return _aiProviders(args);
+      case 'ai_get_provider_key_status':
+        return _aiProviderKeyStatus(args);
+      case 'ai_set_provider_key':
+        return _aiSetProviderKey(args);
+      case 'ai_delete_provider_key':
+        return _aiDeleteProviderKey(args);
+      case 'ai_get_preferred_model':
+        return _aiGetPreferredModel(args);
+      case 'ai_set_preferred_model':
+        return _aiSetPreferredModel(args);
+      case 'ai_get_thinking_level':
+        return _aiGetThinkingLevel(args);
+      case 'ai_set_thinking_level':
+        return _aiSetThinkingLevel(args);
+      case 'ai_get_effective_thinking_level':
+        return _aiGetEffectiveThinkingLevel(args);
+      case 'ai_normalize_thinking_level':
+        return _aiNormalizeThinkingLevel(args);
+      case 'ai_validate_model_params':
+        return _aiValidateModelParams(args);
+      case 'ai_recommend_model':
+      case 'ai_route_model':
+        return _aiRouteModel(toolName, args);
+      case 'ai_explain_model_choice':
+        return _aiExplainModelChoice(args);
+      default:
+        return Future.value(execute(MobileToolCall(
+          id: 'ai:${DateTime.now().microsecondsSinceEpoch}',
+          name: toolName,
+          arguments: args,
+        )));
+    }
+  }
+
+  Future<MobileToolResult> _aiModels(Map<String, dynamic> args) async {
+    final providers = await _loadMergedMobileProviders();
+    final active = await _store.loadApi();
+    final favorites = await _store.loadModelFavorites();
+    final providerFilter = _providerArg(args);
+    final query = '${args['query'] ?? ''}'.trim().toLowerCase();
+    final configuredOnly = _boolArg(args['configured_only'], fallback: false);
+    final favoritesOnly = _boolArg(args['favorites_only'], fallback: false);
+    final rows = <Map<String, dynamic>>[];
+    for (final provider in providers) {
+      if (providerFilter.isNotEmpty && provider.providerId != providerFilter) {
+        continue;
+      }
+      final favorite = _isFavoriteProviderModel(provider, favorites);
+      if (configuredOnly && !provider.isConfigured) continue;
+      if (favoritesOnly && !favorite) continue;
+      final searchable = [
+        provider.providerId,
+        provider.displayName,
+        provider.effectiveLabel,
+        provider.model,
+      ].join(' ').toLowerCase();
+      if (query.isNotEmpty && !searchable.contains(query)) continue;
+      rows.add(_mobileModelRecord(provider, active, favorites));
+    }
+    return _aiToolOk(
+      'ai_models',
+      '${rows.length} mobile models',
+      {
+        'models': rows,
+        'count': rows.length,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiProfiles(Map<String, dynamic> args) async {
+    final providers = await _loadMergedMobileProviders();
+    final active = await _store.loadApi();
+    final favorites = await _store.loadModelFavorites();
+    final query = '${args['query'] ?? ''}'.trim().toLowerCase();
+    final configuredOnly = _boolArg(args['configured_only'], fallback: false);
+    final favoritesOnly = _boolArg(args['favorites_only'], fallback: false);
+    final profiles = <Map<String, dynamic>>[];
+    for (final provider in providers) {
+      final favorite = _isFavoriteProviderModel(provider, favorites);
+      if (configuredOnly && !provider.isConfigured) continue;
+      if (favoritesOnly && !favorite) continue;
+      final profileId = '${provider.providerId}/${provider.model}';
+      final searchable = [
+        profileId,
+        provider.displayName,
+        provider.effectiveLabel,
+      ].join(' ').toLowerCase();
+      if (query.isNotEmpty && !searchable.contains(query)) continue;
+      profiles.add({
+        'profile_id': profileId,
+        'provider_id': provider.providerId,
+        'model': provider.model,
+        'label': provider.effectiveLabel,
+        'source': 'mobile',
+        'configured': provider.isConfigured,
+        'active': active.providerId == provider.providerId &&
+            active.model == provider.model,
+        'favorite': favorite,
+        'api_compatibility': provider.apiCompatibility,
+      });
+    }
+    for (final favorite in favorites.where((item) => item.isPc)) {
+      final searchable = [
+        favorite.profileId,
+        favorite.providerId,
+        favorite.modelId,
+        favorite.effectiveLabel,
+      ].join(' ').toLowerCase();
+      if (query.isNotEmpty && !searchable.contains(query)) continue;
+      profiles.add({
+        'profile_id': favorite.profileId,
+        'provider_id': favorite.providerId,
+        'model': favorite.modelId,
+        'label': favorite.effectiveLabel,
+        'source': 'pc',
+        'configured': false,
+        'active': false,
+        'favorite': true,
+        'pc_label': favorite.pcLabel,
+      });
+    }
+    return _aiToolOk(
+      'ai_profiles',
+      '${profiles.length} mobile profiles',
+      {
+        'profiles': profiles,
+        'count': profiles.length,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiProviders(Map<String, dynamic> args) async {
+    final providers = await _loadMergedMobileProviders();
+    final active = await _store.loadApi();
+    final favorites = await _store.loadModelFavorites();
+    final configuredOnly = _boolArg(args['configured_only'], fallback: false);
+    final query = '${args['query'] ?? ''}'.trim().toLowerCase();
+    final rows = <Map<String, dynamic>>[];
+    for (final provider in providers) {
+      if (configuredOnly && !provider.isConfigured) continue;
+      final searchable = [
+        provider.providerId,
+        provider.displayName,
+        provider.effectiveLabel,
+        provider.baseUrl,
+      ].join(' ').toLowerCase();
+      if (query.isNotEmpty && !searchable.contains(query)) continue;
+      rows.add(_mobileProviderRecord(provider, active, favorites));
+    }
+    return _aiToolOk(
+      'ai_providers',
+      '${rows.length} mobile providers',
+      {
+        'providers': rows,
+        'count': rows.length,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiProviderKeyStatus(
+    Map<String, dynamic> args,
+  ) async {
+    final providers = await _loadMergedMobileProviders();
+    final providerId = _providerArg(args);
+    final selected = providerId.isEmpty
+        ? providers
+        : providers.where((provider) => provider.providerId == providerId);
+    final statuses = [
+      for (final provider in selected) _providerKeyStatusRecord(provider),
+    ];
+    return _aiToolOk(
+      'ai_get_provider_key_status',
+      providerId.isEmpty
+          ? '${statuses.length} provider key statuses'
+          : '$providerId key status',
+      {
+        'providers': statuses,
+        if (providerId.isNotEmpty && statuses.isNotEmpty)
+          'provider': statuses.first,
+        'count': statuses.length,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiSetProviderKey(
+    Map<String, dynamic> args,
+  ) async {
+    final apiKey = '${args['api_key'] ?? args['apiKey'] ?? ''}'.trim();
+    if (apiKey.isEmpty) {
+      return _aiToolError(
+        'ai_set_provider_key',
+        'MISSING_API_KEY',
+        "'api_key' is required.",
+      );
+    }
+    final providerId =
+        _providerArg(args).isEmpty ? 'openai' : _providerArg(args);
+    final provider =
+        await _resolveProviderForArgs(args, providerId: providerId);
+    final next = provider.copyWith(
+      apiKey: apiKey,
+      baseUrl: _firstText(args, const ['base_url', 'baseUrl']).isEmpty
+          ? provider.baseUrl
+          : _firstText(args, const ['base_url', 'baseUrl']),
+      model: _firstText(args, const ['model']).isEmpty
+          ? provider.model
+          : _firstText(args, const ['model']),
+      label: _firstText(args, const ['label']).isEmpty
+          ? provider.label
+          : _firstText(args, const ['label']),
+    );
+    final approved = await _requestMobileApproval(
+      toolName: 'ai_set_provider_key',
+      prompt: 'このスマホのsecure storageに${next.effectiveLabel}のAPI keyを保存します。',
+      arguments: {
+        ...args,
+        'api_key': _maskSecret(apiKey),
+        'apiKey': _maskSecret(apiKey),
+      },
+      risk: 'high',
+    );
+    if (!approved) return _mobileApprovalRequired('ai_set_provider_key');
+    await _store.upsertProviderConfig(next);
+    final active = await _store.loadApi();
+    final activate = _boolArg(args['activate'], fallback: true);
+    if (activate) {
+      await _store.saveApi(
+        next.toApiConfig(
+          systemPrompt: active.systemPrompt,
+          temperature: active.temperature,
+        ),
+      );
+    }
+    if (_boolArg(args['favorite'] ?? args['star'], fallback: activate)) {
+      await _store.upsertModelFavorite(
+        ModelFavoriteConfig.fromMobileProvider(next),
+      );
+    }
+    return _aiToolOk(
+      'ai_set_provider_key',
+      '${next.providerId} provider key saved',
+      {
+        'provider': _providerKeyStatusRecord(next),
+        'activated': activate,
+        'favorite':
+            _boolArg(args['favorite'] ?? args['star'], fallback: activate),
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiDeleteProviderKey(
+    Map<String, dynamic> args,
+  ) async {
+    final providerId = _providerArg(args);
+    if (providerId.isEmpty) {
+      return _aiToolError(
+        'ai_delete_provider_key',
+        'MISSING_PROVIDER',
+        "'provider' or 'provider_id' is required.",
+      );
+    }
+    final provider =
+        await _resolveProviderForArgs(args, providerId: providerId);
+    final approved = await _requestMobileApproval(
+      toolName: 'ai_delete_provider_key',
+      prompt: 'このスマホから${provider.effectiveLabel}のAPI keyを削除します。',
+      arguments: args,
+      risk: 'high',
+    );
+    if (!approved) return _mobileApprovalRequired('ai_delete_provider_key');
+    final next = provider.copyWith(apiKey: '');
+    await _store.upsertProviderConfig(next);
+    final active = await _store.loadApi();
+    if (active.providerId == providerId) {
+      await _store.saveApi(active.copyWith(apiKey: ''));
+    }
+    return _aiToolOk(
+      'ai_delete_provider_key',
+      '$providerId provider key deleted',
+      {
+        'provider': _providerKeyStatusRecord(next),
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiGetPreferredModel(
+    Map<String, dynamic> args,
+  ) async {
+    final active = await _store.loadApi();
+    final settings = await _store.loadModelRuntimeSettings();
+    return _aiToolOk(
+      'ai_get_preferred_model',
+      active.model.trim().isEmpty ? 'no preferred model' : active.model,
+      {
+        'preferred_model': active.model,
+        'provider_id': active.providerId,
+        'label': active.label,
+        'configured': active.isConfigured,
+        'api_compatibility': active.apiCompatibility,
+        'thinking_level':
+            _normalizeThinkingLevelValue(settings['thinking_level']) ??
+                'medium',
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiSetPreferredModel(
+    Map<String, dynamic> args,
+  ) async {
+    final selected = await _selectMobileProviderModel(args);
+    if (selected == null) {
+      return _aiToolError(
+        'ai_set_preferred_model',
+        'MODEL_NOT_FOUND',
+        'No matching phone-local provider/model was found.',
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'ai_set_preferred_model',
+      prompt: 'このスマホの既定モデルを${selected.effectiveLabel}に変更します。',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('ai_set_preferred_model');
+    final active = await _store.loadApi();
+    await _store.saveApi(
+      selected.toApiConfig(
+        systemPrompt: active.systemPrompt,
+        temperature: active.temperature,
+      ),
+    );
+    final settings = await _store.loadModelRuntimeSettings();
+    settings['preferred_model'] = selected.model;
+    settings['preferred_provider_id'] = selected.providerId;
+    settings['preferred_model_group'] = 'mobile';
+    await _store.saveModelRuntimeSettings(settings);
+    final shouldFavorite =
+        _boolArg(args['favorite'] ?? args['star'], fallback: true);
+    if (shouldFavorite) {
+      await _store.upsertModelFavorite(
+        ModelFavoriteConfig.fromMobileProvider(selected),
+      );
+    }
+    return _aiToolOk(
+      'ai_set_preferred_model',
+      'preferred model set to ${selected.model}',
+      {
+        'preferred_model': selected.model,
+        'provider_id': selected.providerId,
+        'label': selected.effectiveLabel,
+        'favorite': shouldFavorite,
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiGetThinkingLevel(
+    Map<String, dynamic> args,
+  ) async {
+    final settings = await _store.loadModelRuntimeSettings();
+    final level =
+        _normalizeThinkingLevelValue(settings['thinking_level']) ?? 'medium';
+    return _aiToolOk(
+      'ai_get_thinking_level',
+      'thinking level $level',
+      {
+        'thinking_level': level,
+        'supported_levels': _mobileThinkingLevels.toList(),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiSetThinkingLevel(
+    Map<String, dynamic> args,
+  ) async {
+    final normalized = _normalizeThinkingLevelValue(
+      args['thinking_level'] ?? args['level'],
+    );
+    if (normalized == null) {
+      return _aiToolError(
+        'ai_set_thinking_level',
+        'INVALID_THINKING_LEVEL',
+        'Supported thinking levels: ${_mobileThinkingLevels.join(', ')}.',
+      );
+    }
+    final approved = await _requestMobileApproval(
+      toolName: 'ai_set_thinking_level',
+      prompt: 'このスマホのthinking levelを$normalizedに変更します。',
+      arguments: args,
+      risk: 'medium',
+    );
+    if (!approved) return _mobileApprovalRequired('ai_set_thinking_level');
+    final settings = await _store.loadModelRuntimeSettings();
+    settings['thinking_level'] = normalized;
+    await _store.saveModelRuntimeSettings(settings);
+    return _aiToolOk(
+      'ai_set_thinking_level',
+      'thinking level set to $normalized',
+      {
+        'thinking_level': normalized,
+        'supported_levels': _mobileThinkingLevels.toList(),
+        'requires_mobile_approval': true,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiGetEffectiveThinkingLevel(
+    Map<String, dynamic> args,
+  ) async {
+    final requested = _normalizeThinkingLevelValue(
+      args['requested_thinking_level'] ?? args['thinking_level'],
+    );
+    final settings = await _store.loadModelRuntimeSettings();
+    final stored = _normalizeThinkingLevelValue(settings['thinking_level']);
+    final level = requested ?? stored ?? 'medium';
+    return _aiToolOk(
+      'ai_get_effective_thinking_level',
+      'effective thinking level $level',
+      {
+        'thinking_level': level,
+        'requested_thinking_level': requested,
+        'stored_thinking_level': stored,
+        'source': requested != null
+            ? 'request'
+            : stored != null
+                ? 'phone_settings'
+                : 'default',
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiNormalizeThinkingLevel(
+    Map<String, dynamic> args,
+  ) async {
+    final raw = args['thinking_level'] ?? args['level'];
+    final normalized = _normalizeThinkingLevelValue(raw);
+    if (normalized == null) {
+      return _aiToolError(
+        'ai_normalize_thinking_level',
+        'INVALID_THINKING_LEVEL',
+        'Supported thinking levels: ${_mobileThinkingLevels.join(', ')}.',
+      );
+    }
+    return _aiToolOk(
+      'ai_normalize_thinking_level',
+      'normalized thinking level $normalized',
+      {
+        'input': raw,
+        'thinking_level': normalized,
+        'supported_levels': _mobileThinkingLevels.toList(),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiValidateModelParams(
+    Map<String, dynamic> args,
+  ) async {
+    final errors = <String>[];
+    final warnings = <String>[];
+    final provider = await _selectMobileProviderModel(args);
+    final requestedModel = _firstText(args, const ['model']);
+    if (requestedModel.isNotEmpty && provider == null) {
+      errors.add('model is not in the phone-local provider catalog');
+    }
+    final temperature = args['temperature'];
+    if (temperature is num && (temperature < 0 || temperature > 2)) {
+      errors.add('temperature must be between 0 and 2');
+    }
+    final maxTokens = args['max_tokens'] ?? args['maxTokens'];
+    if (maxTokens is num && maxTokens <= 0) {
+      errors.add('max_tokens must be greater than 0');
+    }
+    final thinking = args['thinking_level'];
+    if (thinking != null && _normalizeThinkingLevelValue(thinking) == null) {
+      errors.add('thinking_level is invalid');
+    }
+    if (provider != null && !provider.isConfigured) {
+      warnings.add('provider is catalog-only or missing API key on this phone');
+    }
+    return _aiToolOk(
+      'ai_validate_model_params',
+      errors.isEmpty ? 'model params valid' : 'model params invalid',
+      {
+        'valid': errors.isEmpty,
+        'errors': errors,
+        'warnings': warnings,
+        if (provider != null)
+          'model': _mobileModelRecord(provider, null, const []),
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+      ok: errors.isEmpty,
+    );
+  }
+
+  Future<MobileToolResult> _aiRouteModel(
+    String toolName,
+    Map<String, dynamic> args,
+  ) async {
+    final selected = await _selectMobileProviderModel(args) ??
+        await _firstConfiguredOrDefaultProvider();
+    if (selected == null) {
+      return _aiToolError(
+        toolName,
+        'NO_MODEL_AVAILABLE',
+        'No phone-local model catalog entry is available.',
+      );
+    }
+    final active = await _store.loadApi();
+    final reason = selected.providerId == active.providerId &&
+            selected.model == active.model
+        ? 'selected preferred phone-local model'
+        : selected.isConfigured
+            ? 'selected configured phone-local provider'
+            : 'selected catalog fallback; API key may be required';
+    return _aiToolOk(
+      toolName,
+      '${selected.providerId}/${selected.model}',
+      {
+        'selected_model': selected.model,
+        'selected_provider_id': selected.providerId,
+        'profile_id': '${selected.providerId}/${selected.model}',
+        'reason': reason,
+        'configured': selected.isConfigured,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<MobileToolResult> _aiExplainModelChoice(
+    Map<String, dynamic> args,
+  ) async {
+    final selected = await _selectMobileProviderModel(args) ??
+        await _firstConfiguredOrDefaultProvider();
+    if (selected == null) {
+      return _aiToolError(
+        'ai_explain_model_choice',
+        'NO_MODEL_AVAILABLE',
+        'No phone-local model catalog entry is available.',
+      );
+    }
+    final reason = _firstText(args, const ['reason']).isEmpty
+        ? 'スマホ内のprovider設定とstar付きモデルから選択しました。'
+        : _firstText(args, const ['reason']);
+    return _aiToolOk(
+      'ai_explain_model_choice',
+      'explained ${selected.providerId}/${selected.model}',
+      {
+        'model': selected.model,
+        'provider_id': selected.providerId,
+        'profile_id': '${selected.providerId}/${selected.model}',
+        'explanation': reason,
+        'configured': selected.isConfigured,
+        'execution_location': 'phone',
+        'runtime_layers': _flutterRuntimeLayers,
+      },
+    );
+  }
+
+  Future<List<MobileProviderConfig>> _loadMergedMobileProviders() async {
+    final byId = <String, MobileProviderConfig>{
+      for (final provider in defaultspackMobileProviderConfigs)
+        provider.providerId: provider,
+    };
+    for (final stored in await _store.loadProviderConfigs()) {
+      final providerId = stored.providerId.trim();
+      if (providerId.isEmpty) continue;
+      final base = byId[providerId];
+      byId[providerId] = base == null
+          ? stored
+          : base.copyWith(
+              displayName: stored.displayName.trim().isEmpty
+                  ? base.displayName
+                  : stored.displayName,
+              label: stored.label,
+              apiKey: stored.apiKey,
+              baseUrl:
+                  stored.baseUrl.trim().isEmpty ? base.baseUrl : stored.baseUrl,
+              model: stored.model.trim().isEmpty ? base.model : stored.model,
+              openaiCompatible: stored.openaiCompatible,
+              local: stored.local,
+              catalogOnly: stored.catalogOnly,
+              apiCompatibility: stored.apiCompatibility,
+            );
+    }
+    final active = await _store.loadApi();
+    if (active.providerId.trim().isNotEmpty) {
+      final providerId = active.providerId.trim();
+      final base = byId[providerId] ??
+          MobileProviderConfig(
+            providerId: providerId,
+            displayName: providerId,
+            label: '',
+            apiKey: '',
+            baseUrl: active.baseUrl,
+            model: active.model,
+            openaiCompatible: active.apiCompatibility == 'openai',
+            local: active.baseUrl.startsWith('local://') ||
+                active.baseUrl.contains('127.0.0.1') ||
+                active.baseUrl.contains('localhost'),
+            catalogOnly: false,
+            apiCompatibility: active.apiCompatibility,
+          );
+      byId[providerId] = base.copyWith(
+        label: active.label.trim().isEmpty ? base.label : active.label,
+        apiKey: active.apiKey.trim().isEmpty ? base.apiKey : active.apiKey,
+        baseUrl: active.baseUrl.trim().isEmpty ? base.baseUrl : active.baseUrl,
+        model: active.model.trim().isEmpty ? base.model : active.model,
+        apiCompatibility: active.apiCompatibility,
+      );
+    }
+    final list = byId.values.toList()
+      ..sort((a, b) => a.effectiveLabel
+          .toLowerCase()
+          .compareTo(b.effectiveLabel.toLowerCase()));
+    return list;
+  }
+
+  Future<MobileProviderConfig> _resolveProviderForArgs(
+    Map<String, dynamic> args, {
+    required String providerId,
+  }) async {
+    final providers = await _loadMergedMobileProviders();
+    for (final provider in providers) {
+      if (provider.providerId == providerId) return provider;
+    }
+    final baseUrl = _firstText(args, const ['base_url', 'baseUrl']);
+    final model = _firstText(args, const ['model']);
+    return MobileProviderConfig(
+      providerId: providerId,
+      displayName: providerId,
+      label: _firstText(args, const ['label']),
+      apiKey: '',
+      baseUrl: baseUrl,
+      model: model,
+      openaiCompatible: true,
+      local: baseUrl.startsWith('local://') ||
+          baseUrl.contains('127.0.0.1') ||
+          baseUrl.contains('localhost'),
+      catalogOnly: baseUrl.isEmpty,
+      apiCompatibility: 'openai',
+    );
+  }
+
+  Future<MobileProviderConfig?> _selectMobileProviderModel(
+    Map<String, dynamic> args,
+  ) async {
+    final providers = await _loadMergedMobileProviders();
+    final active = await _store.loadApi();
+    var providerId = _providerArg(args);
+    var model = _firstText(
+      args,
+      const ['model', 'preferred_model', 'selected_model'],
+    );
+    final profile = _firstText(args, const ['profile', 'profile_id']);
+    if (profile.isNotEmpty && providerId.isEmpty && model.isEmpty) {
+      final separator = profile.indexOf('/');
+      if (separator > 0 && separator < profile.length - 1) {
+        providerId = profile.substring(0, separator).trim();
+        model = profile.substring(separator + 1).trim();
+      } else {
+        model = profile;
+      }
+    }
+    if (providerId.isEmpty && model.isEmpty) {
+      for (final provider in providers) {
+        if (provider.providerId == active.providerId &&
+            provider.model == active.model) {
+          return provider;
+        }
+      }
+      if (active.providerId.trim().isNotEmpty &&
+          active.model.trim().isNotEmpty) {
+        return MobileProviderConfig(
+          providerId: active.providerId,
+          displayName: active.label.trim().isEmpty
+              ? active.providerId
+              : active.label.trim(),
+          label: active.label,
+          apiKey: active.apiKey,
+          baseUrl: active.baseUrl,
+          model: active.model,
+          openaiCompatible: active.apiCompatibility == 'openai',
+          local: active.baseUrl.startsWith('local://') ||
+              active.baseUrl.contains('127.0.0.1') ||
+              active.baseUrl.contains('localhost'),
+          catalogOnly: false,
+          apiCompatibility: active.apiCompatibility,
+        );
+      }
+    }
+    if (providerId.isNotEmpty) {
+      for (final provider in providers) {
+        if (provider.providerId != providerId) continue;
+        if (model.isEmpty || provider.model == model) {
+          return model.isEmpty ? provider : provider.copyWith(model: model);
+        }
+      }
+    }
+    if (model.isNotEmpty) {
+      for (final provider in providers) {
+        if (provider.model == model) return provider;
+      }
+    }
+    return null;
+  }
+
+  Future<MobileProviderConfig?> _firstConfiguredOrDefaultProvider() async {
+    final providers = await _loadMergedMobileProviders();
+    for (final provider in providers) {
+      if (provider.isConfigured) return provider;
+    }
+    for (final provider in providers) {
+      if (!provider.catalogOnly && provider.model.trim().isNotEmpty) {
+        return provider;
+      }
+    }
+    return providers.isEmpty ? null : providers.first;
+  }
+
+  Map<String, dynamic> _mobileModelRecord(
+    MobileProviderConfig provider,
+    ApiConfig? active,
+    List<ModelFavoriteConfig> favorites,
+  ) {
+    return {
+      'id': '${provider.providerId}/${provider.model}',
+      'provider_id': provider.providerId,
+      'provider_name': provider.displayName,
+      'model': provider.model,
+      'label': provider.effectiveLabel,
+      'configured': provider.isConfigured,
+      'catalog_only': provider.catalogOnly,
+      'local': provider.local,
+      'openai_compatible': provider.openaiCompatible,
+      'api_compatibility': provider.apiCompatibility,
+      'active': active != null &&
+          active.providerId == provider.providerId &&
+          active.model == provider.model,
+      'favorite': _isFavoriteProviderModel(provider, favorites),
+      'execution_location': 'phone',
+    };
+  }
+
+  Map<String, dynamic> _mobileProviderRecord(
+    MobileProviderConfig provider,
+    ApiConfig active,
+    List<ModelFavoriteConfig> favorites,
+  ) {
+    return {
+      'provider_id': provider.providerId,
+      'display_name': provider.displayName,
+      'label': provider.effectiveLabel,
+      'base_url': provider.baseUrl,
+      'default_model': provider.model,
+      'configured': provider.isConfigured,
+      'catalog_only': provider.catalogOnly,
+      'local': provider.local,
+      'openai_compatible': provider.openaiCompatible,
+      'api_compatibility': provider.apiCompatibility,
+      'active': active.providerId == provider.providerId,
+      'favorite': _isFavoriteProviderModel(provider, favorites),
+      'key_status': _providerKeyStatusRecord(provider),
+    };
+  }
+
+  Map<String, dynamic> _providerKeyStatusRecord(
+    MobileProviderConfig provider,
+  ) {
+    final key = provider.apiKey.trim();
+    return {
+      'provider_id': provider.providerId,
+      'display_name': provider.displayName,
+      'configured': provider.isConfigured,
+      'has_api_key': key.isNotEmpty,
+      'key_masked': _maskSecret(key),
+      'key_length': key.length,
+      'local': provider.local,
+      'catalog_only': provider.catalogOnly,
+      'api_compatibility': provider.apiCompatibility,
+    };
+  }
+
+  bool _isFavoriteProviderModel(
+    MobileProviderConfig provider,
+    List<ModelFavoriteConfig> favorites,
+  ) {
+    return favorites
+        .any((favorite) => favorite.matchesMobileProvider(provider));
+  }
+
+  MobileToolResult _aiToolOk(
+    String toolName,
+    String summary,
+    Map<String, dynamic> data, {
+    bool ok = true,
+  }) {
+    return MobileToolResult(
+      ok: ok,
+      summary: summary,
+      output: jsonEncode({
+        'status': ok ? 'ok' : 'error',
+        'data': {
+          ...data,
+          'tool': toolName,
+          'mobile_compatible': true,
+          'requires_pc': false,
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _aiToolError(
+    String toolName,
+    String code,
+    String message,
+  ) {
+    return MobileToolResult(
+      ok: false,
+      summary: message,
+      output: jsonEncode({
+        'status': 'error',
+        'error': {
+          'code': code,
+          'message': message,
+          'tool': toolName,
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'platforms': _defaultMobilePlatforms,
+        },
+      }),
+    );
+  }
+
+  String _providerArg(Map<String, dynamic> args) {
+    return _firstText(args, const ['provider', 'provider_id', 'providerId'])
+        .toLowerCase();
+  }
+
+  String? _normalizeThinkingLevelValue(Object? value) {
+    final raw = '$value'.trim().toLowerCase();
+    if (raw.isEmpty || raw == 'null') return null;
+    final normalized = switch (raw) {
+      'off' || 'false' || 'disabled' || 'disable' || 'no' => 'none',
+      'minimal' || 'min' || 'light' => 'low',
+      'normal' || 'default' || 'auto' => 'medium',
+      'max' || 'maximum' || 'extra' || 'extra_high' || 'very_high' => 'xhigh',
+      _ => raw,
+    };
+    return _mobileThinkingLevels.contains(normalized) ? normalized : null;
+  }
+
+  String _maskSecret(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return '';
+    if (trimmed.length <= 8) return '****';
+    return '${trimmed.substring(0, 4)}...${trimmed.substring(trimmed.length - 4)}';
+  }
+
+  String _firstText(Map<String, dynamic> args, List<String> keys) {
+    for (final key in keys) {
+      final value = args[key];
+      if (value == null) continue;
+      final text = '$value'.trim();
+      if (text.isNotEmpty && text != 'null') return text;
+    }
+    return '';
+  }
+
   String _unsupportedReason(String name) {
     final normalized = name.trim().toLowerCase();
     for (final tool in unavailableDefaultspackTools) {
@@ -8035,6 +9339,8 @@ String _canonicalToolName(String name) {
 }
 
 bool _isAsyncPhoneToolName(String name) {
+  final normalized = name.trim().toLowerCase();
+  if (_phoneAiModelToolIds.contains(normalized)) return true;
   return const {
     'media_clipboard_read',
     'media_clipboard_write',
@@ -8056,7 +9362,7 @@ bool _isAsyncPhoneToolName(String name) {
     'slides_update',
     'job_cancel',
     'job_resume',
-  }.contains(name.trim().toLowerCase());
+  }.contains(normalized);
 }
 
 bool _isMobileConnectorDryRunTool(String name) {
@@ -8601,19 +9907,22 @@ Map<String, dynamic> _mobileRuntimeRecordForTool(MobileToolDefinition tool) {
       tool.unavailableReason,
     );
   }
+  final runtimeLayers = _phoneAiModelToolIds.contains(tool.name)
+      ? _orderedStrings([...tool.runtimeLayers, 'mobile-provider-config'])
+      : tool.runtimeLayers;
   return {
     'compatible': true,
     'available': true,
     'execution_location': 'phone',
     'platforms': tool.executionPlatforms,
-    'runtime_layers': tool.runtimeLayers,
+    'runtime_layers': runtimeLayers,
     'native_layers': tool.nativeLayers,
     'requires_pc': false,
     'requires_mobile_approval': tool.requiresMobileApproval,
     'implementation_status': tool.implementationStatus,
     'tags': _mobilePlatformTags(
       platforms: tool.executionPlatforms,
-      runtimeLayers: tool.runtimeLayers,
+      runtimeLayers: runtimeLayers,
       pcDelegated: false,
     ),
   };
@@ -8692,6 +10001,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isBrowserExtractTable = normalized == 'browser_extract_table';
   final isTtsFallbackTool =
       normalized == 'tts_generate' || normalized == 'tts_generate_local';
+  final isPhoneAiModelTool = _phoneAiModelToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -8893,6 +10203,36 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval': false,
       'implementation_status': 'implemented_silent_wav_fallback',
+    };
+  }
+  if (isPhoneAiModelTool) {
+    final status = switch (normalized) {
+      'ai_models' ||
+      'ai_profiles' ||
+      'ai_providers' =>
+        'implemented_phone_ai_catalog',
+      'ai_get_provider_key_status' =>
+        'implemented_phone_ai_provider_key_status',
+      'ai_set_provider_key' ||
+      'ai_delete_provider_key' =>
+        'implemented_phone_ai_provider_key',
+      'ai_get_preferred_model' ||
+      'ai_set_preferred_model' ||
+      'ai_get_thinking_level' ||
+      'ai_set_thinking_level' ||
+      'ai_get_effective_thinking_level' ||
+      'ai_normalize_thinking_level' =>
+        'implemented_phone_ai_model_settings',
+      'ai_validate_model_params' => 'implemented_phone_ai_param_validation',
+      _ => 'implemented_phone_ai_routing_hint',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': [..._flutterRuntimeLayers, 'mobile-provider-config'],
+      'native_layers': [],
+      'requires_mobile_approval':
+          _phoneAiModelMutationToolIds.contains(normalized),
+      'implementation_status': status,
     };
   }
   if (isPhoneArtifactWorkspaceTool) {

@@ -62,6 +62,24 @@ _CONNECTOR_PAYLOAD_DRY_RUN_TOOLS = {
     "discord_send",
     "line_push",
 }
+_PHONE_AI_MODEL_TOOLS = {
+    "ai_models": ("implemented_phone_ai_catalog", False),
+    "ai_profiles": ("implemented_phone_ai_catalog", False),
+    "ai_providers": ("implemented_phone_ai_catalog", False),
+    "ai_get_provider_key_status": ("implemented_phone_ai_provider_key_status", False),
+    "ai_set_provider_key": ("implemented_phone_ai_provider_key", True),
+    "ai_delete_provider_key": ("implemented_phone_ai_provider_key", True),
+    "ai_get_preferred_model": ("implemented_phone_ai_model_settings", False),
+    "ai_set_preferred_model": ("implemented_phone_ai_model_settings", True),
+    "ai_get_thinking_level": ("implemented_phone_ai_model_settings", False),
+    "ai_set_thinking_level": ("implemented_phone_ai_model_settings", True),
+    "ai_get_effective_thinking_level": ("implemented_phone_ai_model_settings", False),
+    "ai_normalize_thinking_level": ("implemented_phone_ai_model_settings", False),
+    "ai_validate_model_params": ("implemented_phone_ai_param_validation", False),
+    "ai_recommend_model": ("implemented_phone_ai_routing_hint", False),
+    "ai_route_model": ("implemented_phone_ai_routing_hint", False),
+    "ai_explain_model_choice": ("implemented_phone_ai_routing_hint", False),
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -283,6 +301,15 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
                 if tool_id in _CLI_DRY_RUN_TOOLS
                 else "implemented_connector_dry_run"
             ),
+        }
+    if tool_id in _PHONE_AI_MODEL_TOOLS:
+        status, requires_approval = _PHONE_AI_MODEL_TOOLS[tool_id]
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-provider-config"],
+            "native_layers": [],
+            "requires_mobile_approval": requires_approval,
+            "implementation_status": status,
         }
     if tool_id in _PHONE_ARTIFACT_WORKSPACE_TOOLS:
         return {
