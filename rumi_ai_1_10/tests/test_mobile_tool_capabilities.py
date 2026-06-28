@@ -166,6 +166,12 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["artifact", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "tool_file_reader",
+                "name": "tool_file_reader",
+                "summary": "Read phone artifact text",
+                "tags": ["tool", "file"],
+            },
+            {
                 "tool_id": "artifact_file_write",
                 "name": "artifact_file_write",
                 "summary": "Write phone artifact",
@@ -712,6 +718,30 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
                 "tags": ["preview", "agent_os", "artifact_workspace"],
             },
             {
+                "tool_id": "image_render",
+                "name": "image_render",
+                "summary": "Render image artifact",
+                "tags": ["preview", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "image_generate_local_or_provider",
+                "name": "image_generate_local_or_provider",
+                "summary": "Generate image placeholder",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "audio_transcribe",
+                "name": "audio_transcribe",
+                "summary": "Transcribe audio",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
+                "tool_id": "audio_transcribe_local",
+                "name": "audio_transcribe_local",
+                "summary": "Transcribe audio locally",
+                "tags": ["media", "agent_os", "artifact_workspace"],
+            },
+            {
                 "tool_id": "source_extract",
                 "name": "source_extract",
                 "summary": "Extract source payload",
@@ -1103,6 +1133,21 @@ def test_mobile_tool_records_mark_phone_local_overrides() -> None:
         )
         assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
         assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+
+    for tool_id, status in {
+        "image_render": "implemented_phone_svg_image_render",
+        "image_generate_local_or_provider": "implemented_phone_svg_image_placeholder",
+        "audio_transcribe": "implemented_phone_audio_transcribe_payload",
+        "audio_transcribe_local": "implemented_phone_audio_transcribe_payload",
+        "tool_file_reader": "implemented_phone_artifact_file_reader",
+    }.items():
+        assert by_id[tool_id]["mobile_compatible"] is True
+        assert by_id[tool_id]["execution_route"] == "phone"
+        assert by_id[tool_id]["mobile"]["requires_mobile_approval"] is False
+        assert by_id[tool_id]["mobile"]["implementation_status"] == status
+        assert "flutter" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "dart" in by_id[tool_id]["mobile"]["runtime_layers"]
+        assert "mobile-media-artifact" in by_id[tool_id]["mobile"]["runtime_layers"]
 
     assert by_id["source_extract"]["mobile_compatible"] is True
     assert by_id["source_extract"]["execution_route"] == "phone"

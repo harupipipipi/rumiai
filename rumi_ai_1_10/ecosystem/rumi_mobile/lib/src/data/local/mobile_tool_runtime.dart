@@ -166,6 +166,11 @@ const _mobileConsentCategories = <String, Map<String, Object>>{
 };
 const _defaultMobilePlatforms = <String>['ios', 'android'];
 const _flutterRuntimeLayers = <String>['flutter', 'dart'];
+const _phoneMediaArtifactRuntimeLayers = <String>[
+  'flutter',
+  'dart',
+  'mobile-media-artifact',
+];
 const _nativeUrlRuntimeLayers = <String>[
   'flutter',
   'ios-swift',
@@ -338,6 +343,12 @@ const _phoneKnowledgeMutationToolIds = <String>{
   'knowledge_attach_to_project',
   'knowledge_index',
   'knowledge_reindex',
+};
+const _phoneMediaArtifactToolIds = <String>{
+  'image_render',
+  'image_generate_local_or_provider',
+  'audio_transcribe',
+  'audio_transcribe_local',
 };
 const _mobileThinkingLevels = <String>{
   'none',
@@ -1795,6 +1806,35 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'file_reader',
+      description:
+          'Read text from the phone-local artifact workspace using the defaultspack file_reader convention. This does not read PC workspace paths.',
+      tags: ['tool', 'file', 'artifact_workspace', mobileCompatibleTag],
+      aliases: [
+        'tool_file_reader',
+        'defaults_tool_file_reader',
+        'defaultspack_tool_file_reader',
+        'defaults.tool.file_reader',
+        'defaultspack.tool.file_reader',
+        'defaults.tool.file.reader',
+        'defaultspack.tool.file.reader',
+      ],
+      implementationStatus: 'implemented_phone_artifact_file_reader',
+      runtimeLayers: _phoneMediaArtifactRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'path': {'type': 'string'},
+          'start_line': {'type': 'integer', 'minimum': 1},
+          'end_line': {'type': 'integer', 'minimum': 1},
+          'max_chars': {'type': 'integer', 'minimum': 1},
+          'max_tokens': {'type': 'integer', 'minimum': 1},
+        },
+        'required': ['path'],
+      },
+    ),
+    MobileToolDefinition(
       name: 'artifact_file_write',
       description:
           'Write a text file inside this phone-local artifact workspace after mobile approval.',
@@ -3136,6 +3176,143 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'image_render',
+      description:
+          'Render a simple phone-local SVG image artifact in Flutter/Dart. This does not read or write PC artifact paths.',
+      tags: [
+        'tool',
+        'preview',
+        'image',
+        'artifact_workspace',
+        mobileCompatibleTag
+      ],
+      aliases: [
+        'defaults_image_render',
+        'defaultspack_image_render',
+        'defaults.image.render',
+        'defaultspack.image.render',
+      ],
+      implementationStatus: 'implemented_phone_svg_image_render',
+      runtimeLayers: _phoneMediaArtifactRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'prompt': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'width': {'type': 'integer', 'minimum': 1, 'maximum': 4096},
+          'height': {'type': 'integer', 'minimum': 1, 'maximum': 4096},
+          'viewport': {'type': 'object'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'image_generate_local_or_provider',
+      description:
+          'Generate a phone-local placeholder SVG image artifact from a prompt. Provider-backed real image generation remains PC/provider delegated.',
+      tags: [
+        'tool',
+        'media',
+        'image',
+        'artifact_workspace',
+        mobileCompatibleTag
+      ],
+      aliases: [
+        'defaults_image_generate_local_or_provider',
+        'defaultspack_image_generate_local_or_provider',
+        'defaults.image.generate.local_or_provider',
+        'defaultspack.image.generate.local_or_provider',
+      ],
+      implementationStatus: 'implemented_phone_svg_image_placeholder',
+      runtimeLayers: _phoneMediaArtifactRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'prompt': {'type': 'string'},
+          'text': {'type': 'string'},
+          'output_path': {'type': 'string'},
+          'width': {'type': 'integer', 'minimum': 1, 'maximum': 4096},
+          'height': {'type': 'integer', 'minimum': 1, 'maximum': 4096},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'audio_transcribe',
+      description:
+          'Return phone-local audio transcription text when provided explicitly, or audio metadata with a clear native/provider requirement. Does not read PC file paths.',
+      tags: [
+        'tool',
+        'media',
+        'audio',
+        'artifact_workspace',
+        mobileCompatibleTag
+      ],
+      aliases: [
+        'defaults_audio_transcribe',
+        'defaultspack_audio_transcribe',
+        'defaults.audio.transcribe',
+        'defaultspack.audio.transcribe',
+      ],
+      implementationStatus: 'implemented_phone_audio_transcribe_payload',
+      runtimeLayers: _phoneMediaArtifactRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'transcript': {'type': 'string'},
+          'content': {'type': 'string'},
+          'base64': {'type': 'string'},
+          'audio_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'audio': {'type': 'object'},
+          'path': {'type': 'string'},
+          'language': {'type': 'string'},
+          'language_hint': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'audio_transcribe_local',
+      description:
+          'Mirror audio_transcribe on phone with explicit text/payload fallback. Native iOS/Android speech recognition can replace this route later.',
+      tags: [
+        'tool',
+        'media',
+        'audio',
+        'artifact_workspace',
+        mobileCompatibleTag
+      ],
+      aliases: [
+        'defaults_audio_transcribe_local',
+        'defaultspack_audio_transcribe_local',
+        'defaults.audio.transcribe.local',
+        'defaultspack.audio.transcribe.local',
+      ],
+      implementationStatus: 'implemented_phone_audio_transcribe_payload',
+      runtimeLayers: _phoneMediaArtifactRuntimeLayers,
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'text': {'type': 'string'},
+          'transcript': {'type': 'string'},
+          'content': {'type': 'string'},
+          'base64': {'type': 'string'},
+          'audio_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'audio': {'type': 'object'},
+          'path': {'type': 'string'},
+          'language': {'type': 'string'},
+          'language_hint': {'type': 'string'},
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'media_doc_parse',
       description:
           'Parse text-like document bytes or text already provided to this phone runtime. Supports txt, markdown, json, csv, html, xml, and similar UTF text; does not read host file paths.',
@@ -4248,6 +4425,8 @@ class MobileToolRuntime {
         return _artifactFileList(call.arguments);
       case 'artifact_file_read':
         return _artifactFileRead(call.arguments);
+      case 'file_reader':
+        return _fileReader(call.arguments);
       case 'artifact_file_write':
       case 'artifact_file_patch':
       case 'artifact_file_delete':
@@ -4332,6 +4511,13 @@ class MobileToolRuntime {
       case 'tts_generate':
       case 'tts_generate_local':
         return _ttsGenerate(call.arguments, toolName: name);
+      case 'image_render':
+        return _imageRender(call.arguments);
+      case 'image_generate_local_or_provider':
+        return _imageGenerateLocalOrProvider(call.arguments);
+      case 'audio_transcribe':
+      case 'audio_transcribe_local':
+        return _audioTranscribe(call.arguments, toolName: name);
       case 'source_extract':
         return _sourceExtract(call.arguments);
       case 'browser_extract_table':
@@ -6315,6 +6501,204 @@ class MobileToolRuntime {
     );
   }
 
+  MobileToolResult _imageRender(Map<String, dynamic> args) {
+    final outputPath = _phoneImageArtifactOutputPath(
+      args['output_path'],
+      defaultPath: 'renders/${_nextToolId('image_render')}.svg',
+    );
+    if (outputPath == null) {
+      return _phoneArtifactError(
+        'INVALID_OUTPUT_PATH',
+        "'output_path' must stay inside the phone artifact workspace.",
+      );
+    }
+    final ext = _phoneArtifactExtension(outputPath);
+    if (ext.isNotEmpty && ext != 'svg') {
+      return _phoneArtifactError(
+        'PC_DELEGATION_REQUIRED',
+        'Phone-local image_render writes SVG. Use PC delegation for PNG/JPEG rendering.',
+        path: outputPath,
+      );
+    }
+    final dimensions = _imageRenderDimensions(args);
+    final text = _firstText(args, const ['text', 'prompt', 'content']);
+    final title = text.isEmpty ? 'Rumi artifact render' : text;
+    final svg = _phoneRenderedSvg(
+      title: title,
+      subtitle: 'phone-local SVG render',
+      width: dimensions.width,
+      height: dimensions.height,
+    );
+    final data = _putPhoneArtifactContent(
+      outputPath,
+      svg,
+      source: 'image_render',
+      mimeType: 'image/svg+xml',
+      metadata: {
+        'format': 'svg',
+        'width': dimensions.width,
+        'height': dimensions.height,
+        'renderer': 'phone-svg-fallback',
+      },
+    );
+    return MobileToolResult(
+      ok: true,
+      summary: 'rendered SVG image $outputPath',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          ...data,
+          'width': dimensions.width,
+          'height': dimensions.height,
+          'format': 'svg',
+          'path': outputPath,
+          'workspace': 'phone',
+          'fallback': 'svg_render',
+          'execution_location': 'phone',
+          'runtime_layers': _phoneMediaArtifactRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _imageGenerateLocalOrProvider(Map<String, dynamic> args) {
+    final prompt = _firstText(args, const ['prompt', 'text', 'content']);
+    final nextArgs = {
+      ...args,
+      'text': prompt.isEmpty ? 'Generated image' : prompt,
+      'output_path':
+          args['output_path'] ?? 'images/${_nextToolId('generated')}.svg',
+    };
+    final rendered = _imageRender(nextArgs);
+    if (!rendered.ok) return rendered;
+    final payload = jsonDecode(rendered.output) as Map<String, dynamic>;
+    final data = payload['data'] as Map<String, dynamic>;
+    data['tool'] = 'image_generate_local_or_provider';
+    data['provider_backed'] = false;
+    data['real_image_generation_supported'] = false;
+    data['fallback'] = 'phone_svg_placeholder';
+    data['prompt'] = prompt;
+    return MobileToolResult(
+      ok: true,
+      summary: 'generated phone SVG placeholder ${data['path']}',
+      output: jsonEncode({'status': 'ok', 'data': data}),
+    );
+  }
+
+  MobileToolResult _audioTranscribe(
+    Map<String, dynamic> args, {
+    required String toolName,
+  }) {
+    final explicitTranscript =
+        _firstText(args, const ['transcript', 'text', 'content']);
+    final language = _firstText(args, const ['language', 'language_hint']);
+    final path = _normalizePhoneArtifactPath(args['path']);
+    final payload = _audioPayloadBytes(args);
+    if (explicitTranscript.isNotEmpty) {
+      return _audioTranscribeOk(
+        toolName,
+        explicitTranscript,
+        language: language,
+        source: 'arguments.transcript',
+        sizeBytes: payload?.length,
+        path: path,
+        fallback: 'provided_transcript',
+      );
+    }
+    if (path != null) {
+      final file = _mobileArtifactFiles[path];
+      if (file == null) {
+        return _phoneArtifactError(
+          'AUDIO_ARTIFACT_NOT_FOUND',
+          'Phone-local audio artifact not found.',
+          path: path,
+        );
+      }
+      final storedBytes = _phoneArtifactStoredBytes(file);
+      return _audioTranscribeNeedsNative(
+        toolName,
+        sizeBytes: storedBytes.length,
+        path: path,
+        language: language,
+      );
+    }
+    if (payload != null) {
+      return _audioTranscribeNeedsNative(
+        toolName,
+        sizeBytes: payload.length,
+        language: language,
+      );
+    }
+    final rawPath = '${args['path'] ?? ''}'.trim();
+    if (rawPath.isNotEmpty) {
+      return _phoneArtifactError(
+        'UNSUPPORTED_PATH',
+        'Phone-local audio_transcribe cannot read PC file paths. Use media_file_pick/pass audio bytes or route this call to the connected PC runtime.',
+        path: rawPath,
+      );
+    }
+    return _audioTranscribeNeedsNative(toolName, language: language);
+  }
+
+  MobileToolResult _audioTranscribeOk(
+    String toolName,
+    String transcript, {
+    required String language,
+    required String source,
+    int? sizeBytes,
+    String? path,
+    required String fallback,
+  }) {
+    return MobileToolResult(
+      ok: true,
+      summary: transcript.isEmpty
+          ? 'audio transcription unavailable on phone'
+          : 'audio transcript ${transcript.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'text': transcript,
+          'transcript': transcript,
+          'content': transcript,
+          'length': transcript.length,
+          if (language.isNotEmpty) 'language': language,
+          if (sizeBytes != null) 'size_bytes': sizeBytes,
+          if (path != null) 'path': path,
+          'fallback': fallback,
+          'metadata': {
+            'tool': toolName,
+            'source': source,
+            'payload_only': true,
+            'native_transcription_supported': false,
+            'ios_native_layer': 'Speech framework not wired yet',
+            'android_native_layer': 'SpeechRecognizer/ML Kit not wired yet',
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _phoneMediaArtifactRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _audioTranscribeNeedsNative(
+    String toolName, {
+    int? sizeBytes,
+    String? path,
+    required String language,
+  }) {
+    return _audioTranscribeOk(
+      toolName,
+      '',
+      language: language,
+      source: path == null ? 'arguments.audio' : 'phone_artifact_workspace',
+      sizeBytes: sizeBytes,
+      path: path,
+      fallback: 'native_or_provider_transcription_required',
+    );
+  }
+
   MobileToolResult _sourceExtract(Map<String, dynamic> args) {
     final maxChars = _boundedSourceExtractMaxChars(args['max_chars']);
     final url = _stringOrNull(args['url']) ??
@@ -6642,6 +7026,74 @@ class MobileToolRuntime {
           'workspace': 'phone',
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _fileReader(Map<String, dynamic> args) {
+    final path = _normalizePhoneArtifactPath(args['path']);
+    if (path == null) {
+      final rawPath = '${args['path'] ?? ''}'.trim();
+      return _phoneArtifactError(
+        rawPath.isEmpty ? 'INVALID_INPUT' : 'UNSUPPORTED_PATH',
+        rawPath.isEmpty
+            ? "'path' is required."
+            : 'Phone-local file_reader cannot read PC workspace paths. Use artifact_file_read for phone artifacts or route this call to the connected PC runtime.',
+        path: rawPath.isEmpty ? null : rawPath,
+      );
+    }
+    final file = _mobileArtifactFiles[path];
+    if (file == null) {
+      return _phoneArtifactError(
+        'READ_FAILED',
+        'phone artifact file not found',
+        path: path,
+      );
+    }
+    final content = '${file['content'] ?? ''}';
+    final lines = const LineSplitter().convert(content);
+    final totalLines = lines.length;
+    final startLine = _boundedInt(args['start_line'], 1, 1, totalLines + 1);
+    final endLine = args['end_line'] == null
+        ? totalLines
+        : _boundedInt(args['end_line'], totalLines, startLine, totalLines);
+    final selectedLines = totalLines == 0 || startLine > totalLines
+        ? <String>[]
+        : lines.sublist(startLine - 1, endLine);
+    final rawSelected = selectedLines.join('\n');
+    final maxTokenChars = args['max_tokens'] is num
+        ? math.max(1, (args['max_tokens'] as num).toInt()) * 4
+        : null;
+    final maxChars = _boundedInt(
+      args['max_chars'] ?? maxTokenChars,
+      40000,
+      1,
+      200000,
+    );
+    final truncated = rawSelected.length > maxChars;
+    final text = truncated ? rawSelected.substring(0, maxChars) : rawSelected;
+    return MobileToolResult(
+      ok: true,
+      summary: 'read $path (${text.length} chars)',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'path': path,
+          'content': text,
+          'text': text,
+          'start_line': startLine,
+          'end_line': endLine,
+          'line_count': totalLines,
+          'returned_line_count': selectedLines.length,
+          'truncated': truncated,
+          'size': file['size'] ?? utf8.encode(content).length,
+          'encoding': file['encoding'] ?? 'utf8',
+          if (file['mime_type'] != null) 'mime_type': file['mime_type'],
+          'workspace': 'phone',
+          'execution_location': 'phone',
+          'runtime_layers': _phoneMediaArtifactRuntimeLayers,
           'requires_mobile_approval': false,
         },
       }),
@@ -12830,6 +13282,8 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPhonePromptTool = _phonePromptToolIds.contains(normalized);
   final isPhoneMemoryTool = _phoneMemoryToolIds.contains(normalized);
   final isPhoneKnowledgeTool = _phoneKnowledgeToolIds.contains(normalized);
+  final isPhoneMediaArtifactTool =
+      _phoneMediaArtifactToolIds.contains(normalized);
   final isPhoneArtifactWorkspaceTool = const {
     'artifact_file_list',
     'artifact_file_read',
@@ -13128,6 +13582,21 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
       'native_layers': [],
       'requires_mobile_approval':
           _phoneKnowledgeMutationToolIds.contains(normalized),
+      'implementation_status': status,
+    };
+  }
+  if (isPhoneMediaArtifactTool) {
+    final status = switch (normalized) {
+      'image_render' => 'implemented_phone_svg_image_render',
+      'image_generate_local_or_provider' =>
+        'implemented_phone_svg_image_placeholder',
+      _ => 'implemented_phone_audio_transcribe_payload',
+    };
+    return {
+      'platforms': _defaultMobilePlatforms,
+      'runtime_layers': _phoneMediaArtifactRuntimeLayers,
+      'native_layers': [],
+      'requires_mobile_approval': false,
       'implementation_status': status,
     };
   }
@@ -14916,7 +15385,7 @@ String? _extractImageBase64(Object? value, [int depth = 0]) {
 String _stripDataUrlPrefix(String value) {
   final text = value.trim();
   final comma = text.indexOf(',');
-  if (text.startsWith('data:image/') && comma >= 0) {
+  if (text.startsWith('data:') && comma >= 0) {
     return text.substring(comma + 1).trim();
   }
   return text;
@@ -14926,6 +15395,152 @@ bool _looksLikeBase64(String value) {
   final text = _stripDataUrlPrefix(value).replaceAll(RegExp(r'\s+'), '');
   if (text.length < 16) return false;
   return RegExp(r'^[A-Za-z0-9+/=_-]+$').hasMatch(text);
+}
+
+String? _phoneImageArtifactOutputPath(
+  Object? value, {
+  required String defaultPath,
+}) {
+  final path = _normalizePhoneArtifactPath(value ?? defaultPath);
+  if (path == null) return null;
+  final ext = _phoneArtifactExtension(path);
+  return ext.isEmpty ? '$path.svg' : path;
+}
+
+_PhoneImageRenderDimensions _imageRenderDimensions(Map<String, dynamic> args) {
+  final viewport = args['viewport'];
+  final viewportMap = viewport is Map ? viewport : const {};
+  final width = _boundedInt(
+    args['width'] ?? viewportMap['width'],
+    1024,
+    1,
+    4096,
+  );
+  final height = _boundedInt(
+    args['height'] ?? viewportMap['height'],
+    640,
+    1,
+    4096,
+  );
+  return _PhoneImageRenderDimensions(width: width, height: height);
+}
+
+String _phoneRenderedSvg({
+  required String title,
+  required String subtitle,
+  required int width,
+  required int height,
+}) {
+  final safeSubtitle = _escapeHtmlText(_clampText(subtitle, 120));
+  final titleSize = math.max(16, math.min(42, (width / 18).round()));
+  final subtitleSize = math.max(12, math.min(20, (width / 48).round()));
+  final padding = math.max(24, math.min(72, (width / 16).round()));
+  final lines = _wrapSvgText(title, maxChars: math.max(16, width ~/ 18));
+  final buffer = StringBuffer()
+    ..writeln(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="$width" height="$height" viewBox="0 0 $width $height" role="img">',
+    )
+    ..writeln('<rect width="100%" height="100%" fill="#f8fafc"/>')
+    ..writeln(
+      '<rect x="${padding / 2}" y="${padding / 2}" width="${width - padding}" height="${height - padding}" fill="#ffffff" stroke="#d1d5db" stroke-width="2" rx="18"/>',
+    )
+    ..writeln(
+      '<text x="$padding" y="${padding + titleSize}" font-family="Arial, sans-serif" font-size="$titleSize" fill="#111827" font-weight="700">$safeSubtitle</text>',
+    );
+  var y = padding + titleSize + 48;
+  for (final line in lines.take(8)) {
+    buffer.writeln(
+      '<text x="$padding" y="$y" font-family="Arial, sans-serif" font-size="$titleSize" fill="#111827">${_escapeHtmlText(line)}</text>',
+    );
+    y += titleSize + 12;
+  }
+  if (lines.length > 8) {
+    buffer.writeln(
+      '<text x="$padding" y="$y" font-family="Arial, sans-serif" font-size="$subtitleSize" fill="#6b7280">...</text>',
+    );
+  }
+  buffer
+    ..writeln(
+      '<text x="$padding" y="${height - padding}" font-family="Arial, sans-serif" font-size="$subtitleSize" fill="#6b7280">Generated on this phone</text>',
+    )
+    ..writeln('</svg>');
+  return buffer.toString();
+}
+
+List<String> _wrapSvgText(String value, {required int maxChars}) {
+  final words = value.replaceAll(RegExp(r'\s+'), ' ').trim().split(' ');
+  final lines = <String>[];
+  final current = StringBuffer();
+  for (final word in words) {
+    if (word.isEmpty) continue;
+    if (current.isEmpty) {
+      current.write(word);
+      continue;
+    }
+    if (current.length + word.length + 1 > maxChars) {
+      lines.add(current.toString());
+      current
+        ..clear()
+        ..write(word);
+    } else {
+      current.write(' $word');
+    }
+  }
+  if (current.isNotEmpty) lines.add(current.toString());
+  return lines.isEmpty ? ['Rumi artifact render'] : lines;
+}
+
+Uint8List? _audioPayloadBytes(Map<String, dynamic> args) {
+  final encoded = _extractAudioBase64(args);
+  if (encoded == null) return null;
+  try {
+    return base64Decode(_stripDataUrlPrefix(encoded));
+  } catch (_) {
+    return null;
+  }
+}
+
+String? _extractAudioBase64(Object? value, [int depth = 0]) {
+  if (depth > 4 || value == null) return null;
+  if (value is String) {
+    final text = value.trim();
+    if (text.isEmpty) return null;
+    if (text.startsWith('data:audio/') || _looksLikeBase64(text)) return text;
+    try {
+      final decoded = jsonDecode(text);
+      return _extractAudioBase64(decoded, depth + 1);
+    } catch (_) {
+      return null;
+    }
+  }
+  if (value is Map) {
+    for (final key in const [
+      'audio_base64',
+      'base64',
+      'data_base64',
+      'data_url',
+      'content',
+      'data',
+    ]) {
+      final found = _extractAudioBase64(value[key], depth + 1);
+      if (found != null) return found;
+    }
+    for (final key in const ['audio', 'file', 'result', 'output']) {
+      final found = _extractAudioBase64(value[key], depth + 1);
+      if (found != null) return found;
+    }
+  }
+  return null;
+}
+
+class _PhoneImageRenderDimensions {
+  const _PhoneImageRenderDimensions({
+    required this.width,
+    required this.height,
+  });
+
+  final int width;
+  final int height;
 }
 
 _MobileImageMetadata? _readImageHeader(Uint8List bytes) {

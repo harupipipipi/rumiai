@@ -123,6 +123,14 @@ _PHONE_KNOWLEDGE_TOOLS = {
     "knowledge_index": ("implemented_phone_knowledge_index", True),
     "knowledge_reindex": ("implemented_phone_knowledge_index", True),
 }
+_PHONE_MEDIA_ARTIFACT_TOOLS = {
+    "image_render": "implemented_phone_svg_image_render",
+    "image_generate_local_or_provider": "implemented_phone_svg_image_placeholder",
+    "audio_transcribe": "implemented_phone_audio_transcribe_payload",
+    "audio_transcribe_local": "implemented_phone_audio_transcribe_payload",
+    "tool_file_reader": "implemented_phone_artifact_file_reader",
+    "file_reader": "implemented_phone_artifact_file_reader",
+}
 _PHONE_ARTIFACT_WORKSPACE_TOOLS = {
     "artifact_file_list",
     "artifact_file_read",
@@ -380,6 +388,14 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "native_layers": [],
             "requires_mobile_approval": requires_approval,
             "implementation_status": status,
+        }
+    if tool_id in _PHONE_MEDIA_ARTIFACT_TOOLS:
+        return {
+            "platforms": ["ios", "android"],
+            "runtime_layers": ["flutter", "dart", "mobile-media-artifact"],
+            "native_layers": [],
+            "requires_mobile_approval": False,
+            "implementation_status": _PHONE_MEDIA_ARTIFACT_TOOLS[tool_id],
         }
     if tool_id in _PHONE_ARTIFACT_WORKSPACE_TOOLS:
         return {

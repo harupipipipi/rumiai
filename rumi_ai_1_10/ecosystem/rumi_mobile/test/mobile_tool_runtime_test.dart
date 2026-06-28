@@ -255,6 +255,8 @@ void main() {
           'artifact_file_write',
           'artifact_file_patch',
           'artifact_file_delete',
+          'file_reader',
+          'tool_file_reader',
           'browser_save_page',
           'webapp_preview',
           'webapp_lint',
@@ -302,6 +304,10 @@ void main() {
           'browser_extract_table',
           'tts_generate',
           'tts_generate_local',
+          'image_render',
+          'image_generate_local_or_provider',
+          'audio_transcribe',
+          'audio_transcribe_local',
           'mobile_platform_info',
           'mobile_json',
           'mobile_base64',
@@ -873,6 +879,26 @@ void main() {
       final readData = readPayload['data'] as Map<String, dynamic>;
       expect(readData['content'], 'hello mobile artifact');
       expect(readData['runtime_layers'], containsAll(['flutter', 'dart']));
+
+      final fileRead = artifactRuntime.execute(
+        const MobileToolCall(
+          id: 'file_reader_1',
+          name: 'tool_file_reader',
+          arguments: {
+            'path': path,
+            'start_line': 1,
+            'end_line': 1,
+            'max_chars': 10,
+          },
+        ),
+      );
+      expect(fileRead.ok, isTrue);
+      final fileReadPayload =
+          jsonDecode(fileRead.output) as Map<String, dynamic>;
+      final fileReadData = fileReadPayload['data'] as Map<String, dynamic>;
+      expect(fileReadData['content'], 'hello mobi');
+      expect(fileReadData['truncated'], isTrue);
+      expect(fileReadData['runtime_layers'], contains('mobile-media-artifact'));
 
       final patch = await artifactRuntime.executeAsync(
         const MobileToolCall(
@@ -2263,6 +2289,86 @@ void main() {
       expect(metadata['tool'], 'tts_generate_local');
     });
 
+    test('renders phone-local image artifacts and audio transcript payloads',
+        () {
+      final rendered = runtime.execute(
+        const MobileToolCall(
+          id: 'image_render_1',
+          name: 'image_render',
+          arguments: {
+            'text': 'Hello from phone image render',
+            'output_path': 'renders/mobile-tool-test.svg',
+            'width': 480,
+            'height': 320,
+          },
+        ),
+      );
+      expect(rendered.ok, isTrue);
+      final renderedData = (jsonDecode(rendered.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(renderedData['path'], 'renders/mobile-tool-test.svg');
+      expect(renderedData['format'], 'svg');
+      expect(renderedData['runtime_layers'], contains('mobile-media-artifact'));
+
+      final read = runtime.execute(
+        const MobileToolCall(
+          id: 'read_render_1',
+          name: 'artifact_file_read',
+          arguments: {'path': 'renders/mobile-tool-test.svg'},
+        ),
+      );
+      expect(read.ok, isTrue);
+      final readData = (jsonDecode(read.output) as Map<String, dynamic>)['data']
+          as Map<String, dynamic>;
+      expect(readData['content'], contains('<svg'));
+
+      final generated = runtime.execute(
+        const MobileToolCall(
+          id: 'image_generate_1',
+          name: 'image_generate_local_or_provider',
+          arguments: {
+            'prompt': 'a simple mobile placeholder',
+            'output_path': 'images/generated-tool-test.svg',
+          },
+        ),
+      );
+      expect(generated.ok, isTrue);
+      final generatedData = (jsonDecode(generated.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(generatedData['provider_backed'], isFalse);
+      expect(generatedData['fallback'], 'phone_svg_placeholder');
+
+      final transcript = runtime.execute(
+        const MobileToolCall(
+          id: 'audio_transcribe_1',
+          name: 'audio_transcribe',
+          arguments: {'transcript': 'hello audio', 'language': 'en'},
+        ),
+      );
+      expect(transcript.ok, isTrue);
+      final transcriptData = (jsonDecode(transcript.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(transcriptData['text'], 'hello audio');
+      expect(transcriptData['fallback'], 'provided_transcript');
+
+      final audioBytes = runtime.execute(
+        MobileToolCall(
+          id: 'audio_transcribe_local_1',
+          name: 'audio_transcribe_local',
+          arguments: {
+            'audio_base64': base64Encode([0, 1, 2, 3])
+          },
+        ),
+      );
+      expect(audioBytes.ok, isTrue);
+      final audioData = (jsonDecode(audioBytes.output)
+          as Map<String, dynamic>)['data'] as Map<String, dynamic>;
+      expect(audioData['text'], '');
+      expect(
+          audioData['fallback'], 'native_or_provider_transcription_required');
+      expect(audioData['runtime_layers'], contains('mobile-media-artifact'));
+    });
+
     test('parses phone-provided text documents through media_doc_parse', () {
       final markdown = '# Hello\n\nmobile docs';
       final result = runtime.execute(
@@ -3538,6 +3644,27 @@ void main() {
         expect(artifactData['tags'], contains(mobileFlutterTag));
       }
 
+      final fileReaderSchema = runtime.execute(
+        const MobileToolCall(
+          id: 'schema_tool_file_reader_1',
+          name: 'tool_schema',
+          arguments: {'tool_name': 'tool_file_reader'},
+        ),
+      );
+      final fileReaderPayload =
+          jsonDecode(fileReaderSchema.output) as Map<String, dynamic>;
+      final fileReaderData = fileReaderPayload['data'] as Map<String, dynamic>;
+      final fileReaderMobile = fileReaderData['mobile'] as Map<String, dynamic>;
+      expect(fileReaderData['mobile_compatible'], isTrue);
+      expect(fileReaderData['execution_route'], 'phone');
+      expect(fileReaderData['function_id'], 'tool_file_reader');
+      expect(fileReaderData['tool_id'], 'file_reader');
+      expect(fileReaderMobile['requires_mobile_approval'], isFalse);
+      expect(fileReaderMobile['implementation_status'],
+          'implemented_phone_artifact_file_reader');
+      expect(fileReaderMobile['runtime_layers'],
+          contains('mobile-media-artifact'));
+
       for (final toolName in const [
         'browser_save_page',
         'webapp_preview',
@@ -3961,6 +4088,34 @@ void main() {
       expect(
           sourceRankMobile['runtime_layers'], containsAll(['flutter', 'dart']));
       expect(sourceRankData['tags'], contains(mobileFlutterTag));
+
+      for (final entry in const {
+        'image_render': 'implemented_phone_svg_image_render',
+        'image_generate_local_or_provider':
+            'implemented_phone_svg_image_placeholder',
+        'audio_transcribe': 'implemented_phone_audio_transcribe_payload',
+        'audio_transcribe_local': 'implemented_phone_audio_transcribe_payload',
+      }.entries) {
+        final mediaSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${entry.key}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': entry.key},
+          ),
+        );
+        final mediaPayload =
+            jsonDecode(mediaSchema.output) as Map<String, dynamic>;
+        final mediaData = mediaPayload['data'] as Map<String, dynamic>;
+        final mediaMobile = mediaData['mobile'] as Map<String, dynamic>;
+        expect(mediaData['mobile_compatible'], isTrue);
+        expect(mediaData['execution_route'], 'phone');
+        expect(mediaMobile['requires_mobile_approval'], isFalse);
+        expect(mediaMobile['implementation_status'], entry.value);
+        expect(mediaMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(
+            mediaMobile['runtime_layers'], contains('mobile-media-artifact'));
+        expect(mediaData['tags'], contains(mobileFlutterTag));
+      }
 
       for (final entry in const {
         'github_search': 'implemented_cli_dry_run_pc_execute',
