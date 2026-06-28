@@ -526,6 +526,49 @@ class TestGenerateFunctionRunnerScript(unittest.TestCase):
         self.assertIn("args", script)
 
 
+class TestFunctionRunnerSubprocessEncoding(unittest.TestCase):
+    """Regression coverage for Windows non-ASCII workspace paths."""
+
+    def test_run_runner_on_host_uses_utf8_text_encoding(self):
+        executor = CapabilityExecutor()
+        mock_proc = _make_subprocess_result(returncode=0, stdout='{"result": "ok"}')
+        payload = (
+            '{"module_path": '
+            '"C:\\\\Users\\\\ai\\\\OneDrive\\\\\\u30c9\\u30ad\\u30e5\\u30e1\\u30f3\\u30c8\\\\handler.py"}'
+        )
+
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
+            resp = executor._run_runner_on_host(
+                payload=payload,
+                cwd=".",
+                timeout=5,
+                start_time=time.time(),
+                failure_prefix="Handler execution failed",
+            )
+
+        self.assertTrue(resp.success)
+        self.assertEqual(mock_run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(mock_run.call_args.kwargs["errors"], "replace")
+
+    def test_nonzero_runner_response_uses_stdout_json_error_when_stderr_is_empty(self):
+        executor = CapabilityExecutor()
+        proc = _make_subprocess_result(
+            returncode=1,
+            stdout='{"error": "utf-8 decode failed", "error_type": "UnicodeDecodeError"}',
+            stderr="",
+        )
+
+        resp = executor._response_from_completed_process(
+            proc,
+            time.time(),
+            "Handler execution failed",
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "function_execution_error")
+        self.assertIn("utf-8 decode failed", resp.error)
+
+
 class TestGetFunctionTimeout(unittest.TestCase):
     """Test _get_function_timeout method."""
 

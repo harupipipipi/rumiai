@@ -2626,6 +2626,14 @@ class CapabilityExecutor:
         latency_ms = (time.time() - start_time) * 1000
         if proc.returncode != 0:
             stderr = (proc.stderr or "").strip()
+            stdout = (proc.stdout or "").strip()
+            if not stderr and stdout:
+                try:
+                    payload = json.loads(stdout)
+                    if isinstance(payload, dict):
+                        stderr = str(payload.get("error") or payload.get("error_type") or "").strip()
+                except json.JSONDecodeError:
+                    stderr = stdout
             return CapabilityResponse(
                 success=False,
                 error=_sanitize_error(f"{failure_prefix}: {stderr}"[:1000]),
@@ -2663,6 +2671,8 @@ class CapabilityExecutor:
             input=payload,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=cwd,
         )
