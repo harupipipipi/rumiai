@@ -3,7 +3,7 @@ import { AlertTriangle, Trash2, X } from "lucide-react";
 
 import { sandboxesApi } from "../../features/sandboxes/api";
 import { diagnosticsText } from "../../features/sandboxes/runtimeStatus";
-import type { CreateDesktopRequest, DesktopInputAction } from "../../features/sandboxes/types";
+import type { CreateDesktopRequest, DesktopInputAction, DesktopInstance } from "../../features/sandboxes/types";
 import { useDesktopControlLease } from "../../features/sandboxes/useDesktopControlLease";
 import { useDesktopInstances } from "../../features/sandboxes/useSandboxInstances";
 import { useRuntimeDoctor } from "../../features/sandboxes/useRuntimeDoctor";
@@ -27,6 +27,15 @@ export function shouldShowDesktopList({
   error?: string | null;
 }) {
   return runtimeReady || desktopCount > 0 || loading || Boolean(error);
+}
+
+export function resolveVisibleSelectedDesktop(
+  visibleDesktops: DesktopInstance[],
+  selectedSeatId: string | null,
+): DesktopInstance | null {
+  return visibleDesktops.find((desktop) => desktop.seat_id === selectedSeatId)
+    ?? visibleDesktops[0]
+    ?? null;
 }
 
 export function DesktopMonitorWorkspace() {
@@ -60,9 +69,7 @@ export function DesktopMonitorWorkspace() {
       : desktopInstances.desktops,
     [desktopInstances.desktops, filter],
   );
-  const selectedDesktop = desktopInstances.desktops.find((desktop) => desktop.seat_id === selectedSeatId)
-    ?? desktopInstances.desktops[0]
-    ?? null;
+  const selectedDesktop = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId);
   const stopTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === stopTargetSeatId) ?? null;
   const deleteTarget = desktopInstances.desktops.find((desktop) => desktop.seat_id === deleteTargetSeatId) ?? null;
 
@@ -91,9 +98,10 @@ export function DesktopMonitorWorkspace() {
   }, [desktopInstances.desktops]);
 
   useEffect(() => {
-    if (selectedSeatId && desktopInstances.desktops.some((desktop) => desktop.seat_id === selectedSeatId)) return;
-    setSelectedSeatId(desktopInstances.desktops[0]?.seat_id ?? null);
-  }, [desktopInstances.desktops, selectedSeatId]);
+    const nextSelectedSeatId = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId)?.seat_id ?? null;
+    if (nextSelectedSeatId === selectedSeatId) return;
+    setSelectedSeatId(nextSelectedSeatId);
+  }, [selectedSeatId, visibleDesktops]);
 
   useEffect(() => {
     setAccessMessage(null);

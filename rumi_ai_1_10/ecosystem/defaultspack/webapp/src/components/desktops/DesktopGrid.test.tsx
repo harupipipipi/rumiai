@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DesktopInstance } from "../../features/sandboxes/types";
-import { shouldShowDesktopList } from "./DesktopMonitorWorkspace";
+import { resolveVisibleSelectedDesktop, shouldShowDesktopList } from "./DesktopMonitorWorkspace";
 import { DesktopGrid } from "./DesktopGrid";
 
 const noop = () => undefined;
@@ -65,4 +65,22 @@ test("desktop workspace keeps existing seats visible while runtime setup is degr
     desktopCount: 0,
     loading: false,
   }), false);
+});
+
+test("desktop workspace resolves inspector selection from visible desktops", () => {
+  const destroyedDesktop = {
+    ...desktop("destroyed-seat"),
+    name: "Destroyed Desktop",
+    status: "destroyed",
+  } satisfies DesktopInstance;
+  const runningDesktop = {
+    ...desktop("running-seat"),
+    name: "Running Desktop",
+  };
+  const visibleDesktops = [destroyedDesktop, runningDesktop].filter((instance) => instance.status === "running");
+
+  assert.equal(
+    resolveVisibleSelectedDesktop(visibleDesktops, destroyedDesktop.seat_id)?.seat_id,
+    runningDesktop.seat_id,
+  );
 });
