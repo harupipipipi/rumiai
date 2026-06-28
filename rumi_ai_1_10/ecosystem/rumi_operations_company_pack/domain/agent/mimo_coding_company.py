@@ -403,6 +403,8 @@ class MimoCodingCompanyRuntime:
         self.source_pack_root = Path(__file__).resolve().parents[2]
         self.pack_root = pack_root or self.source_pack_root
         self.defaultspack_root = self.pack_root.parent / "defaultspack"
+        self.schedules_dir = self._resolve_schedules_dir()
+        os.environ.setdefault("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(self.schedules_dir))
         self.state_path = self._resolve_state_path()
 
     def manifest(self) -> dict[str, Any]:
@@ -532,6 +534,7 @@ class MimoCodingCompanyRuntime:
                 "qa_targets": list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else []),
                 "docker_swarm": docker_swarm,
                 "knowledge_bundle_paths": [str(path) for path in self._knowledge_bundle_paths()],
+                "schedules_dir": str(self.schedules_dir),
                 "seeded_task_ids": list(state.get("seeded_task_ids") if isinstance(state.get("seeded_task_ids"), list) else []),
                 "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
                 "seeded_knowledge_ids": list(state.get("seeded_knowledge_ids") if isinstance(state.get("seeded_knowledge_ids"), list) else []),
@@ -731,6 +734,13 @@ class MimoCodingCompanyRuntime:
         if override:
             return Path(override)
         return self.pack_root / "user_data" / "shared" / "mimo_coding_company" / "state.json"
+
+    def _resolve_schedules_dir(self) -> Path:
+        override = os.environ.get("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", "").strip()
+        if override:
+            return Path(override)
+        runtime_root = self.pack_root.parent.parent if self.pack_root.parent.name == "ecosystem" else self.pack_root.parent
+        return runtime_root / "user_data" / "shared" / "schedules"
 
     def _load_state(self) -> dict[str, Any]:
         try:

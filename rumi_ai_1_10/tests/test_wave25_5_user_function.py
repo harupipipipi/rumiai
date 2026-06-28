@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
 import shutil
 import re
+import subprocess
 
 # Ensure project root is in path
 _project_root = Path(__file__).resolve().parent.parent
@@ -549,6 +550,47 @@ class TestFunctionRunnerSubprocessEncoding(unittest.TestCase):
         self.assertTrue(resp.success)
         self.assertEqual(mock_run.call_args.kwargs["encoding"], "utf-8")
         self.assertEqual(mock_run.call_args.kwargs["errors"], "replace")
+        env = mock_run.call_args.kwargs["env"]
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(env["PYTHONUTF8"], "1")
+
+    def test_function_runner_reads_utf8_stdin_when_process_locale_is_cp932(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            function_dir = Path(temp_dir) / "ドキュメント"
+            function_dir.mkdir()
+            main_py = function_dir / "main.py"
+            main_py.write_text(
+                "def run(context, args):\n"
+                "    return {'ok': True, 'name': context.get('name')}\n",
+                encoding="utf-8",
+            )
+            payload = json.dumps(
+                {
+                    "module_path": str(main_py),
+                    "callable_name": "run",
+                    "context": {"name": "ミモ"},
+                    "args": {},
+                },
+                ensure_ascii=False,
+            )
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "cp932"
+            env["PYTHONUTF8"] = "0"
+
+            proc = subprocess.run(
+                [sys.executable, str(FUNCTION_RUNNER_PATH)],
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                cwd=str(function_dir),
+                env=env,
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertEqual(json.loads(proc.stdout), {"ok": True, "name": "ミモ"})
 
     def test_nonzero_runner_response_uses_stdout_json_error_when_stderr_is_empty(self):
         executor = CapabilityExecutor()

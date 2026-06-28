@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -325,3 +327,122 @@ def test_schedule_history_replaces_lone_surrogates_before_persisting(tmp_path, m
     assert "bad ? schedule" in (tmp_path / "user_data" / "shared" / "schedules" / "sched-surrogate.json").read_text(
         encoding="utf-8"
     )
+
+
+def test_schedule_store_can_use_explicit_schedules_dir_when_cwd_differs(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    runtime_root = repo_root / "rumi_ai_1_10"
+    schedules_dir = runtime_root / "user_data" / "shared" / "schedules"
+    repo_root.mkdir()
+    monkeypatch.chdir(repo_root)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(schedules_dir))
+
+    from domain.agent.schedule_store import load_history, save_schedule, append_history
+
+    save_schedule(
+        {
+            "id": "sched-explicit",
+            "type": "once",
+            "task": {"message": "use explicit runtime schedule dir"},
+            "config": {"run_at": "2099-01-01T00:00:00Z"},
+            "status": "active",
+        }
+    )
+    append_history(
+        "sched-explicit",
+        {
+            "execution_id": "sexec-explicit",
+            "status": "completed",
+            "result": "ok",
+        },
+    )
+
+    entries, total = load_history("sched-explicit")
+
+    assert total == 1
+    assert entries[0]["result"] == "ok"
+    assert (schedules_dir / "sched-explicit.json").is_file()
+    assert not (repo_root / "user_data" / "shared" / "schedules" / "sched-explicit.json").exists()
+
+
+def test_scheduler_serializes_chat_runs_for_same_conversation(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    active = 0
+    max_active = 0
+    call_count = 0
+    lock = threading.Lock()
+    first_call_started = threading.Event()
+    release_first_call = threading.Event()
+
+    def fake_send_chat(payload, context):
+        nonlocal active, max_active, call_count
+        with lock:
+            active += 1
+            max_active = max(max_active, active)
+            call_count += 1
+            index = call_count
+            if index == 1:
+                first_call_started.set()
+        if index == 1:
+            assert release_first_call.wait(timeout=2)
+        time.sleep(0.05)
+        content = payload["message"]["content"]
+        with lock:
+            active -= 1
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": content + " done"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    first = scheduler.create_schedule(
+        "once",
+        {"message": "first", "conversation_id": "conv-shared"},
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+    second = scheduler.create_schedule(
+        "once",
+        {"message": "second", "conversation_id": "conv-shared"},
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    results = {}
+
+    def run_schedule(key, schedule_id):
+        results[key] = scheduler.trigger_now(schedule_id)
+
+    t1 = threading.Thread(target=run_schedule, args=("first", first["id"]))
+    t2 = threading.Thread(target=run_schedule, args=("second", second["id"]))
+    t1.start()
+    assert first_call_started.wait(timeout=2)
+    t2.start()
+    time.sleep(0.1)
+
+    assert call_count == 1
+    assert max_active == 1
+
+    release_first_call.set()
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+
+    assert not t1.is_alive()
+    assert not t2.is_alive()
+    assert results["first"]["status"] == "completed"
+    assert results["second"]["status"] == "completed"
+    assert max_active == 1
+
+    scheduler.delete_schedule(first["id"])
+    scheduler.delete_schedule(second["id"])
+    _reset_scheduler_singleton()

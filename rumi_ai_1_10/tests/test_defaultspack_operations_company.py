@@ -95,6 +95,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
     status = runtime.bootstrap(
@@ -117,6 +118,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert status["conversation_id"]
     assert status["harness"]["qa_targets"] == ["http://127.0.0.1:3000"]
     assert status["harness"]["max_tool_calls"] is None
+    assert status["harness"]["schedules_dir"] == str(tmp_path / "user_data" / "shared" / "schedules")
     assert status["company"]["metadata"]["max_tool_calls"] is None
     assert len(status["harness"]["seeded_task_ids"]) == 6
     assert status["harness"]["docker_swarm"]["worker_count"] == 4
@@ -179,6 +181,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         "desktop_input",
     } <= set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "managed desktop" in qa_schedule["task"]["message"]
+    assert (tmp_path / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").is_file()
+    assert not (tmp_path / "ops_pack" / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").exists()
     browser_qa_role = next(role for role in status["manifest"]["roles"] if role["agent_id"] == "browser_qa")
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(browser_qa_role["allowed_tools"])
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(status["manifest"]["tool_policy"]["allowlist"])
@@ -205,6 +209,7 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
     status = runtime.bootstrap(

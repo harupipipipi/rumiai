@@ -16,6 +16,13 @@ _SCHEDULES_DIR = os.path.join("user_data", "shared", "schedules")
 _lock = threading.Lock()
 
 
+def _schedules_dir():
+    override = os.environ.get("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", "").strip()
+    if override:
+        return override
+    return _SCHEDULES_DIR
+
+
 def _sanitize_json_text(value):
     if isinstance(value, str):
         return value.encode("utf-8", errors="replace").decode("utf-8")
@@ -31,18 +38,19 @@ def _sanitize_json_text(value):
 
 def _ensure_dir():
     """Create the schedules directory if it does not exist."""
-    if not os.path.isdir(_SCHEDULES_DIR):
-        os.makedirs(_SCHEDULES_DIR, exist_ok=True)
+    schedules_dir = _schedules_dir()
+    if not os.path.isdir(schedules_dir):
+        os.makedirs(schedules_dir, exist_ok=True)
 
 
 def _schedule_path(schedule_id):
     """Return the file path for a given schedule ID."""
-    return os.path.join(_SCHEDULES_DIR, schedule_id + ".json")
+    return os.path.join(_schedules_dir(), schedule_id + ".json")
 
 
 def _history_path(schedule_id):
     """Return the file path for a given schedule's execution history."""
-    return os.path.join(_SCHEDULES_DIR, schedule_id + "_history.json")
+    return os.path.join(_schedules_dir(), schedule_id + "_history.json")
 
 
 def save_schedule(schedule_dict):
@@ -86,9 +94,10 @@ def load_all_schedules():
     _ensure_dir()
     results = []
     with _lock:
-        for fname in os.listdir(_SCHEDULES_DIR):
+        schedules_dir = _schedules_dir()
+        for fname in os.listdir(schedules_dir):
             if fname.endswith(".json") and not fname.endswith("_history.json"):
-                fpath = os.path.join(_SCHEDULES_DIR, fname)
+                fpath = os.path.join(schedules_dir, fname)
                 try:
                     with open(fpath, "r", encoding="utf-8") as f:
                         data = json.load(f)

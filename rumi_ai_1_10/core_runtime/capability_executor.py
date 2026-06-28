@@ -2610,6 +2610,12 @@ class CapabilityExecutor:
     def _runner_command(self):
         return [sys.executable, str(FUNCTION_RUNNER_PATH)]
 
+    def _runner_env(self):
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
+        return env
+
     def _generate_function_runner_script(self):
         """Return the bundled runner script for legacy callers/tests."""
         return FUNCTION_RUNNER_PATH.read_text(encoding="utf-8")
@@ -2675,6 +2681,7 @@ class CapabilityExecutor:
             errors="replace",
             timeout=timeout,
             cwd=cwd,
+            env=self._runner_env(),
         )
         return self._response_from_completed_process(proc, start_time, failure_prefix)
 

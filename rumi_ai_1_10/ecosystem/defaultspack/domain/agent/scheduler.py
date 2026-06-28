@@ -377,6 +377,7 @@ class Scheduler:
         self._lock = threading.Lock()
         self._timers = {}        # schedule_id -> threading.Timer
         self._schedules = {}     # schedule_id -> schedule dict (in-memory cache)
+        self._conversation_locks = {}  # conversation_id -> threading.Lock
         self._loaded = False
 
     # ---- public API ----
@@ -711,6 +712,17 @@ class Scheduler:
         if timer is not None:
             timer.cancel()
 
+    def _conversation_execution_lock(self, conversation_id):
+        key = str(conversation_id or "").strip()
+        if not key:
+            return None
+        with self._lock:
+            lock = self._conversation_locks.get(key)
+            if lock is None:
+                lock = threading.Lock()
+                self._conversation_locks[key] = lock
+            return lock
+
     def _on_timer_fire(self, schedule_id):
         """Called when a timer fires. Execute the task and re-arm."""
         with self._lock:
@@ -768,45 +780,47 @@ class Scheduler:
 
         try:
             if conversation_id:
-                from blocks.chat.send import run as chat_send_run
+                conversation_lock = self._conversation_execution_lock(conversation_id)
+                with conversation_lock:
+                    from blocks.chat.send import run as chat_send_run
 
-                params = {}
-                if task_cfg.get("model"):
-                    params["model"] = task_cfg.get("model")
-                if isinstance(task_cfg.get("tool_policy"), dict):
-                    params["tool_policy"] = task_cfg["tool_policy"]
-                if task_cfg.get("thinking_level"):
-                    params["thinking_level"] = task_cfg.get("thinking_level")
-                tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
-                if tools and "tool_choice" not in params:
-                    initial_tool_choice = _initial_tool_choice(task_cfg)
-                    if initial_tool_choice is not None:
-                        params["tool_choice"] = initial_tool_choice
-                trigger = _scheduler_trigger_name(manual)
-                result = chat_send_run(
-                    _scheduler_chat_payload(
+                    params = {}
+                    if task_cfg.get("model"):
+                        params["model"] = task_cfg.get("model")
+                    if isinstance(task_cfg.get("tool_policy"), dict):
+                        params["tool_policy"] = task_cfg["tool_policy"]
+                    if task_cfg.get("thinking_level"):
+                        params["thinking_level"] = task_cfg.get("thinking_level")
+                    tools = task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None
+                    if tools and "tool_choice" not in params:
+                        initial_tool_choice = _initial_tool_choice(task_cfg)
+                        if initial_tool_choice is not None:
+                            params["tool_choice"] = initial_tool_choice
+                    trigger = _scheduler_trigger_name(manual)
+                    result = chat_send_run(
+                        _scheduler_chat_payload(
+                            conversation_id=conversation_id,
+                            content=message,
+                            task_cfg=task_cfg,
+                            schedule_id=schedule_id,
+                            exec_id=exec_id,
+                            trigger=trigger,
+                            params=params,
+                            tools=tools,
+                        ),
+                        {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                    )
+                    result, auto_approvals = _resume_scheduled_chat_approvals(
+                        result=result,
+                        send_chat=chat_send_run,
                         conversation_id=conversation_id,
-                        content=message,
                         task_cfg=task_cfg,
                         schedule_id=schedule_id,
                         exec_id=exec_id,
                         trigger=trigger,
                         params=params,
                         tools=tools,
-                    ),
-                    {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
-                )
-                result, auto_approvals = _resume_scheduled_chat_approvals(
-                    result=result,
-                    send_chat=chat_send_run,
-                    conversation_id=conversation_id,
-                    task_cfg=task_cfg,
-                    schedule_id=schedule_id,
-                    exec_id=exec_id,
-                    trigger=trigger,
-                    params=params,
-                    tools=tools,
-                )
+                    )
             else:
                 from blocks.ai.complete import run as ai_complete_run
 
