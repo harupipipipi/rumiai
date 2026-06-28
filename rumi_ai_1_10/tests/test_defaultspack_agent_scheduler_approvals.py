@@ -244,6 +244,81 @@ def test_scheduler_ensure_loaded_does_not_duplicate_live_active_timer(tmp_path, 
     _reset_scheduler_singleton()
 
 
+def test_scheduler_reloads_and_rearms_when_schedule_dir_changes(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import save_schedule
+
+    def schedule_payload(schedule_id, message):
+        return {
+            "id": schedule_id,
+            "name": message,
+            "description": "",
+            "type": "interval",
+            "task": {"message": message, "conversation_id": "conv-mimo"},
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2099-01-01T00:00:00Z",
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-01T00:00:00Z",
+        }
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+
+    first_dir = tmp_path / "first" / "schedules"
+    second_dir = tmp_path / "second" / "schedules"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(first_dir))
+    save_schedule(schedule_payload("sched-first", "first directory schedule"))
+
+    scheduler = scheduler_module.Scheduler()
+    scheduler.ensure_loaded()
+
+    assert len(FakeTimer.created) == 1
+    first_timer = FakeTimer.created[0]
+    assert first_timer.args == ["sched-first"]
+    assert first_timer.started is True
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(second_dir))
+    save_schedule(schedule_payload("sched-second", "second directory schedule"))
+
+    scheduler.ensure_loaded()
+
+    assert first_timer.cancelled is True
+    assert len(FakeTimer.created) == 2
+    assert FakeTimer.created[1].args == ["sched-second"]
+    assert FakeTimer.created[1].started is True
+    with scheduler._lock:
+        assert set(scheduler._schedules) == {"sched-second"}
+        assert set(scheduler._timers) == {"sched-second"}
+
+    scheduler.delete_schedule("sched-second")
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_recovers_persisted_stale_manual_running_execution_and_can_trigger(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

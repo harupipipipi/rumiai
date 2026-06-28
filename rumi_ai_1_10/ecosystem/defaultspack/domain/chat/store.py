@@ -263,6 +263,43 @@ class ChatStore:
             return None
         return copy.deepcopy(conv)
 
+    def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
+        self._refresh_if_storage_changed()
+        conv = self._conversations.get(conversation_id)
+        if conv is None:
+            return None, None
+        messages = conv.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+        total = len(messages)
+        if message_limit is None:
+            start = 0
+            end = total
+            resolved_limit = total
+        else:
+            resolved_limit = max(0, int(message_limit))
+            if message_offset is None:
+                start = max(0, total - resolved_limit)
+            else:
+                start = max(0, min(total, int(message_offset)))
+            end = max(start, min(total, start + resolved_limit))
+        conv_copy = {
+            key: copy.deepcopy(value)
+            for key, value in conv.items()
+            if key != "messages"
+        }
+        conv_copy["messages"] = [copy.deepcopy(message) for message in messages[start:end]]
+        window = {
+            "offset": start,
+            "limit": resolved_limit,
+            "returned": len(conv_copy["messages"]),
+            "total": total,
+            "has_more_before": start > 0,
+            "has_more_after": end < total,
+            "order": "chronological",
+        }
+        return conv_copy, window
+
     def list_conversations(
         self,
         limit=50,

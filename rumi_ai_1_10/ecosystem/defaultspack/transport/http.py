@@ -53,6 +53,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.tool.list",
     "blocks.ui.catalog",
     "blocks.ui.commands",
+    "blocks.ui.conversation_preview",
     "blocks.ui.settings",
 }
 
@@ -401,6 +402,9 @@ class DefaultsHttpServer:
             return invoke_block(module_name, payload, context)
         if module_name == "blocks.chat.stream":
             return invoke_block(module_name, payload, context)
+        if self._safe_get_fallback_allowed(module_name, payload):
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
             from domain.function_runtime.registry import function_id_for_block_module
@@ -517,6 +521,8 @@ class DefaultsHttpServer:
                 context.get("approval_id"),
             )
         if fallback_block_module in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            return invoke_block(fallback_block_module, payload, context)
+        if fallback_block_module and self._safe_get_fallback_allowed(fallback_block_module, payload):
             return invoke_block(fallback_block_module, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function

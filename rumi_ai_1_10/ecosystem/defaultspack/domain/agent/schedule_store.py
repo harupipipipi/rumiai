@@ -23,6 +23,11 @@ def _schedules_dir():
     return _SCHEDULES_DIR
 
 
+def current_schedules_dir():
+    """Return the absolute directory currently used for schedule persistence."""
+    return os.path.abspath(_schedules_dir())
+
+
 def _sanitize_json_text(value):
     if isinstance(value, str):
         return value.encode("utf-8", errors="replace").decode("utf-8")

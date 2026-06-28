@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
 from domain.agent.schedule_store import (
+    current_schedules_dir,
     save_schedule,
     load_schedule,
     load_all_schedules,
@@ -544,16 +545,27 @@ class Scheduler:
         self._conversation_locks = {}  # conversation_id -> threading.Lock
         self._active_execution_ids = set()
         self._loaded = False
+        self._loaded_schedules_dir = None
 
     # ---- public API ----
 
     def ensure_loaded(self):
         """Load schedules once and keep active schedule timers armed."""
         should_load = False
+        timers_to_cancel = []
+        schedules_dir = current_schedules_dir()
         with self._lock:
+            if self._loaded_schedules_dir != schedules_dir:
+                timers_to_cancel = list(self._timers.values())
+                self._timers.clear()
+                self._schedules.clear()
+                self._loaded = False
+                self._loaded_schedules_dir = schedules_dir
             if not self._loaded:
                 self._loaded = True
                 should_load = True
+        for timer in timers_to_cancel:
+            timer.cancel()
         if should_load:
             all_scheds = load_all_schedules()
             for sd in all_scheds:
