@@ -25,11 +25,23 @@ def missing_company(company_id: str):
     return error("company not found: " + str(company_id), "NOT_FOUND")
 
 
+def _int_param(value: Any, default: int) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdecimal():
+            return int(text)
+    return default
+
+
 def limit_offset(input_data: dict[str, Any]) -> tuple[int, int]:
-    limit = input_data.get("limit", 50)
-    offset = input_data.get("offset", 0)
-    if not isinstance(limit, int) or limit < 1:
+    limit = _int_param(input_data.get("limit", 50), 50)
+    offset = _int_param(input_data.get("offset", 0), 0)
+    if limit < 1:
         limit = 50
-    if not isinstance(offset, int) or offset < 0:
+    if offset < 0:
         offset = 0
     return limit, offset

@@ -1304,6 +1304,28 @@ def test_stream_engine_recovers_multiple_text_tool_calls_for_mimo_scheduler(tmp_
     assert sum(1 for event in events if event.get("type") == "tool_call_completed") == 2
 
 
+def test_stream_engine_recovers_text_assistant_progress_without_connected_tool(tmp_path, monkeypatch):
+    calls, gateway, events, stored = _run_text_tool_call_response(
+        tmp_path,
+        monkeypatch,
+        (
+            "<tool_call>\n"
+            "<function=assistant_progress>\n"
+            "<parameter=summary>Worker-1 target: http://127.0.0.1:8766/chat</parameter>\n"
+            "<parameter=next_action>Take first screenshot of chat UI</parameter>\n"
+            "</function>\n"
+            "</tool_call>"
+        ),
+        metadata={"source": "scheduler", "profile_id": "defaultspack.mimo_coding_company"},
+        tool_names=(),
+    )
+
+    assert calls == []
+    assert len(gateway.complete_requests) == 2
+    assert stored["raw_text"] == "routes checked"
+    assert any(event.get("type") == "assistant_progress" for event in events)
+
+
 def test_stream_engine_ignores_prefaced_text_tool_call_outside_mimo_scheduler(tmp_path, monkeypatch):
     raw_text = (
         "For example, a model might write this instead of calling the tool.\n\n"

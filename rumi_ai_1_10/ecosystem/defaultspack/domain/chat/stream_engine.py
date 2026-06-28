@@ -374,7 +374,7 @@ def _text_tool_call_blocks(
     tool_uses: list[dict[str, Any]] = []
     for item in matches:
         tool_name = html.unescape(str(item.group(1) or "").strip())
-        if not tool_name or tool_name not in connected:
+        if not tool_name or (tool_name not in connected and not is_assistant_progress_tool_name(tool_name)):
             return []
         body = str(item.group("body") or "")
         arguments: dict[str, Any] = {}

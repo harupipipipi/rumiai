@@ -342,6 +342,33 @@ def test_company_channels_include_runtime_message_counts(tmp_path, monkeypatch):
     assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
 
 
+def test_company_messages_accept_string_limit_and_offset(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, messages
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    for index in range(60):
+        messages.run(
+            {
+                "action": "create",
+                "company_id": company_id,
+                "channel_id": "ops-company",
+                "sender_id": "scheduler",
+                "content": f"MiMo sync message {index}",
+            },
+            {},
+        )
+
+    listed = messages.run({"company_id": company_id, "limit": "55", "offset": "2"}, {})
+
+    assert listed["status"] == "ok"
+    assert listed["data"]["total"] == 60
+    assert len(listed["data"]["messages"]) == 55
+
+
 def test_company_get_and_status_include_runtime_workspace_counts(tmp_path, monkeypatch):
     from blocks.company import bootstrap, get, messages, status
 
