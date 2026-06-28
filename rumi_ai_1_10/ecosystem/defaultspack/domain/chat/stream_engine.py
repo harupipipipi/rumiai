@@ -68,6 +68,12 @@ from domain.chat.progress_tool import (
 )
 from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
+from domain.chat.subagent_durability import (
+    SUBAGENT_DURABLE_DRAFT_FLAG,
+    SUBAGENT_PENDING_TEXT,
+    should_create_subagent_durable_draft,
+    subagent_durable_draft_metadata,
+)
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
 from domain.kanban.chat_sync import sync_conversation_kanban
@@ -926,31 +932,39 @@ class _AssistantDraft:
         sequence_number: int,
         model: str,
         params: dict[str, Any],
+        initial_text: str = "",
+        metadata_extra: dict[str, Any] | None = None,
+        preserve_initial_text: bool = False,
     ) -> None:
         self._store = store
         self._conversation_id = conversation_id
         self._model = model
         self._params = params
+        self._initial_text = str(initial_text or "")
+        self._metadata_extra = dict(metadata_extra or {})
+        self._preserve_initial_text = bool(preserve_initial_text and self._initial_text)
         self._last_sync_at = 0.0
         self._last_signature: tuple[Any, ...] | None = None
+        metadata = {
+            "model": model,
+            "streaming": True,
+            "draft": True,
+            "thinking": {"state": "running"},
+            "thinking_level": params.get("thinking_level"),
+        }
+        metadata.update(self._metadata_extra)
         self.message = store.add_message(
             conversation_id,
             {
                 "role": "assistant",
                 "parent_id": parent_id,
                 "sequence_number": sequence_number,
-                "content": [],
-                "raw_text": "",
+                "content": [{"type": "text", "text": self._initial_text}] if self._initial_text else [],
+                "raw_text": self._initial_text,
                 "finish_reason": "streaming",
                 "usage": {},
                 "widget": None,
-                "metadata": {
-                    "model": model,
-                    "streaming": True,
-                    "draft": True,
-                    "thinking": {"state": "running"},
-                    "thinking_level": params.get("thinking_level"),
-                },
+                "metadata": metadata,
                 "events": [],
                 "tool_logs": [],
                 "model": model,
@@ -976,15 +990,21 @@ class _AssistantDraft:
     ) -> None:
         if not self.message:
             return
+        effective_content_text = str(content_text or "")
+        if self._preserve_initial_text and not effective_content_text.strip():
+            effective_content_text = self._initial_text
+        effective_metadata_extra = dict(self._metadata_extra)
+        if isinstance(metadata_extra, dict):
+            effective_metadata_extra.update(metadata_extra)
         signature = self._signature(
-            content_text=content_text,
+            content_text=effective_content_text,
             thinking_transcript=thinking_transcript,
             events=events,
             tool_logs=tool_logs,
             finish_reason=finish_reason,
             thinking_state=thinking_state,
             usage=usage,
-            metadata_extra=metadata_extra,
+            metadata_extra=effective_metadata_extra,
         )
         now = time.monotonic()
         if signature == self._last_signature:
@@ -1000,14 +1020,13 @@ class _AssistantDraft:
         }
         if thinking_transcript:
             metadata["thinking"]["transcript"] = thinking_transcript
-        if isinstance(metadata_extra, dict):
-            metadata.update(metadata_extra)
+        metadata.update(effective_metadata_extra)
         updated = self._store.update_message(
             self._conversation_id,
             self.id,
             {
-                "content": [{"type": "text", "text": content_text}],
-                "raw_text": content_text,
+                "content": [{"type": "text", "text": effective_content_text}],
+                "raw_text": effective_content_text,
                 "finish_reason": finish_reason,
                 "usage": usage if usage is not None else {},
                 "metadata": metadata,
@@ -1028,8 +1047,28 @@ class _AssistantDraft:
         metadata = dict(updates.get("metadata") or {})
         metadata.pop("streaming", None)
         metadata.pop("draft", None)
+        metadata.pop(SUBAGENT_DURABLE_DRAFT_FLAG, None)
+        if str(metadata.get("status") or "").strip().lower() == "running":
+            metadata.pop("status", None)
+        thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else None
+        if thinking is not None and str(thinking.get("state") or "").strip().lower() == "running":
+            metadata["thinking"] = {**thinking, "state": "completed"}
         updates["metadata"] = metadata
         return self._store.update_message(self._conversation_id, self.id, updates)
+
+    def _final_metadata_extra(self, *, status: str = "", error_code: str = "") -> dict[str, Any]:
+        metadata = dict(self._metadata_extra)
+        metadata.pop("streaming", None)
+        metadata.pop("draft", None)
+        metadata.pop(SUBAGENT_DURABLE_DRAFT_FLAG, None)
+        metadata.pop("thinking", None)
+        if str(metadata.get("status") or "").strip().lower() == "running":
+            metadata.pop("status", None)
+        if status:
+            metadata["status"] = status
+        if error_code:
+            metadata["error_code"] = error_code
+        return metadata
 
     def cancel(
         self,
@@ -1048,6 +1087,12 @@ class _AssistantDraft:
             "thinking_level": self._params.get("thinking_level"),
             "cancelled": True,
         }
+        metadata.update(
+            self._final_metadata_extra(
+                status="cancelled" if self._metadata_extra else "",
+                error_code="SUBAGENT_DRAFT_CANCELLED" if self._metadata_extra else "",
+            )
+        )
         if thinking_transcript:
             metadata["thinking"]["transcript"] = thinking_transcript
         updated = self._store.update_message(
@@ -1087,6 +1132,12 @@ class _AssistantDraft:
             "interrupted": True,
             "interruption_reason": reason,
         }
+        metadata.update(
+            self._final_metadata_extra(
+                status="error" if self._metadata_extra else "",
+                error_code="SUBAGENT_DRAFT_INTERRUPTED" if self._metadata_extra else "",
+            )
+        )
         if thinking_transcript:
             metadata["thinking"]["transcript"] = thinking_transcript
         updated = self._store.update_message(
@@ -1256,7 +1307,11 @@ class ChatRunEngine:
                 )
 
             assistant_seq = int(prepared.user_message.get("sequence_number", 1) or 1) + 1
-            if stream_mode:
+            durable_subagent_draft = (
+                not stream_mode
+                and should_create_subagent_durable_draft(prepared.conversation, context)
+            )
+            if stream_mode or durable_subagent_draft:
                 draft = _AssistantDraft(
                     store=self._store,
                     conversation_id=prepared.conversation_id,
@@ -1264,6 +1319,13 @@ class ChatRunEngine:
                     sequence_number=assistant_seq,
                     model=prepared.model,
                     params=prepared.params,
+                    initial_text=SUBAGENT_PENDING_TEXT if durable_subagent_draft else "",
+                    metadata_extra=(
+                        subagent_durable_draft_metadata(prepared.model, prepared.params)
+                        if durable_subagent_draft
+                        else None
+                    ),
+                    preserve_initial_text=durable_subagent_draft,
                 )
                 if draft.message is not None:
                     yield self._emit(

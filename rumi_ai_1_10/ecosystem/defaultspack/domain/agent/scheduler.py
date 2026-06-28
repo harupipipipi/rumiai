@@ -15,6 +15,7 @@ import os
 import threading
 import time
 import calendar
+import math
 import re
 from itertools import count
 from typing import Any
@@ -38,6 +39,74 @@ _APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_re
 _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS = 3
 _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS = 64
 _SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES = {"none", "null", "unlimited", "infinite", "infinity"}
+_SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS = 300.0
+
+
+class _SchedulerTaskTimedOut(TimeoutError):
+    def __init__(self, timeout_seconds: float):
+        self.timeout_seconds = timeout_seconds
+        super().__init__(
+            "scheduled task timed out after "
+            + _format_timeout_seconds(timeout_seconds)
+            + " seconds"
+        )
+
+
+def _format_timeout_seconds(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
+def _task_timeout_seconds(raw_value: Any) -> float:
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        return _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS
+    if not math.isfinite(value) or value <= 0:
+        return _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS
+    return value
+
+
+def _wait_timeout_seconds(value: float) -> float:
+    max_timeout = getattr(threading, "TIMEOUT_MAX", value)
+    return max(0.0, min(float(value), float(max_timeout)))
+
+
+def _remaining_timeout_seconds(deadline: float) -> float:
+    return max(0.0, deadline - time.monotonic())
+
+
+def _run_with_timeout(call, timeout_seconds: float, *, task_timeout_seconds: float, cancel_event=None):
+    if timeout_seconds <= 0:
+        if cancel_event is not None:
+            cancel_event.set()
+        raise _SchedulerTaskTimedOut(task_timeout_seconds)
+
+    done = threading.Event()
+    outcome: dict[str, Any] = {}
+
+    def target():
+        try:
+            outcome["result"] = call()
+        except BaseException as exc:
+            outcome["exception"] = exc
+        finally:
+            done.set()
+
+    worker = threading.Thread(target=target, name="scheduler-task-runner", daemon=True)
+    worker.start()
+    if not done.wait(_wait_timeout_seconds(timeout_seconds)):
+        if cancel_event is not None:
+            cancel_event.set()
+        raise _SchedulerTaskTimedOut(task_timeout_seconds)
+
+    exc = outcome.get("exception")
+    if exc is not None:
+        if isinstance(exc, Exception):
+            raise exc
+        raise RuntimeError(str(exc))
+    return outcome.get("result")
 
 
 def _chat_result_data(result: dict[str, Any] | None) -> dict[str, Any]:
@@ -188,9 +257,12 @@ def _resume_scheduled_chat_approvals(
     trigger: str,
     params: dict[str, Any],
     tools: list[Any] | None,
+    cancel_event=None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     auto_approvals: list[dict[str, Any]] = []
     for _idx in _schedule_auto_approval_attempts(task_cfg):
+        if cancel_event is not None and cancel_event.is_set():
+            break
         if _chat_result_finish_reason(result) not in _APPROVAL_REQUIRED_FINISH_REASONS:
             break
         pending = _pending_approval_from_chat_result(result)
@@ -198,6 +270,8 @@ def _resume_scheduled_chat_approvals(
             break
         approved = approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
         if not approved:
+            break
+        if cancel_event is not None and cancel_event.is_set():
             break
         auto_approvals.append(approved["summary"])
         result = send_chat(
@@ -814,11 +888,13 @@ class Scheduler:
         task_cfg = sched.get("task", {})
         message = task_cfg.get("message", "")
         model = task_cfg.get("model", "default")
-        timeout = task_cfg.get("timeout", 300)
+        timeout_seconds = _task_timeout_seconds(task_cfg.get("timeout", 300))
         conversation_id = task_cfg.get("conversation_id")
 
         exec_id = "sexec_" + gen_id()
         started_at = timestamp()
+        deadline = time.monotonic() + timeout_seconds
+        cancel_event = threading.Event()
 
         history_entry = {
             "execution_id": exec_id,
@@ -837,7 +913,13 @@ class Scheduler:
         try:
             if conversation_id:
                 conversation_lock = self._conversation_execution_lock(conversation_id)
-                with conversation_lock:
+                if conversation_lock is None:
+                    raise ValueError("task.conversation_id cannot be blank")
+                lock_timeout = _remaining_timeout_seconds(deadline)
+                if not conversation_lock.acquire(timeout=_wait_timeout_seconds(lock_timeout)):
+                    cancel_event.set()
+                    raise _SchedulerTaskTimedOut(timeout_seconds)
+                try:
                     from blocks.chat.send import run as chat_send_run
 
                     params = {}
@@ -852,30 +934,42 @@ class Scheduler:
                         initial_tool_choice = _initial_tool_choice(task_cfg)
                         if initial_tool_choice is not None:
                             params["tool_choice"] = initial_tool_choice
-                    result = chat_send_run(
-                        _scheduler_chat_payload(
+
+                    def run_chat_task():
+                        chat_result = chat_send_run(
+                            _scheduler_chat_payload(
+                                conversation_id=conversation_id,
+                                content=message,
+                                task_cfg=task_cfg,
+                                schedule_id=schedule_id,
+                                exec_id=exec_id,
+                                trigger=trigger,
+                                params=params,
+                                tools=tools,
+                            ),
+                            _scheduler_chat_context(task_cfg),
+                        )
+                        return _resume_scheduled_chat_approvals(
+                            result=chat_result,
+                            send_chat=chat_send_run,
                             conversation_id=conversation_id,
-                            content=message,
                             task_cfg=task_cfg,
                             schedule_id=schedule_id,
                             exec_id=exec_id,
                             trigger=trigger,
                             params=params,
                             tools=tools,
-                        ),
-                        _scheduler_chat_context(task_cfg),
+                            cancel_event=cancel_event,
+                        )
+
+                    result, auto_approvals = _run_with_timeout(
+                        run_chat_task,
+                        _remaining_timeout_seconds(deadline),
+                        task_timeout_seconds=timeout_seconds,
+                        cancel_event=cancel_event,
                     )
-                    result, auto_approvals = _resume_scheduled_chat_approvals(
-                        result=result,
-                        send_chat=chat_send_run,
-                        conversation_id=conversation_id,
-                        task_cfg=task_cfg,
-                        schedule_id=schedule_id,
-                        exec_id=exec_id,
-                        trigger=trigger,
-                        params=params,
-                        tools=tools,
-                    )
+                finally:
+                    conversation_lock.release()
             else:
                 from blocks.ai.complete import run as ai_complete_run
 
@@ -888,7 +982,16 @@ class Scheduler:
                 messages.append({"role": "user", "content": message})
 
                 empty_context = {}
-                result = ai_complete_run({"messages": messages, "model": model}, empty_context)
+
+                def run_completion_task():
+                    return ai_complete_run({"messages": messages, "model": model}, empty_context)
+
+                result = _run_with_timeout(
+                    run_completion_task,
+                    _remaining_timeout_seconds(deadline),
+                    task_timeout_seconds=timeout_seconds,
+                    cancel_event=cancel_event,
+                )
 
             if result.get("status") == "ok":
                 data = result.get("data", {})
@@ -923,6 +1026,8 @@ class Scheduler:
         except Exception as exc:
             history_entry["status"] = "error"
             history_entry["error"] = str(exc)
+            if isinstance(exc, _SchedulerTaskTimedOut):
+                history_entry["timeout_seconds"] = exc.timeout_seconds
 
         history_entry["completed_at"] = timestamp()
         append_history(schedule_id, history_entry)

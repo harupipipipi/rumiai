@@ -13,6 +13,11 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from blocks.agent.run_subagent import run as run_subagent_block  # noqa: E402
 from domain.chat.store import ChatStore  # noqa: E402
+from domain.chat.subagent_durability import (  # noqa: E402
+    SUBAGENT_DURABLE_DRAFT_FLAG,
+    SUBAGENT_PENDING_TEXT,
+    subagent_durable_draft_metadata,
+)
 from domain.function_runtime.dispatcher import run_defaultspack_function  # noqa: E402
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController  # noqa: E402
@@ -293,6 +298,147 @@ def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_pat
     assert child["metadata"]["company_id"] == "mimo-coding-company"
 
 
+def test_non_stream_subagent_child_creates_durable_assistant_draft_before_model(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "probe", "source": "subagent_tool"},
+        },
+    )
+
+    from domain.chat.stream_engine import ChatRunEngine
+
+    events = ChatRunEngine().stream(
+        {
+            "conversation_id": child["id"],
+            "message": {"role": "user", "content": "do the child work"},
+            "params": {},
+            "tools": [],
+        },
+        {"chat_history_mode": "current_turn", "subagent_child_durable_draft": True},
+        stream_mode=False,
+    )
+    try:
+        seen_types = []
+        for _ in range(5):
+            event = next(events)
+            seen_types.append(event.get("type"))
+            if event.get("type") == "assistant_message_started":
+                break
+        assert "assistant_message_started" in seen_types
+        child_after = ChatStore().get_conversation(child["id"])
+        assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+        draft = child_after["messages"][-1]
+        assert draft["finish_reason"] == "streaming"
+        assert draft["raw_text"] == SUBAGENT_PENDING_TEXT
+        assert draft["metadata"][SUBAGENT_DURABLE_DRAFT_FLAG] is True
+        assert draft["metadata"]["status"] == "running"
+    finally:
+        events.close()
+
+
+def test_non_stream_subagent_child_success_finalizes_without_draft_metadata(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "probe", "source": "subagent_tool"},
+        },
+    )
+
+    def call_handler(name, payload):
+        assert name == "defaults.ai.complete"
+        return {
+            "status": "ok",
+            "data": {
+                "content": [{"type": "text", "text": "child complete"}],
+                "finish_reason": "stop",
+                "metadata": {
+                    SUBAGENT_DURABLE_DRAFT_FLAG: True,
+                    "streaming": True,
+                    "draft": True,
+                    "status": "running",
+                    "thinking": {"state": "running"},
+                },
+            },
+        }
+
+    from domain.chat.stream_engine import ChatRunEngine
+
+    events = list(
+        ChatRunEngine().stream(
+            {
+                "conversation_id": child["id"],
+                "message": {"role": "user", "content": "do the child work"},
+                "params": {},
+                "tools": [],
+            },
+            {
+                "call_handler": call_handler,
+                "chat_history_mode": "current_turn",
+                "subagent_child_durable_draft": True,
+            },
+            stream_mode=False,
+        )
+    )
+
+    assert any(event.get("type") == "assistant_message_started" for event in events)
+    assert any(event.get("type") == "assistant_message_completed" for event in events)
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assistant = child_after["messages"][-1]
+    assert assistant["raw_text"] == "child complete"
+    assert assistant["finish_reason"] == "stop"
+    metadata = assistant["metadata"]
+    assert "streaming" not in metadata
+    assert "draft" not in metadata
+    assert SUBAGENT_DURABLE_DRAFT_FLAG not in metadata
+    assert metadata.get("status") != "running"
+    assert metadata["thinking"]["state"] == "completed"
+
+
+def test_tool_subagent_adds_safe_marker_when_dispatch_returns_without_assistant(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    parent = ChatStore().create_conversation(model="stub/default")
+
+    def fake_dispatch(envelope, context):
+        ChatStore().add_message(
+            envelope.target["conversation_id"],
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": envelope.input}],
+                "metadata": envelope.metadata,
+            },
+        )
+        return {"status": "ok", "assistant_text": ""}
+
+    monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input", fake_dispatch)
+
+    result = SubagentController().run({"task": "silent child"}, {"conversation_id": parent["id"]})
+
+    child = ChatStore().get_conversation(result["child_conversation_id"])
+    assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    marker = child["messages"][-1]
+    assert marker["finish_reason"] == "error"
+    assert "completed without producing a visible response" in marker["raw_text"]
+    assert marker["metadata"]["error_code"] == "SUBAGENT_EMPTY_RESPONSE"
+    assert SUBAGENT_DURABLE_DRAFT_FLAG not in marker["metadata"]
+
+
 def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_out(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None
@@ -337,6 +483,62 @@ def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_
     assert child["messages"][-1]["finish_reason"] == "error"
     assert "could not complete" in child["messages"][-1]["raw_text"]
     assert "timed out" not in child["messages"][-1]["raw_text"]
+
+
+def test_mimo_monitor_repairs_stale_running_durable_subagent_draft(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "stale child", "source": "subagent_tool"},
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "please finish"}],
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": SUBAGENT_PENDING_TEXT}],
+            "raw_text": SUBAGENT_PENDING_TEXT,
+            "finish_reason": "streaming",
+            "metadata": subagent_durable_draft_metadata("stub/default", {}),
+        },
+    )
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    monkeypatch.setattr(runtime, "_conversation_age_seconds", lambda conversation: 999.0)
+
+    result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
+
+    assert result["unanswered"] == []
+    assert result["repaired"] == [child["id"]]
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assert child_after["metadata"]["subagent"]["status"] == "error"
+    assert child_after["metadata"]["subagent"]["error_code"] == "SUBAGENT_DISPATCH_INTERRUPTED"
+    assert child_after["messages"][-1]["finish_reason"] == "error"
+    assert "could not complete" in child_after["messages"][-1]["raw_text"]
+    metadata = child_after["messages"][-1]["metadata"]
+    assert metadata["status"] == "error"
+    assert metadata["error_code"] == "SUBAGENT_DISPATCH_INTERRUPTED"
+    assert metadata["final"] is True
+    assert "streaming" not in metadata
+    assert "draft" not in metadata
+    assert SUBAGENT_DURABLE_DRAFT_FLAG not in metadata
 
 
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):

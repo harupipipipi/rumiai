@@ -1513,6 +1513,8 @@ class MimoCodingCompanyRuntime:
 
             subagent_gaps = self._subagent_reply_gaps(state)
             summary["subagents"]["checked"] = len(subagent_gaps.get("checked_ids", []))
+            summary["subagents"]["repaired"] = subagent_gaps.get("repaired", [])
+            summary["subagents"]["repaired_count"] = len(summary["subagents"]["repaired"])
             summary["subagents"]["unanswered"] = subagent_gaps.get("unanswered", [])
             summary["subagents"]["unanswered_count"] = len(summary["subagents"]["unanswered"])
             for gap in summary["subagents"]["unanswered"]:
@@ -1642,9 +1644,14 @@ class MimoCodingCompanyRuntime:
     def _subagent_reply_gaps(self, state: dict[str, Any]) -> dict[str, Any]:
         conversation_id = str(state.get("conversation_id") or "").strip()
         if not conversation_id:
-            return {"checked_ids": [], "unanswered": []}
+            return {"checked_ids": [], "unanswered": [], "repaired": []}
         try:
             from domain.chat.store import ChatStore
+            from domain.chat.subagent_durability import (
+                has_completed_assistant_text,
+                is_running_subagent_durable_draft,
+                mark_subagent_child_failed,
+            )
 
             store = ChatStore()
             parent = store.get_conversation(conversation_id) or {}
@@ -1654,22 +1661,34 @@ class MimoCodingCompanyRuntime:
                 if str(item or "").strip()
             ]
             unanswered: list[dict[str, Any]] = []
+            repaired: list[str] = []
             for child_id in child_ids:
                 child = store.get_conversation(child_id) or {}
                 if str(child.get("conversation_kind") or "") != "subagent":
                     continue
                 messages = child.get("messages") if isinstance(child.get("messages"), list) else []
-                has_assistant_text = any(
-                    str(message.get("role") or "") == "assistant"
-                    and self._message_text(message).strip()
+                has_running_draft = any(
+                    is_running_subagent_durable_draft(message)
                     for message in messages
                     if isinstance(message, dict)
                 )
-                if has_assistant_text:
+                if has_completed_assistant_text(messages) and not has_running_draft:
                     continue
                 age_seconds = self._conversation_age_seconds(child)
                 if age_seconds is not None and age_seconds < SUBAGENT_GAP_GRACE_SECONDS:
                     continue
+                repaired_message = mark_subagent_child_failed(
+                    store,
+                    child_id,
+                    metadata=child.get("metadata") if isinstance(child.get("metadata"), dict) else {},
+                    code="SUBAGENT_DISPATCH_INTERRUPTED",
+                )
+                if repaired_message is not None:
+                    repaired.append(child_id)
+                    child = store.get_conversation(child_id) or child
+                    messages = child.get("messages") if isinstance(child.get("messages"), list) else messages
+                    if has_completed_assistant_text(messages):
+                        continue
                 unanswered.append(
                     {
                         "child_conversation_id": child_id,
@@ -1686,9 +1705,9 @@ class MimoCodingCompanyRuntime:
                         ),
                     }
                 )
-            return {"checked_ids": child_ids, "unanswered": unanswered}
+            return {"checked_ids": child_ids, "unanswered": unanswered, "repaired": repaired}
         except Exception:
-            return {"checked_ids": [], "unanswered": []}
+            return {"checked_ids": [], "unanswered": [], "repaired": []}
 
     @staticmethod
     def _conversation_age_seconds(conversation: dict[str, Any]) -> float | None:

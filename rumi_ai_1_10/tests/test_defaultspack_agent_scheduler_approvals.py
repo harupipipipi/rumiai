@@ -386,6 +386,192 @@ def test_scheduled_execution_persists_completion_and_next_time_together(tmp_path
     _reset_scheduler_singleton()
 
 
+def test_scheduler_times_out_conversation_run_and_allows_next_interval(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+    calls_lock = threading.Lock()
+    first_call_started = threading.Event()
+    first_call_release = threading.Event()
+    first_call_finished = threading.Event()
+
+    def fake_send_chat(payload, context):
+        del context
+        with calls_lock:
+            calls.append(payload)
+            index = len(calls)
+        if index == 1:
+            first_call_started.set()
+            try:
+                first_call_release.wait(timeout=5)
+            finally:
+                first_call_finished.set()
+            return {
+                "status": "ok",
+                "data": {
+                    "id": "assistant-late",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "late first run"}],
+                    "finish_reason": "stop",
+                    "metadata": {},
+                },
+            }
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-next",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "next interval done"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = None
+    try:
+        schedule = scheduler.create_schedule(
+            "interval",
+            {"message": "keep testing", "conversation_id": "conv-mimo", "timeout": 0.2},
+            {"value": 30, "unit": "minutes"},
+        )
+        stale_next = "2000-01-01T00:00:00Z"
+        with scheduler._lock:
+            scheduler._schedules[schedule["id"]]["next_execution_at"] = stale_next
+            save_schedule(scheduler._schedules[schedule["id"]])
+
+        first_history = scheduler._execute_task(schedule["id"], manual=False)
+
+        assert first_call_started.wait(timeout=1)
+        assert first_history["status"] == "error"
+        assert "timed out after 0.2 seconds" in first_history["error"]
+        assert first_history["timeout_seconds"] == 0.2
+        saved_after_timeout = load_schedule(schedule["id"])
+        assert "running_execution" not in saved_after_timeout
+        assert "running_started_at" not in saved_after_timeout
+        assert saved_after_timeout["execution_count"] == 1
+        assert saved_after_timeout["last_executed_at"] == first_history["completed_at"]
+        assert saved_after_timeout["next_execution_at"] != stale_next
+        assert not first_call_finished.is_set()
+
+        second_history = scheduler._execute_task(schedule["id"], manual=False)
+
+        assert second_history["status"] == "completed"
+        assert second_history["result"] == "next interval done"
+        with calls_lock:
+            assert len(calls) == 2
+        saved_after_second = load_schedule(schedule["id"])
+        assert "running_execution" not in saved_after_second
+        assert saved_after_second["execution_count"] == 2
+
+        entries, total = load_history(schedule["id"])
+        assert total == 2
+        assert entries[0]["status"] == "completed"
+        assert entries[1]["status"] == "error"
+        assert entries[1]["timeout_seconds"] == 0.2
+    finally:
+        first_call_release.set()
+        first_call_finished.wait(timeout=1)
+        if schedule is not None:
+            scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
+def test_scheduler_times_out_ai_complete_run_and_clears_running(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    complete_started = threading.Event()
+    complete_release = threading.Event()
+    complete_finished = threading.Event()
+
+    def fake_complete(payload, context):
+        del payload, context
+        complete_started.set()
+        try:
+            complete_release.wait(timeout=5)
+        finally:
+            complete_finished.set()
+        return {"status": "ok", "data": {"content": "late complete"}}
+
+    monkeypatch.setattr("blocks.ai.complete.run", fake_complete)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = None
+    try:
+        schedule = scheduler.create_schedule(
+            "interval",
+            {"message": "summarize", "model": "stub/default", "timeout": 0.2},
+            {"value": 30, "unit": "minutes"},
+        )
+
+        history = scheduler._execute_task(schedule["id"], manual=False)
+
+        assert complete_started.wait(timeout=1)
+        assert history["status"] == "error"
+        assert "timed out after 0.2 seconds" in history["error"]
+        assert history["timeout_seconds"] == 0.2
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert "running_started_at" not in saved
+        assert saved["execution_count"] == 1
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["status"] == "error"
+        assert entries[0]["timeout_seconds"] == 0.2
+    finally:
+        complete_release.set()
+        complete_finished.wait(timeout=1)
+        if schedule is not None:
+            scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

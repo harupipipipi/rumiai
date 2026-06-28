@@ -11,6 +11,10 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
         sys.path.insert(0, _path)
 
 from domain.chat.store import ChatStore
+from domain.chat.subagent_durability import (
+    ensure_subagent_child_has_assistant_response,
+    mark_subagent_child_failed,
+)
 from domain.input import RumiInputEnvelope, dispatch_input
 
 
@@ -124,7 +128,7 @@ class SubagentController:
                     params=params,
                     tools=inherited_tools,
                 ),
-                {**context, "chat_history_mode": "current_turn"},
+                {**context, "chat_history_mode": "current_turn", "subagent_child_durable_draft": True},
             )
         except Exception as exc:
             code = "SUBAGENT_DISPATCH_TIMEOUT" if isinstance(exc, TimeoutError) else "SUBAGENT_DISPATCH_EXCEPTION"
@@ -148,6 +152,12 @@ class SubagentController:
                 code="SUBAGENT_DISPATCH_FAILED",
             )
         summary = str(result.get("assistant_text") or "Subagent completed.").strip()
+        ensure_subagent_child_has_assistant_response(
+            store,
+            child["id"],
+            assistant_text=str(result.get("assistant_text") or "").strip(),
+            metadata=child_metadata,
+        )
         return {
             "action": "subagent.run",
             "parent_conversation_id": parent_id,
@@ -166,27 +176,8 @@ class SubagentController:
 
     @staticmethod
     def _mark_child_failed(store: ChatStore, child_id: str, metadata: dict[str, Any], *, code: str) -> None:
-        message = "The delegated agent could not complete before producing a response."
-        updated_metadata = dict(metadata)
-        subagent_metadata = dict(updated_metadata.get("subagent") or {})
-        subagent_metadata.update({"status": "error", "error_code": code})
-        updated_metadata["subagent"] = subagent_metadata
         try:
-            store.update_conversation(child_id, {"metadata": updated_metadata})
-            store.add_message(
-                child_id,
-                {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": message}],
-                    "raw_text": message,
-                    "finish_reason": "error",
-                    "metadata": {
-                        "source": "subagent_tool",
-                        "status": "error",
-                        "error_code": code,
-                    },
-                },
-            )
+            mark_subagent_child_failed(store, child_id, metadata=metadata, code=code)
         except Exception:
             pass
 
