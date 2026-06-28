@@ -424,6 +424,119 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until_state_saved(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import save_schedule
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    state_path = tmp_path / "mimo" / "state.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(state_path))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    loop_keys = ["kickoff_review", "heartbeat", "improvement_loop", "qa_loop"]
+    schedule_ids = {loop_key: "sched_existing_" + loop_key for loop_key in loop_keys}
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps({"schema_version": 1, "schedule_ids": schedule_ids}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    overdue = (datetime.now(timezone.utc) - timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    agent_ids = {
+        "kickoff_review": "project_manager",
+        "heartbeat": "scheduler",
+        "improvement_loop": "project_manager",
+        "qa_loop": "browser_qa",
+    }
+    for loop_key, schedule_id in schedule_ids.items():
+        is_once = loop_key == "kickoff_review"
+        save_schedule(
+            {
+                "id": schedule_id,
+                "name": "MiMo Coding Company " + loop_key.replace("_", " "),
+                "description": "Persisted overdue MiMo loop schedule.",
+                "type": "once" if is_once else "interval",
+                "task": {
+                    "message": "overdue " + loop_key,
+                    "model": "stub/default",
+                    "conversation_id": "conv_previous",
+                    "timeout": 600,
+                    "profile_id": "defaultspack.mimo_coding_company",
+                    "agent_id": agent_ids[loop_key],
+                    "tools": ["rumi_api"],
+                    "metadata": {
+                        "profile_id": "defaultspack.mimo_coding_company",
+                        "company_id": "mimo-coding-company",
+                        "conversation_id": "conv_previous",
+                        "loop_key": loop_key,
+                    },
+                },
+                "config": {"run_at": overdue} if is_once else {"value": 30, "unit": "minutes"},
+                "status": "active",
+                "execution_count": 0,
+                "last_executed_at": None,
+                "next_execution_at": overdue,
+                "created_at": overdue,
+                "updated_at": overdue,
+            }
+        )
+
+    arm_observations: list[dict[str, object]] = []
+
+    def record_arm(self, schedule_id):
+        schedule = getattr(self, "_schedules", {}).get(schedule_id, {})
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        if metadata.get("profile_id") != "defaultspack.mimo_coding_company":
+            return
+        if metadata.get("company_id") != "mimo-coding-company":
+            return
+        state_payload = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+        arm_observations.append(
+            {
+                "schedule_id": schedule_id,
+                "loop_key": metadata.get("loop_key"),
+                "last_bootstrapped_at": bool(state_payload.get("last_bootstrapped_at")),
+            }
+        )
+
+    monkeypatch.setattr(Scheduler, "_arm_timer", record_arm)
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=120,
+        qa_interval_minutes=90,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3001"],
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+
+    assert status["bootstrapped"] is True
+    assert arm_observations
+    assert {item["loop_key"] for item in arm_observations} >= set(loop_keys)
+    assert all(item["last_bootstrapped_at"] for item in arm_observations)
+
+    saved_state = json.loads(state_path.read_text(encoding="utf-8"))
+    bootstrapped_at = datetime.fromisoformat(saved_state["last_bootstrapped_at"].replace("Z", "+00:00"))
+    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    qa_next = datetime.fromisoformat(qa_schedule["next_execution_at"].replace("Z", "+00:00"))
+    assert qa_schedule["status"] == "active"
+    assert qa_next > bootstrapped_at
+
+    for schedule in status["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_rebootstrap_replenishes_completed_stream_task(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
@@ -670,10 +783,16 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     signals = {item["signal"] for item in observability["schedule_history"]["signals"]}
     assert {"subagent_timeout", "text_tool_call_not_executed"} <= signals
-    assert observability["subagents"]["unanswered_count"] == 1
+    assert observability["subagents"]["checked"] == 2
+    assert observability["subagents"]["repaired_count"] == 1
+    assert observability["subagents"]["repaired"] == [child["id"]]
+    assert observability["subagents"]["unanswered_count"] == 0
+    assert observability["subagents"]["unanswered"] == []
     assert observability["desktop_monitoring"]["status"] in {"empty", "ok", "error"}
-    assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
-    assert observability["subagents"]["unanswered"][0]["child_conversation_id"] == child["id"]
+    company_subagents = observed["company"]["metadata"]["observability"]["subagents"]
+    assert company_subagents["repaired_count"] == 1
+    assert company_subagents["repaired"] == [child["id"]]
+    assert company_subagents["unanswered_count"] == 0
     assert recent_child["id"] not in {
         str(message["metadata"].get("child_conversation_id") or "")
         for message in messages
@@ -685,10 +804,10 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         if isinstance(message.get("metadata"), dict)
     }
     assert "text_tool_call_not_executed" in message_signals
-    assert total == 4
+    assert "subagent_unanswered" not in message_signals
+    assert total == 3
     assert {message["metadata"]["sync_source"] for message in messages} == {
         "mimo_schedule_history",
-        "mimo_subagent_monitor",
         "mimo_desktop_monitor",
     }
 

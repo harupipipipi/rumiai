@@ -45,17 +45,21 @@ _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS = 300.0
 class _SchedulerTaskTimedOut(TimeoutError):
     def __init__(self, timeout_seconds: float):
         self.timeout_seconds = timeout_seconds
-        super().__init__(
-            "scheduled task timed out after "
-            + _format_timeout_seconds(timeout_seconds)
-            + " seconds"
-        )
+        super().__init__(_scheduler_timeout_error(timeout_seconds))
 
 
 def _format_timeout_seconds(value: float) -> str:
     if float(value).is_integer():
         return str(int(value))
     return f"{value:g}"
+
+
+def _scheduler_timeout_error(timeout_seconds: float) -> str:
+    return (
+        "scheduled task timed out after "
+        + _format_timeout_seconds(timeout_seconds)
+        + " seconds"
+    )
 
 
 def _task_timeout_seconds(raw_value: Any) -> float:
@@ -442,6 +446,72 @@ def _parse_iso_datetime(dt_str):
     return dt
 
 
+def _running_execution_details(sched: dict[str, Any]) -> dict[str, Any] | None:
+    running = sched.get("running_execution")
+    if isinstance(running, dict):
+        return running
+    return None
+
+
+def _running_execution_started_at(sched: dict[str, Any]) -> tuple[str | None, datetime | None]:
+    running = _running_execution_details(sched) or {}
+    for raw_value in (
+        running.get("started_at"),
+        sched.get("running_started_at"),
+        running.get("created_at"),
+        sched.get("updated_at"),
+    ):
+        if raw_value is None:
+            continue
+        raw_text = str(raw_value).strip()
+        if not raw_text:
+            continue
+        try:
+            return raw_text, _parse_iso_datetime(raw_text)
+        except ValueError:
+            continue
+    return None, None
+
+
+def _running_execution_timeout_seconds(sched: dict[str, Any]) -> float:
+    running = _running_execution_details(sched) or {}
+    task_cfg = sched.get("task") if isinstance(sched.get("task"), dict) else {}
+    if running.get("timeout_seconds") is not None:
+        return _task_timeout_seconds(running.get("timeout_seconds"))
+    return _task_timeout_seconds(task_cfg.get("timeout", 300))
+
+
+def _running_execution_trigger(sched: dict[str, Any]) -> str:
+    running = _running_execution_details(sched) or {}
+    trigger = str(running.get("trigger") or "").strip()
+    if trigger in {"manual", "scheduled"}:
+        return trigger
+    return "scheduled"
+
+
+def _stale_running_execution(sched: dict[str, Any], *, now_dt: datetime | None = None) -> dict[str, Any] | None:
+    running = _running_execution_details(sched)
+    if running is None:
+        return None
+    started_at, started_dt = _running_execution_started_at(sched)
+    if started_dt is None:
+        return None
+    if now_dt is None:
+        now_dt = datetime.now(timezone.utc)
+    timeout_seconds = _running_execution_timeout_seconds(sched)
+    if (now_dt - started_dt).total_seconds() < timeout_seconds:
+        return None
+    execution_id = str(running.get("execution_id") or "").strip()
+    if not execution_id:
+        execution_id = "sexec_recovered_" + gen_id()
+    return {
+        "execution_id": execution_id,
+        "started_at": started_at or started_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "trigger": _running_execution_trigger(sched),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Scheduler singleton
 # ---------------------------------------------------------------------------
@@ -472,6 +542,7 @@ class Scheduler:
         self._timers = {}        # schedule_id -> threading.Timer
         self._schedules = {}     # schedule_id -> schedule dict (in-memory cache)
         self._conversation_locks = {}  # conversation_id -> threading.Lock
+        self._active_execution_ids = set()
         self._loaded = False
 
     # ---- public API ----
@@ -491,6 +562,7 @@ class Scheduler:
                     continue
                 with self._lock:
                     self._schedules[sid] = sd
+        self._recover_stale_running_executions()
         self._ensure_active_timers()
 
     def create_schedule(self, schedule_type, task_config, schedule_config, name="", description=""):
@@ -802,6 +874,71 @@ class Scheduler:
             return False
         return not is_alive()
 
+    def _recover_stale_running_executions(self):
+        with self._lock:
+            schedule_ids = list(self._schedules.keys())
+        for schedule_id in schedule_ids:
+            self._recover_stale_running_execution(schedule_id)
+
+    def _recover_stale_running_execution(self, schedule_id):
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+            if sched is None:
+                return False
+            stale = _stale_running_execution(sched)
+            if stale is None:
+                return False
+            if stale["execution_id"] in self._active_execution_ids:
+                return False
+            self._active_execution_ids.add(stale["execution_id"])
+
+        try:
+            completed_at = timestamp()
+            history_entry = {
+                "execution_id": stale["execution_id"],
+                "schedule_id": schedule_id,
+                "started_at": stale["started_at"],
+                "completed_at": completed_at,
+                "status": "error",
+                "trigger": stale["trigger"],
+                "result": None,
+                "error": _scheduler_timeout_error(stale["timeout_seconds"]),
+                "timeout_seconds": stale["timeout_seconds"],
+                "recovered_stale_running_execution": True,
+            }
+            append_history(schedule_id, history_entry)
+
+            with self._lock:
+                sched = self._schedules.get(schedule_id)
+                if sched is None:
+                    return True
+                current = _running_execution_details(sched)
+                if isinstance(current, dict):
+                    current_execution_id = str(current.get("execution_id") or "").strip()
+                    if current_execution_id and current_execution_id != stale["execution_id"]:
+                        return True
+                sched.pop("running_execution", None)
+                sched.pop("running_started_at", None)
+                try:
+                    execution_count = int(sched.get("execution_count", 0))
+                except (TypeError, ValueError):
+                    execution_count = 0
+                sched["execution_count"] = execution_count + 1
+                sched["last_executed_at"] = completed_at
+                if stale["trigger"] != "manual":
+                    if sched.get("type") == "once":
+                        sched["status"] = "completed"
+                        sched["next_execution_at"] = None
+                    elif sched.get("status") == "active":
+                        sched["next_execution_at"] = self._compute_next_execution(sched)
+                sched["updated_at"] = timestamp()
+                save_schedule(sched)
+                self._schedules[schedule_id] = sched
+            return True
+        finally:
+            with self._lock:
+                self._active_execution_ids.discard(stale["execution_id"])
+
     def _ensure_active_timers(self):
         with self._lock:
             active_ids = [
@@ -823,6 +960,7 @@ class Scheduler:
 
     def _recheck_and_arm(self, schedule_id):
         """Called when delay was capped; re-compute and re-arm."""
+        self._recover_stale_running_execution(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is None or sched.get("status") != "active":
@@ -836,7 +974,7 @@ class Scheduler:
         if timer is not None:
             timer.cancel()
 
-    def _mark_schedule_running(self, schedule_id, execution_id, started_at, trigger):
+    def _mark_schedule_running(self, schedule_id, execution_id, started_at, trigger, timeout_seconds):
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is None:
@@ -846,6 +984,7 @@ class Scheduler:
             "schedule_id": schedule_id,
             "started_at": started_at,
             "trigger": trigger,
+            "timeout_seconds": timeout_seconds,
         }
         sched["running_started_at"] = started_at
         sched["updated_at"] = timestamp()
@@ -866,6 +1005,7 @@ class Scheduler:
 
     def _on_timer_fire(self, schedule_id):
         """Called when a timer fires. Execute the task and re-arm."""
+        self._recover_stale_running_execution(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
         if sched is None or sched.get("status") != "active":
@@ -908,7 +1048,9 @@ class Scheduler:
         }
         auto_approvals = []
         trigger = _scheduler_trigger_name(manual)
-        self._mark_schedule_running(schedule_id, exec_id, started_at, trigger)
+        with self._lock:
+            self._active_execution_ids.add(exec_id)
+        self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
 
         try:
             if conversation_id:
@@ -1051,6 +1193,8 @@ class Scheduler:
             with self._lock:
                 self._schedules[schedule_id] = sched
 
+        with self._lock:
+            self._active_execution_ids.discard(exec_id)
         return history_entry
 
     def shutdown(self):

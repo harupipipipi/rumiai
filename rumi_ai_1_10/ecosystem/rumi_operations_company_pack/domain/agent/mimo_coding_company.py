@@ -22,6 +22,7 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager
 from domain.agent.role_registry import RoleRegistry
+from domain.agent.schedule_store import load_all_schedules, save_schedule
 from domain.agent.scheduler import Scheduler
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.providers import get_all_known_models
@@ -621,8 +622,9 @@ class MimoCodingCompanyRuntime:
         )
         safe_max_tool_calls = self._max_tool_calls(max_tool_calls)
 
-        self._define_roles(main_model, selected_vision_model, selected_fast_model)
         state = self._load_state()
+        paused_for_bootstrap = self._pause_mimo_loop_schedules_for_bootstrap() if start_nonstop else set()
+        self._define_roles(main_model, selected_vision_model, selected_fast_model)
         org_id = self._ensure_org(state, main_model, selected_vision_model, selected_fast_model)
         conversation_id = self._ensure_conversation(
             state,
@@ -680,11 +682,6 @@ class MimoCodingCompanyRuntime:
                 tools=["rumi_api", "todo", "subagent", "knowledge_search", "knowledge_create"],
                 description="Initial MiMo coding company repo and harness review.",
             )
-            if run_initial_review_now and kickoff_id:
-                try:
-                    Scheduler().trigger_now(kickoff_id)
-                except Exception:
-                    pass
             self._ensure_interval_schedule(
                 state,
                 key="heartbeat",
@@ -730,6 +727,13 @@ class MimoCodingCompanyRuntime:
             self._pause_stale_mimo_schedules(state)
         state["last_bootstrapped_at"] = timestamp()
         self._save_state(state)
+        if start_nonstop:
+            self._resume_mimo_loop_schedules_after_bootstrap(state, paused_for_bootstrap)
+            if run_initial_review_now and kickoff_id:
+                try:
+                    Scheduler().trigger_now(kickoff_id)
+                except Exception:
+                    pass
         return self.status()
 
     def _resolve_state_path(self) -> Path:
@@ -2015,6 +2019,68 @@ class MimoCodingCompanyRuntime:
             if schedule:
                 schedules.append(schedule)
         return schedules
+
+    @staticmethod
+    def _mimo_loop_key_for_schedule(schedule: dict[str, Any]) -> str:
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        if str(metadata.get("profile_id") or task.get("profile_id") or "") != PROFILE_ID:
+            return ""
+        if str(metadata.get("company_id") or "") != COMPANY_ID:
+            return ""
+        loop_key = str(metadata.get("loop_key") or "")
+        return loop_key if loop_key in SCHEDULE_LOOP_KEYS else ""
+
+    def _pause_mimo_loop_schedules_for_bootstrap(self) -> set[str]:
+        paused: set[str] = set()
+        for schedule in load_all_schedules():
+            if not isinstance(schedule, dict):
+                continue
+            schedule_id = str(schedule.get("id") or "").strip()
+            if not schedule_id or not self._mimo_loop_key_for_schedule(schedule):
+                continue
+            if schedule.get("status") != "active":
+                continue
+            scheduler = getattr(Scheduler, "_instance", None)
+            if scheduler is not None and getattr(scheduler, "_loaded", False):
+                try:
+                    scheduler.pause_schedule(schedule_id)
+                except Exception:
+                    pass
+            schedule["status"] = "paused"
+            schedule["next_execution_at"] = None
+            schedule["updated_at"] = timestamp()
+            save_schedule(schedule)
+            paused.add(schedule_id)
+        return paused
+
+    def _resume_mimo_loop_schedules_after_bootstrap(self, state: dict[str, Any], paused_schedule_ids: set[str]) -> list[str]:
+        if not paused_schedule_ids:
+            return []
+        schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        current_ids = {
+            str(schedule_id)
+            for loop_key, schedule_id in schedule_ids.items()
+            if str(loop_key) in SCHEDULE_LOOP_KEYS
+            and str(schedule_id or "").strip()
+            and str(schedule_id) in paused_schedule_ids
+        }
+        if not current_ids:
+            return []
+
+        scheduler = Scheduler()
+        resumed: list[str] = []
+        for schedule_id in sorted(current_ids):
+            schedule = scheduler.get_schedule(schedule_id)
+            if not schedule or schedule.get("status") == "completed":
+                continue
+            if schedule.get("status") == "active":
+                resumed.append(schedule_id)
+                continue
+            updated = scheduler.resume_schedule(schedule_id)
+            if updated and updated.get("status") == "active":
+                resumed.append(schedule_id)
+        return resumed
 
     def _pause_stale_mimo_schedules(self, state: dict[str, Any]) -> list[str]:
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}

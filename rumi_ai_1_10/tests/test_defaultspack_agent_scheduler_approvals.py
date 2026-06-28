@@ -244,6 +244,118 @@ def test_scheduler_ensure_loaded_does_not_duplicate_live_active_timer(tmp_path, 
     _reset_scheduler_singleton()
 
 
+def test_scheduler_recovers_persisted_stale_manual_running_execution_and_can_trigger(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "manual retry done"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    schedule_id = "sched-stale-manual"
+    stale_execution_id = "sexec-stale-manual"
+    next_execution_at = "2099-01-01T00:00:00Z"
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Stale manual QA",
+            "description": "",
+            "type": "interval",
+            "task": {"message": "keep testing", "conversation_id": "conv-mimo", "timeout": 600},
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": next_execution_at,
+            "created_at": "2026-06-28T15:00:00Z",
+            "updated_at": "2026-06-28T15:53:36Z",
+            "running_execution": {
+                "execution_id": stale_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": "2000-01-01T00:00:00Z",
+                "trigger": "manual",
+            },
+            "running_started_at": "2000-01-01T00:00:00Z",
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        recovered = scheduler.get_schedule(schedule_id)
+
+        assert "running_execution" not in recovered
+        assert "running_started_at" not in recovered
+        assert recovered["execution_count"] == 1
+        assert recovered["last_executed_at"]
+        assert recovered["next_execution_at"] == next_execution_at
+        saved = load_schedule(schedule_id)
+        assert "running_execution" not in saved
+        assert saved["execution_count"] == 1
+
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        assert entries[0]["execution_id"] == stale_execution_id
+        assert entries[0]["trigger"] == "manual"
+        assert entries[0]["status"] == "error"
+        assert entries[0]["timeout_seconds"] == 600
+        assert entries[0]["recovered_stale_running_execution"] is True
+        assert "timed out after 600 seconds" in entries[0]["error"]
+
+        retry = scheduler.trigger_now(schedule_id)
+
+        assert retry["status"] == "completed"
+        assert retry["result"] == "manual retry done"
+        assert len(calls) == 1
+        saved_after_retry = load_schedule(schedule_id)
+        assert "running_execution" not in saved_after_retry
+        assert saved_after_retry["execution_count"] == 2
+        entries, total = load_history(schedule_id)
+        assert total == 2
+        assert entries[0]["status"] == "completed"
+        assert entries[1]["execution_id"] == stale_execution_id
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+
+
 def test_scheduler_marks_interval_running_until_task_completes(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
