@@ -342,6 +342,102 @@ def test_company_channels_include_runtime_message_counts(tmp_path, monkeypatch):
     assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
 
 
+def test_company_get_and_status_include_runtime_workspace_counts(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, get, messages, status
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "scheduler",
+            "content": "MiMo Team Workspace GUI sync check",
+        },
+        {},
+    )
+
+    fetched = get.run({"company_id": company_id}, {})
+    runtime_status = status.run({"company_id": company_id}, {})
+
+    assert created["status"] == "ok"
+    assert fetched["data"]["message_count"] == 1
+    assert fetched["data"]["runtime_counts"]["messages"] == 1
+    assert fetched["data"]["channels"]["ops-company"]["message_count"] == 1
+    assert fetched["data"]["channels"]["ops-company"]["last_message_at"]
+    assert runtime_status["data"]["company"]["message_count"] == 1
+    assert runtime_status["data"]["company"]["channels"]["ops-company"]["message_count"] == 1
+
+
+def test_company_get_and_status_include_runtime_only_channels(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, channels, get, messages, status
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "qa-findings",
+            "sender_id": "mimo",
+            "content": "MiMo runtime-only channel finding",
+        },
+        {},
+    )
+
+    fetched = get.run({"company_id": company_id}, {})
+    runtime_status = status.run({"company_id": company_id}, {})
+    listed = channels.run({"company_id": company_id}, {})
+    channel_get = channels.run({"action": "get", "company_id": company_id, "channel_id": "qa-findings"}, {})
+
+    assert created["status"] == "ok"
+    listed_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "qa-findings")
+    assert listed_channel["message_count"] == 1
+    assert channel_get["data"]["message_count"] == 1
+    assert fetched["data"]["message_count"] == 1
+    assert fetched["data"]["channels"]["qa-findings"]["id"] == "qa-findings"
+    assert fetched["data"]["channels"]["qa-findings"]["message_count"] == 1
+    assert fetched["data"]["channels"]["qa-findings"]["last_message_at"]
+    assert fetched["data"]["channel_count"] == 2
+    assert runtime_status["data"]["company"]["channel_count"] == 2
+    assert runtime_status["data"]["company"]["channels"]["qa-findings"]["message_count"] == 1
+
+
+def test_company_runtime_only_channel_get_requires_existing_company(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, channels, messages
+    from domain.company.service import CompanyService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "qa-findings",
+            "sender_id": "mimo",
+            "content": "MiMo runtime-only channel finding",
+        },
+        {},
+    )
+    deleted = CompanyService().delete_company(company_id)
+    fetched = channels.run({"action": "get", "company_id": company_id, "channel_id": "qa-findings"}, {})
+
+    assert created["status"] == "ok"
+    assert deleted is True
+    assert fetched["status"] == "error"
+    assert fetched["error"]["code"] == "NOT_FOUND"
+
+
 def test_operations_company_runtime_syncs_default_company_record(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler

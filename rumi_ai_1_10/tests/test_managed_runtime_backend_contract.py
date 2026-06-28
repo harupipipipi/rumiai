@@ -2053,7 +2053,14 @@ def test_windows_wsl_guest_shell_escapes_dollar_expansion_and_preserves_stdin() 
 
 
 def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_processes() -> None:
-    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import _desktop_start_script
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import _desktop_running_script, _desktop_start_script
+
+    def assert_in_order(text: str, *needles: str) -> None:
+        position = -1
+        for needle in needles:
+            next_position = text.index(needle, position + 1)
+            assert next_position > position
+            position = next_position
 
     script = _desktop_start_script(
         "windows_wsl-seat-1",
@@ -2072,9 +2079,43 @@ def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_
     assert "display.env" in script
     assert "run_display_service setsid" in script
     assert "run_ui() {" in script
+    assert "rumi_process_matches_instance" in script
+    assert "rumi_find_instance_pid Xvfb" in script
+    assert "rumi_find_instance_pid openbox" in script
+    assert "rumi_pidfile_alive" in script
+    assert "/proc/$pid/environ" in script
+    assert "launched_xvfb" in script
+    assert "launched_openbox" in script
+    assert script.index("launched_xvfb") < script.index("Desktop Xvfb failed to stay running.")
+    assert script.index("launched_openbox") < script.index("Desktop openbox failed to stay running.")
     assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in script
     assert "Desktop Xvfb failed to stay running." in script
     assert "Desktop openbox failed to stay running." in script
+    assert_in_order(
+        script,
+        "Xvfb :98 -screen 0 1440x900x24",
+        "sleep 0.5",
+        'launched_xvfb="$(rumi_find_instance_pid Xvfb || true)"',
+        'echo "$launched_xvfb" > /tmp/rumi-managed-runtime/windows_wsl-seat-1/xvfb.pid',
+        "Desktop Xvfb failed to stay running.",
+    )
+    assert_in_order(
+        script,
+        'DISPLAY="$CLIENT_DISPLAY" openbox',
+        "sleep 0.2",
+        'launched_openbox="$(rumi_find_instance_pid openbox || true)"',
+        'echo "$launched_openbox" > /tmp/rumi-managed-runtime/windows_wsl-seat-1/openbox.pid',
+        "Desktop openbox failed to stay running.",
+    )
+
+    running_script = _desktop_running_script("windows_wsl-seat-1")
+    assert "rumi_process_matches_instance" in running_script
+    assert "rumi_find_instance_pid Xvfb" in running_script
+    assert "rumi_find_instance_pid openbox" in running_script
+    assert "rumi_pidfile_alive" in running_script
+    assert "/proc/$pid/environ" in running_script
+    assert "xvfb.pid" in running_script
+    assert "openbox.pid" in running_script
 
 
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:

@@ -34,6 +34,9 @@ from domain.tool.scheduled_approval import approve_schedule_pending_approval
 
 
 _APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_required"}
+_SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS = 3
+_SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS = 64
+_SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES = {"none", "null", "unlimited", "infinite", "infinity"}
 
 
 def _chat_result_data(result: dict[str, Any] | None) -> dict[str, Any]:
@@ -119,11 +122,23 @@ def _scheduler_chat_payload(
 
 def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int:
     policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    if "schedule_auto_approve_max_followups" not in policy:
+        raw_value: Any = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
+    else:
+        raw_value = policy.get("schedule_auto_approve_max_followups")
+        if raw_value is None:
+            return _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS
+    if isinstance(raw_value, str):
+        text = raw_value.strip().lower()
+        if text in _SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES:
+            return _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS
+        if not text:
+            raw_value = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
     try:
-        value = int(policy.get("schedule_auto_approve_max_followups") or 3)
+        value = int(raw_value)
     except Exception:
-        value = 3
-    return max(0, min(value, 8))
+        value = _SCHEDULE_AUTO_APPROVAL_DEFAULT_FOLLOWUPS
+    return max(0, min(value, _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS))
 
 
 def _initial_tool_choice(task_cfg: dict[str, Any]) -> Any:

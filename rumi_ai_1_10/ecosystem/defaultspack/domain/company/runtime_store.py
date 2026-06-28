@@ -431,6 +431,24 @@ class CompanyRuntimeStore:
             messages.append(item)
         return messages, int(total)
 
+    def list_channel_ids(self, company_id: str) -> list[str]:
+        rows = self.conn.execute(
+            """
+            SELECT channel_id
+            FROM (
+              SELECT DISTINCT channel_id FROM company_messages WHERE company_id = ?
+              UNION
+              SELECT DISTINCT channel_id FROM company_threads WHERE company_id = ?
+              UNION
+              SELECT DISTINCT channel_id FROM company_tasks WHERE company_id = ? AND channel_id IS NOT NULL
+            )
+            WHERE channel_id IS NOT NULL AND channel_id != ''
+            ORDER BY channel_id
+            """,
+            (str(company_id), str(company_id), str(company_id)),
+        ).fetchall()
+        return [str(row["channel_id"]) for row in rows if str(row["channel_id"] or "").strip()]
+
     def create_task(
         self,
         company_id: str,

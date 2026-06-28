@@ -1847,7 +1847,7 @@ class MimoCodingCompanyRuntime:
                 "desktop_frame",
                 "desktop_input",
             ],
-            "schedule_auto_approve_max_followups": 5,
+            "schedule_auto_approve_max_followups": "unlimited",
         }
         if state.get("workspace_id"):
             policy["workspace_id"] = state["workspace_id"]

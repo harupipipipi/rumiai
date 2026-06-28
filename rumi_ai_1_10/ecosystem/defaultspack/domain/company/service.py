@@ -22,6 +22,7 @@ from .store import CompanyStore
 class CompanyService:
     def __init__(self, store: CompanyStore | None = None) -> None:
         self.store = store or CompanyStore()
+        self.runtime_store = CompanyRuntimeStore()
 
     def create_company(self, data: dict[str, Any]) -> dict[str, Any]:
         name = str(data.get("name") or "").strip()
@@ -38,10 +39,11 @@ class CompanyService:
         )
 
     def get_company(self, company_id: str) -> dict[str, Any] | None:
-        return self.store.get_company(company_id)
+        return self._with_runtime_summary(self.store.get_company(company_id))
 
     def list_companies(self, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
-        return self.store.list_companies(limit=limit, offset=offset)
+        companies, total = self.store.list_companies(limit=limit, offset=offset)
+        return [self._with_runtime_summary(company) for company in companies], total
 
     def update_company(self, company_id: str, updates: dict[str, Any]) -> dict[str, Any] | None:
         return self.store.update_company(company_id, updates)
@@ -102,7 +104,8 @@ class CompanyService:
         company = self.store.get_company(target_id)
         if company is None and target_id == DEFAULT_COMPANY_ID:
             company = migrate_operations_company_state(store=self.store) or self.bootstrap_default_company()
-        runtime_store = CompanyRuntimeStore()
+        runtime_store = self.runtime_store
+        company = self._with_runtime_summary(company, runtime_store=runtime_store)
         return {
             "bootstrapped": company is not None,
             "company_id": target_id,
@@ -119,8 +122,9 @@ class CompanyService:
         company = self.store.find_company_by_conversation_id(conversation_id)
         if company is None and bootstrap:
             company = self.bootstrap_conversation_company(conversation_id)
-        runtime_store = CompanyRuntimeStore()
+        runtime_store = self.runtime_store
         company_id = str(company.get("id") or _conversation_company_id(conversation_id)) if company else _conversation_company_id(conversation_id)
+        company = self._with_runtime_summary(company, runtime_store=runtime_store)
         return {
             "bootstrapped": company is not None,
             "company_id": company_id,
@@ -151,6 +155,94 @@ class CompanyService:
 
     def inbound_routes(self) -> CompanyInboundRouteService:
         return CompanyInboundRouteService(self.store)
+
+    def _with_runtime_summary(
+        self,
+        company: dict[str, Any] | None,
+        *,
+        runtime_store: CompanyRuntimeStore | None = None,
+    ) -> dict[str, Any] | None:
+        if company is None:
+            return None
+        runtime = runtime_store or self.runtime_store
+        company_id = str(company.get("id") or "")
+        if not company_id:
+            return company
+        enriched = dict(company)
+        try:
+            stats = runtime.stats(company_id)
+        except Exception:
+            stats = {}
+        if stats:
+            enriched["runtime_counts"] = stats
+            enriched["message_count"] = max(int(enriched.get("message_count", 0) or 0), int(stats.get("messages", 0) or 0))
+            enriched["task_count"] = max(int(enriched.get("task_count", 0) or 0), int(stats.get("tasks", 0) or 0))
+            enriched["run_count"] = int(stats.get("runs", 0) or 0)
+            enriched["thread_count"] = int(stats.get("threads", 0) or 0)
+            enriched["inbox_count"] = int(stats.get("inbox", 0) or 0)
+        channels = enriched.get("channels")
+        if isinstance(channels, dict):
+            next_channels: dict[str, Any] = {}
+            for channel_id, channel in channels.items():
+                next_channels[str(channel_id)] = self._with_runtime_channel_count(
+                    company_id,
+                    str(channel_id),
+                    channel if isinstance(channel, dict) else {},
+                    runtime,
+                )
+            for channel_id in self._runtime_channel_ids(company_id, runtime):
+                if channel_id not in next_channels:
+                    next_channels[channel_id] = self._with_runtime_channel_count(
+                        company_id,
+                        channel_id,
+                        {
+                            "id": channel_id,
+                            "name": channel_id,
+                            "description": "Runtime channel",
+                            "visibility": "team",
+                            "members": [],
+                        },
+                        runtime,
+                    )
+            enriched["channels"] = next_channels
+            enriched["channel_count"] = len(next_channels)
+        return enriched
+
+    @staticmethod
+    def _runtime_channel_ids(company_id: str, runtime_store: CompanyRuntimeStore) -> list[str]:
+        try:
+            return runtime_store.list_channel_ids(company_id)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _with_runtime_channel_count(
+        company_id: str,
+        channel_id: str,
+        channel: dict[str, Any],
+        runtime_store: CompanyRuntimeStore,
+    ) -> dict[str, Any]:
+        enriched = dict(channel)
+        try:
+            messages, total = runtime_store.list_messages(company_id, channel_id=channel_id, limit=1, offset=0)
+        except Exception:
+            return enriched
+        enriched["message_count"] = max(int(enriched.get("message_count", 0) or 0), int(total))
+        if total:
+            try:
+                latest, _latest_total = runtime_store.list_messages(
+                    company_id,
+                    channel_id=channel_id,
+                    limit=1,
+                    offset=max(int(total) - 1, 0),
+                )
+            except Exception:
+                latest = []
+            if latest:
+                enriched["last_message_at"] = latest[0].get("created_at") or enriched.get("last_message_at")
+            elif messages:
+                enriched["last_message_at"] = messages[0].get("created_at") or enriched.get("last_message_at")
+        return enriched
 
 
 def _conversation_company_id(conversation_id: str) -> str:

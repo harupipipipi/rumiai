@@ -83,6 +83,16 @@ def _approval_required_response(
     }
 
 
+def test_schedule_auto_approval_limit_accepts_unlimited_policy():
+    from domain.agent.scheduler import _schedule_auto_approval_limit
+
+    assert _schedule_auto_approval_limit({"tool_policy": {}}) == 3
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": 0}}) == 0
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": "unlimited"}}) == 64
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": None}}) == 64
+    assert _schedule_auto_approval_limit({"tool_policy": {"schedule_auto_approve_max_followups": 999}}) == 64
+
+
 def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
