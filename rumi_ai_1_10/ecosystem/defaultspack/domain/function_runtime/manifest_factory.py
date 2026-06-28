@@ -21,6 +21,7 @@ class FunctionSpec:
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
     permission_id: str | None = None
+    grant_config: dict[str, Any] | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -64,6 +65,7 @@ def _spec(
     requires: tuple[str, ...] | None = None,
     caller_requires: tuple[str, ...] | None = None,
     input_schema: dict[str, Any] | None = None,
+    grant_config: dict[str, Any] | None = None,
 ) -> FunctionSpec:
     all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
     return FunctionSpec(
@@ -77,6 +79,7 @@ def _spec(
         requires=_requires(function_id, risk) if requires is None else requires,
         caller_requires=_caller_requires(risk) if caller_requires is None else caller_requires,
         input_schema=input_schema,
+        grant_config=dict(grant_config) if grant_config is not None else None,
     )
 
 
@@ -106,6 +109,8 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
     }
     if spec.permission_id:
         manifest["permission_id"] = spec.permission_id
+    if spec.grant_config is not None:
+        manifest["grant_config"] = dict(spec.grant_config)
     return manifest
 
 
@@ -229,6 +234,18 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_key", "Send a key with the computer controller.", ("tool", "computer"), "high"),
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),
     )
+)
+TOOL_FUNCTIONS = tuple(
+    _spec(
+        "tool_subagent",
+        "Run the default subagent tool.",
+        ("tool", "agent"),
+        risk="medium",
+        grant_config={"timeout": 240},
+    )
+    if spec.function_id == "tool_subagent"
+    else spec
+    for spec in TOOL_FUNCTIONS
 )
 SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",

@@ -177,6 +177,77 @@ def test_tool_subagent_manifest_timeout_is_forwarded_to_capability_executor():
     assert seen["request"]["timeout_seconds"] == 240
 
 
+def test_tool_subagent_defaultspack_function_manifest_keeps_long_timeout():
+    from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID, manifest_for
+
+    generated = manifest_for(FUNCTION_SPECS_BY_ID["tool_subagent"])
+    committed = json.loads(
+        (ROOT / "ecosystem" / "defaultspack" / "functions" / "tool_subagent" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert generated["grant_config"]["timeout"] == 240
+    assert committed["grant_config"]["timeout"] == 240
+
+
+def test_tool_subagent_direct_function_call_uses_manifest_timeout(monkeypatch):
+    from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+    from core_runtime.function_registry import FunctionRegistry
+
+    manifest = json.loads(
+        (ROOT / "ecosystem" / "defaultspack" / "functions" / "tool_subagent" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    function_dir = ROOT / "ecosystem" / "defaultspack" / "functions" / "tool_subagent"
+    registry = FunctionRegistry()
+    assert registry.register(
+        pack_id="defaultspack",
+        function_id="tool_subagent",
+        manifest=manifest,
+        function_dir=function_dir,
+    )
+    seen: dict[str, object] = {}
+
+    class GrantManager:
+        def check(self, principal_id, permission_id):
+            return SimpleNamespace(allowed=True, reason="Granted", config={})
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return True
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._function_registry = registry
+    executor._grant_manager = GrantManager()
+    executor._approval_manager = ApprovalManager()
+    executor._permission_manager = SimpleNamespace()
+    executor._trust_store = SimpleNamespace()
+
+    monkeypatch.setattr(executor, "_check_entry_trust", lambda entry, permission_id: None)
+
+    def fake_execute_handler_subprocess(**kwargs):
+        seen["timeout_seconds"] = kwargs["timeout_seconds"]
+        return CapabilityResponse(success=True, output={"status": "ok", "data": {}})
+
+    monkeypatch.setattr(executor, "_execute_handler_subprocess", fake_execute_handler_subprocess)
+
+    response = executor.execute(
+        "defaultspack",
+        {
+            "type": "function.call",
+            "qualified_name": "defaultspack:tool_subagent",
+            "args": {"task": "hello"},
+            "request_id": "req-direct-subagent",
+        },
+    )
+
+    assert response.success is True
+    assert seen["timeout_seconds"] == 240
+
+
 def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None

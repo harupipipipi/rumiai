@@ -1146,7 +1146,7 @@ class CapabilityExecutor:
 
         args = request.get("args", {})
         request_context = request.get("context") if isinstance(request.get("context"), dict) else None
-        timeout_seconds = min(float(request.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
+        timeout_seconds = self._request_timeout_seconds(request, entry)
         request_id = request.get("request_id", "")
         handler_id = entry.qualified_name
 
@@ -1838,7 +1838,7 @@ class CapabilityExecutor:
                 effective_permission_id="function.call",
                 grant_config=dispatch_grant_config,
                 args=args,
-                timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
+                timeout_seconds=self._request_timeout_seconds(request, entry),
                 request_id=request_id,
                 start_time=start_time,
                 request_context=request_context,
@@ -1848,7 +1848,7 @@ class CapabilityExecutor:
                                                  request_id=request_id, start_time=start_time,
                                                  effective_permission_id="function.call",
                                                  grant_config=dispatch_grant_config,
-                                                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT))
+                                                 timeout_seconds=self._request_timeout_seconds(request, entry))
         elif entry.host_execution:
             resp = self._execute_host_function(
                 principal_id=principal_id,
@@ -2684,6 +2684,16 @@ class CapabilityExecutor:
             env=self._runner_env(),
         )
         return self._response_from_completed_process(proc, start_time, failure_prefix)
+
+    def _request_timeout_seconds(self, request, entry):
+        raw_timeout = request.get("timeout_seconds")
+        if raw_timeout in (None, ""):
+            return self._get_function_timeout(entry)
+        try:
+            timeout = float(raw_timeout)
+        except (TypeError, ValueError):
+            timeout = DEFAULT_TIMEOUT
+        return min(max(timeout, 1.0), MAX_TIMEOUT)
 
     def _get_function_timeout(self, entry):
         manifest = getattr(entry, "manifest", None)

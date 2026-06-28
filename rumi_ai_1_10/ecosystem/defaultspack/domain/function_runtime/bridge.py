@@ -226,6 +226,7 @@ def invoke_function(
     timeout_seconds: float | None = None,
 ) -> dict[str, Any]:
     """Invoke a Rumi function through the shared CapabilityExecutor."""
+    qualified_name = _normalize_defaultspack_function_name(qualified_name)
     try:
         from core_runtime.di_container import get_container
     except Exception as exc:
@@ -278,6 +279,20 @@ def invoke_function(
             (getattr(response, "error_type", None) or "FUNCTION_CALL_FAILED").upper(),
         )
     return normalize_output(getattr(response, "output", None))
+
+
+def _normalize_defaultspack_function_name(qualified_name: str) -> str:
+    name = str(qualified_name or "").strip()
+    if not name or ":" in name:
+        return name
+    try:
+        from .registry import get_spec
+
+        if get_spec(name) is not None:
+            return f"defaultspack:{name}"
+    except Exception:
+        pass
+    return name
 
 
 def invoke_defaultspack_function(

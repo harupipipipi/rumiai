@@ -53,6 +53,29 @@ def test_bridge_invokes_capability_executor_with_function_call():
     assert request["args"] == {"level": "high"}
 
 
+def test_bridge_normalizes_bare_defaultspack_function_ids():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {"id": "c1"}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "chat_get_conversation",
+            {"conversation_id": "c1"},
+            {"request_id": "req-bare-id"},
+        )
+
+    assert result == {"status": "ok", "data": {"id": "c1"}}
+    _principal_id, request = executor.execute.call_args.args
+    assert request["qualified_name"] == "defaultspack:chat_get_conversation"
+
+
 def test_bridge_uses_explicit_principal_for_external_pack_callers():
     from domain.function_runtime.bridge import invoke_function
 
