@@ -171,3 +171,70 @@ def test_calendar_fixture_contains_required_recursive_calendar_responsibilities(
 
     assert plan.is_executable()
     assert {"week-grid", "time-axis", "event-block", "mobile-agenda", "event-editor"}.issubset(contract_ids)
+
+
+def test_advanced_webapps_fixture_contains_high_complexity_website_contracts() -> None:
+    plan = RecursiveUIPlanner().plan(fixture_tree("advanced_webapps_contract"), run_id="advanced-webapps-fixture")
+    contract_ids = {contract.id for contract in plan.contracts()}
+
+    assert plan.is_executable(), [diagnostic.to_dict() for diagnostic in plan.diagnostics]
+    assert len(plan.contracts()) == 25
+    assert {
+        "commerce-shell",
+        "product-gallery",
+        "option-matrix",
+        "compatibility-alerts",
+        "quote-summary",
+        "checkout-cta",
+        "clinical-shell",
+        "patient-summary",
+        "symptom-triage",
+        "medication-history",
+        "consent-review",
+        "appointment-action",
+        "fintech-shell",
+        "transaction-summary",
+        "risk-signal-stack",
+        "exception-review",
+        "audit-ledger",
+        "approval-actions",
+        "admin-shell",
+        "grid-shell",
+        "filter-builder",
+        "bulk-action-bar",
+        "row-detail-drawer",
+        "audit-state-rail",
+    }.issubset(contract_ids)
+
+
+def test_recursive_build_dogfoods_advanced_webapps_fixture(tmp_path: Path) -> None:
+    write_pass_package(tmp_path / "project")
+    args = build_args("advanced-webapps-run", tree_name="advanced_webapps_contract")
+    args["options"] = {
+        "viewports": [390, 1440],
+        "scenarios": ["default", "long", "error"],
+        "textScales": [1],
+        "runBuild": True,
+    }
+
+    result = ui_build_recursive(args, fake_context(tmp_path))
+    run_root = tmp_path / ".rumi" / "ui" / "runs" / "advanced-webapps-run"
+    final = json.loads((run_root / "reports" / "final.json").read_text(encoding="utf-8"))
+    composition_report = json.loads((run_root / "composition" / "report.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "ok"
+    assert result["data"]["summary"]["contracts"] == 25
+    assert result["data"]["summary"]["acceptedBundles"] == 25
+    assert result["data"]["summary"]["foundationCandidates"] == 3
+    assert result["data"]["summary"]["candidateBundles"] >= 25
+    assert final["status"] == "ok"
+    assert final["summary"]["compressionFailures"] == 0
+    assert final["verification"]["build"] == "passed"
+    assert composition_report["leafSourceEdited"] is False
+    assert composition_report["renderTree"]["nodeId"] == "advanced-webapps-suite"
+    assert {child["nodeId"] for child in composition_report["renderTree"]["children"]} == {
+        "commerce-shell",
+        "clinical-shell",
+        "fintech-shell",
+        "admin-shell",
+    }
