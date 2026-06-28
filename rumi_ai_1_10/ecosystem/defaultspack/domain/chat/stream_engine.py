@@ -348,6 +348,22 @@ def _prefaced_text_tool_calls_allowed(prepared: PreparedChatRun) -> bool:
     )
 
 
+def _scheduled_mimo_approval_followup(prepared: PreparedChatRun) -> bool:
+    metadata_value = prepared.user_message.get("metadata")
+    metadata = metadata_value if isinstance(metadata_value, dict) else {}
+    profile_id = str(
+        metadata.get("profile_id")
+        or prepared.request_context.get("profile_id")
+        or ""
+    ).strip()
+    source = str(
+        metadata.get("source")
+        or prepared.request_context.get("source")
+        or ""
+    ).strip()
+    return source == "scheduler_approval_followup" and profile_id == "defaultspack.mimo_coding_company"
+
+
 def _text_tool_call_blocks(
     response: dict[str, Any],
     connected_tool_names: set[str],
@@ -2680,10 +2696,11 @@ class ChatRunEngine:
             self._sync_draft(draft, force=True)
             return _tool_blocked_response(tool_name, result)
 
-        # Strip provider tools so the upcoming model turn produces only a
+        # Strip provider tools so ordinary approval followups produce only a
         # natural-language summary; we have already replayed the pending tool
-        # exactly once, and any further provider tool call from the same
-        # followup turn would be a regression of the deterministic contract.
+        # exactly once. Scheduled MiMo followups are allowed to keep the tools
+        # attached so a distinct next action can surface and pass through the
+        # scheduler allowlist/approval loop instead of throttling at one action.
         # The original list is snapshotted on ``tool_context`` so
         # ``_final_response`` can still surface the truthful set of attached
         # tools on the finalised assistant ``metadata.attached_tools`` /
@@ -2694,7 +2711,8 @@ class ChatRunEngine:
                 "_attached_provider_tools_snapshot",
                 list(prepared.provider_tools or []),
             )
-        prepared.provider_tools = []
+        if not _scheduled_mimo_approval_followup(prepared):
+            prepared.provider_tools = []
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["approval_replayed"] = {
                 "tool_name": tool_name,

@@ -1425,6 +1425,170 @@ def test_stream_engine_treats_consumed_approval_followup_as_idempotent_duplicate
     assert replay.code == "APPROVAL_TOKEN_USED"
 
 
+def test_stream_engine_scheduled_mimo_approval_replay_keeps_tools_for_distinct_followup(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
+    conversation_id = conversation["id"]
+
+    approved_args = {
+        "owner_id": "local-user",
+        "seat_id": "seat-1",
+        "action": "click",
+        "x": 12,
+        "y": 34,
+    }
+    request = approval.create_approval_request(
+        "tool.desktop_input",
+        "high",
+        approved_args,
+        details={
+            "tool_name": "desktop_input",
+            "action": "tool.desktop_input",
+            "arguments": approved_args,
+            "conversation_id": conversation_id,
+        },
+    )
+    token = approval.approve(request["request_id"])["token"]
+
+    class Gateway:
+        def __init__(self):
+            self.complete_requests = []
+
+        def complete(self, request):
+            self.complete_requests.append(request)
+            if len(self.complete_requests) == 1:
+                tool_names = {
+                    tool.get("function", {}).get("name")
+                    for tool in request.get("tools", [])
+                    if isinstance(tool, dict)
+                }
+                assert "desktop_frame" in tool_names
+                return {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call-frame",
+                            "name": "desktop_frame",
+                            "input": {"owner_id": "local-user", "seat_id": "seat-1"},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "usage": {},
+                }
+            return {
+                "content": [{"type": "text", "text": "desktop input and frame completed"}],
+                "finish_reason": "stop",
+                "usage": {},
+            }
+
+        def stream(self, request):
+            return iter([])
+
+        def supports_stream(self, model):
+            return False
+
+        def resolve_provider(self, model):
+            class Provider:
+                pass
+
+            return Provider(), model
+
+    calls = []
+
+    def fake_execute(self, name, arguments, context):
+        calls.append((name, dict(arguments)))
+        return {"result": "ok", "is_error": False, "widget": None}
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": tool_name,
+                "description": tool_name,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+        for tool_name in ("desktop_input", "desktop_frame")
+    ]
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation={"id": conversation_id, "messages": []},
+        input_data={},
+        request_id="req-approved-input",
+        content=[],
+        metadata={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "approval_followup": {
+                "approval_token": token,
+                "request_id": request["request_id"],
+                "tool_name": "desktop_input",
+            },
+        },
+        user_message={
+            "id": "user-approved-input",
+            "role": "user",
+            "content": "continue",
+            "metadata": {
+                "source": "scheduler_approval_followup",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "approval_followup": {
+                    "approval_token": token,
+                    "request_id": request["request_id"],
+                    "tool_name": "desktop_input",
+                },
+            },
+        },
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={},
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={"tool_approval_tokens": {"desktop_input": token}},
+        standard_messages=[{"role": "user", "content": "continue"}],
+        user_text="continue",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["desktop_input", "desktop_frame"],
+        connected_tool_names={"desktop_input", "desktop_frame"},
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+
+    gateway = Gateway()
+    engine = ChatRunEngine(store=store, gateway=gateway)
+    events = list(engine.stream({}, {}, stream_mode=False))
+    stored = store.get_conversation(conversation_id)["messages"][-1]
+    ChatStore._instance = None
+
+    assert calls == [
+        ("desktop_input", {**approved_args, "approval_token": token}),
+        ("desktop_frame", {"owner_id": "local-user", "seat_id": "seat-1"}),
+    ]
+    assert len(gateway.complete_requests) == 2
+    assert stored["raw_text"] == "desktop input and frame completed"
+    assert sum(1 for event in events if event.get("type") == "tool_call_completed") == 2
+
+
 def test_stream_engine_recovers_multiple_text_tool_calls_for_mimo_scheduler(tmp_path, monkeypatch):
     calls, gateway, events, stored = _run_text_tool_call_response(
         tmp_path,
