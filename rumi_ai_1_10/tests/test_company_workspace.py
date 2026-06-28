@@ -393,6 +393,39 @@ def test_company_messages_accept_string_limit_and_offset(tmp_path, monkeypatch):
     assert len(listed["data"]["messages"]) == 55
 
 
+def test_company_messages_tail_returns_latest_messages_in_chronological_order(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, messages
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    for index in range(100):
+        messages.run(
+            {
+                "action": "create",
+                "company_id": company_id,
+                "channel_id": "ops-company",
+                "sender_id": "scheduler",
+                "content": f"MiMo long-run message {index}",
+            },
+            {},
+        )
+
+    listed = messages.run({"company_id": company_id, "limit": 5, "tail": True}, {})
+
+    assert listed["status"] == "ok"
+    assert listed["data"]["total"] == 100
+    assert [message["content"] for message in listed["data"]["messages"]] == [
+        "MiMo long-run message 95",
+        "MiMo long-run message 96",
+        "MiMo long-run message 97",
+        "MiMo long-run message 98",
+        "MiMo long-run message 99",
+    ]
+
+
 def test_company_get_and_status_include_runtime_workspace_counts(tmp_path, monkeypatch):
     from blocks.company import bootstrap, get, messages, status
 

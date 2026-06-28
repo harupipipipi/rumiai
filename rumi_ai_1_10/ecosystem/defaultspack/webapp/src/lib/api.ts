@@ -3238,7 +3238,7 @@ export const api = {
     });
   },
 
-  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number }) {
+  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number; tail?: boolean }) {
     return request<{ messages: CompanyMessage[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/messages`, { company_id: companyId, ...options }),
       { cache: "no-store" },

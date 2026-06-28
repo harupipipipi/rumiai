@@ -321,6 +321,71 @@ def test_scheduler_marks_interval_running_until_task_completes(tmp_path, monkeyp
     _reset_scheduler_singleton()
 
 
+def test_scheduled_execution_persists_completion_and_next_time_together(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    def fake_send_chat(payload, context):
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "interval done"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "keep testing", "conversation_id": "conv-mimo"},
+        {"value": 30, "unit": "minutes"},
+    )
+    with scheduler._lock:
+        scheduler._schedules[schedule["id"]]["next_execution_at"] = "2000-01-01T00:00:00Z"
+        save_schedule(scheduler._schedules[schedule["id"]])
+
+    scheduler._execute_task(schedule["id"], manual=False)
+
+    saved = load_schedule(schedule["id"])
+    history, total = load_history(schedule["id"])
+    assert total == 1
+    assert history[0]["status"] == "completed"
+    assert "running_execution" not in saved
+    assert "running_started_at" not in saved
+    assert saved["execution_count"] == 1
+    assert saved["last_executed_at"] == history[0]["completed_at"]
+    assert saved["next_execution_at"] != "2000-01-01T00:00:00Z"
+    assert saved["next_execution_at"]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

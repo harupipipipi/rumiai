@@ -6,6 +6,14 @@ from domain.company.store import CompanyStore
 from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict
 
 
+def _bool_param(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "tail", "latest"}
+    return False
+
+
 def run(input_data, context):
     if require_dict(input_data) is None:
         return invalid("input_data must be a dict")
@@ -20,6 +28,15 @@ def run(input_data, context):
             limit, offset = limit_offset(input_data)
             if store.get_company(company_id) is None:
                 return missing_company(company_id)
+            if _bool_param(input_data.get("tail")) or _bool_param(input_data.get("latest")):
+                _head, total = runtime_store.list_messages(
+                    company_id,
+                    channel_id=input_data.get("channel_id"),
+                    thread_id=input_data.get("thread_id"),
+                    limit=1,
+                    offset=0,
+                )
+                offset = max(int(total) - int(limit), 0)
             result = runtime_store.list_messages(
                 company_id,
                 channel_id=input_data.get("channel_id"),

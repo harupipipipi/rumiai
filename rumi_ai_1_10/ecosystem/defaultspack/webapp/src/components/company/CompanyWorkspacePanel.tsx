@@ -166,7 +166,7 @@ export function CompanyWorkspacePanel({
           companyResources.listCompanyChannels(selectedId),
           companyResources.listCompanyTasks(selectedId),
           companyResources.listCompanyInboundRoutes(selectedId),
-          companyResources.listCompanyMessages(selectedId, { limit: 80 }),
+          companyResources.listCompanyMessages(selectedId, { limit: 80, tail: true }),
           companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
         const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);

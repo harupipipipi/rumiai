@@ -797,24 +797,11 @@ class Scheduler:
         if sched is None or sched.get("status") != "active":
             return
         self._execute_task(schedule_id, manual=False)
-        # Re-arm for next execution (interval / cron). For 'once', mark completed.
         with self._lock:
             sched = self._schedules.get(schedule_id)
-        if sched is None:
+        if sched is None or sched.get("status") != "active" or not sched.get("next_execution_at"):
             return
-        if sched.get("type") == "once":
-            sched["status"] = "completed"
-            sched["next_execution_at"] = None
-            sched["updated_at"] = timestamp()
-            save_schedule(sched)
-            with self._lock:
-                self._schedules[schedule_id] = sched
-        else:
-            sched["next_execution_at"] = self._compute_next_execution(sched)
-            sched["updated_at"] = timestamp()
-            save_schedule(sched)
-            with self._lock:
-                self._schedules[schedule_id] = sched
+        if sched.get("type") != "once":
             self._arm_timer(schedule_id)
 
     def _execute_task(self, schedule_id, manual=False):
@@ -948,6 +935,12 @@ class Scheduler:
             sched.pop("running_started_at", None)
             sched["execution_count"] = sched.get("execution_count", 0) + 1
             sched["last_executed_at"] = history_entry["completed_at"]
+            if not manual:
+                if sched.get("type") == "once":
+                    sched["status"] = "completed"
+                    sched["next_execution_at"] = None
+                elif sched.get("status") == "active":
+                    sched["next_execution_at"] = self._compute_next_execution(sched)
             sched["updated_at"] = timestamp()
             save_schedule(sched)
             with self._lock:
