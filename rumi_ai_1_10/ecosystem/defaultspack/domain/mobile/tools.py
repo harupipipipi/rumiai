@@ -331,7 +331,7 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
                 else "implemented_best_effort_bytes"
             ),
         }
-    if tool_id == "artifact_preview":
+    if tool_id in {"artifact_preview", "html_preview", "pdf_preview"}:
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart"],
@@ -490,7 +490,7 @@ def _mobile_port_plan(service_id: str, tags: set[str], tool: dict[str, Any]) -> 
                 else "implemented_best_effort_bytes"
             ),
         }
-    if tool_id == "artifact_preview":
+    if tool_id in {"artifact_preview", "html_preview", "pdf_preview"}:
         return {
             "platforms": ["ios", "android"],
             "runtime_layers": ["flutter", "dart"],

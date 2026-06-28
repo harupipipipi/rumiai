@@ -1298,6 +1298,98 @@ class MobileToolRuntime {
       },
     ),
     MobileToolDefinition(
+      name: 'html_preview',
+      description:
+          'Preview HTML payloads already provided to this phone runtime with metadata and text fallback. Does not read PC artifact paths.',
+      tags: [
+        'tool',
+        'preview',
+        'html',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_html_preview',
+        'defaultspack_html_preview',
+        'defaults.html.preview',
+        'defaultspack.html.preview',
+      ],
+      implementationStatus: 'implemented_payload_only_preview',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'html': {'type': 'string'},
+          'content': {'type': 'string'},
+          'source': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'path': {'type': 'string'},
+          'viewport': {'type': 'object'},
+          'full_page': {'type': 'boolean', 'default': true},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxBytes,
+            'default': _defaultArtifactPreviewMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxChars,
+            'default': _defaultArtifactPreviewMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
+      name: 'pdf_preview',
+      description:
+          'Preview PDF bytes already provided to this phone runtime with metadata and best-effort text fallback. Does not read PC artifact paths.',
+      tags: [
+        'tool',
+        'preview',
+        'pdf',
+        'artifact_workspace',
+        mobileCompatibleTag,
+      ],
+      aliases: [
+        'defaults_pdf_preview',
+        'defaultspack_pdf_preview',
+        'defaults.pdf.preview',
+        'defaultspack.pdf.preview',
+      ],
+      implementationStatus: 'implemented_payload_only_preview',
+      parameters: {
+        'type': 'object',
+        'additionalProperties': true,
+        'properties': {
+          'base64': {'type': 'string'},
+          'pdf_base64': {'type': 'string'},
+          'document_base64': {'type': 'string'},
+          'data_url': {'type': 'string'},
+          'file': {'type': 'object'},
+          'document': {'type': 'object'},
+          'path': {'type': 'string'},
+          'name': {'type': 'string'},
+          'mime_type': {'type': 'string'},
+          'max_bytes': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxBytes,
+            'default': _defaultArtifactPreviewMaxBytes,
+          },
+          'max_chars': {
+            'type': 'integer',
+            'minimum': 1,
+            'maximum': _hardArtifactPreviewMaxChars,
+            'default': _defaultArtifactPreviewMaxChars,
+          },
+        },
+      },
+    ),
+    MobileToolDefinition(
       name: 'artifact_preview',
       description:
           'Preview text, HTML, image, or PDF payloads already provided to this phone runtime. Does not read PC artifact paths or directories.',
@@ -1919,6 +2011,10 @@ class MobileToolRuntime {
         return _pdfExtract(call.arguments);
       case 'pdf_extract_tables':
         return _pdfExtractTables(call.arguments);
+      case 'html_preview':
+        return _htmlPreview(call.arguments);
+      case 'pdf_preview':
+        return _pdfPreview(call.arguments);
       case 'artifact_preview':
         return _artifactPreview(call.arguments);
       case 'tts_generate':
@@ -2080,6 +2176,8 @@ class MobileToolRuntime {
       'media_image_read',
       'media_doc_parse',
       'media_pdf_parse',
+      'html_preview',
+      'pdf_preview',
       'artifact_preview',
       'source_rank',
       'source_extract',
@@ -3251,6 +3349,138 @@ class MobileToolRuntime {
             'payload_only': true,
             'best_effort': true,
             'tables_supported': false,
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _htmlPreview(Map<String, dynamic> args) {
+    final payload = _extractHtmlTablePayload(args);
+    if (payload == null) {
+      final path = _stringOrNull(args['path']);
+      return MobileToolResult(
+        ok: false,
+        summary: 'HTML payload is required',
+        output: jsonEncode({
+          'status': 'error',
+          'error': {
+            'code': path == null ? 'MISSING_HTML_PAYLOAD' : 'UNSUPPORTED_PATH',
+            'message': path == null
+                ? 'html, content, source, data_url, file.base64, or document.base64 is required.'
+                : 'Phone-local html_preview cannot read PC artifact paths. Pass HTML payload or route this call to the connected PC runtime.',
+            if (path != null) 'path': path,
+            'execution_location': 'phone',
+          },
+        }),
+      );
+    }
+    final maxBytes = _boundedArtifactPreviewMaxBytes(args['max_bytes']);
+    final sizeBytes = utf8.encode(payload.html).length;
+    if (sizeBytes > maxBytes) {
+      return _artifactPreviewTooLarge(sizeBytes, maxBytes);
+    }
+    final maxChars = _boundedArtifactPreviewMaxChars(args['max_chars']);
+    final html = payload.html.trim();
+    final truncated = html.length > maxChars;
+    final content = truncated ? html.substring(0, maxChars) : html;
+    final title = _extractHtmlTitle(html) ?? 'HTML Preview';
+    return MobileToolResult(
+      ok: true,
+      summary: 'preview HTML ${content.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'kind': 'html',
+          'title': title,
+          'content': content,
+          'text': _stripHtmlToText(content).trim(),
+          'truncated': truncated,
+          'length': html.length,
+          'returned_length': content.length,
+          'viewport': _previewViewport(args['viewport']),
+          'full_page': _boolArg(args['full_page'], fallback: true),
+          'fallback': 'phone_payload_metadata',
+          'screenshot_supported': false,
+          'metadata': {
+            'payload_only': true,
+            'source': payload.source,
+            'size_bytes': sizeBytes,
+            'preview_mode': 'html_payload',
+          },
+          'execution_location': 'phone',
+          'runtime_layers': _flutterRuntimeLayers,
+          'requires_mobile_approval': false,
+        },
+      }),
+    );
+  }
+
+  MobileToolResult _pdfPreview(Map<String, dynamic> args) {
+    final path = _stringOrNull(args['path']);
+    final parsed = _mediaPdfParse({
+      ...args,
+      'max_bytes': args['max_bytes'] ?? _defaultArtifactPreviewMaxBytes,
+      'max_chars': args['max_chars'] ?? _defaultArtifactPreviewMaxChars,
+    });
+    if (!parsed.ok) {
+      if (path != null) {
+        return MobileToolResult(
+          ok: false,
+          summary: 'PDF payload is required',
+          output: jsonEncode({
+            'status': 'error',
+            'error': {
+              'code': 'UNSUPPORTED_PATH',
+              'message':
+                  'Phone-local pdf_preview cannot read PC artifact paths. Pass PDF bytes or route this call to the connected PC runtime.',
+              'path': path,
+              'execution_location': 'phone',
+            },
+          }),
+        );
+      }
+      return parsed;
+    }
+    final payload = _decodeObject(parsed.output);
+    final data = payload['data'];
+    final parsedData = data is Map<String, dynamic>
+        ? data
+        : data is Map
+            ? data.map((key, value) => MapEntry('$key', value))
+            : const <String, dynamic>{};
+    final metadataRaw = parsedData['metadata'];
+    final metadata = metadataRaw is Map<String, dynamic>
+        ? metadataRaw
+        : metadataRaw is Map
+            ? metadataRaw.map((key, value) => MapEntry('$key', value))
+            : const <String, dynamic>{};
+    final content = '${parsedData['content'] ?? parsedData['text'] ?? ''}';
+    return MobileToolResult(
+      ok: true,
+      summary: content.isEmpty
+          ? 'preview PDF metadata'
+          : 'preview PDF ${content.length} chars',
+      output: jsonEncode({
+        'status': 'ok',
+        'data': {
+          'kind': 'pdf',
+          'pdf_path': null,
+          'screenshot_path': null,
+          'content': content,
+          'text': content,
+          'truncated': parsedData['truncated'] ?? false,
+          'length': parsedData['length'] ?? content.length,
+          'returned_length': parsedData['returned_length'] ?? content.length,
+          'fallback': 'phone_payload_metadata',
+          'screenshot_supported': false,
+          'metadata': {
+            ...metadata,
+            'payload_only': true,
+            'preview_mode': 'pdf_payload',
           },
           'execution_location': 'phone',
           'runtime_layers': _flutterRuntimeLayers,
@@ -4746,7 +4976,9 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
   final isPdfParse = normalized == 'media_pdf_parse';
   final isPdfPayloadTool =
       normalized == 'pdf_extract' || normalized == 'pdf_extract_tables';
-  final isArtifactPreview = normalized == 'artifact_preview';
+  final isPreviewPayloadTool = normalized == 'artifact_preview' ||
+      normalized == 'html_preview' ||
+      normalized == 'pdf_preview';
   final isSourcePayloadTool =
       normalized == 'source_extract' || normalized == 'source_rank';
   final isBrowserExtractTable = normalized == 'browser_extract_table';
@@ -4864,7 +5096,7 @@ Map<String, dynamic> _mobilePortPlan(String name, List<String> tags) {
           : 'implemented_best_effort_bytes',
     };
   }
-  if (isArtifactPreview) {
+  if (isPreviewPayloadTool) {
     return const {
       'platforms': _defaultMobilePlatforms,
       'runtime_layers': _flutterRuntimeLayers,
@@ -5182,6 +5414,9 @@ String _unsupportedReasonForTags(String name, List<String> tags) {
   }
   if (normalized == 'artifact_preview') {
     return 'このdefaultspack-compatible toolはDartで渡されたtext/html/image/pdf payloadのpreviewにスマホ対応済みです。PC artifact pathやdirectory previewはPC runtimeへ委譲してください。';
+  }
+  if (normalized == 'html_preview' || normalized == 'pdf_preview') {
+    return 'このdefaultspack-compatible toolはDartで渡されたHTML/PDF payloadのpreviewにスマホ対応済みです。PC artifact pathやscreenshot artifact生成はPC runtimeへ委譲してください。';
   }
   if (normalized == 'source_extract') {
     return 'このdefaultspack-compatible toolはDartで渡されたtext/html/url payloadの抽出にスマホ対応済みです。PC workspace pathはPC runtimeへ委譲してください。';
@@ -5636,6 +5871,33 @@ int _boundedArtifactPreviewMaxChars(Object? value) {
     return math.max(1, math.min(_hardArtifactPreviewMaxChars, parsed));
   }
   return _defaultArtifactPreviewMaxChars;
+}
+
+Map<String, int> _previewViewport(Object? value) {
+  var width = 1280;
+  var height = 720;
+  if (value is Map) {
+    final rawWidth = value['width'];
+    final rawHeight = value['height'];
+    if (rawWidth is num) width = rawWidth.toInt();
+    if (rawHeight is num) height = rawHeight.toInt();
+    final parsedWidth = int.tryParse('${rawWidth ?? ''}'.trim());
+    final parsedHeight = int.tryParse('${rawHeight ?? ''}'.trim());
+    if (parsedWidth != null) width = parsedWidth;
+    if (parsedHeight != null) height = parsedHeight;
+  }
+  return {
+    'width': math.max(1, width),
+    'height': math.max(1, height),
+  };
+}
+
+bool _boolArg(Object? value, {required bool fallback}) {
+  if (value is bool) return value;
+  final text = '${value ?? ''}'.trim().toLowerCase();
+  if (text == 'true' || text == '1' || text == 'yes') return true;
+  if (text == 'false' || text == '0' || text == 'no') return false;
+  return fallback;
 }
 
 int _boundedHtmlTableMaxTables(Object? value) {

@@ -235,6 +235,8 @@ void main() {
           'pdf_extract',
           'pdf_extract_tables',
           'artifact_preview',
+          'html_preview',
+          'pdf_preview',
           'source_extract',
           'source_rank',
           'browser_extract_table',
@@ -1341,6 +1343,94 @@ void main() {
       expect(error['path'], '/tmp/artifact.html');
     });
 
+    test('html_preview previews HTML payload metadata on phone', () {
+      const html = '<html><head><title>HTML Tool</title></head>'
+          '<body><p>Hi <b>preview</b></p></body></html>';
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'html_preview_1',
+          name: 'html_preview',
+          arguments: {
+            'html': html,
+            'viewport': {'width': 390, 'height': 844},
+            'full_page': false,
+          },
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      final viewport = data['viewport'] as Map<String, dynamic>;
+      expect(data['kind'], 'html');
+      expect(data['title'], 'HTML Tool');
+      expect(data['text'], contains('Hi preview'));
+      expect(viewport['width'], 390);
+      expect(viewport['height'], 844);
+      expect(data['full_page'], isFalse);
+      expect(data['screenshot_supported'], isFalse);
+      expect(metadata['payload_only'], isTrue);
+      expect(metadata['preview_mode'], 'html_payload');
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('html_preview does not read host artifact paths on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'html_preview_path_1',
+          name: 'html_preview',
+          arguments: {'path': '/tmp/preview.html'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+      expect(error['path'], '/tmp/preview.html');
+    });
+
+    test('pdf_preview previews PDF payload metadata on phone', () {
+      final pdf = '%PDF-1.4\nBT (PDF preview text) Tj ET\n%%EOF';
+      final result = runtime.execute(
+        MobileToolCall(
+          id: 'pdf_preview_1',
+          name: 'pdf_preview',
+          arguments: {'pdf_base64': base64Encode(latin1.encode(pdf))},
+        ),
+      );
+
+      expect(result.ok, isTrue);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final data = payload['data'] as Map<String, dynamic>;
+      final metadata = data['metadata'] as Map<String, dynamic>;
+      expect(data['kind'], 'pdf');
+      expect(data['content'], contains('PDF preview text'));
+      expect(data['screenshot_supported'], isFalse);
+      expect(metadata['payload_only'], isTrue);
+      expect(metadata['preview_mode'], 'pdf_payload');
+      expect(data['execution_location'], 'phone');
+      expect(data['runtime_layers'], containsAll(['flutter', 'dart']));
+    });
+
+    test('pdf_preview does not read host artifact paths on phone', () {
+      final result = runtime.execute(
+        const MobileToolCall(
+          id: 'pdf_preview_path_1',
+          name: 'pdf_preview',
+          arguments: {'path': '/tmp/preview.pdf'},
+        ),
+      );
+
+      expect(result.ok, isFalse);
+      final payload = jsonDecode(result.output) as Map<String, dynamic>;
+      final error = payload['error'] as Map<String, dynamic>;
+      expect(error['code'], 'UNSUPPORTED_PATH');
+      expect(error['path'], '/tmp/preview.pdf');
+    });
+
     test('extracts provided HTML source payload on phone', () {
       const html = '<html><head><title>Source Title</title></head>'
           '<body><h1>Hello</h1><p>mobile research &amp; ranking</p></body></html>';
@@ -1933,6 +2023,28 @@ void main() {
       expect(artifactPreviewMobile['runtime_layers'],
           containsAll(['flutter', 'dart']));
       expect(artifactPreviewData['tags'], contains(mobileFlutterTag));
+
+      for (final toolName in const ['html_preview', 'pdf_preview']) {
+        final previewSchema = runtime.execute(
+          MobileToolCall(
+            id: 'schema_${toolName}_1',
+            name: 'tool_schema',
+            arguments: {'tool_name': toolName},
+          ),
+        );
+        final previewPayload =
+            jsonDecode(previewSchema.output) as Map<String, dynamic>;
+        final previewData = previewPayload['data'] as Map<String, dynamic>;
+        final previewMobile = previewData['mobile'] as Map<String, dynamic>;
+        expect(previewData['mobile_compatible'], isTrue);
+        expect(previewData['execution_route'], 'phone');
+        expect(previewMobile['requires_mobile_approval'], isFalse);
+        expect(previewMobile['implementation_status'],
+            'implemented_payload_only_preview');
+        expect(
+            previewMobile['runtime_layers'], containsAll(['flutter', 'dart']));
+        expect(previewData['tags'], contains(mobileFlutterTag));
+      }
 
       final sourceExtractSchema = runtime.execute(
         const MobileToolCall(
