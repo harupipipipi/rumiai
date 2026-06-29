@@ -9,7 +9,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
@@ -724,6 +724,12 @@ class MimoCodingCompanyRuntime:
                 description="Self-improvement loop for coding, provider, and tooling work.",
                 timeout_seconds=IMPROVEMENT_LOOP_SCHEDULE_TIMEOUT_SECONDS,
             )
+            self._ensure_loop_conversation(
+                state,
+                key="qa_loop",
+                model=selected_vision_model,
+                agent_id="browser_qa",
+            )
             self._ensure_interval_schedule(
                 state,
                 key="qa_loop",
@@ -800,15 +806,72 @@ class MimoCodingCompanyRuntime:
         return cleaned
 
     @staticmethod
-    def _managed_desktop_target_url(target: str) -> str:
+    def _managed_desktop_target_url(target: str, *, chat_id: str | None = None) -> str:
         value = str(target or "").strip()
         parsed = urlsplit(value)
         host = (parsed.hostname or "").strip().lower()
         if parsed.scheme in {"http", "https"} and host in {"127.0.0.1", "localhost"} and parsed.port == 8766:
             hostname = parsed.hostname or "127.0.0.1"
             netloc = f"{hostname}:18766"
-            return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
-        return value
+            parsed = urlsplit(urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment)))
+        if MimoCodingCompanyRuntime._is_defaultspack_chat_url(parsed) and str(chat_id or "").strip():
+            query = [
+                (key, existing_value)
+                for key, existing_value in parse_qsl(parsed.query, keep_blank_values=True)
+                if key != "chat"
+            ]
+            query.append(("chat", str(chat_id or "").strip()))
+            return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(query), parsed.fragment))
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment)) if parsed.scheme else value
+
+    @staticmethod
+    def _is_defaultspack_chat_url(parsed: Any) -> bool:
+        if not parsed or getattr(parsed, "scheme", "") not in {"http", "https"}:
+            return False
+        host = (getattr(parsed, "hostname", None) or "").strip().lower()
+        if host not in {"127.0.0.1", "localhost"}:
+            return False
+        if getattr(parsed, "port", None) not in {8766, 18766}:
+            return False
+        return (getattr(parsed, "path", "") or "").rstrip("/") == "/chat"
+
+    @classmethod
+    def _defaultspack_chat_url_missing_query(cls, target: str) -> bool:
+        value = str(target or "").strip()
+        if not value:
+            return False
+        parsed = urlsplit(value)
+        if not cls._is_defaultspack_chat_url(parsed):
+            return False
+        return not any(key == "chat" and str(existing_value or "").strip() for key, existing_value in parse_qsl(parsed.query, keep_blank_values=True))
+
+    @staticmethod
+    def _managed_desktop_chat_id(state: dict[str, Any]) -> str:
+        loop_conversation_ids = state.get("loop_conversation_ids") if isinstance(state.get("loop_conversation_ids"), dict) else {}
+        qa_conversation_id = str(loop_conversation_ids.get("qa_loop") or "").strip()
+        if qa_conversation_id:
+            return qa_conversation_id
+        return str(state.get("conversation_id") or "").strip()
+
+    @staticmethod
+    def _desktop_browser_url_candidates(desktop: dict[str, Any]) -> list[str]:
+        candidates: list[str] = []
+
+        def add(value: Any) -> None:
+            text = str(value or "").strip()
+            if text and text not in candidates:
+                candidates.append(text)
+
+        add(desktop.get("browser_url"))
+        for key in ("startup", "desktop_spec", "metadata", "opaque_state"):
+            value = desktop.get(key)
+            if not isinstance(value, dict):
+                continue
+            add(value.get("browser_url"))
+            startup = value.get("startup")
+            if isinstance(startup, dict):
+                add(startup.get("browser_url"))
+        return candidates
 
     def _persona_specs(self) -> list[dict[str, Any]]:
         path = self._docker_bundle_dir() / "personas.json"
@@ -2311,23 +2374,43 @@ class MimoCodingCompanyRuntime:
             data = result.get("data") if isinstance(result.get("data"), dict) else {}
             desktops = data.get("desktops") if isinstance(data.get("desktops"), list) else []
             compact: list[dict[str, Any]] = []
+            missing_chat_targets: list[dict[str, Any]] = []
             for desktop in desktops[:10]:
                 if not isinstance(desktop, dict):
                     continue
-                compact.append(
-                    {
-                        "seat_id": desktop.get("seat_id") or desktop.get("id"),
-                        "name": desktop.get("name"),
-                        "status": desktop.get("status"),
-                        "template_id": desktop.get("template_id"),
-                        "assigned_agent_id": desktop.get("assigned_agent_id"),
-                    }
-                )
+                browser_urls = MimoCodingCompanyRuntime._desktop_browser_url_candidates(desktop)
+                compact_item = {
+                    "seat_id": desktop.get("seat_id") or desktop.get("id"),
+                    "name": desktop.get("name"),
+                    "status": desktop.get("status"),
+                    "template_id": desktop.get("template_id"),
+                    "assigned_agent_id": desktop.get("assigned_agent_id"),
+                }
+                if browser_urls:
+                    compact_item["browser_urls"] = browser_urls[:3]
+                compact.append(compact_item)
+                for browser_url in browser_urls:
+                    if MimoCodingCompanyRuntime._defaultspack_chat_url_missing_query(browser_url):
+                        missing_chat_targets.append(
+                            {
+                                "seat_id": compact_item.get("seat_id"),
+                                "status": compact_item.get("status"),
+                                "browser_url": browser_url,
+                            }
+                        )
             summary["desktop_count"] = len(desktops)
             summary["desktops"] = compact
             if not desktops:
                 summary["status"] = "empty"
                 summary["signal"] = "desktops_empty"
+            elif missing_chat_targets:
+                summary["status"] = "blocked"
+                summary["signal"] = "managed_desktop_chat_target_missing"
+                summary["blocker"] = (
+                    "A managed browser desktop is configured for /chat without an explicit chat query. "
+                    "Chrome can restore a stale conversation instead of the active MiMo QA loop."
+                )
+                summary["missing_chat_targets"] = missing_chat_targets[:5]
             else:
                 summary["status"] = "ok"
             return summary
@@ -2405,6 +2488,18 @@ class MimoCodingCompanyRuntime:
                     "No desktop seats are currently visible. Browser/computer QA may still be running through chat tools, but the Desktops workspace has no seat to inspect.",
                 ]
             )
+        elif status == "blocked" and observation.get("blocker"):
+            lines.extend(["", "Blocker:", str(observation.get("blocker"))[:600]])
+            targets = observation.get("missing_chat_targets") if isinstance(observation.get("missing_chat_targets"), list) else []
+            for item in targets[:5]:
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    "- Seat `{seat}` uses `{url}`".format(
+                        seat=str(item.get("seat_id") or ""),
+                        url=str(item.get("browser_url") or "")[:240],
+                    )
+                )
         elif observation.get("error"):
             lines.extend(["", "Error:", "```text", str(observation.get("error"))[:600], "```"])
         return "\n".join(lines)
@@ -2984,7 +3079,7 @@ class MimoCodingCompanyRuntime:
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
         return (
             "Run a short heartbeat for the MiMo Coding Company. Check pending tasks, recent failures, QA bugs, and blocked work. "
-            "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops. "
+            "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops, including that local /chat desktop targets include an explicit chat query. "
             + (monitoring_summary + " " if monitoring_summary else "")
             + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo/Gemma loops keep moving. "
             "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence. "
@@ -3010,14 +3105,15 @@ class MimoCodingCompanyRuntime:
         assignments = self._qa_swarm_plan(state).get("workers", [])
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
         qa_targets = list(state.get("qa_targets") if isinstance(state.get("qa_targets"), list) else [])
-        managed_targets = [self._managed_desktop_target_url(str(target)) for target in qa_targets]
+        managed_chat_id = self._managed_desktop_chat_id(state)
+        managed_targets = [self._managed_desktop_target_url(str(target), chat_id=managed_chat_id) for target in qa_targets]
         summary = "; ".join(
             (
                 str(item.get("worker_id") or "")
                 + " "
                 + str(item.get("persona_label") or item.get("persona_id") or "")
                 + " -> "
-                + self._managed_desktop_target_url(str(item.get("qa_target") or "defaultspack surface"))
+                + self._managed_desktop_target_url(str(item.get("qa_target") or "defaultspack surface"), chat_id=managed_chat_id)
             )
             for item in assignments[:4]
             if isinstance(item, dict)

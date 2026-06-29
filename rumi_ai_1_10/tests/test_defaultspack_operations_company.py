@@ -388,16 +388,79 @@ def test_mimo_coding_company_qa_schedule_uses_managed_desktop_reachable_defaults
 
     qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
     message = qa_schedule["task"]["message"]
+    qa_conversation_id = status["loop_conversation_ids"]["qa_loop"]
+    managed_chat_target = f"http://127.0.0.1:18766/chat?chat={qa_conversation_id}"
 
-    assert "Managed desktop target URLs: http://127.0.0.1:18766/chat" in message
+    assert qa_schedule["task"]["conversation_id"] == qa_conversation_id
+    assert f"Managed desktop target URLs: {managed_chat_target}" in message
     assert "browser_url=<managed desktop target URL>" in message
     assert "different address-bar URL" in message
     assert "stale/wrong-target" in message
     assert "http://127.0.0.1:8766/chat" not in message
+    assert "http://127.0.0.1:18766/chat." not in message
 
     for schedule in status["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_managed_desktop_chat_url_falls_back_to_parent_conversation(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    message = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")._qa_message(
+        {
+            "conversation_id": "parent-conversation-123",
+            "loop_conversation_ids": {},
+            "qa_targets": ["http://127.0.0.1:8766/chat"],
+            "docker_swarm": {"enabled": False, "worker_count": 0, "workers": []},
+        }
+    )
+
+    assert "Managed desktop target URLs: http://127.0.0.1:18766/chat?chat=parent-conversation-123" in message
+    assert "http://127.0.0.1:18766/chat." not in message
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_desktop_monitor_blocks_bare_chat_target(monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from blocks.sandbox import api as sandbox_api
+
+    def fake_desktops_list(payload, context):
+        assert payload == {"_handler": "desktops_list"}
+        assert context["source"] == "mimo_observability"
+        return {
+            "status": "ok",
+            "data": {
+                "desktops": [
+                    {
+                        "seat_id": "seat_stale_chat",
+                        "status": "running",
+                        "template_id": "desktop.browser",
+                        "startup": {
+                            "starter": "browser_url",
+                            "browser_url": "http://127.0.0.1:18766/chat",
+                        },
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(sandbox_api, "run", fake_desktops_list)
+
+    observation = MimoCodingCompanyRuntime._desktop_monitoring_observation()
+    message = MimoCodingCompanyRuntime._desktop_monitoring_message(observation)
+
+    assert observation["status"] == "blocked"
+    assert observation["signal"] == "managed_desktop_chat_target_missing"
+    assert observation["missing_chat_targets"][0]["seat_id"] == "seat_stale_chat"
+    assert observation["missing_chat_targets"][0]["browser_url"] == "http://127.0.0.1:18766/chat"
+    assert "without an explicit chat query" in observation["blocker"]
+    assert "seat_stale_chat" in message
+    assert "http://127.0.0.1:18766/chat" in message
 
 
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):
