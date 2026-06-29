@@ -16,6 +16,14 @@ import { ContinuitySettingsField } from "../features/continuity/ContinuitySettin
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
+  buildControlCenterSections,
+  filterControlCenterSections,
+  mapSettingsSectionId,
+  safeSettingsLabel,
+  type ControlCenterField,
+  type ControlCenterSection,
+} from "../settings/controlCenter";
+import {
   createSettingsFieldRendererRegistry,
   SettingsFieldRendererHost,
   type SettingsFieldRendererProps,
@@ -2863,11 +2871,17 @@ export function SettingsModalRenderer({
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
-  const [activeSectionId, setActiveSectionId] = useState(settingsSections[0]?.id ?? "system");
+  const [activeSectionId, setActiveSectionId] = useState<ControlCenterSection["id"]>(
+    () => mapSettingsSectionId(requestedSectionId) ?? "quick_setup",
+  );
   const [settingsSearch, setSettingsSearch] = useState("");
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
+  const controlCenterSections = useMemo(
+    () => buildControlCenterSections(settingsSections),
+    [settingsSections],
+  );
   const placementManifestMap = useMemo(
     () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
     [settingsSections],
@@ -2892,21 +2906,23 @@ export function SettingsModalRenderer({
       placement.id === manifest.id && placement.surface === "settings"
     )))
   ), [pinnedPlacements, placementManifestMap]);
-  const visibleSections = normalizedSearch
-    ? settingsSections.filter((section) => settingsSectionSearchText(section).includes(normalizedSearch))
-    : settingsSections;
+  const visibleSections = useMemo(
+    () => filterControlCenterSections(controlCenterSections, settingsSearch),
+    [controlCenterSections, settingsSearch],
+  );
   useEffect(() => {
     if (!requestedSectionId) return;
-    if (settingsSections.some((section) => section.id === requestedSectionId)) {
-      setActiveSectionId(requestedSectionId);
+    const mappedSectionId = mapSettingsSectionId(requestedSectionId);
+    if (mappedSectionId && controlCenterSections.some((section) => section.id === mappedSectionId)) {
+      setActiveSectionId(mappedSectionId);
     }
-  }, [requestedSectionId, settingsSections]);
+  }, [controlCenterSections, requestedSectionId]);
   useEffect(() => {
     if (!normalizedSearch) return;
     if (!visibleSections.some((section) => section.id === activeSectionId)) {
-      setActiveSectionId(visibleSections[0]?.id ?? settingsSections[0]?.id ?? "system");
+      setActiveSectionId(visibleSections[0]?.id ?? "quick_setup");
     }
-  }, [activeSectionId, normalizedSearch, settingsSections, visibleSections]);
+  }, [activeSectionId, normalizedSearch, visibleSections]);
   useEffect(() => {
     if (!placementMenuOpen) return;
     const handlePointerDown = () => setPlacementMenuOpen(false);
@@ -2922,10 +2938,10 @@ export function SettingsModalRenderer({
   }, [placementMenuOpen]);
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
-    ?? settingsSections[0];
-  const activeSectionValues = settingsValues[activeSection?.id ?? ""] ?? {};
-  const primaryFields = activeSection?.fields.filter((field) => !field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
-  const advancedFields = activeSection?.fields.filter((field) => field.advanced && settingsFieldVisible(field, activeSectionValues)) ?? [];
+    ?? controlCenterSections[0];
+  const fieldSourceValues = (field: ControlCenterField) => settingsValues[field.sourceSectionId] ?? {};
+  const primaryFields = activeSection?.fields.filter((field) => !field.advanced && settingsFieldVisible(field, fieldSourceValues(field))) ?? [];
+  const advancedFields = activeSection?.fields.filter((field) => field.advanced && settingsFieldVisible(field, fieldSourceValues(field))) ?? [];
   const activeSectionOwnText = [
     activeSection?.id ?? "",
     activeSection?.label ?? "",
@@ -2944,30 +2960,37 @@ export function SettingsModalRenderer({
     onSettingChange("sidebar", "ui_placements", updater(pinnedPlacements));
   };
   const openSection = (sectionId: string) => {
-    setActiveSectionId(sectionId);
+    setActiveSectionId(mapSettingsSectionId(sectionId) ?? "packs_extensions");
     onOpenSection?.(sectionId);
   };
 
-  const renderField = (field: SettingsSection["fields"][number]) => (
+  const renderField = (field: ControlCenterField) => (
     <div
-      key={`${activeSection?.id}.${field.id}`}
+      key={`${field.sourceSectionId}.${field.id}`}
       className={cn(
         "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
         settingsFieldTakesFullWidth(field) ? "lg:col-span-2" : "",
       )}
     >
+      {field.sourceSectionLabel && field.sourceSectionId !== activeSection?.id && (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <span className="rounded-md border border-zinc-800 bg-zinc-900/70 px-2 py-1 text-[10px] font-medium uppercase tracking-normal text-zinc-500">
+            {field.sourceSectionLabel}
+          </span>
+        </div>
+      )}
       <SettingsFieldRendererHost
         registry={settingsModalFieldRendererRegistry}
         componentBindings={catalog?.component_bindings ?? []}
         fallbackRenderer={SettingsFieldFallback}
-        sectionId={activeSection?.id ?? ""}
+        sectionId={field.sourceSectionId}
         field={field as SettingsFieldRendererProps["field"]}
         value={
           field.type === "secret" && field.configured_field
-            ? settingsValues[activeSection?.id ?? ""]?.[field.configured_field]
-            : settingsValues[activeSection?.id ?? ""]?.[field.id] ?? field.default
+            ? settingsValues[field.sourceSectionId]?.[field.configured_field]
+            : settingsValues[field.sourceSectionId]?.[field.id] ?? field.default
         }
-        sectionValues={settingsValues[activeSection?.id ?? ""] ?? {}}
+        sectionValues={settingsValues[field.sourceSectionId] ?? {}}
         onChange={onSettingChange}
       />
     </div>
@@ -3014,6 +3037,130 @@ export function SettingsModalRenderer({
     );
   };
 
+  const renderSectionPrelude = (section: ControlCenterSection): ReactElement | null => {
+    if (section.id === "quick_setup") {
+      return (
+        <div className="grid gap-3 xl:grid-cols-3">
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-4">
+            <div className="text-sm font-medium text-emerald-100">Setup path</div>
+            <p className="mt-1 text-xs leading-5 text-emerald-100/75">
+              Models, API keys, account connections, MCP requirements, and computer approvals are surfaced first.
+            </p>
+          </div>
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-4">
+            <div className="text-sm font-medium text-sky-100">Official app / self-host</div>
+            <p className="mt-1 text-xs leading-5 text-sky-100/75">
+              Cloud continuation uses the hosted OAuth broker, or a self-host OAuth client configured by the user.
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+            <div className="text-sm font-medium text-zinc-100">Registry contract</div>
+            <p className="mt-1 text-xs leading-5 text-zinc-500">
+              Pack settings are validated before they join this control center.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    if (section.id === "accounts_connections") {
+      return (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {["Cloudflare", "Google"].map((provider) => (
+            <div key={provider} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-zinc-100">{provider}</div>
+                  <p className="mt-1 text-xs leading-5 text-zinc-500">
+                    {provider === "Cloudflare"
+                      ? "Continue Rumi tasks in the user's Cloudflare account when this computer is offline."
+                      : "Connect Gmail and Google Drive capabilities through an explicit OAuth account connection."}
+                  </p>
+                </div>
+                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
+                  Not connected
+                </span>
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 hover:border-zinc-500">
+                  Connect {provider}
+                </button>
+                <button type="button" className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200">
+                  Configure self-host OAuth
+                </button>
+              </div>
+            </div>
+          ))}
+          <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-4 lg:col-span-2">
+            <div className="text-sm font-medium text-sky-100">OSS / official app mode</div>
+            <p className="mt-1 text-xs leading-5 text-sky-100/75">
+              No official client secret is bundled. Use the official hosted broker, or configure your own OAuth client with PKCE/server credentials.
+            </p>
+          </div>
+        </div>
+      );
+    }
+    if (section.id === "tools_mcp") {
+      return (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-medium text-zinc-100">MCP and tool policy are split from account login</div>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                MCP servers define tools and required connections. Accounts & Connections owns the actual login and credential state.
+              </p>
+            </div>
+            <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-400">
+              {section.fields.length} controls
+            </span>
+          </div>
+        </div>
+      );
+    }
+    if (section.id === "computer_automation") {
+      return (
+        <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 p-4">
+          <div className="text-sm font-medium text-rose-100">Computer actions are high-impact</div>
+          <p className="mt-1 text-xs leading-5 text-rose-100/75">
+            Screen observation, clicking, typing, scrolling, browser automation, checkpoint/resume, and cloud continuation stay together here.
+          </p>
+        </div>
+      );
+    }
+    return null;
+  };
+
+  const renderRightHelp = (section: ControlCenterSection | undefined): ReactElement => (
+    <aside className="hidden border-l border-zinc-800 bg-zinc-950/40 p-4 md:block">
+      <div className="sticky top-4 space-y-4">
+        <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Control Center</div>
+          <h3 className="mt-2 text-sm font-medium text-zinc-100">{section?.label ?? "Settings"}</h3>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">{section?.help ?? "Settings are grouped by user intent and risk."}</p>
+        </section>
+        <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Active profile</div>
+          <div className="mt-2 text-sm text-zinc-100">default</div>
+          <p className="mt-2 text-xs leading-5 text-zinc-500">
+            Profile-aware settings can report configured, missing, disabled, unapproved, or unavailable states.
+          </p>
+        </section>
+        <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
+          <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Source sections</div>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {(section?.sourceSections ?? []).slice(0, 8).map((source) => (
+              <span key={source.id} className="rounded-md border border-zinc-800 px-2 py-1 text-[10px] text-zinc-500">
+                {safeSettingsLabel(source.label, source.id)}
+              </span>
+            ))}
+            {(section?.sourceSections.length ?? 0) === 0 && (
+              <span className="text-xs text-zinc-600">Registry-only section</span>
+            )}
+          </div>
+        </section>
+      </div>
+    </aside>
+  );
+
   return (
     <AnimatePresence>
       {isOpen && (
@@ -3029,11 +3176,11 @@ export function SettingsModalRenderer({
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative h-[min(760px,calc(100vh-48px))] w-[min(1040px,calc(100vw-32px))] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            className="relative h-[min(820px,calc(100vh-48px))] w-[min(1180px,calc(100vw-32px))] bg-[#09090b] border border-zinc-800 rounded-xl shadow-2xl overflow-hidden flex flex-col"
           >
             <div className="px-6 py-4 border-b border-zinc-800 flex justify-between items-center">
               <div className="min-w-0">
-                <h2 className="text-lg font-medium text-zinc-100">{t(locale, "settings.title")}</h2>
+                <h2 className="text-lg font-medium text-zinc-100">Rumi Control Center</h2>
                 <p className="text-xs text-zinc-500 mt-1">
                   {t(locale, "settings.backendRegistry", {
                     extensionPoints: catalog?.extension_points.length ?? 0,
@@ -3088,7 +3235,7 @@ export function SettingsModalRenderer({
                 </button>
               </div>
             </div>
-            <div className="grid flex-1 min-h-0 md:grid-cols-[220px_1fr]">
+            <div className="grid flex-1 min-h-0 md:grid-cols-[220px_minmax(0,1fr)_260px]">
               <nav className="border-b border-zinc-800 bg-zinc-950/50 p-3 md:border-b-0 md:border-r overflow-x-auto md:overflow-y-auto">
                 <label className="mb-3 flex h-9 items-center gap-2 rounded-lg border border-zinc-800 bg-black/30 px-3 text-xs text-zinc-500 focus-within:border-zinc-600 focus-within:text-zinc-300">
                   <Search size={14} />
@@ -3156,46 +3303,53 @@ export function SettingsModalRenderer({
                 )}
                 {activeSection && (
                   <section className="space-y-4">
-                    <div>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
                       <h3 className="text-sm font-medium text-zinc-100">{activeSection.label}</h3>
                       {activeSection.description && <p className="text-xs text-zinc-500 mt-1">{activeSection.description}</p>}
+                      </div>
+                      <span className="rounded-full border border-zinc-800 bg-zinc-950/60 px-2.5 py-1 text-[10px] text-zinc-500">
+                        {activeSection.order}
+                      </span>
                     </div>
-                    {activeSection.id === "tools" && (
+                    {renderSectionPrelude(activeSection)}
+                    {activeSection.id === "tools_mcp" && (
                       <ToolExperienceSettingsPanel
                         tools={(catalog?.sidebar.items ?? []).filter((item) => item.category === "tool")}
                         settingsValues={settingsValues}
                         onSettingChange={onSettingChange}
                       />
                     )}
-                    {activeSection.id === "system_info" && (
+                    {activeSection.id === "computer_automation" && (
                       <SystemInfoPanel info={desktopSystemInfo} />
                     )}
-                    {activeSection.id !== "tools" && (
-                      <>
-                        <div className="grid gap-4 lg:grid-cols-2">
-                          {visiblePrimaryFields.map(renderField)}
+                    <div className="grid gap-4 lg:grid-cols-2">
+                      {visiblePrimaryFields.map(renderField)}
+                    </div>
+                    {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                        {t(locale, "settings.noFields")}
+                      </div>
+                    )}
+                    {!normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
+                        Pack or provider contributions for this section will appear here after registry validation.
+                      </div>
+                    )}
+                    {visibleAdvancedFields.length > 0 && (
+                      <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
+                        <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
+                          {t(locale, "settings.advanced")}
+                        </summary>
+                        <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
+                          {visibleAdvancedFields.map(renderField)}
                         </div>
-                        {normalizedSearch && visiblePrimaryFields.length === 0 && visibleAdvancedFields.length === 0 && (
-                          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm text-zinc-500">
-                            {t(locale, "settings.noFields")}
-                          </div>
-                        )}
-                        {visibleAdvancedFields.length > 0 && (
-                          <details className="rounded-lg border border-zinc-800 bg-zinc-950/40">
-                            <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-400 transition-colors hover:text-zinc-200">
-                              {t(locale, "settings.advanced")}
-                            </summary>
-                            <div className="grid gap-4 border-t border-zinc-800 p-4 lg:grid-cols-2">
-                              {visibleAdvancedFields.map(renderField)}
-                            </div>
-                          </details>
-                        )}
-                      </>
+                      </details>
                     )}
                   </section>
                 )}
 
-              <details className="rounded-lg border border-zinc-800 bg-zinc-950/30">
+              {activeSection?.id === "diagnostics" && <details className="rounded-lg border border-zinc-800 bg-zinc-950/30">
                 <summary className="cursor-pointer list-none px-4 py-3 text-xs font-medium text-zinc-500 transition-colors hover:text-zinc-300">
                   {t(locale, "settings.developerDiagnostics")}
                 </summary>
@@ -3245,8 +3399,9 @@ export function SettingsModalRenderer({
                     />
                   </section>
                 </div>
-              </details>
+              </details>}
               </div>
+              {renderRightHelp(activeSection)}
             </div>
           </motion.div>
         </div>

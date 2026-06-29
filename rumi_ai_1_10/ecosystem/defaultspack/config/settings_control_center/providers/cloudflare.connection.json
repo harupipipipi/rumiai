@@ -1,0 +1,62 @@
+{
+  "schema": "rumi.connection.provider.v1",
+  "provider_id": "cloudflare",
+  "display_name": {
+    "en": "Cloudflare",
+    "ja": "Cloudflare"
+  },
+  "description": {
+    "en": "Continue Rumi tasks in your Cloudflare account when this computer is offline.",
+    "ja": "PCがオフラインでもCloudflareアカウントでRumiの作業を継続します。"
+  },
+  "icon": "cloudflare",
+  "service_kind": "cloud",
+  "auth": {
+    "type": "oauth2",
+    "official_broker_supported": true,
+    "self_host_client_supported": true,
+    "pkce_supported": true,
+    "oauth": {
+      "authorization_url": "https://dash.cloudflare.com/oauth2/auth",
+      "token_url": "https://dash.cloudflare.com/oauth2/token",
+      "revoke_url": "https://dash.cloudflare.com/oauth2/revoke",
+      "userinfo_url": "https://dash.cloudflare.com/oauth2/userinfo",
+      "default_scopes": [],
+      "pkce_supported": true
+    }
+  },
+  "capabilities": [
+    {
+      "id": "cloudflare.account.read",
+      "displayName": {
+        "en": "Read account metadata",
+        "ja": "アカウント情報を読む"
+      },
+      "description": {
+        "en": "Select the account Rumi should use.",
+        "ja": "Rumiが使用するアカウントを選びます。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.runner.deploy",
+      "displayName": {
+        "en": "Deploy Rumi runner",
+        "ja": "Rumi runnerを配置"
+      },
+      "description": {
+        "en": "Create/update runner resources for cloud continuation.",
+        "ja": "クラウド継続用runnerリソースを作成/更新します。"
+      },
+      "risk": "medium"
+    }
+  ],
+  "settings": {
+    "section": "accounts_connections",
+    "priority": 30,
+    "recommended": true
+  },
+  "metadata": {
+    "scope_note": "Configure least-privilege Cloudflare OAuth scopes for the exact runner resources used by the implementation. Do not request broad account permissions by default."
+  }
+}

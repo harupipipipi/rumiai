@@ -1,0 +1,119 @@
+{
+  "schema": "rumi.connection.provider.v1",
+  "provider_id": "google",
+  "display_name": {
+    "en": "Google",
+    "ja": "Google"
+  },
+  "description": {
+    "en": "Connect Gmail and Google Drive capabilities.",
+    "ja": "GmailとGoogle Driveを連携します。"
+  },
+  "icon": "google",
+  "service_kind": "google",
+  "auth": {
+    "type": "oauth2",
+    "official_broker_supported": true,
+    "self_host_client_supported": true,
+    "pkce_supported": true,
+    "oauth": {
+      "authorization_url": "https://accounts.google.com/o/oauth2/v2/auth",
+      "token_url": "https://oauth2.googleapis.com/token",
+      "revoke_url": "https://oauth2.googleapis.com/revoke",
+      "userinfo_url": "https://openidconnect.googleapis.com/v1/userinfo",
+      "default_scopes": [
+        "openid",
+        "email",
+        "profile"
+      ],
+      "pkce_supported": true
+    }
+  },
+  "services": [
+    {
+      "service_id": "drive",
+      "display_name": "Google Drive",
+      "recommended_scopes": [
+        "https://www.googleapis.com/auth/drive.file"
+      ]
+    },
+    {
+      "service_id": "gmail",
+      "display_name": "Gmail",
+      "restricted_scopes": [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.metadata",
+        "https://www.googleapis.com/auth/gmail.modify",
+        "https://mail.google.com/"
+      ],
+      "scope_modes": [
+        {
+          "mode": "labels_only",
+          "classification": "non_sensitive",
+          "scopes": [
+            "https://www.googleapis.com/auth/gmail.labels"
+          ]
+        },
+        {
+          "mode": "metadata_search",
+          "classification": "restricted",
+          "scopes": [
+            "https://www.googleapis.com/auth/gmail.metadata"
+          ],
+          "requires": "restricted_scope_review_or_self_host_ack"
+        },
+        {
+          "mode": "readonly_body",
+          "classification": "restricted",
+          "scopes": [
+            "https://www.googleapis.com/auth/gmail.readonly"
+          ],
+          "requires": "restricted_scope_review_or_self_host_ack"
+        }
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "google.drive.file",
+      "displayName": {
+        "en": "Google Drive selected files",
+        "ja": "選択したDriveファイル"
+      },
+      "description": {
+        "en": "Access files opened or shared with Rumi.",
+        "ja": "Rumiに共有/選択したファイルへアクセスします。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "google.gmail.labels",
+      "displayName": {
+        "en": "Gmail labels",
+        "ja": "Gmailラベル"
+      },
+      "description": {
+        "en": "Read Gmail labels in low-friction mode. Search/body-read uses explicit restricted-scope mode.",
+        "ja": "低リスクモードでGmailラベルを読みます。検索/本文読み取りは明示的な制限スコープモードです。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "google.gmail.metadata_restricted",
+      "displayName": {
+        "en": "Gmail metadata/search",
+        "ja": "Gmailメタデータ/検索"
+      },
+      "description": {
+        "en": "Search Gmail metadata only when restricted-scope mode is enabled.",
+        "ja": "制限スコープモードを有効にした場合のみGmailメタデータを検索します。"
+      },
+      "risk": "high"
+    }
+  ],
+  "settings": {
+    "section": "accounts_connections",
+    "priority": 40,
+    "recommended": true
+  }
+}
