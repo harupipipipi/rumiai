@@ -81,7 +81,7 @@ IMPROVEMENT_STREAMS = [
     {
         "id": "provider_search_coverage",
         "title": "Provider and search coverage",
-        "description": "Improve search quality, provider discovery, and model catalogs. Keep Groq, Cerebras, and Xiaomi current.",
+        "description": "Improve search quality, provider discovery, and model catalogs for OpenCode MiMo Pro and Google Gemma vision.",
         "target_agent_ids": ["toolsmith", "project_manager"],
         "preferred_tools": ["web_search", "knowledge_search", "knowledge_create", "coding_file_patch"],
         "owner_role": "toolsmith",
@@ -90,8 +90,8 @@ IMPROVEMENT_STREAMS = [
     {
         "id": "frontend_qa_swarm",
         "title": "Frontend QA swarm",
-        "description": "Run browser and computer-use QA with multiple personas and log only evidence-backed bugs.",
-        "target_agent_ids": ["browser_qa", "reviewer"],
+        "description": "Run browser and computer-use QA with multiple personas, then hand evidence-backed fixes to MiMo Pro.",
+        "target_agent_ids": ["browser_qa", "coding_engineer", "reviewer"],
         "preferred_tools": [
             "browser_use",
             "browser_companion",
@@ -314,7 +314,8 @@ ROLE_DEFINITIONS = [
         ],
         "context_limit": 96000,
         "system_prompt": (
-            "Act like a real user. Click around, break things, and file only evidence-backed bugs. "
+            "Act like a real user. Click around, break things, and turn evidence-backed bugs into fix tasks for @coding_engineer. "
+            "Create an issue only when a fix is blocked or external tracking is needed. "
             "If browser tools are unpaired or unavailable, create/use a managed desktop seat before stopping. "
             "Desktop and sandbox access comes from trusted local/server context; do not add payload owner_id as proof of access. "
             "For desktop_input, always include action; type with action=type_text plus text, "
@@ -1109,7 +1110,7 @@ class MimoCodingCompanyRuntime:
             "mission": str(mission.get("mission") or str(persona_spec.get("goal") or "")),
             "probe_areas": list(mission.get("probe_areas") or []),
             "prompt_style": "Keep prompts short, concrete, and evidence-first. For desktop/sandbox tools, rely on the server-provided principal context; do not add payload owner_id as proof of access.",
-            "reporting_policy": "Report only evidence-backed bugs with exact repro steps or screenshots.",
+            "reporting_policy": "For each evidence-backed bug, include exact repro steps or screenshots and hand a fix task to MiMo Pro.",
             "tools_hint": ["browser_use", "browser_companion", "computer_use"],
             "desktop_tools_hint": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
             "model_hint": DEFAULT_VISION_MODEL,
@@ -2301,7 +2302,7 @@ class MimoCodingCompanyRuntime:
         if docker_swarm.get("enabled") is False:
             return {
                 "coordinator_agent_id": "browser_qa",
-                "reporting_policy": "Report only evidence-backed bugs. Stay quiet if the assigned path passes.",
+                "reporting_policy": "Evidence first; hand bugs to MiMo Pro for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
                 "managed_desktop_fallback": {
                     "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
                     "create_defaults": {
@@ -2333,13 +2334,13 @@ class MimoCodingCompanyRuntime:
                     "qa_target": str(worker.get("qa_target") or ""),
                     "mission": str(persona_meta.get("mission") or str(persona_spec.get("goal") or "")),
                     "probe_areas": list(persona_meta.get("probe_areas") or []),
-                    "evidence_required": "Screenshots or exact repro steps before filing a bug.",
+                    "evidence_required": "Screenshots or exact repro steps before handing off a fix.",
                     "fallback": "If browser_use, computer_use, or browser_companion cannot control a browser, use desktop_list/create/frame/input to continue in a managed desktop seat.",
                 }
             )
         return {
             "coordinator_agent_id": "browser_qa",
-            "reporting_policy": "Report only evidence-backed bugs. Stay quiet if the assigned path passes.",
+            "reporting_policy": "Evidence first; hand bugs to MiMo Pro for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
             "managed_desktop_fallback": {
                 "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
                 "create_defaults": {
@@ -2368,7 +2369,8 @@ class MimoCodingCompanyRuntime:
             "Run a short heartbeat for the MiMo Coding Company. Check pending tasks, recent failures, QA bugs, and blocked work. "
             "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops. "
             + (monitoring_summary + " " if monitoring_summary else "")
-            + "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
+            + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo/Gemma loops keep moving. "
+            "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
         )
 
     def _improvement_message(self, state: dict[str, Any]) -> str:
@@ -2381,7 +2383,7 @@ class MimoCodingCompanyRuntime:
             + ". Use "
             + main_model
             + " as the main reasoning model. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
-            "Land one verified change, then capture what changed in knowledge."
+            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change, then capture what changed in knowledge."
         )
 
     def _qa_message(self, state: dict[str, Any]) -> str:
@@ -2408,6 +2410,6 @@ class MimoCodingCompanyRuntime:
             + (" Managed desktop target URLs: " + target_summary + "." if target_summary else "")
             + " First call desktop_list. Reuse only desktops whose status is running and whose startup.browser_url, desktop_spec.browser_url, or metadata startup browser_url exactly matches the managed desktop target URL. Ignore destroyed, failed, stale, or wrong-target seats. If no current-target running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<managed desktop target URL>, assigned_agent=browser_qa. Desktop and sandbox access comes from trusted local/server context; do not add payload owner_id as proof of access. If a frame shows ERR_CONNECTION_REFUSED or a different address-bar URL, treat that seat as stale/wrong-target and create a current-target desktop. For desktop_frame and desktop_input, use the selected desktop's seat_id directly and let the server-provided principal context authorize access. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<managed desktop target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
-            "Log only evidence-backed bugs with repro steps. "
+            "For every evidence-backed bug, hand a fix task with repro steps to @coding_engineer, ask @reviewer to verify the patch, and create an issue only if the fix is blocked or needs external tracking. "
             "Stay quiet if everything passes."
         )
