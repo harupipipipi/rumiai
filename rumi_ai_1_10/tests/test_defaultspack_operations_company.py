@@ -183,6 +183,11 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert conversation["agent_id"] == "client_manager"
     assert conversation["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
     assert "mimo-coding-company" in conversation["tags"]
+    loop_conversation_ids = status["loop_conversation_ids"]
+    assert {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"} <= set(loop_conversation_ids)
+    assert len(set(loop_conversation_ids.values())) == len(loop_conversation_ids)
+    parent_after_lanes = ChatStore().get_conversation(status["conversation_id"])
+    assert set(loop_conversation_ids.values()) <= set(parent_after_lanes["child_conversation_ids"])
 
     loop_keys = {schedule["task"]["metadata"]["loop_key"] for schedule in status["schedules"]}
     assert {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"} <= loop_keys
@@ -196,11 +201,26 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert heartbeat_schedule["task"]["timeout"] == 600
     assert improvement_schedule["task"]["timeout"] == 600
     assert qa_schedule["task"]["timeout"] == 1800
+    assert improvement_schedule["task"]["conversation_id"] == loop_conversation_ids["improvement_loop"]
+    assert qa_schedule["task"]["conversation_id"] == loop_conversation_ids["qa_loop"]
+    assert improvement_schedule["task"]["conversation_id"] != qa_schedule["task"]["conversation_id"]
+    for loop_key, schedule in schedules_by_loop.items():
+        assert schedule["task"]["conversation_id"] == loop_conversation_ids[loop_key]
+        assert schedule["task"]["conversation_id"] != status["conversation_id"]
+        assert schedule["task"]["metadata"]["parent_conversation_id"] == status["conversation_id"]
+        assert schedule["task"]["metadata"]["schedule_failure_external_issue_policy"] == "blocked_only"
+        assert "scheduled_timeout" in schedule["task"]["metadata"]["schedule_suppress_external_issue_on"]
+        loop_conversation = ChatStore().get_conversation(schedule["task"]["conversation_id"])
+        assert loop_conversation["parent_conversation_id"] == status["conversation_id"]
+        assert loop_conversation["conversation_kind"] == "mimo_coding_company_loop"
     assert heartbeat_schedule["task"]["tool_policy"]["max_tool_calls"] is None
     assert heartbeat_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
     assert qa_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
+    assert qa_schedule["task"]["tool_policy"]["schedule_failure_external_issue_policy"] == "blocked_only"
+    assert "conversation_running" in qa_schedule["task"]["tool_policy"]["schedule_suppress_external_issue_on"]
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
+    assert "Do not create GitHub issues for scheduler bookkeeping noise" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
     auto_approve_allowlist = set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "rumi_api" not in auto_approve_allowlist
@@ -1248,6 +1268,132 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         expired_active,
     ):
         scheduler.delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_suppresses_expected_schedule_noise(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+        }),
+    )
+
+    parent = ChatStore().create_conversation(
+        model="opencode-go/mimo-v2.5",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {
+            "message": "QA loop.",
+            "model": "google/gemma-4-31b-it",
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_suppress_external_issue_on": [
+                    "already_running",
+                    "conversation_running",
+                    "scheduled_timeout",
+                ],
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "qa_loop",
+                "schedule_suppress_external_issue_on": [
+                    "already_running",
+                    "conversation_running",
+                    "scheduled_timeout",
+                ],
+            },
+        },
+        {"value": 30, "unit": "minutes"},
+        name="MiMo Coding Company qa loop",
+    )
+    append_history(
+        schedule["id"],
+        {
+            "schedule_id": schedule["id"],
+            "execution_id": "exec_overlap",
+            "trigger": "scheduled",
+            "status": "skipped",
+            "started_at": "2026-06-29T00:00:00Z",
+            "completed_at": "2026-06-29T00:00:00Z",
+            "error": "conversation is already running: " + parent["id"],
+            "error_code": "CONVERSATION_RUNNING",
+            "skipped_reason": "conversation_running",
+        },
+    )
+    append_history(
+        schedule["id"],
+        {
+            "schedule_id": schedule["id"],
+            "execution_id": "exec_timeout",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T00:30:00Z",
+            "completed_at": "2026-06-29T01:00:00Z",
+            "error": "scheduled task timed out after 1800 seconds",
+        },
+    )
+    append_history(
+        schedule["id"],
+        {
+            "schedule_id": schedule["id"],
+            "execution_id": "exec_real_error",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T01:30:00Z",
+            "completed_at": "2026-06-29T01:30:08Z",
+            "error": "handler execution failed for desktop_frame",
+        },
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    summary = runtime._sync_company_observability(
+        {
+            "conversation_id": parent["id"],
+            "conversation_group_id": "company:mimo-coding-company",
+            "schedule_ids": {"qa_loop": schedule["id"]},
+        }
+    )
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
+
+    latest_by_execution = {item["execution_id"]: item for item in summary["schedule_history"]["latest"]}
+    assert latest_by_execution["exec_overlap"]["suppressed"] is True
+    assert latest_by_execution["exec_overlap"]["suppressed_reason"] == "conversation_running"
+    assert latest_by_execution["exec_timeout"]["suppressed"] is True
+    assert latest_by_execution["exec_timeout"]["suppressed_reason"] == "scheduled_timeout"
+    assert latest_by_execution["exec_real_error"]["signal"] == "tool_handler_failure"
+    assert summary["team_workspace"]["synced_messages"] == 1
+    assert total == 1
+    assert messages[0]["metadata"]["execution_id"] == "exec_real_error"
+
+    scheduler.delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
 

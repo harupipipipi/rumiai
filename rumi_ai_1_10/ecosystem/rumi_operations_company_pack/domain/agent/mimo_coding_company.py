@@ -40,6 +40,13 @@ DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5"
 DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
 DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
+SCHEDULE_CONVERSATION_LANES = {
+    "kickoff_review": "review",
+    "heartbeat": "heartbeat",
+    "improvement_loop": "improvement",
+    "qa_loop": "qa",
+}
+SCHEDULE_NOISE_SUPPRESSION_REASONS = {"already_running", "conversation_running", "scheduled_timeout"}
 DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS = 600
 QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
 DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
@@ -503,6 +510,11 @@ class MimoCodingCompanyRuntime:
             "company_id": COMPANY_ID,
             "conversation_id": state.get("conversation_id"),
             "conversation_group_id": state.get("conversation_group_id"),
+            "loop_conversation_ids": deepcopy(
+                state.get("loop_conversation_ids")
+                if isinstance(state.get("loop_conversation_ids"), dict)
+                else {}
+            ),
             "company": company,
             "org": org,
             "schedules": self._schedules_for_state(state),
@@ -1267,6 +1279,102 @@ class MimoCodingCompanyRuntime:
         store.update_conversation(conversation["id"], {"title": "MiMo Coding Company"})
         return str(conversation["id"])
 
+    def _ensure_loop_conversation(
+        self,
+        state: dict[str, Any],
+        *,
+        key: str,
+        model: str,
+        agent_id: str,
+    ) -> str:
+        from domain.chat.store import ChatStore
+
+        parent_id = str(state.get("conversation_id") or "").strip()
+        if not parent_id:
+            return ""
+        lane_key = SCHEDULE_CONVERSATION_LANES.get(key, key)
+        loop_conversation_ids = state.setdefault("loop_conversation_ids", {})
+        if not isinstance(loop_conversation_ids, dict):
+            loop_conversation_ids = {}
+            state["loop_conversation_ids"] = loop_conversation_ids
+
+        workspace_metadata = self._workspace_metadata(
+            workspace_id=state.get("workspace_id"),
+            workspace_label=state.get("workspace_label"),
+            workspace_root=state.get("workspace_root"),
+        )
+        metadata = {
+            "profile_id": PROFILE_ID,
+            "company_id": COMPANY_ID,
+            "parent_conversation_id": parent_id,
+            "conversation_group_id": self._conversation_group_id(),
+            "loop_key": key,
+            "schedule_lane": lane_key,
+            "agent_id": agent_id,
+            "client_manager_agent_id": "client_manager",
+            **workspace_metadata,
+        }
+        title = "MiMo Coding Company: " + key.replace("_", " ")
+        store = ChatStore()
+        existing_id = str(loop_conversation_ids.get(key) or "").strip()
+        if existing_id and store.get_conversation(existing_id):
+            conversation = store.get_conversation(existing_id) or {}
+            current_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+            store.update_conversation(
+                existing_id,
+                {
+                    "title": title,
+                    "model": model,
+                    "system_prompt_id": "mimo_coding_company",
+                    "agent_id": agent_id,
+                    "parent_conversation_id": parent_id,
+                    "conversation_kind": "mimo_coding_company_loop",
+                    "group_id": self._conversation_group_id(),
+                    "metadata": {**current_metadata, **metadata},
+                },
+            )
+            return existing_id
+
+        parent = store.get_conversation(parent_id) or {}
+        for child_id in parent.get("child_conversation_ids", []) if isinstance(parent, dict) else []:
+            child = store.get_conversation(str(child_id))
+            if not isinstance(child, dict):
+                continue
+            child_metadata = child.get("metadata") if isinstance(child.get("metadata"), dict) else {}
+            if (
+                str(child.get("conversation_kind") or "") == "mimo_coding_company_loop"
+                and str(child_metadata.get("loop_key") or "") == key
+                and str(child_metadata.get("company_id") or "") == COMPANY_ID
+            ):
+                loop_conversation_ids[key] = str(child_id)
+                store.update_conversation(
+                    str(child_id),
+                    {
+                        "title": title,
+                        "model": model,
+                        "system_prompt_id": "mimo_coding_company",
+                        "agent_id": agent_id,
+                        "group_id": self._conversation_group_id(),
+                        "metadata": {**child_metadata, **metadata},
+                    },
+                )
+                return str(child_id)
+
+        conversation = store.create_conversation(
+            model=model,
+            system_prompt_id="mimo_coding_company",
+            agent_id=agent_id,
+            tags=["mimo-coding-company", "company-loop", lane_key],
+            parent_conversation_id=parent_id,
+            conversation_kind="mimo_coding_company_loop",
+            group_id=self._conversation_group_id(),
+            metadata=metadata,
+        )
+        conversation_id = str(conversation["id"])
+        store.update_conversation(conversation_id, {"title": title})
+        loop_conversation_ids[key] = conversation_id
+        return conversation_id
+
     def _apply_model_preferences(self, main_model: str, vision_model: str, fast_model: str) -> None:
         service = ModelRuntimeSettingsService(pack_root=self.defaultspack_root)
         service.update_settings(
@@ -1478,6 +1586,8 @@ class MimoCodingCompanyRuntime:
                     summary["schedule_history"]["latest"].append(latest)
                     if latest.get("signal"):
                         summary["schedule_history"]["signals"].append(latest)
+                    if latest.get("suppressed"):
+                        continue
                     sync_key = "schedule:" + str(entry.get("execution_id") or "").strip()
                     if sync_key == "schedule:" or sync_key in known_sync_keys:
                         continue
@@ -1761,6 +1871,7 @@ class MimoCodingCompanyRuntime:
     def _schedule_history_observation(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> dict[str, Any]:
         text = (str(entry.get("error") or "") + "\n" + str(entry.get("result") or "")).lower()
         signal = ""
+        suppressed_reason = MimoCodingCompanyRuntime._schedule_noise_suppression_reason(schedule, entry, text)
         if "subagent" in text and ("timeout" in text or "timed out" in text):
             signal = "subagent_timeout"
         elif "handler execution failed" in text or ("rumi_api" in text and "fail" in text):
@@ -1776,6 +1887,8 @@ class MimoCodingCompanyRuntime:
             signal = "approval_wait"
         elif str(entry.get("status") or "").lower() == "error" or entry.get("error"):
             signal = "schedule_error"
+        if suppressed_reason:
+            signal = ""
         return {
             "loop_key": loop_key,
             "schedule_id": str(entry.get("schedule_id") or (schedule or {}).get("id") or ""),
@@ -1786,7 +1899,37 @@ class MimoCodingCompanyRuntime:
             "started_at": entry.get("started_at"),
             "completed_at": entry.get("completed_at"),
             "signal": signal,
+            "suppressed": bool(suppressed_reason),
+            "suppressed_reason": suppressed_reason,
         }
+
+    @staticmethod
+    def _schedule_noise_suppression_reason(
+        schedule: dict[str, Any] | None,
+        entry: dict[str, Any],
+        text: str | None = None,
+    ) -> str:
+        task = schedule.get("task") if isinstance(schedule, dict) and isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        policy = task.get("tool_policy") if isinstance(task.get("tool_policy"), dict) else {}
+        configured = metadata.get("schedule_suppress_external_issue_on")
+        if configured is None:
+            configured = policy.get("schedule_suppress_external_issue_on")
+        suppressions = {str(item or "").strip() for item in configured if str(item or "").strip()} if isinstance(configured, list) else set()
+        if not suppressions:
+            return ""
+
+        skipped_reason = str(entry.get("skipped_reason") or "").strip()
+        error_code = str(entry.get("error_code") or "").strip()
+        if skipped_reason in suppressions:
+            return skipped_reason
+        if error_code == "CONVERSATION_RUNNING" and "conversation_running" in suppressions:
+            return "conversation_running"
+
+        lowered = (text if text is not None else str(entry.get("error") or entry.get("result") or "")).lower()
+        if "scheduled task timed out after " in lowered and "scheduled_timeout" in suppressions:
+            return "scheduled_timeout"
+        return ""
 
     @staticmethod
     def _schedule_history_message(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> str:
@@ -1825,10 +1968,12 @@ class MimoCodingCompanyRuntime:
             child_ids = self._subagent_child_conversation_ids(store, parent, conversation_id)
             unanswered: list[dict[str, Any]] = []
             repaired: list[str] = []
+            checked_ids: list[str] = []
             for child_id in child_ids:
                 child = store.get_conversation(child_id) or {}
                 if str(child.get("conversation_kind") or "") != "subagent":
                     continue
+                checked_ids.append(child_id)
                 messages = child.get("messages") if isinstance(child.get("messages"), list) else []
                 has_running_draft = any(
                     is_running_subagent_durable_draft(message)
@@ -1868,7 +2013,7 @@ class MimoCodingCompanyRuntime:
                         ),
                     }
                 )
-            return {"checked_ids": child_ids, "unanswered": unanswered, "repaired": repaired}
+            return {"checked_ids": checked_ids, "unanswered": unanswered, "repaired": repaired}
         except Exception:
             return {"checked_ids": [], "unanswered": [], "repaired": []}
 
@@ -2113,6 +2258,8 @@ class MimoCodingCompanyRuntime:
                 "desktop_input",
             ],
             "schedule_auto_approve_max_followups": "unlimited",
+            "schedule_failure_external_issue_policy": "blocked_only",
+            "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
         }
         if state.get("workspace_id"):
             policy["workspace_id"] = state["workspace_id"]
@@ -2136,10 +2283,12 @@ class MimoCodingCompanyRuntime:
         schedule_ids = state.setdefault("schedule_ids", {})
         scheduler = Scheduler()
         existing_id = schedule_ids.get(key)
+        conversation_id = self._ensure_loop_conversation(state, key=key, model=model, agent_id=agent_id)
+        parent_conversation_id = str(state.get("conversation_id") or "").strip()
         task = {
             "message": message,
             "model": model,
-            "conversation_id": state.get("conversation_id"),
+            "conversation_id": conversation_id or parent_conversation_id,
             "timeout": safe_timeout_seconds,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
@@ -2149,8 +2298,13 @@ class MimoCodingCompanyRuntime:
             "metadata": {
                 "profile_id": PROFILE_ID,
                 "company_id": COMPANY_ID,
-                "conversation_id": state.get("conversation_id"),
+                "conversation_id": conversation_id or parent_conversation_id,
+                "parent_conversation_id": parent_conversation_id,
+                "conversation_group_id": self._conversation_group_id(),
                 "loop_key": key,
+                "schedule_lane": SCHEDULE_CONVERSATION_LANES.get(key, key),
+                "schedule_failure_external_issue_policy": "blocked_only",
+                "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
                 **self._workspace_metadata(
                     workspace_id=state.get("workspace_id"),
                     workspace_label=state.get("workspace_label"),
@@ -2188,10 +2342,12 @@ class MimoCodingCompanyRuntime:
         schedule_ids = state.setdefault("schedule_ids", {})
         scheduler = Scheduler()
         existing_id = schedule_ids.get(key)
+        conversation_id = self._ensure_loop_conversation(state, key=key, model=model, agent_id=agent_id)
+        parent_conversation_id = str(state.get("conversation_id") or "").strip()
         task = {
             "message": message,
             "model": model,
-            "conversation_id": state.get("conversation_id"),
+            "conversation_id": conversation_id or parent_conversation_id,
             "timeout": DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
@@ -2201,8 +2357,13 @@ class MimoCodingCompanyRuntime:
             "metadata": {
                 "profile_id": PROFILE_ID,
                 "company_id": COMPANY_ID,
-                "conversation_id": state.get("conversation_id"),
+                "conversation_id": conversation_id or parent_conversation_id,
+                "parent_conversation_id": parent_conversation_id,
+                "conversation_group_id": self._conversation_group_id(),
                 "loop_key": key,
+                "schedule_lane": SCHEDULE_CONVERSATION_LANES.get(key, key),
+                "schedule_failure_external_issue_policy": "blocked_only",
+                "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
                 **self._workspace_metadata(
                     workspace_id=state.get("workspace_id"),
                     workspace_label=state.get("workspace_label"),
@@ -2446,7 +2607,8 @@ class MimoCodingCompanyRuntime:
             "Start MiMo Coding Company with one simple coding task. Pick one stream"
             + (": " + focus if focus else "")
             + ". Use short prompts. Hand implementation to @coding_engineer, review to @reviewer, and record the outcome in knowledge. "
-            "If a missing tool or skill blocks progress, ask @toolsmith to create the smallest viable version."
+            "If a missing tool or skill blocks progress, ask @toolsmith to create the smallest viable version. "
+            + self._scheduler_noise_prompt()
         )
 
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
@@ -2456,7 +2618,8 @@ class MimoCodingCompanyRuntime:
             "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops. "
             + (monitoring_summary + " " if monitoring_summary else "")
             + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo/Gemma loops keep moving. "
-            "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence."
+            "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence. "
+            + self._scheduler_noise_prompt()
         )
 
     def _improvement_message(self, state: dict[str, Any]) -> str:
@@ -2469,7 +2632,8 @@ class MimoCodingCompanyRuntime:
             + ". Use "
             + main_model
             + " as the main reasoning model. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
-            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change, then capture what changed in knowledge."
+            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change, then capture what changed in knowledge. "
+            + self._scheduler_noise_prompt()
         )
 
     def _qa_message(self, state: dict[str, Any]) -> str:
@@ -2497,5 +2661,14 @@ class MimoCodingCompanyRuntime:
             + " First call desktop_list. Reuse only desktops whose status is running and whose startup.browser_url, desktop_spec.browser_url, or metadata startup browser_url exactly matches the managed desktop target URL. Ignore destroyed, failed, stale, or wrong-target seats. If no current-target running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<managed desktop target URL>, assigned_agent=browser_qa. Desktop and sandbox access comes from trusted local/server context; do not add payload owner_id as proof of access. If a frame shows ERR_CONNECTION_REFUSED or a different address-bar URL, treat that seat as stale/wrong-target and create a current-target desktop. For desktop_frame and desktop_input, use the selected desktop's seat_id directly and let the server-provided principal context authorize access. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<managed desktop target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "For every evidence-backed bug, hand a fix task with repro steps to @coding_engineer, ask @reviewer to verify the patch, and create an issue only if the fix is blocked or needs external tracking. "
-            "Stay quiet if everything passes."
+            + self._scheduler_noise_prompt()
+            + " Stay quiet if everything passes."
+        )
+
+    @staticmethod
+    def _scheduler_noise_prompt() -> str:
+        return (
+            "Do not create GitHub issues for scheduler bookkeeping noise such as CONVERSATION_RUNNING, "
+            "already_running, or a single scheduled task timeout; only externalize repeated, evidence-backed blockers "
+            "after an in-loop fix is blocked."
         )
