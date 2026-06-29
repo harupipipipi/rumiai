@@ -101,6 +101,9 @@ domains:
   context_engine:
     may_import: []
     path: domain/context_engine
+  codex:
+    may_import: []
+    path: domain/codex
   dev:
     may_import: []
     path: domain/dev
@@ -124,6 +127,7 @@ domains:
     - domain/capability
     - domain/chat
     - domain/components
+    - domain/codex
     - domain/dev
     - domain/extensions
     - domain/external
