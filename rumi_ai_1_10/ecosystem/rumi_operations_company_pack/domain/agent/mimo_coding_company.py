@@ -44,6 +44,8 @@ DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
 MIMO_OBSERVABILITY_HISTORY_LIMIT = 5
+MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE = timedelta(hours=1)
+MIMO_CURRENT_OBSERVABILITY_MODELS = {DEFAULT_MAIN_MODEL, DEFAULT_VISION_MODEL}
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -1580,13 +1582,23 @@ class MimoCodingCompanyRuntime:
             )
 
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        state_schedule_ids = {
+            str(schedule_id or "").strip()
+            for schedule_id in schedule_ids.values()
+            if str(schedule_id or "").strip()
+        }
         for loop_key, schedule_id in schedule_ids.items():
             add_schedule(schedule_id, loop_key=str(loop_key or "").strip())
 
         for schedule in scheduler.list_schedules():
             if not isinstance(schedule, dict):
                 continue
+            schedule_id = str(schedule.get("id") or "").strip()
+            if not schedule_id or schedule_id in state_schedule_ids:
+                continue
             if not self._is_mimo_company_observability_schedule(schedule, state):
+                continue
+            if not self._is_current_mimo_company_observability_schedule(schedule):
                 continue
             add_schedule(schedule.get("id"), schedule=schedule)
         return schedules
@@ -1637,6 +1649,40 @@ class MimoCodingCompanyRuntime:
             str(task.get("group") or "").strip(),
         }
         return bool(expected_group_id and expected_group_id in group_ids)
+
+    @staticmethod
+    def _is_current_mimo_company_observability_schedule(schedule: dict[str, Any]) -> bool:
+        status = str(schedule.get("status") or "").strip().lower()
+        if status != "active":
+            return False
+
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        model = str(task.get("model") or "").strip().lower()
+        current_models = {item.lower() for item in MIMO_CURRENT_OBSERVABILITY_MODELS}
+        if model not in current_models:
+            return False
+
+        next_execution_at = str(schedule.get("next_execution_at") or "").strip()
+        if not next_execution_at and str(schedule.get("type") or "").strip().lower() == "once":
+            config = schedule.get("config") if isinstance(schedule.get("config"), dict) else {}
+            next_execution_at = str(config.get("run_at") or "").strip()
+        next_execution = MimoCodingCompanyRuntime._parse_mimo_observability_datetime(next_execution_at)
+        if next_execution is None:
+            return False
+        return next_execution >= _utc_now() - MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE
+
+    @staticmethod
+    def _parse_mimo_observability_datetime(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     @staticmethod
     def _company_runtime_sync_keys(runtime_store: CompanyRuntimeStore) -> set[str]:

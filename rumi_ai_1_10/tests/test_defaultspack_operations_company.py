@@ -918,7 +918,7 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
         "once",
         {
             "message": "Dedicated manager schedule.",
-            "model": "stub/default",
+            "model": "opencode-go/mimo-v2.5-pro",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "project_manager",
@@ -971,6 +971,271 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
 
     scheduler.delete_schedule(tracked_schedule["id"])
     scheduler.delete_schedule(dedicated_schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import append_history, save_schedule
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+            "desktops": [],
+        }),
+    )
+
+    parent = ChatStore().create_conversation(
+        model="opencode-go/mimo-v2.5-pro",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        agent_id="client_manager",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    scheduler = Scheduler()
+    future_run_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    past_run_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
+
+    def mimo_task(loop_key: str, *, model: str, agent_id: str, message: str) -> dict[str, object]:
+        return {
+            "message": message,
+            "model": model,
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": agent_id,
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": loop_key,
+            },
+        }
+
+    state_kickoff = scheduler.create_schedule(
+        "once",
+        mimo_task(
+            "kickoff_review",
+            model="opencode-go/mimo-v2.5-pro",
+            agent_id="project_manager",
+            message="State-owned completed kickoff review.",
+        ),
+        {"run_at": future_run_at},
+        name="MiMo Coding Company kickoff review",
+    )
+    state_kickoff["status"] = "completed"
+    state_kickoff["next_execution_at"] = None
+    save_schedule(state_kickoff)
+    append_history(
+        state_kickoff["id"],
+        {
+            "schedule_id": state_kickoff["id"],
+            "execution_id": "exec_state_completed_kickoff",
+            "trigger": "scheduled",
+            "status": "completed",
+            "started_at": "2026-06-29T00:00:00Z",
+            "completed_at": "2026-06-29T00:00:08Z",
+            "result": "State kickoff completed and remains part of the current harness state.",
+        },
+    )
+
+    current_gemma_qa = scheduler.create_schedule(
+        "interval",
+        mimo_task(
+            "qa_loop",
+            model="google/gemma-4-31b-it",
+            agent_id="browser_qa",
+            message="Current Gemma browser QA loop.",
+        ),
+        {"value": 240, "unit": "minutes"},
+        name="MiMo Coding Company Gemma QA loop",
+    )
+    append_history(
+        current_gemma_qa["id"],
+        {
+            "schedule_id": current_gemma_qa["id"],
+            "execution_id": "exec_current_gemma_qa",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T00:05:00Z",
+            "completed_at": "2026-06-29T00:05:08Z",
+            "error": "Current Gemma QA desktop blocker.",
+        },
+    )
+
+    paused_xiaomi = scheduler.create_schedule(
+        "interval",
+        mimo_task(
+            "heartbeat",
+            model="opencode-go/mimo-v2.5-pro",
+            agent_id="scheduler",
+            message="Expired Xiaomi pre-expiry heartbeat.",
+        ),
+        {"value": 30, "unit": "minutes"},
+        name="MiMo Xiaomi dedicated pre-expiry heartbeat",
+    )
+    scheduler.pause_schedule(paused_xiaomi["id"])
+    append_history(
+        paused_xiaomi["id"],
+        {
+            "schedule_id": paused_xiaomi["id"],
+            "execution_id": "exec_paused_xiaomi_timeout",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-28T23:30:00Z",
+            "completed_at": "2026-06-28T23:30:08Z",
+            "error": "Old paused Xiaomi schedule timed out.",
+        },
+    )
+
+    completed_dedicated = scheduler.create_schedule(
+        "once",
+        mimo_task(
+            "dedicated_manager",
+            model="opencode-go/mimo-v2.5-pro",
+            agent_id="project_manager",
+            message="Old dedicated MiMo loop.",
+        ),
+        {"run_at": future_run_at},
+        name="MiMo old dedicated manager",
+    )
+    completed_dedicated["status"] = "completed"
+    completed_dedicated["next_execution_at"] = None
+    save_schedule(completed_dedicated)
+    append_history(
+        completed_dedicated["id"],
+        {
+            "schedule_id": completed_dedicated["id"],
+            "execution_id": "exec_completed_dedicated_error",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-28T22:00:00Z",
+            "completed_at": "2026-06-28T22:00:08Z",
+            "error": "Old completed dedicated schedule error.",
+        },
+    )
+
+    active_stub = scheduler.create_schedule(
+        "interval",
+        mimo_task(
+            "qa_loop",
+            model="stub/default",
+            agent_id="browser_qa",
+            message="Stub/default test QA loop.",
+        ),
+        {"value": 15, "unit": "minutes"},
+        name="MiMo stub/default test loop",
+    )
+    append_history(
+        active_stub["id"],
+        {
+            "schedule_id": active_stub["id"],
+            "execution_id": "exec_active_stub_error",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T00:10:00Z",
+            "completed_at": "2026-06-29T00:10:08Z",
+            "error": "Active stub/default test loop error.",
+        },
+    )
+
+    active_xiaomi = scheduler.create_schedule(
+        "interval",
+        mimo_task(
+            "qa_loop",
+            model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            agent_id="browser_qa",
+            message="Expired Xiaomi active QA loop.",
+        ),
+        {"value": 15, "unit": "minutes"},
+        name="MiMo expired Xiaomi active loop",
+    )
+    append_history(
+        active_xiaomi["id"],
+        {
+            "schedule_id": active_xiaomi["id"],
+            "execution_id": "exec_active_xiaomi_error",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T00:11:00Z",
+            "completed_at": "2026-06-29T00:11:08Z",
+            "error": "Active expired Xiaomi loop should not be current.",
+        },
+    )
+
+    expired_active = scheduler.create_schedule(
+        "once",
+        mimo_task(
+            "improvement_loop",
+            model="opencode-go/mimo-v2.5-pro",
+            agent_id="project_manager",
+            message="Expired Xiaomi pre-expiry improvement sprint.",
+        ),
+        {"run_at": past_run_at},
+        name="MiMo Xiaomi expired active one-shot",
+    )
+    append_history(
+        expired_active["id"],
+        {
+            "schedule_id": expired_active["id"],
+            "execution_id": "exec_expired_active_xiaomi",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-28T20:00:00Z",
+            "completed_at": "2026-06-28T20:00:08Z",
+            "error": "Expired Xiaomi one-shot should not be current.",
+        },
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    state = {
+        "conversation_id": parent["id"],
+        "conversation_group_id": "company:mimo-coding-company",
+        "schedule_ids": {"kickoff_review": state_kickoff["id"]},
+    }
+    summary = runtime._sync_company_observability(state)
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
+
+    observed_schedule_ids = {item["schedule_id"] for item in summary["schedule_history"]["latest"]}
+    assert observed_schedule_ids == {state_kickoff["id"], current_gemma_qa["id"]}
+    assert summary["schedule_history"]["checked"] == 2
+    assert summary["team_workspace"]["synced_messages"] == 2
+    assert total == 2
+    assert {message["metadata"]["schedule_id"] for message in messages} == observed_schedule_ids
+    assert "schedule_error" in {item["signal"] for item in summary["schedule_history"]["signals"]}
+    assert not {
+        paused_xiaomi["id"],
+        completed_dedicated["id"],
+        active_stub["id"],
+        active_xiaomi["id"],
+        expired_active["id"],
+    } & observed_schedule_ids
+
+    for schedule in (
+        state_kickoff,
+        current_gemma_qa,
+        paused_xiaomi,
+        completed_dedicated,
+        active_stub,
+        active_xiaomi,
+        expired_active,
+    ):
+        scheduler.delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
 
