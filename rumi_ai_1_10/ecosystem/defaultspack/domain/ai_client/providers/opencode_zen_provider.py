@@ -250,6 +250,10 @@ class OpencodeZenProvider(AnthropicProvider):
             if key in params:
                 body[key] = params[key]
 
+    @staticmethod
+    def _message_reasoning_content(msg):
+        return OpenAIProvider._message_reasoning_content(msg)
+
     def _complete_openai_chat(self, model_id, messages, tools, params):
         body = {"model": model_id, "messages": OpenAIProvider.build_request(self, messages)}
         if tools:

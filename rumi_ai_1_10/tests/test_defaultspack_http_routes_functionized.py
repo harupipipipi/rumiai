@@ -189,6 +189,30 @@ def test_fallback_http_ambient_event_uses_long_running_timeout():
     assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
 
 
+def test_agent_schedule_trigger_uses_schedule_timeout_budget():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={"status": "ok", "data": {"execution_id": "sexec-1"}},
+    ) as mocked:
+        result = server._invoke_fallback_block(
+            "blocks.agent.scheduler.trigger",
+            {"schedule_id": "sched-1"},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"execution_id": "sexec-1"}}
+    mocked.assert_called_once()
+    assert mocked.call_args.args[0] == "defaultspack:agent_schedule_trigger"
+    assert mocked.call_args.kwargs["timeout_seconds"] == 1800.0
+    assert mocked.call_args.args[1]["timeout_seconds"] == 1800.0
+
+
 def test_sandbox_api_function_route_uses_in_process_block_for_runtime_operations():
     from transport import http
     from transport.http import DefaultsHttpServer

@@ -10,6 +10,34 @@ from domain.prompt.manager import get_manager
 from domain.temporal_context import add_temporal_context_message, current_datetime_context
 
 
+def _authority_context_from_runtime(context, input_data):
+    if not isinstance(context, dict):
+        context = {}
+    if not isinstance(input_data, dict):
+        input_data = {}
+    authority = context.get("authority") if isinstance(context.get("authority"), dict) else {}
+    result = dict(authority)
+    trusted_profile_id = str(result.get("profile_id") or context.get("profile_id") or "").strip()
+    profile_id = trusted_profile_id or str(input_data.get("profile_id") or "").strip()
+    if profile_id:
+        result["profile_id"] = profile_id
+    for key in ("conversation_id", "node_id", "graph_id"):
+        value = str(result.get(key) or context.get(key) or input_data.get(key) or "").strip()
+        if value:
+            result[key] = value
+    principal_id = str(
+        result.get("principal_id")
+        or context.get("principal_id")
+        or context.get("authority_principal_id")
+        or ""
+    ).strip()
+    if not principal_id and trusted_profile_id:
+        principal_id = "profile:" + trusted_profile_id
+    if principal_id:
+        result["principal_id"] = principal_id
+    return {key: value for key, value in result.items() if value not in ("", None)}
+
+
 def run(input_data, context):
     model = input_data.get("model")
     messages = input_data.get("messages")
@@ -42,9 +70,12 @@ def run(input_data, context):
     request_id = gen_id()
 
     try:
-        result = LLMGateway().complete(
-            {"model": model, "messages": messages, "tools": tools, "params": params}
-        )
+        request = {"model": model, "messages": messages, "tools": tools, "params": params}
+        if "_authority_context" not in params:
+            authority_context = _authority_context_from_runtime(context, input_data)
+            if authority_context:
+                request["authority_context"] = authority_context
+        result = LLMGateway().complete(request)
     except RuntimeError as e:
         return error(str(e), "PROVIDER_ERROR")
 

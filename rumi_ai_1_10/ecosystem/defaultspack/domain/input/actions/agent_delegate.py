@@ -12,6 +12,14 @@ _PROVIDER_ERROR_HINTS = (
     "model provider",
     "llm provider",
 )
+_DELEGATE_RUNTIME_CONTEXT_KEYS = (
+    "conversation_id",
+    "node_id",
+    "graph_id",
+    "agent_id",
+    "company_id",
+    "timezone",
+)
 
 
 def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -81,9 +89,26 @@ def _delegate_context(envelope: RumiInputEnvelope, context: dict[str, Any]) -> d
     target = envelope.target if isinstance(envelope.target, dict) else {}
     if target.get("conversation_id"):
         updated.setdefault("conversation_id", str(target.get("conversation_id")))
-    if isinstance(envelope.metadata, dict) and envelope.metadata:
-        updated.setdefault("delegate_metadata", dict(envelope.metadata))
     payload = _delegate_payload(envelope)
+    metadata = envelope.metadata if isinstance(envelope.metadata, dict) else {}
+    for source in (payload.get("params") if isinstance(payload.get("params"), dict) else {}, payload, metadata, target):
+        for key in _DELEGATE_RUNTIME_CONTEXT_KEYS:
+            value = source.get(key) if isinstance(source, dict) else None
+            if value in ("", None, [], {}):
+                continue
+            updated.setdefault(key, value)
+    if isinstance(context, dict):
+        for key in ("profile_id", "principal_id", "authority_principal_id"):
+            if context.get(key) not in ("", None, [], {}):
+                updated[key] = context.get(key)
+        profile_id = str(context.get("profile_id") or "").strip()
+        principal_id = str(context.get("principal_id") or context.get("authority_principal_id") or "").strip()
+        if principal_id:
+            updated.setdefault("principal_id", principal_id)
+        if profile_id and not principal_id:
+            updated["principal_id"] = "profile:" + profile_id
+    if metadata:
+        updated.setdefault("delegate_metadata", dict(metadata))
     if target:
         updated.setdefault("target", dict(target))
     if isinstance(envelope.delivery, dict) and envelope.delivery:

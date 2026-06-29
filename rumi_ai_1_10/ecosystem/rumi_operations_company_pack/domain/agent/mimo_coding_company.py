@@ -496,11 +496,14 @@ class MimoCodingCompanyRuntime:
             "roles": deepcopy(ROLE_DEFINITIONS),
         }
 
-    def status(self) -> dict[str, Any]:
+    def status(self, *, recover_scheduled_approvals: bool = False) -> dict[str, Any]:
         state = self._load_state()
         org_id = state.get("org_id")
         org = OrgManager().get_org(org_id) if org_id else None
-        observability = self._sync_company_observability(state)
+        observability = self._sync_company_observability(
+            state,
+            recover_scheduled_approvals=recover_scheduled_approvals,
+        )
         company = self._sync_company_record({**state, "observability": observability})
         open_tasks = 0
         try:
@@ -536,7 +539,10 @@ class MimoCodingCompanyRuntime:
             ),
             "company": company,
             "org": org,
-            "schedules": self._schedules_for_state(state),
+            "schedules": self._schedules_for_state(
+                state,
+                recover_scheduled_approvals=recover_scheduled_approvals,
+            ),
             "harness": {
                 "main_model": state.get("main_model") or DEFAULT_MAIN_MODEL,
                 "vision_model": state.get("vision_model") or DEFAULT_VISION_MODEL,
@@ -1588,7 +1594,12 @@ class MimoCodingCompanyRuntime:
             "signals": [],
         }
 
-    def _sync_company_observability(self, state: dict[str, Any]) -> dict[str, Any]:
+    def _sync_company_observability(
+        self,
+        state: dict[str, Any],
+        *,
+        recover_scheduled_approvals: bool = False,
+    ) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "status": "ok",
             "company_id": COMPANY_ID,
@@ -1612,11 +1623,12 @@ class MimoCodingCompanyRuntime:
                 schedule_id = observed_schedule["schedule_id"]
                 loop_key = observed_schedule["loop_key"]
                 schedule = observed_schedule.get("schedule")
-                try:
-                    self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
-                    schedule = scheduler.get_schedule(schedule_id) or schedule
-                except Exception:
-                    pass
+                if recover_scheduled_approvals:
+                    try:
+                        self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
+                        schedule = scheduler.get_schedule(schedule_id) or schedule
+                    except Exception:
+                        pass
                 history = scheduler.get_history(schedule_id, limit=MIMO_OBSERVABILITY_HISTORY_LIMIT).get("entries", [])
                 for entry in reversed([item for item in history if isinstance(item, dict)]):
                     summary["schedule_history"]["checked"] += 1
@@ -2527,7 +2539,12 @@ class MimoCodingCompanyRuntime:
         schedule_ids[key] = schedule["id"]
         return str(schedule["id"])
 
-    def _schedules_for_state(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+    def _schedules_for_state(
+        self,
+        state: dict[str, Any],
+        *,
+        recover_scheduled_approvals: bool = False,
+    ) -> list[dict[str, Any]]:
         scheduler = Scheduler()
         schedules: list[dict[str, Any]] = []
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
@@ -2539,11 +2556,12 @@ class MimoCodingCompanyRuntime:
             seen.add(schedule_id)
             schedule = scheduler.get_schedule(schedule_id)
             if schedule:
-                try:
-                    self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
-                    schedule = scheduler.get_schedule(schedule_id) or schedule
-                except Exception:
-                    pass
+                if recover_scheduled_approvals:
+                    try:
+                        self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
+                        schedule = scheduler.get_schedule(schedule_id) or schedule
+                    except Exception:
+                        pass
                 schedules.append(schedule)
         return schedules
 

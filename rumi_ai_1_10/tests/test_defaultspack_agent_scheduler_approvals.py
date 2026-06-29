@@ -437,6 +437,101 @@ def test_scheduler_recovers_persisted_stale_manual_running_execution_and_can_tri
         _reset_scheduler_singleton()
 
 
+def test_stale_scheduled_chat_recovery_appends_durable_error(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="opencode-zen/mimo-v2.5-free",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, save_schedule
+
+    schedule_id = "sched-stale-chat"
+    stale_execution_id = "sexec-stale-chat"
+    scheduled_user = store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "Run heartbeat.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": stale_execution_id,
+                "trigger": "scheduled",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    assert scheduled_user is not None
+
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Stale chat heartbeat",
+            "description": "",
+            "type": "interval",
+            "task": {
+                "message": "Run heartbeat.",
+                "model": "opencode-zen/mimo-v2.5-free",
+                "conversation_id": conversation_id,
+                "timeout": 600,
+                "profile_id": "defaultspack.mimo_coding_company",
+                "agent_id": "scheduler",
+                "metadata": {"company_id": "mimo-coding-company"},
+            },
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2099-01-01T00:00:00Z",
+            "created_at": "2026-06-28T15:00:00Z",
+            "updated_at": "2026-06-28T15:53:36Z",
+            "running_execution": {
+                "execution_id": stale_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": "2000-01-01T00:00:00Z",
+                "trigger": "scheduled",
+                "timeout_seconds": 600,
+            },
+            "running_started_at": "2000-01-01T00:00:00Z",
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        assert scheduler.get_schedule(schedule_id)["execution_count"] == 1
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        history = entries[0]
+        assert history["execution_id"] == stale_execution_id
+        assert history["status"] == "error"
+        assert history["conversation_id"] == conversation_id
+        assert history["assistant_error_message_id"]
+
+        stored = store.get_conversation(conversation_id)
+        assistant = stored["messages"][-1]
+        assert assistant["role"] == "assistant"
+        assert assistant["parent_id"] == scheduled_user["id"]
+        assert assistant["id"] == history["assistant_error_message_id"]
+        assert assistant["finish_reason"] == "error"
+        assert assistant["metadata"]["durable_scheduler_error"] is True
+        assert assistant["metadata"]["schedule_execution_id"] == stale_execution_id
+        assert "scheduled task timed out after 600 seconds" in assistant["raw_text"]
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_scheduler_recovers_active_stale_running_execution_once_when_original_unwinds(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -1572,6 +1667,50 @@ def test_scheduler_times_out_ai_complete_run_and_clears_running(tmp_path, monkey
         _reset_scheduler_singleton()
 
 
+def test_scheduler_ai_complete_uses_profile_authority_context(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    captured: dict[str, object] = {}
+
+    def fake_complete(payload, context):
+        captured["payload"] = payload
+        captured["context"] = context
+        return {"status": "ok", "data": {"content": "done"}}
+
+    monkeypatch.setattr("blocks.ai.complete.run", fake_complete)
+
+    from domain.agent import scheduler as scheduler_module
+
+    scheduler = scheduler_module.Scheduler()
+    schedule = None
+    try:
+        schedule = scheduler.create_schedule(
+            "interval",
+            {
+                "message": "visual QA",
+                "model": "google/gemma-4-31b-it",
+                "timeout": 30,
+                "profile_id": "defaultspack.mimo_coding_company",
+                "metadata": {"company_id": "mimo-coding-company"},
+            },
+            {"value": 30, "unit": "minutes"},
+        )
+
+        history = scheduler._execute_task(schedule["id"], manual=False)
+
+        assert history["status"] == "completed"
+        assert captured["payload"]["model"] == "google/gemma-4-31b-it"
+        assert captured["context"]["profile_id"] == "defaultspack.mimo_coding_company"
+        assert captured["context"]["authority_principal_id"] == "profile:defaultspack.mimo_coding_company"
+        assert captured["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
+        assert captured["context"]["source"] == "scheduler"
+    finally:
+        if schedule is not None:
+            scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_scheduler_auto_approves_mimo_scheduled_browser_request(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -2467,7 +2606,10 @@ def test_mimo_status_recovers_externally_approved_scheduled_approval(tmp_path, m
 
     try:
         runtime = MimoCodingCompanyRuntime()
-        schedules = runtime._schedules_for_state({"schedule_ids": {"qa_loop": schedule["id"]}})
+        schedules = runtime._schedules_for_state(
+            {"schedule_ids": {"qa_loop": schedule["id"]}},
+            recover_scheduled_approvals=True,
+        )
 
         assert [item["id"] for item in schedules] == [schedule["id"]]
         assert len(calls) == 1
@@ -2626,7 +2768,10 @@ def test_mimo_status_recovers_scheduled_desktop_frame_approval_card(tmp_path, mo
 
     try:
         runtime = MimoCodingCompanyRuntime()
-        schedules = runtime._schedules_for_state({"schedule_ids": {"qa_loop": schedule["id"]}})
+        schedules = runtime._schedules_for_state(
+            {"schedule_ids": {"qa_loop": schedule["id"]}},
+            recover_scheduled_approvals=True,
+        )
 
         assert [item["id"] for item in schedules] == [schedule["id"]]
         assert len(calls) == 1

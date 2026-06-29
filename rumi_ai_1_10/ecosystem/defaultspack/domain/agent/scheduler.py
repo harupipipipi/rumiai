@@ -467,6 +467,10 @@ def _scheduler_chat_context(task_cfg: dict[str, Any], *, cancel_event=None) -> d
         context["is_cancelled"] = cancel_event.is_set
     metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
     profile_id = str(task_cfg.get("profile_id") or policy.get("profile_id") or metadata.get("profile_id") or "").strip()
+    if profile_id:
+        context["profile_id"] = profile_id
+        context["authority_principal_id"] = "profile:" + profile_id
+        context["principal_id"] = "profile:" + profile_id
     company_id = str(metadata.get("company_id") or "").strip()
     if profile_id == "defaultspack.mimo_coding_company" and company_id == "mimo-coding-company":
         context["owner_pack"] = "defaultspack"
@@ -1348,6 +1352,20 @@ class Scheduler:
                 "timeout_seconds": stale["timeout_seconds"],
                 "recovered_stale_running_execution": True,
             }
+            task_cfg = sched.get("task", {}) if isinstance(sched.get("task"), dict) else {}
+            conversation_id = str(task_cfg.get("conversation_id") or "").strip()
+            if conversation_id:
+                stored_error = _ensure_scheduled_chat_error_message(
+                    conversation_id=conversation_id,
+                    schedule_id=schedule_id,
+                    exec_id=stale["execution_id"],
+                    task_cfg=task_cfg,
+                    trigger=stale["trigger"],
+                    error_text=history_entry["error"],
+                )
+                if isinstance(stored_error, dict):
+                    history_entry["conversation_id"] = conversation_id
+                    history_entry["assistant_error_message_id"] = stored_error.get("id")
             append_history(schedule_id, history_entry)
 
             with self._lock:
@@ -1681,7 +1699,7 @@ class Scheduler:
                 messages.append({"role": "system", "content": system_content})
                 messages.append({"role": "user", "content": message})
 
-                empty_context = {}
+                scheduler_context = _scheduler_chat_context(task_cfg, cancel_event=cancel_event)
                 completion_params: dict[str, Any] = {}
                 apply_execution_timeout_to_params(completion_params, timeout_seconds)
 
@@ -1689,7 +1707,7 @@ class Scheduler:
                     payload = {"messages": messages, "model": model}
                     if completion_params:
                         payload["params"] = completion_params
-                    return ai_complete_run(payload, empty_context)
+                    return ai_complete_run(payload, scheduler_context)
 
                 result = _run_with_timeout(
                     run_completion_task,

@@ -159,6 +159,50 @@ def test_opencode_zen_mimo_complete_uses_openai_chat_completions(monkeypatch):
     assert result["metadata"]["reasoning_content"] == "Checked briefly."
 
 
+def test_opencode_zen_mimo_preserves_reasoning_on_tool_call_history(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_chat_json(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_test",
+            "model": "mimo-v2.5-free",
+            "choices": [{"message": {"role": "assistant", "content": "OK"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+        }
+
+    with patch.object(provider, "_request_chat_json", side_effect=fake_request_chat_json):
+        result = provider.complete(
+            "opencode-zen/mimo-v2.5-free",
+            [
+                {"role": "user", "content": "Use a tool."},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "rumi_api", "arguments": "{}"},
+                        }
+                    ],
+                    "metadata": {"reasoning_content": "I should inspect the runtime."},
+                },
+                {"role": "tool", "tool_call_id": "call_1", "name": "rumi_api", "content": "{}"},
+            ],
+            [],
+            {"max_tokens": 32},
+        )
+
+    assert captured["path"] == "/v1/chat/completions"
+    assistant = captured["body"]["messages"][1]
+    assert assistant["tool_calls"][0]["id"] == "call_1"
+    assert assistant["reasoning_content"] == "I should inspect the runtime."
+    assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
 def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}

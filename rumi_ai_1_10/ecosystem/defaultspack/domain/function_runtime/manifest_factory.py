@@ -595,7 +595,14 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_run_subagent", "Compatibility alias for utility model routing or delegated runs.", "medium", "blocks.agent.run_subagent"),
     )
 ) + tuple(
-    _spec(f"agent_schedule_{name}", f"{label} an agent schedule.", ("agent", "scheduler"), risk=risk, block=f"blocks.agent.scheduler.{module}")
+    _spec(
+        f"agent_schedule_{name}",
+        f"{label} an agent schedule.",
+        ("agent", "scheduler"),
+        risk=risk,
+        block=f"blocks.agent.scheduler.{module}",
+        grant_config={"timeout": 1800} if name == "trigger" else None,
+    )
     for name, label, risk, module in (
         ("create", "Create", "medium", "create"),
         ("list", "List", "low", "list"),

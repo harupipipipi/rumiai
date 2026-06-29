@@ -60,11 +60,13 @@ _SAFE_GET_FALLBACK_BLOCKS = {
 _LONG_RUNNING_FALLBACK_BLOCKS = {
     "blocks.ambient.event_submit",
     "blocks.agent.run_subagent",
+    "blocks.agent.scheduler.trigger",
     "blocks.chat.send",
     "blocks.integrations.line",
     "blocks.webhooks.inbound",
 }
 _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
+_SCHEDULE_TRIGGER_FALLBACK_TIMEOUT_SECONDS = 1800.0
 
 _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS = {
     "blocks.agent.run_subagent",
@@ -635,6 +637,8 @@ class DefaultsHttpServer:
             except ValueError:
                 pass
         if module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
+            if module_name == "blocks.agent.scheduler.trigger":
+                return _SCHEDULE_TRIGGER_FALLBACK_TIMEOUT_SECONDS
             return _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS
         return None
 

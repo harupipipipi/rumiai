@@ -88,6 +88,200 @@ def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(mo
     assert seen["conversation_id"] == "conv_1"
 
 
+def test_agent_run_subagent_delegate_forwards_profile_authority_context(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_dispatch(envelope, context):
+        seen["context"] = context
+        seen["params"] = envelope.params
+        seen["metadata"] = envelope.metadata
+        seen["target"] = envelope.target
+        return {"status": "ok", "assistant_text": "done"}
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block(
+        {
+            "prompt": "Gemma monitor smoke",
+            "model": "google/gemma-4-31b-it",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "conversation_id": "conv_1",
+            "company_id": "mimo-coding-company",
+        },
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert seen["context"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
+    assert seen["params"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["metadata"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["target"]["conversation_id"] == "conv_1"
+
+
+def test_agent_run_subagent_delegate_does_not_trust_payload_principal(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_dispatch(envelope, context):
+        seen["context"] = context
+        seen["params"] = envelope.params
+        return {"status": "ok", "assistant_text": "done"}
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block(
+        {
+            "prompt": "Gemma monitor smoke",
+            "model": "google/gemma-4-31b-it",
+            "profile_id": "profile-from-payload",
+            "principal_id": "profile:payload-spoof",
+            "authority_principal_id": "profile:payload-spoof",
+        },
+        {
+            "profile_id": "trusted-profile",
+            "authority_principal_id": "profile:trusted-profile",
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert seen["context"]["profile_id"] == "trusted-profile"
+    assert seen["context"]["principal_id"] == "profile:trusted-profile"
+    assert seen["context"]["authority_principal_id"] == "profile:trusted-profile"
+    assert seen["params"]["profile_id"] == "profile-from-payload"
+
+
+def test_agent_delegate_forwards_profile_authority_context(monkeypatch):
+    from domain.input.actions.agent_delegate import handle
+    from domain.input.envelope import RumiInputEnvelope
+
+    seen: dict[str, object] = {}
+
+    def fake_execute(input_data, context):
+        seen["input_data"] = input_data
+        seen["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent_1",
+                "status": "ok",
+                "result": {"assistant_text": "done"},
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = handle(
+        RumiInputEnvelope(
+            role="user",
+            input="Gemma monitor smoke",
+            chat={},
+            source={"type": "compatibility", "provider": "subagent"},
+            target={"conversation_id": "conv_1"},
+            delivery={"action_id": "agent.delegate"},
+            attachments=[],
+            metadata={"profile_id": "defaultspack.mimo_coding_company"},
+            params={
+                "task": "Gemma monitor smoke",
+                "model": "google/gemma-4-31b-it",
+                "profile_id": "defaultspack.mimo_coding_company",
+            },
+            tools=[],
+        ),
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert seen["input_data"]["model"] == "google/gemma-4-31b-it"
+    assert seen["context"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
+    assert seen["context"]["conversation_id"] == "conv_1"
+
+
+def test_agent_delegate_does_not_trust_payload_principal(monkeypatch):
+    from domain.input.actions.agent_delegate import handle
+    from domain.input.envelope import RumiInputEnvelope
+
+    seen: dict[str, object] = {}
+
+    def fake_execute(input_data, context):
+        seen["input_data"] = input_data
+        seen["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent_1",
+                "status": "ok",
+                "result": {"assistant_text": "done"},
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = handle(
+        RumiInputEnvelope(
+            role="user",
+            input="Gemma monitor smoke",
+            chat={},
+            source={"type": "compatibility", "provider": "subagent"},
+            target={"conversation_id": "conv_1"},
+            delivery={"action_id": "agent.delegate"},
+            attachments=[],
+            metadata={"profile_id": "profile-from-metadata", "principal_id": "profile:metadata-spoof"},
+            params={
+                "task": "Gemma monitor smoke",
+                "model": "google/gemma-4-31b-it",
+                "profile_id": "profile-from-payload",
+                "principal_id": "profile:payload-spoof",
+                "authority_principal_id": "profile:payload-spoof",
+            },
+            tools=[],
+        ),
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert seen["input_data"]["model"] == "google/gemma-4-31b-it"
+    assert "profile_id" not in seen["context"]
+    assert "principal_id" not in seen["context"]
+    assert "authority_principal_id" not in seen["context"]
+    assert seen["context"]["conversation_id"] == "conv_1"
+
+
+def test_agent_run_subagent_utility_forwards_authority_context(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_call_model(input_data, context, *, call_handler=None):
+        seen["input_data"] = input_data
+        seen["context"] = context
+        seen["call_handler"] = call_handler
+        return {"status": "ok", "output": {"recommended_tools": [{"tool_id": "search_docs"}]}}
+
+    monkeypatch.setattr("domain.agent.subagent_orchestrator.call_model", fake_call_model)
+
+    result = run_subagent_block(
+        {
+            "role_id": "tool_selector",
+            "model": "google/gemma-4-31b-it",
+            "payload": {"candidate_tools": [{"tool_id": "search_docs"}]},
+        },
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
+        },
+    )
+
+    assert result["status"] == "ok"
+    assert seen["context"]["profile_id"] == "defaultspack.mimo_coding_company"
+    assert seen["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
+    assert seen["context"]["_model_call_depth"] == 0
+
+
 def test_agent_run_subagent_nested_payload_keeps_http_fallback_timeout_for_execute(monkeypatch):
     seen: dict[str, object] = {}
 
