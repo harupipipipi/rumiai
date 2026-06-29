@@ -512,6 +512,43 @@ def test_permission_denied_function_call_never_falls_back_to_pack_function():
     assert result is None
 
 
+def test_approved_permission_denied_function_call_can_fallback_to_mapped_local_tool(monkeypatch):
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    class FakeResponse:
+        success = False
+        error_type = "permission_denied"
+        error = "Permission denied: function.call"
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_execute_local_with_tool_def(self, tool_name, arguments, context, tool_def):
+        del self, context, tool_def
+        calls.append((tool_name, dict(arguments)))
+        return {"result": "todo ok", "is_error": False, "widget": None}
+
+    monkeypatch.setattr(
+        ToolExecutor,
+        "_execute_local_with_tool_def",
+        fake_execute_local_with_tool_def,
+    )
+
+    context = mark_tool_server_approval_context({"owner_pack": "defaultspack"})
+    result = ToolExecutor._fallback_function_call_if_first_party_unapproved(
+        {"name": "todo", "metadata": {"source_pack_id": "defaultspack"}},
+        {
+            "type": "function.call",
+            "qualified_name": "defaultspack:tool_todo",
+            "args": {"action": "list"},
+        },
+        context,
+        FakeResponse(),
+    )
+
+    assert calls == [("todo", {"action": "list"})]
+    assert result == {"result": "todo ok", "is_error": False, "widget": None}
+
+
 def test_high_risk_first_party_function_registry_unavailable_fails_closed():
     class FakeResponse:
         success = False

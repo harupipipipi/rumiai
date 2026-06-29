@@ -553,6 +553,7 @@ class ToolExecutor:
         if bool(getattr(response, "success", False)):
             return None
         error_type = getattr(response, "error_type", "")
+        permission_denied = error_type == "permission_denied"
         if error_type not in {
             "function_not_found",
             "function_registry_unavailable",
@@ -560,7 +561,7 @@ class ToolExecutor:
         } and not (
             error_type in {"caller_requires_denied", "requires_denied"}
             and _context_has_tool_server_approval(context)
-        ):
+        ) and not permission_denied:
             return None
         qualified_name = str(request.get("qualified_name") or "")
         pack_id, _, function_id = qualified_name.partition(":")
@@ -570,11 +571,16 @@ class ToolExecutor:
             return None
         local_tool = ToolExecutor._first_party_local_tool_for_function(pack_id, function_id)
         if local_tool:
+            if permission_denied:
+                if local_tool != "todo" or not _context_has_tool_server_approval(context):
+                    return None
             if local_tool in {"web_search", "reddit_search"} and error_type != "pack_not_approved":
                 return None
             if _requires_approval(tool_def) and not _context_has_tool_server_approval(context):
                 return None
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
+        if permission_denied:
+            return None
         if error_type == "pack_not_approved" and not _context_has_tool_server_approval(context):
             return None
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):

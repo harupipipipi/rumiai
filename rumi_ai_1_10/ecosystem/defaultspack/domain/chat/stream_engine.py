@@ -481,7 +481,11 @@ def _text_tool_call_blocks_for_prepared(
             filtered.append(block)
             continue
         block_arguments = _tool_use_argument_dict(block)
-        if replayed_arguments is not None and block_arguments != replayed_arguments:
+        if (
+            replayed_arguments is not None
+            and _tool_arguments_without_approval_token(block_arguments)
+            != _tool_arguments_without_approval_token(replayed_arguments)
+        ):
             filtered.append(block)
     return filtered
 
@@ -503,6 +507,24 @@ def _tool_use_argument_dict(block: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _tool_arguments_without_approval_token(arguments: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(arguments, dict):
+        return arguments
+
+    def scrub(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: scrub(item)
+                for key, item in value.items()
+                if str(key) != "approval_token"
+            }
+        if isinstance(value, list):
+            return [scrub(item) for item in value]
+        return value
+
+    return scrub(arguments)
+
+
 def _approval_replay_duplicate_tool_use(prepared: PreparedChatRun, block: dict[str, Any]) -> bool:
     tool_context = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
     replayed = tool_context.get("approval_replayed")
@@ -522,7 +544,11 @@ def _approval_replay_duplicate_tool_use(prepared: PreparedChatRun, block: dict[s
         replayed_name,
         dict(replayed_arguments),
     )
-    return _tool_identity_text_matches(block_name, replayed_name) and block_arguments == replayed_arguments
+    return (
+        _tool_identity_text_matches(block_name, replayed_name)
+        and _tool_arguments_without_approval_token(block_arguments)
+        == _tool_arguments_without_approval_token(replayed_arguments)
+    )
 
 
 def _suppress_duplicate_approval_replay_tool_uses(

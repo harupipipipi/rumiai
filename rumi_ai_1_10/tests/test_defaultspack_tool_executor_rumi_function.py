@@ -111,6 +111,17 @@ def _pack_not_approved_executor():
     return capability_executor
 
 
+def _permission_denied_executor():
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="Permission denied: function.call",
+        error_type="permission_denied",
+    )
+    return capability_executor
+
+
 def _success_executor():
     capability_executor = MagicMock()
     capability_executor.execute.return_value = SimpleNamespace(
@@ -639,6 +650,66 @@ def test_tool_executor_todo_pack_not_approved_without_autonomy_still_requires_ap
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "todo"
+
+
+def test_tool_executor_todo_permission_denied_with_server_approval_falls_back_locally(tmp_path, monkeypatch):
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+    ToolRegistry._instance = None
+
+    arguments = {"action": "list"}
+    request = approval.create_approval_request(
+        "tool.todo",
+        "medium",
+        arguments,
+        details={
+            "tool_name": "todo",
+            "action": "tool.todo",
+            "function_id": "tool.todo",
+            "pack_id": "defaultspack",
+            "arguments": arguments,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("todo"),
+        {**arguments, "approval_token": decision["token"]},
+        {
+            "owner_pack": "defaultspack",
+            "conversation_workspace_dir": str(tmp_path),
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "todo"
+    assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+
+
+def test_tool_executor_todo_permission_denied_without_server_approval_does_not_fallback(tmp_path):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("todo"),
+        {"action": "list"},
+        {
+            "conversation_workspace_dir": str(tmp_path),
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is True
+    assert result["result"] == "Permission denied: function.call"
+    assert result["widget"] is None
 
 
 def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval(monkeypatch):

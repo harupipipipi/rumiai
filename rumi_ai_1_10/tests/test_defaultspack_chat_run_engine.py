@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -2002,6 +2003,61 @@ def test_stream_engine_scheduled_desktop_frame_approval_replay_suppresses_duplic
     assert len(gateway.complete_requests) == 1
     assert sum(1 for event in events if event.get("type") == "tool_call_completed") == 1
     assert not any(event.get("type") == "approval_requested" for event in events)
+
+
+def test_stream_engine_scheduled_replay_duplicate_ignores_echoed_approval_token():
+    from domain.chat.stream_engine import (
+        _approval_replay_duplicate_tool_use,
+        _text_tool_call_blocks_for_prepared,
+    )
+
+    prepared = SimpleNamespace(
+        user_message={
+            "metadata": {
+                "source": "scheduler_approval_followup",
+                "profile_id": "defaultspack.mimo_coding_company",
+            }
+        },
+        request_context={},
+        connected_tool_names={"desktop_frame"},
+        tool_context={
+            "approval_replayed": {
+                "tool_name": "desktop_frame",
+                "request_id": "apr-approved-frame",
+                "arguments": {"owner_id": "local-user", "seat_id": "seat-1"},
+            }
+        },
+    )
+
+    duplicate_native = {
+        "type": "tool_use",
+        "id": "call-frame-duplicate",
+        "name": "desktop_frame",
+        "input": {
+            "owner_id": "local-user",
+            "seat_id": "seat-1",
+            "approval_token": "spent-token",
+        },
+    }
+    assert _approval_replay_duplicate_tool_use(prepared, duplicate_native) is True
+
+    duplicate_text_response = {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "<tool_call>\n"
+                    "<function=desktop_frame>\n"
+                    "<parameter=owner_id>local-user</parameter>\n"
+                    "<parameter=seat_id>seat-1</parameter>\n"
+                    "<parameter=approval_token>spent-token</parameter>\n"
+                    "</function>\n"
+                    "</tool_call>"
+                ),
+            }
+        ]
+    }
+    assert _text_tool_call_blocks_for_prepared(duplicate_text_response, prepared) == []
 
 
 def test_stream_engine_scheduled_desktop_frame_replay_uses_defaultspack_local_owner(tmp_path, monkeypatch):
