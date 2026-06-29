@@ -88,6 +88,35 @@ def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(mo
     assert seen["conversation_id"] == "conv_1"
 
 
+def test_agent_run_subagent_delegate_extracts_nested_assistant_text(monkeypatch):
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "ok",
+            "assistant_text": "",
+            "delegate": {"execution_id": "run_1"},
+            "result": {
+                "status": "ok",
+                "result": {
+                    "result": {
+                        "things": [
+                            "Inspect repo files",
+                            "Run focused tests",
+                            "Report findings",
+                        ]
+                    }
+                },
+            },
+        }
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block({"payload": {"task": "Simple test: List 3 things you can do as a subagent."}}, {})
+
+    assert result["status"] == "ok"
+    assert "Inspect repo files" in result["data"]["assistant_text"]
+    assert result["data"]["route_kind"] == "agent.delegate"
+
+
 def test_agent_subagent_http_route_gets_long_running_timeout():
     from ecosystem.defaultspack.transport.http import DefaultsHttpServer
 
@@ -459,6 +488,53 @@ def test_tool_subagent_adds_safe_marker_when_dispatch_returns_without_assistant(
     assert "completed without producing a visible response" in marker["raw_text"]
     assert marker["metadata"]["error_code"] == "SUBAGENT_EMPTY_RESPONSE"
     assert SUBAGENT_DURABLE_DRAFT_FLAG not in marker["metadata"]
+
+
+def test_tool_subagent_persists_nested_delegate_assistant_text(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    parent = ChatStore().create_conversation(model="stub/default")
+
+    def fake_dispatch(envelope, context):
+        ChatStore().add_message(
+            envelope.target["conversation_id"],
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": envelope.input}],
+                "metadata": envelope.metadata,
+            },
+        )
+        return {
+            "status": "ok",
+            "assistant_text": "",
+            "result": {
+                "status": "ok",
+                "result": {
+                    "result": {
+                        "things": [
+                            "Inspect repo files",
+                            "Run focused tests",
+                            "Report findings",
+                        ]
+                    }
+                },
+            },
+        }
+
+    monkeypatch.setattr("ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input", fake_dispatch)
+
+    result = SubagentController().run(
+        {"task": "Simple test: List 3 things you can do as a subagent."},
+        {"conversation_id": parent["id"]},
+    )
+
+    assert "Inspect repo files" in result["summary"]
+    child = ChatStore().get_conversation(result["child_conversation_id"])
+    assert [message["role"] for message in child["messages"]] == ["user", "assistant"]
+    assistant = child["messages"][-1]
+    assert assistant["finish_reason"] == "stop"
+    assert "Inspect repo files" in assistant["raw_text"]
+    assert assistant["metadata"]["error_code"] == "SUBAGENT_RESPONSE_REPAIRED"
 
 
 def test_tool_subagent_returns_error_and_marks_child_failed_when_dispatch_times_out(monkeypatch, tmp_path):

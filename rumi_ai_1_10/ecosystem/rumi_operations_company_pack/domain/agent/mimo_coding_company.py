@@ -19,7 +19,7 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
     sys.path.insert(0, _path)
 
-from blocks._common import timestamp
+from blocks._common import gen_id, timestamp
 from domain.agent.org_manager import OrgManager
 from domain.agent.role_registry import RoleRegistry
 from domain.agent.schedule_store import load_all_schedules, save_schedule
@@ -1612,6 +1612,11 @@ class MimoCodingCompanyRuntime:
                 schedule_id = observed_schedule["schedule_id"]
                 loop_key = observed_schedule["loop_key"]
                 schedule = observed_schedule.get("schedule")
+                try:
+                    self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
+                    schedule = scheduler.get_schedule(schedule_id) or schedule
+                except Exception:
+                    pass
                 history = scheduler.get_history(schedule_id, limit=MIMO_OBSERVABILITY_HISTORY_LIMIT).get("entries", [])
                 for entry in reversed([item for item in history if isinstance(item, dict)]):
                     summary["schedule_history"]["checked"] += 1
@@ -2535,12 +2540,174 @@ class MimoCodingCompanyRuntime:
             schedule = scheduler.get_schedule(schedule_id)
             if schedule:
                 try:
-                    scheduler.recover_scheduled_chat_approval(schedule_id)
+                    self._recover_scheduled_approval_for_schedule(scheduler, schedule_id)
                     schedule = scheduler.get_schedule(schedule_id) or schedule
                 except Exception:
                     pass
                 schedules.append(schedule)
         return schedules
+
+    def _recover_scheduled_approval_for_schedule(self, scheduler: Scheduler, schedule_id: str) -> dict[str, Any] | None:
+        try:
+            recovered = scheduler.recover_scheduled_chat_approval(schedule_id)
+            if isinstance(recovered, dict) and int(recovered.get("continued_count") or 0) > 0:
+                return recovered
+        except Exception:
+            recovered = None
+        return self._recover_scheduled_approval_card_for_schedule(scheduler, schedule_id)
+
+    def _recover_scheduled_approval_card_for_schedule(self, scheduler: Scheduler, schedule_id: str) -> dict[str, Any] | None:
+        scheduler_lock = getattr(scheduler, "_lock", None)
+        if scheduler_lock is None:
+            return None
+        with scheduler_lock:
+            schedules = getattr(scheduler, "_schedules", {})
+            schedule = schedules.get(schedule_id) if isinstance(schedules, dict) else None
+        if not isinstance(schedule, dict):
+            return None
+        task_cfg = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        conversation_id = str(task_cfg.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return None
+
+        try:
+            from blocks.chat.send import run as chat_send_run
+            from domain.agent.schedule_store import append_history
+            from domain.agent.scheduler import (
+                _chat_result_content,
+                _chat_result_finish_reason,
+                _followup_params,
+                _schedule_auto_approval_attempts,
+                _scheduled_approval_followup_content,
+                _scheduler_chat_context,
+                _scheduler_chat_params_and_tools,
+                _scheduler_chat_payload,
+            )
+            from domain.chat.store import ChatStore
+            from domain.tool.scheduled_approval import (
+                approve_schedule_pending_approval,
+                current_scheduled_approval_from_conversation,
+                pending_scheduled_approval_from_chat_result,
+            )
+        except Exception:
+            return None
+
+        conversation = ChatStore().get_conversation(conversation_id)
+        current = current_scheduled_approval_from_conversation(conversation, schedule_id=schedule_id)
+        if not isinstance(current, dict):
+            return None
+        conversation_lock = scheduler._conversation_execution_lock(conversation_id)
+        if conversation_lock is None or not conversation_lock.acquire(blocking=False):
+            return {
+                "schedule_id": schedule_id,
+                "continued_count": 0,
+                "continued": [],
+                "status": "conversation_running",
+            }
+
+        started_at = timestamp()
+        recovered_exec_id = "sexec_mimo_card_recovery_" + gen_id()
+        source_metadata = current.get("source_metadata") if isinstance(current.get("source_metadata"), dict) else {}
+        exec_id = str(source_metadata.get("schedule_execution_id") or recovered_exec_id).strip()
+        trigger = str(source_metadata.get("trigger") or "scheduled").strip() or "scheduled"
+        params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=task_cfg.get("timeout", 300))
+        auto_approvals: list[dict[str, Any]] = []
+        result = current["result"]
+        history_entry = {
+            "execution_id": recovered_exec_id,
+            "schedule_id": schedule_id,
+            "started_at": started_at,
+            "completed_at": None,
+            "status": "running",
+            "trigger": "approval_recovery",
+            "result": None,
+            "error": None,
+            "recovered_scheduled_approval": True,
+            "recovered_execution_id": exec_id,
+            "recovered_approval_card": True,
+        }
+        try:
+            for _idx in _schedule_auto_approval_attempts(task_cfg):
+                finish_reason = _chat_result_finish_reason(result)
+                if finish_reason not in {"approval_required", "authority_approval_required"}:
+                    break
+                pending = pending_scheduled_approval_from_chat_result(result)
+                if not isinstance(pending, dict):
+                    break
+                approved = approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
+                if not approved:
+                    break
+                auto_approvals.append(approved["summary"])
+                result = chat_send_run(
+                    _scheduler_chat_payload(
+                        conversation_id=conversation_id,
+                        content=_scheduled_approval_followup_content(
+                            task_cfg=task_cfg,
+                            approved=approved,
+                        ),
+                        task_cfg=task_cfg,
+                        schedule_id=schedule_id,
+                        exec_id=exec_id,
+                        trigger=trigger,
+                        params=_followup_params(params),
+                        tools=tools,
+                        metadata_extra={
+                            "source": "scheduler_approval_followup",
+                            "approval_followup": approved["followup"],
+                            "scheduled_task_message": str(task_cfg.get("message") or ""),
+                            "scheduled_task_model": str(task_cfg.get("model") or ""),
+                            "scheduled_task_agent_id": str(task_cfg.get("agent_id") or ""),
+                        },
+                    ),
+                    _scheduler_chat_context(task_cfg),
+                )
+
+            if not auto_approvals:
+                return {
+                    "schedule_id": schedule_id,
+                    "continued_count": 0,
+                    "continued": [],
+                    "status": "not_approved",
+                }
+
+            if isinstance(result, dict) and result.get("status") == "ok":
+                data = result.get("data", {})
+                if isinstance(data, dict):
+                    content = _chat_result_content(result)
+                    finish_reason = _chat_result_finish_reason(result)
+                elif isinstance(data, str):
+                    content = data
+                    finish_reason = ""
+                else:
+                    content = str(data)
+                    finish_reason = ""
+                if finish_reason in {"approval_required", "authority_approval_required"}:
+                    content = (finish_reason + "\n" + content).strip()
+                    history_entry["status"] = finish_reason
+                else:
+                    history_entry["status"] = "completed"
+                history_entry["result"] = content
+                if finish_reason:
+                    history_entry["finish_reason"] = finish_reason
+            else:
+                err = result.get("error", {}) if isinstance(result, dict) else result
+                history_entry["status"] = "error"
+                history_entry["error"] = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+        except Exception as exc:
+            history_entry["status"] = "error"
+            history_entry["error"] = str(exc)
+        finally:
+            conversation_lock.release()
+
+        history_entry["auto_approvals"] = auto_approvals
+        history_entry["completed_at"] = timestamp()
+        append_history(schedule_id, history_entry)
+        return {
+            "schedule_id": schedule_id,
+            "continued_count": len(auto_approvals),
+            "continued": auto_approvals,
+            "status": history_entry["status"],
+        }
 
     @staticmethod
     def _mimo_loop_key_for_schedule(schedule: dict[str, Any]) -> str:

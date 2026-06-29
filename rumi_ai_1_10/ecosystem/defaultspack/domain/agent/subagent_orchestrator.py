@@ -156,6 +156,68 @@ def _parse_json_response(response: Any) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def extract_assistant_text_from_result(value: Any, *, _depth: int = 0) -> str:
+    if _depth > 8:
+        return ""
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        if text[:1] in {"{", "["}:
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError:
+                return text
+            nested_text = extract_assistant_text_from_result(parsed, _depth=_depth + 1)
+            return nested_text or text
+        return text
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or item.get("raw_text")
+                if text:
+                    parts.append(str(text))
+                    continue
+            nested_text = extract_assistant_text_from_result(item, _depth=_depth + 1)
+            if nested_text:
+                parts.append(nested_text)
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+    if not isinstance(value, dict):
+        return ""
+
+    for key in ("assistant_text", "raw_text", "output_text", "text", "answer", "summary", "message", "content"):
+        if key not in value:
+            continue
+        text = extract_assistant_text_from_result(value.get(key), _depth=_depth + 1)
+        if text:
+            return text
+
+    for key in ("data", "result", "output", "response"):
+        if key not in value:
+            continue
+        text = extract_assistant_text_from_result(value.get(key), _depth=_depth + 1)
+        if text:
+            return text
+
+    transport_keys = {
+        "status",
+        "execution_id",
+        "delegate",
+        "result",
+        "data",
+        "output",
+        "response",
+        "code",
+        "error",
+        "is_error",
+        "error_type",
+    }
+    if _depth > 0 and value and not set(value).issubset(transport_keys):
+        return json.dumps(value, ensure_ascii=False)
+    return ""
+
+
 def _delegate_via_input(
     role_id: str,
     payload: dict[str, Any],
@@ -194,6 +256,9 @@ def _delegate_via_input(
         context or {},
     )
     if isinstance(result, dict):
+        assistant_text = extract_assistant_text_from_result(result)
+        if assistant_text:
+            result["assistant_text"] = assistant_text
         result.setdefault("compatibility_alias", "subagent")
         result.setdefault("route_kind", "agent.delegate")
     return result

@@ -15,6 +15,7 @@ from domain.chat.subagent_durability import (
     ensure_subagent_child_has_assistant_response,
     mark_subagent_child_failed,
 )
+from domain.agent.subagent_orchestrator import extract_assistant_text_from_result
 from domain.input import RumiInputEnvelope, dispatch_input
 
 
@@ -151,11 +152,12 @@ class SubagentController:
                 workspace=workspace_contract,
                 code="SUBAGENT_DISPATCH_FAILED",
             )
-        summary = str(result.get("assistant_text") or "Subagent completed.").strip()
+        assistant_text = extract_assistant_text_from_result(result)
+        summary = str(assistant_text or "Subagent completed.").strip()
         ensure_subagent_child_has_assistant_response(
             store,
             child["id"],
-            assistant_text=str(result.get("assistant_text") or "").strip(),
+            assistant_text=assistant_text,
             metadata=child_metadata,
         )
         return {
