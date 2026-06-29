@@ -60,6 +60,89 @@ test("startProviderOAuth posts scope mode and requested services", async () => {
   });
 });
 
+test("saveCodexAccessToken posts to Codex connection route and redacts response", async () => {
+  const rawToken = ["codex", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        configured: true,
+        status: {
+          provider_id: "codex",
+          configured: true,
+          token_configured: true,
+          token_source: "secret_store",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.saveCodexAccessToken>> | null = null;
+  try {
+    result = await api.saveCodexAccessToken(rawToken);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    action: "save_token",
+    access_token: rawToken,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
+test("saveCodexAppServerConfig serializes safe endpoint config", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        app_server: {
+          configured: true,
+          connection_status: "configured",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.saveCodexAppServerConfig({
+      enabled: true,
+      baseUrl: "http://127.0.0.1:7331",
+      websocketUrl: "ws://127.0.0.1:7331/ws",
+      toolSourceEnabled: true,
+      automationEndpointEnabled: false,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.deepEqual(requestBody, {
+    action: "save_app_server",
+    app_server: {
+      enabled: true,
+      base_url: "http://127.0.0.1:7331",
+      websocket_url: "ws://127.0.0.1:7331/ws",
+      tool_source_enabled: true,
+      automation_endpoint_enabled: false,
+    },
+  });
+});
+
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
     frontendCommandArgs({ enabled: "false" }, { enabled: false }),

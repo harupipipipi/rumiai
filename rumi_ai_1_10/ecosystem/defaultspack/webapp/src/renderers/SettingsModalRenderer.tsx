@@ -16,6 +16,7 @@ import { ContinuitySettingsField } from "../features/continuity/ContinuitySettin
 import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
+  buildCodexAppServerPrelude,
   buildControlCenterSections,
   buildAccountConnectionPrelude,
   filterControlCenterSections,
@@ -23,6 +24,7 @@ import {
   safeSettingsLabel,
   type AccountConnectionPreludeCard,
   type AccountConnectionScopeModeOption,
+  type CodexAppServerPrelude,
   type ControlCenterField,
   type ControlCenterSection,
 } from "../settings/controlCenter";
@@ -2914,6 +2916,14 @@ export function SettingsModalRenderer({
   const [connectionBusy, setConnectionBusy] = useState("");
   const [connectionMessages, setConnectionMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
   const [connectionScopeModes, setConnectionScopeModes] = useState<Record<string, string>>({});
+  const [connectionCredentialDrafts, setConnectionCredentialDrafts] = useState<Record<string, string>>({});
+  const [codexAppServerDraft, setCodexAppServerDraft] = useState({
+    enabled: false,
+    baseUrl: "",
+    websocketUrl: "",
+    toolSourceEnabled: false,
+    automationEndpointEnabled: false,
+  });
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const controlCenterSections = useMemo(
@@ -2922,6 +2932,10 @@ export function SettingsModalRenderer({
   );
   const accountConnectionCards = useMemo(
     () => buildAccountConnectionPrelude(settingsValues),
+    [settingsValues],
+  );
+  const codexAppServerPrelude = useMemo<CodexAppServerPrelude>(
+    () => buildCodexAppServerPrelude(settingsValues),
     [settingsValues],
   );
   const activeProfile = useMemo(
@@ -2982,6 +2996,21 @@ export function SettingsModalRenderer({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [placementMenuOpen]);
+  useEffect(() => {
+    setCodexAppServerDraft({
+      enabled: codexAppServerPrelude.enabled,
+      baseUrl: codexAppServerPrelude.baseUrl,
+      websocketUrl: codexAppServerPrelude.websocketUrl,
+      toolSourceEnabled: codexAppServerPrelude.toolSourceStatus !== "disabled",
+      automationEndpointEnabled: codexAppServerPrelude.automationEndpointStatus !== "disabled",
+    });
+  }, [
+    codexAppServerPrelude.automationEndpointStatus,
+    codexAppServerPrelude.baseUrl,
+    codexAppServerPrelude.enabled,
+    codexAppServerPrelude.toolSourceStatus,
+    codexAppServerPrelude.websocketUrl,
+  ]);
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
     ?? controlCenterSections[0];
@@ -3010,7 +3039,9 @@ export function SettingsModalRenderer({
     onOpenSection?.(sectionId);
   };
   const refreshConnectionStatus = (providerId: string) => {
-    onSettingChange("apis", "api_keys", { action: "oauth_refresh", provider_id: providerId });
+    onSettingChange("apis", "api_keys", providerId === "codex"
+      ? { action: "oauth_refresh" }
+      : { action: "oauth_refresh", provider_id: providerId });
   };
   const selectedConnectionScopeMode = (card: AccountConnectionPreludeCard): AccountConnectionScopeModeOption | undefined => {
     const selectedId = connectionScopeModes[card.providerId] || card.scopeMode || card.scopeModes[0]?.id || "";
@@ -3044,6 +3075,129 @@ export function SettingsModalRenderer({
         [card.providerId]: {
           tone: "error",
           text: errorValue instanceof Error ? errorValue.message : `Failed to start ${card.label} OAuth.`,
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
+  const saveConnectionCredential = async (card: AccountConnectionPreludeCard) => {
+    if (card.credential?.kind !== "codex_access_token") return;
+    const draft = String(connectionCredentialDrafts[card.providerId] ?? "").trim();
+    if (!draft) {
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "error", text: "Token is required." },
+      }));
+      return;
+    }
+    try {
+      setConnectionBusy(`${card.providerId}:save_credential`);
+      await settingsApiResources.saveCodexAccessToken(draft);
+      setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: "" }));
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "success", text: "Codex token saved." },
+      }));
+      refreshConnectionStatus(card.providerId);
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to save Codex token.",
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
+  const clearConnectionCredential = async (card: AccountConnectionPreludeCard) => {
+    if (card.credential?.kind !== "codex_access_token") return;
+    try {
+      setConnectionBusy(`${card.providerId}:clear_credential`);
+      await settingsApiResources.clearCodexAccessToken();
+      setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: "" }));
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "success", text: "Codex token cleared." },
+      }));
+      refreshConnectionStatus(card.providerId);
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to clear Codex token.",
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
+  const saveCodexAppServer = async () => {
+    try {
+      setConnectionBusy("codex_app_server:save");
+      await settingsApiResources.saveCodexAppServerConfig(codexAppServerDraft);
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: { tone: "success", text: "Codex App Server config saved." },
+      }));
+      refreshConnectionStatus("codex");
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to save Codex App Server config.",
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
+  const clearCodexAppServer = async () => {
+    try {
+      setConnectionBusy("codex_app_server:clear");
+      await settingsApiResources.clearCodexAppServerConfig();
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: { tone: "success", text: "Codex App Server config cleared." },
+      }));
+      refreshConnectionStatus("codex");
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to clear Codex App Server config.",
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
+  const probeCodexAppServer = async () => {
+    try {
+      setConnectionBusy("codex_app_server:probe");
+      const result = await settingsApiResources.probeCodexAppServer();
+      const probeStatus = String(result.probe?.status ?? "unknown");
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: { tone: probeStatus === "ok" ? "success" : "error", text: `Probe: ${probeStatus}` },
+      }));
+      refreshConnectionStatus("codex");
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        codex_app_server: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to probe Codex App Server.",
         },
       }));
     } finally {
@@ -3224,6 +3378,50 @@ export function SettingsModalRenderer({
                     Selected scopes: {selectedScopes.join(", ")}
                   </div>
                 )}
+                {card.credential && (
+                  <div className="mt-3 space-y-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-medium text-zinc-200">Codex access token</span>
+                      <span className={cn(
+                        "rounded-full border px-2 py-0.5 text-[10px]",
+                        card.credential.configured
+                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                          : "border-amber-500/30 bg-amber-500/10 text-amber-200",
+                      )}>
+                        {card.credential.configured ? "Saved" : "Missing"}
+                      </span>
+                    </div>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={connectionCredentialDrafts[card.providerId] ?? ""}
+                      onChange={(event) => setConnectionCredentialDrafts((current) => ({
+                        ...current,
+                        [card.providerId]: event.target.value,
+                      }))}
+                      placeholder={card.credential.placeholder}
+                      className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={connectionBusy === `${card.providerId}:save_credential`}
+                        onClick={() => void saveConnectionCredential(card)}
+                        className="rounded-lg border border-cyan-700 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-100 transition-colors hover:border-cyan-500 hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                      >
+                        {connectionBusy === `${card.providerId}:save_credential` ? "Saving..." : card.credential.saveLabel}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!card.credential.canClear || connectionBusy === `${card.providerId}:clear_credential`}
+                        onClick={() => void clearConnectionCredential(card)}
+                        className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
+                      >
+                        {connectionBusy === `${card.providerId}:clear_credential` ? "Clearing..." : card.credential.clearLabel}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {card.disabledReason && (
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
                     <p className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
@@ -3234,29 +3432,31 @@ export function SettingsModalRenderer({
                     </p>
                   </div>
                 )}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    disabled={!card.canConnect || isBusy}
-                    onClick={() => void startAccountConnection(card, selectedScopeOption)}
-                    title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`}
-                    className={cn(
-                      "rounded-lg border px-3 py-1.5 text-xs transition-colors",
-                      !card.canConnect || isBusy
-                        ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                        : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
-                    )}
-                  >
-                    {isBusy ? "Opening..." : card.primaryLabel}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => openSection(card.configureSectionId)}
-                    className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-                  >
-                    Configure self-host OAuth
-                  </button>
-                </div>
+                {!card.credential && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={!card.canConnect || isBusy}
+                      onClick={() => void startAccountConnection(card, selectedScopeOption)}
+                      title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`}
+                      className={cn(
+                        "rounded-lg border px-3 py-1.5 text-xs transition-colors",
+                        !card.canConnect || isBusy
+                          ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                          : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
+                      )}
+                    >
+                      {isBusy ? "Opening..." : card.primaryLabel}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openSection(card.configureSectionId)}
+                      className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                    >
+                      {card.configureLabel}
+                    </button>
+                  </div>
+                )}
                 {message && (
                   <p className={cn("mt-3 text-[11px]", message.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
                     {message.text}
@@ -3275,18 +3475,128 @@ export function SettingsModalRenderer({
       );
     }
     if (section.id === "tools_mcp") {
+      const appServerMessage = connectionMessages.codex_app_server;
+      const appServerToggleFields: Array<["enabled" | "toolSourceEnabled" | "automationEndpointEnabled", string]> = [
+        ["enabled", "Enabled"],
+        ["toolSourceEnabled", "Tool source"],
+        ["automationEndpointEnabled", "Automation endpoint"],
+      ];
       return (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <div className="text-sm font-medium text-zinc-100">MCP and tool policy are split from account login</div>
-              <p className="mt-1 text-xs leading-5 text-zinc-500">
-                MCP servers define tools and required connections. Accounts & Connections owns the actual login and credential state.
-              </p>
+        <div className="grid gap-3 lg:grid-cols-2">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-100">MCP and tool policy are split from account login</div>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  MCP servers define tools and required connections. Accounts & Connections owns the actual login and credential state.
+                </p>
+              </div>
+              <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-400">
+                {section.fields.length} controls
+              </span>
             </div>
-            <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-400">
-              {section.fields.length} controls
-            </span>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="text-sm font-medium text-zinc-100">Codex App Server</div>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  Tool source: {codexAppServerPrelude.toolSourceStatus}; automation endpoint: {codexAppServerPrelude.automationEndpointStatus}
+                </p>
+              </div>
+              <span className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                codexAppServerPrelude.blockedReason
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                  : codexAppServerPrelude.configured
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                    : "border-zinc-700 bg-zinc-900 text-zinc-400",
+              )}>
+                {codexAppServerPrelude.statusLabel}
+              </span>
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>Base URL</span>
+                <input
+                  value={codexAppServerDraft.baseUrl}
+                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+                  placeholder="http://127.0.0.1:7331"
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                />
+              </label>
+              <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>WebSocket URL</span>
+                <input
+                  value={codexAppServerDraft.websocketUrl}
+                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, websocketUrl: event.target.value }))}
+                  placeholder="ws://127.0.0.1:7331/ws"
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3">
+              {appServerToggleFields.map(([key, label]) => (
+                <label key={key} className="inline-flex items-center gap-2 text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={codexAppServerDraft[key]}
+                    onChange={(event) => setCodexAppServerDraft((current) => ({
+                      ...current,
+                      [key]: event.target.checked,
+                    }))}
+                    className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 text-cyan-500"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {codexAppServerPrelude.blockedReason && (
+              <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-5 text-amber-100/80">
+                {codexAppServerPrelude.blockedReason}
+              </p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={connectionBusy === "codex_app_server:save"}
+                onClick={() => void saveCodexAppServer()}
+                className="rounded-lg border border-cyan-700 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-100 transition-colors hover:border-cyan-500 hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+              >
+                {connectionBusy === "codex_app_server:save" ? "Saving..." : "Save config"}
+              </button>
+              <button
+                type="button"
+                disabled={connectionBusy === "codex_app_server:probe"}
+                onClick={() => void probeCodexAppServer()}
+                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
+              >
+                {connectionBusy === "codex_app_server:probe" ? "Probing..." : "Probe"}
+              </button>
+              <button
+                type="button"
+                disabled={connectionBusy === "codex_app_server:clear"}
+                onClick={() => void clearCodexAppServer()}
+                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
+              >
+                {connectionBusy === "codex_app_server:clear" ? "Clearing..." : "Clear"}
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-zinc-500">
+              <span className="rounded-full border border-zinc-800 px-2 py-0.5">
+                {codexAppServerPrelude.loopback ? "Loopback" : "Remote"}
+              </span>
+              {codexAppServerPrelude.authRequired && (
+                <span className="rounded-full border border-amber-500/30 px-2 py-0.5 text-amber-200">
+                  Auth {codexAppServerPrelude.authConfigured ? "ready" : "needed"}
+                </span>
+              )}
+            </div>
+            {appServerMessage && (
+              <p className={cn("mt-3 text-[11px]", appServerMessage.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
+                {appServerMessage.text}
+              </p>
+            )}
           </div>
         </div>
       );

@@ -991,6 +991,111 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
   assert.doesNotMatch(html, />Not connected</);
 });
 
+test("settings accounts prelude renders Codex token credential without raw token", () => {
+  const rawToken = ["codex", "renderer", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              connected: true,
+              token_configured: true,
+              can_clear: true,
+              connection_status: "connected",
+              status_label: "Token saved",
+              access_token: rawToken,
+            },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex access token/);
+  assert.match(html, /Token saved/);
+  assert.match(html, /Saved/);
+  assert.match(html, /Update token/);
+  assert.match(html, /Clear token/);
+  assert.doesNotMatch(html, /Connect Codex/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+});
+
+test("settings tools prelude renders Codex App Server status and controls", () => {
+  const rawToken = ["codex", "hidden", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "tools", label: "Tools", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              token_configured: true,
+              access_token: rawToken,
+            },
+          },
+        },
+        tools_mcp: {
+          codex_app_server: {
+            configured: true,
+            enabled: true,
+            connection_status: "configured",
+            status_label: "Configured",
+            base_url: "http://127.0.0.1:7331",
+            websocket_url: "ws://127.0.0.1:7331/ws",
+            loopback: true,
+            auth_required: false,
+            auth_configured: true,
+            tool_source: { status: "configured" },
+            automation_endpoint: { status: "configured" },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex App Server/);
+  assert.match(html, /Tool source: configured; automation endpoint: configured/);
+  assert.match(html, /http:\/\/127\.0\.0\.1:7331/);
+  assert.match(html, /ws:\/\/127\.0\.0\.1:7331\/ws/);
+  assert.match(html, /Save config/);
+  assert.match(html, /Probe/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+});
+
 test("settings help pane uses reported active profile with fallback when absent", () => {
   const withProfile = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {

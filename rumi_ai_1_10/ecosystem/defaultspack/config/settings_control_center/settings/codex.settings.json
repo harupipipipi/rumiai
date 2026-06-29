@@ -1,0 +1,65 @@
+{
+  "schema": "rumi.settings.v1",
+  "pack_id": "codex_core",
+  "contributions": [
+    {
+      "id": "codex.accounts.access_token",
+      "owner": "codex_core",
+      "title": {
+        "en": "Codex access token",
+        "ja": "Codex access token"
+      },
+      "description": {
+        "en": "Credential for Codex local and programmatic workflows. This is not a Platform API key or Workspace Agent token.",
+        "ja": "Codex local/programmatic workflow 用の credential。Platform API key や Workspace Agent token ではありません。"
+      },
+      "section": "accounts_connections",
+      "priority": 50,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "AccountsConnectionsPanel.CodexTokenCard",
+      "requires": [
+        "provider.codex"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "codex",
+        "access token",
+        "credential",
+        "local workflow",
+        "programmatic workflow"
+      ]
+    },
+    {
+      "id": "codex.tools.app_server",
+      "owner": "codex_core",
+      "title": {
+        "en": "Codex App Server",
+        "ja": "Codex App Server"
+      },
+      "description": {
+        "en": "Configure Codex App Server as a Tools & MCP tool source and automation endpoint.",
+        "ja": "Codex App Server を Tools & MCP の tool source / automation endpoint として設定します。"
+      },
+      "section": "tools_mcp",
+      "priority": 45,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "ToolsMcpPanel.CodexAppServerCard",
+      "requires": [
+        "connection.codex"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "codex",
+        "app server",
+        "mcp",
+        "tool source",
+        "automation endpoint",
+        "websocket"
+      ]
+    }
+  ]
+}

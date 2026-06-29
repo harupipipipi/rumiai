@@ -1,5 +1,5 @@
 import { api } from "../../../lib/api";
-import type { ModelSearchResponse } from "../../../lib/api";
+import type { CodexAppServerConfig, ModelSearchResponse } from "../../../lib/api";
 import { createProviderApiKeyResources, type ProviderKeySaveResult } from "../../apiKeys";
 import { createModelSearchResources } from "../../models";
 
@@ -29,6 +29,30 @@ export const settingsApiResources = {
 
   saveProviderOAuthClientConfig(providerId: string, clientConfig: string) {
     return api.saveProviderOAuthClientConfig(providerId, clientConfig);
+  },
+
+  getCodexConnectionStatus() {
+    return api.getCodexConnectionStatus();
+  },
+
+  saveCodexAccessToken(accessToken: string) {
+    return api.saveCodexAccessToken(accessToken);
+  },
+
+  clearCodexAccessToken() {
+    return api.clearCodexAccessToken();
+  },
+
+  saveCodexAppServerConfig(config: CodexAppServerConfig) {
+    return api.saveCodexAppServerConfig(config);
+  },
+
+  clearCodexAppServerConfig() {
+    return api.clearCodexAppServerConfig();
+  },
+
+  probeCodexAppServer() {
+    return api.probeCodexAppServer();
   },
 
   createPublicUrl(payload: Parameters<typeof api.createPublicUrl>[0]) {

@@ -2359,6 +2359,28 @@ async function readStreamEvents(
   return finalMessage;
 }
 
+export type CodexAppServerConfig = {
+  enabled?: boolean;
+  baseUrl?: string;
+  websocketUrl?: string;
+  toolSourceEnabled?: boolean;
+  automationEndpointEnabled?: boolean;
+};
+
+export type CodexConnectionStatusResponse = {
+  provider: Record<string, unknown>;
+  app_server: Record<string, unknown>;
+};
+
+export type CodexConnectionActionResponse = Partial<CodexConnectionStatusResponse> & {
+  provider_id?: string;
+  configured?: boolean;
+  cleared?: boolean;
+  created?: boolean;
+  status?: Record<string, unknown>;
+  probe?: Record<string, unknown>;
+};
+
 export const api = {
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
@@ -2916,6 +2938,63 @@ export const api = {
       body: JSON.stringify({
         action: "clear_client",
         provider_id: providerId,
+      }),
+    });
+  },
+
+  getCodexConnectionStatus() {
+    return request<CodexConnectionStatusResponse>("/api/connections/codex", { cache: "no-store" });
+  },
+
+  saveCodexAccessToken(accessToken: string) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_token",
+        access_token: accessToken,
+      }),
+    });
+  },
+
+  clearCodexAccessToken() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_token",
+      }),
+    });
+  },
+
+  saveCodexAppServerConfig(config: CodexAppServerConfig) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_app_server",
+        app_server: {
+          enabled: config.enabled,
+          base_url: config.baseUrl,
+          websocket_url: config.websocketUrl,
+          tool_source_enabled: config.toolSourceEnabled,
+          automation_endpoint_enabled: config.automationEndpointEnabled,
+        },
+      }),
+    });
+  },
+
+  clearCodexAppServerConfig() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_app_server",
+      }),
+    });
+  },
+
+  probeCodexAppServer() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "probe_app_server",
       }),
     });
   },

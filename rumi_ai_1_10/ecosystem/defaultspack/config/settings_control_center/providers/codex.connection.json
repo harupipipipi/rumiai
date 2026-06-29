@@ -1,0 +1,56 @@
+{
+  "schema": "rumi.connection.provider.v1",
+  "provider_id": "codex",
+  "display_name": {
+    "en": "Codex",
+    "ja": "Codex"
+  },
+  "description": {
+    "en": "Connect a Codex local/programmatic workflow token and optional Codex App Server endpoint.",
+    "ja": "Codex local/programmatic workflow token と任意の Codex App Server endpoint を接続します。"
+  },
+  "icon": "terminal",
+  "service_kind": "dev",
+  "auth": {
+    "type": "api_key",
+    "official_broker_supported": false,
+    "self_host_client_supported": false
+  },
+  "capabilities": [
+    {
+      "id": "codex.local_workflow.access",
+      "displayName": {
+        "en": "Codex local workflow access",
+        "ja": "Codex local workflow access"
+      },
+      "description": {
+        "en": "Store a Codex access token for local and programmatic workflow integrations.",
+        "ja": "local/programmatic workflow 用の Codex access token を保存します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "codex.app_server.tools",
+      "displayName": {
+        "en": "Codex App Server tools",
+        "ja": "Codex App Server tools"
+      },
+      "description": {
+        "en": "Use Codex App Server as a tool source and automation endpoint.",
+        "ja": "Codex App Server を tool source / automation endpoint として使います。"
+      },
+      "risk": "medium"
+    }
+  ],
+  "settings": {
+    "section": "accounts_connections",
+    "priority": 50,
+    "recommended": true
+  },
+  "metadata": {
+    "credential_kind": "codex_access_token",
+    "not_platform_api_key": true,
+    "not_workspace_agent_token": true,
+    "secret_handling": "Never expose the raw token in Settings payloads, logs, snapshots, or repository files."
+  }
+}

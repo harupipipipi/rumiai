@@ -14,8 +14,11 @@ from core_runtime.profile_workspace import ProfileWorkspaceManager
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.oauth_store import provider_oauth_statuses
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
+from domain.codex.app_server import codex_app_server_status
+from domain.codex.connection_store import codex_connection_status
 from domain.components.registry import DomainComponentRegistry, build_domain_component_roots
 from domain.dev.inspector import Inspector
 from domain.extensions.activation import selected_extension_pack_ids
@@ -3081,6 +3084,13 @@ class FrontendRegistry:
             token_container["external_tokens"] = []
         if isinstance(legacy_external_inputs, dict) and "external_inputs" in sanitized:
             sanitized.pop("external_inputs", None)
+        accounts_connections = sanitized.get("accounts_connections")
+        if isinstance(accounts_connections, dict):
+            accounts_connections.pop("providers", None)
+            accounts_connections["providers"] = {}
+        tools_mcp = sanitized.get("tools_mcp")
+        if isinstance(tools_mcp, dict):
+            tools_mcp.pop("codex_app_server", None)
         models = sanitized.get("models")
         if isinstance(models, dict):
             sanitized["models"] = ModelRuntimeSettingsService(
@@ -3351,6 +3361,21 @@ class FrontendRegistry:
             legacy_routes = apis.pop("model_api_routes", None)
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
+        accounts_connections = refreshed.setdefault("accounts_connections", {})
+        if not isinstance(accounts_connections, dict):
+            accounts_connections = {}
+            refreshed["accounts_connections"] = accounts_connections
+        connection_providers = accounts_connections.setdefault("providers", {})
+        if not isinstance(connection_providers, dict):
+            connection_providers = {}
+            accounts_connections["providers"] = connection_providers
+        connection_providers.update(provider_oauth_statuses(pack_root=self._pack_root))
+        connection_providers["codex"] = codex_connection_status(pack_root=self._pack_root)
+        tools_mcp = refreshed.setdefault("tools_mcp", {})
+        if not isinstance(tools_mcp, dict):
+            tools_mcp = {}
+            refreshed["tools_mcp"] = tools_mcp
+        tools_mcp["codex_app_server"] = codex_app_server_status(pack_root=self._pack_root)
         refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
         line = refreshed.setdefault("line", {})
         if not isinstance(line, dict):

@@ -943,6 +943,19 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         status_scopes = list(metadata.get("scopes") or _default_scopes(provider_id, scope_mode or None))
     except ValueError:
         status_scopes = list(metadata.get("scopes") or default_scopes)
+    cloudflare_sdk = {}
+    if provider_id == "cloudflare":
+        try:
+            from core_runtime.cloudflare.sdk_client import cloudflare_sdk_status
+
+            cloudflare_sdk = cloudflare_sdk_status()
+        except Exception:
+            cloudflare_sdk = {
+                "available": False,
+                "status": "sdk_missing",
+                "package": "cloudflare",
+                "detail": "Cloudflare Python SDK status could not be loaded.",
+            }
     return {
         "supported": supported,
         "backend_supported": provider_id in _OAUTH_RUNTIME_PROVIDER_IDS,
@@ -965,6 +978,8 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "scope_mode": scope_mode,
         "scope_modes": _google_scope_mode_rows() if provider_id == "google" else [],
         "services": list(metadata.get("services") or []),
+        "cloudflare_sdk": cloudflare_sdk,
+        "provisioning": {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {},
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
         "redirect_path": f"/api/ai/oauth/{provider_id}/callback" if supported else "",

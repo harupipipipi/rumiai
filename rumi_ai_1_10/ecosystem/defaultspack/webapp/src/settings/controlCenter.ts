@@ -45,7 +45,7 @@ export type AccountConnectionScopeModeOption = {
 };
 
 export type AccountConnectionPreludeCard = {
-  providerId: "cloudflare" | "google";
+  providerId: string;
   label: string;
   description: string;
   connected: boolean;
@@ -62,10 +62,34 @@ export type AccountConnectionPreludeCard = {
   officialAppDescription: string;
   selfHostDescription: string;
   configureSectionId: ControlCenterSectionId;
+  configureLabel: string;
   scopeMode?: string;
   services: string[];
   scopes: string[];
   scopeModes: AccountConnectionScopeModeOption[];
+  credential?: {
+    kind: "codex_access_token";
+    configured: boolean;
+    canClear: boolean;
+    placeholder: string;
+    saveLabel: string;
+    clearLabel: string;
+  };
+};
+
+export type CodexAppServerPrelude = {
+  configured: boolean;
+  enabled: boolean;
+  statusLabel: string;
+  status: string;
+  blockedReason: string;
+  baseUrl: string;
+  websocketUrl: string;
+  loopback: boolean;
+  authRequired: boolean;
+  authConfigured: boolean;
+  toolSourceStatus: string;
+  automationEndpointStatus: string;
 };
 
 const BLOCKED_RAW_LABELS = new Map([
@@ -217,7 +241,7 @@ const SECTION_ID_ALIASES: Record<string, ControlCenterSectionId> = {
 
 const FIELD_TOKEN_ALIASES: Array<[RegExp, ControlCenterSectionId]> = [
   [/\b(model|provider|api[_ -]?key|api[_ -]?route|token|openrouter)\b/i, "models_api"],
-  [/\b(oauth|account|connection|connect|gmail|drive|google|cloudflare|github)\b/i, "accounts_connections"],
+  [/\b(oauth|account|connection|connect|gmail|drive|google|cloudflare|codex|github)\b/i, "accounts_connections"],
   [/\b(computer|browser|screen|click|type|scroll|desktop|accessibility|continuity|automation|ambient|camera|microphone)\b/i, "computer_automation"],
   [/\b(mcp|tool|approval|allowlist|denylist|permission[_ -]?overrides)\b/i, "tools_mcp"],
   [/\b(theme|layout|sidebar|preview|composer|shortcut|command|gradient|indicator|calendar|language|voice)\b/i, "workspace_ui"],
@@ -350,7 +374,7 @@ function quickSetupScore(field: ControlCenterField): number {
   const fieldType = String(field.type);
   let score = 0;
   if (/default|preferred|api[_ -]?key|provider|model/.test(text)) score += 50;
-  if (/cloudflare|google|gmail|drive|connection|oauth|continuity/.test(text)) score += 40;
+  if (/cloudflare|google|gmail|drive|codex|connection|oauth|continuity/.test(text)) score += 40;
   if (/computer|browser|screen|accessibility|approval|mcp/.test(text)) score += 30;
   if (fieldType === "secret" || fieldType === "api_key_setup" || fieldType === "model_select") score += 20;
   if ((field as SettingsField & { advanced?: boolean }).advanced) score -= 40;
@@ -459,6 +483,8 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     fallbackStatus: Record<string, unknown>;
     scopeMode?: string;
     configureSectionId: ControlCenterSectionId;
+    configureLabel: string;
+    credential?: (status: Record<string, unknown>) => AccountConnectionPreludeCard["credential"];
   }> = [
     {
       providerId: "cloudflare",
@@ -475,6 +501,7 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       },
       scopeMode: undefined,
       configureSectionId: "accounts_connections" as const,
+      configureLabel: "Configure self-host OAuth",
     },
     {
       providerId: "google",
@@ -493,6 +520,34 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       },
       scopeMode: "google_identity",
       configureSectionId: "models_api" as const,
+      configureLabel: "Configure self-host OAuth",
+    },
+    {
+      providerId: "codex",
+      label: "Codex",
+      description: "Save the local/programmatic Codex workflow access credential.",
+      fallbackStatus: {
+        supported: true,
+        backend_supported: true,
+        connect_enabled: false,
+        connected: false,
+        configured: false,
+        token_configured: false,
+        can_clear: false,
+        connection_status: "missing_token",
+        status_label: "Token needed",
+        disabled_reason: "Save Codex access token",
+      },
+      configureSectionId: "privacy_security" as const,
+      configureLabel: "Review credential policy",
+      credential: (status) => ({
+        kind: "codex_access_token",
+        configured: Boolean(status.token_configured ?? status.configured ?? status.connected),
+        canClear: Boolean(status.can_clear),
+        placeholder: "Codex access token",
+        saveLabel: Boolean(status.token_configured ?? status.configured ?? status.connected) ? "Update token" : "Save token",
+        clearLabel: "Clear token",
+      }),
     },
   ];
   return definitions.map((definition) => {
@@ -502,6 +557,7 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     };
     const connected = Boolean(status.connected);
     const canConnect = Boolean(status.connect_enabled);
+    const credential = definition.credential?.(status);
     const disabledReason = connected || canConnect ? "" : String(status.disabled_reason || status.status_label || "Configure self-host OAuth");
     const scopeModes = definition.providerId === "google"
       ? accountScopeModeOptions(status.scope_modes).length
@@ -522,22 +578,52 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       statusLabel: String(status.status_label || (connected ? "Connected" : "Disconnected")),
       status: String(status.connection_status || (connected ? "connected" : "disconnected")),
       canConnect,
-      connectAction: canConnect
+      connectAction: canConnect && !credential
         ? { providerId: definition.providerId, scopeMode: selectedScopeMode, services: selectedServices }
         : undefined,
       primaryLabel: definition.providerId === "google"
         ? connected ? "Reconnect selected mode" : "Connect selected mode"
         : connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
       disabledReason,
-      officialAppDescription: "Official app required for hosted broker mode.",
-      selfHostDescription: disabledReason === "Configure self-host OAuth"
+      officialAppDescription: credential
+        ? "Stored through local secret storage and only exposed as configured status."
+        : "Official app required for hosted broker mode.",
+      selfHostDescription: credential
+        ? "Separate from Platform API keys and Workspace Agent tokens."
+        : disabledReason === "Configure self-host OAuth"
         ? "Configure self-host OAuth with explicit scopes before connecting."
         : "Self-host OAuth remains available when a client and scopes are configured.",
       configureSectionId: definition.configureSectionId,
+      configureLabel: definition.configureLabel,
       scopeMode: selectedScopeMode,
       services: selectedServices,
       scopes: selectedScopeModeOption?.scopes.length ? selectedScopeModeOption.scopes : stringList(status.scopes),
       scopeModes,
+      credential,
     };
   });
+}
+
+export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}): CodexAppServerPrelude {
+  const toolsMcp = recordValue(settingsValues.tools_mcp);
+  const appServer = recordValue(toolsMcp.codex_app_server);
+  const toolSource = recordValue(appServer.tool_source);
+  const automationEndpoint = recordValue(appServer.automation_endpoint);
+  const configured = Boolean(appServer.configured);
+  const enabled = Boolean(appServer.enabled);
+  const status = String(appServer.connection_status || (configured ? "configured" : "not_configured"));
+  return {
+    configured,
+    enabled,
+    statusLabel: String(appServer.status_label || (configured ? "Configured" : "Not configured")),
+    status,
+    blockedReason: String(appServer.blocked_reason || ""),
+    baseUrl: String(appServer.base_url || ""),
+    websocketUrl: String(appServer.websocket_url || ""),
+    loopback: appServer.loopback !== false,
+    authRequired: Boolean(appServer.auth_required),
+    authConfigured: Boolean(appServer.auth_configured),
+    toolSourceStatus: String(toolSource.status || "disabled"),
+    automationEndpointStatus: String(automationEndpoint.status || "disabled"),
+  };
 }

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { SettingsSection } from "../lib/api";
 import {
+  buildCodexAppServerPrelude,
   buildAccountConnectionPrelude,
   buildControlCenterSections,
   controlCenterSectionForField,
@@ -186,4 +187,63 @@ test("account connection prelude gives Google explicit OAuth scope mode actions"
   assert.ok(google?.scopeModes.some((mode) => mode.id === "google_drive"));
   assert.ok(google?.scopeModes.some((mode) => mode.id === "google_gmail_metadata" && mode.restricted));
   assert.match(google?.scopeModes.find((mode) => mode.id === "google_gmail_metadata")?.warning ?? "", /Restricted Gmail/);
+});
+
+test("account connection prelude treats Codex as a redacted credential", () => {
+  const rawToken = ["codex", "raw", "token"].join("-");
+  const cards = buildAccountConnectionPrelude({
+    accounts_connections: {
+      providers: {
+        codex: {
+          connected: true,
+          configured: true,
+          token_configured: true,
+          can_clear: true,
+          connection_status: "connected",
+          status_label: "Token saved",
+          access_token: rawToken,
+        },
+      },
+    },
+  });
+
+  const codex = cards.find((card) => card.providerId === "codex");
+  assert.equal(codex?.label, "Codex");
+  assert.equal(codex?.canConnect, false);
+  assert.equal(codex?.connectAction, undefined);
+  assert.equal(codex?.credential?.kind, "codex_access_token");
+  assert.equal(codex?.credential?.configured, true);
+  assert.equal(codex?.credential?.canClear, true);
+  assert.doesNotMatch(JSON.stringify(codex), new RegExp(rawToken));
+});
+
+test("Codex App Server prelude maps safe Tools & MCP status", () => {
+  const prelude = buildCodexAppServerPrelude({
+    tools_mcp: {
+      codex_app_server: {
+        configured: true,
+        enabled: true,
+        connection_status: "blocked_auth_required",
+        status_label: "Auth required",
+        blocked_reason: "Save Codex access token before using a non-loopback websocket.",
+        base_url: "https://codex-app.example.test",
+        websocket_url: "wss://codex-app.example.test/ws",
+        loopback: false,
+        auth_required: true,
+        auth_configured: false,
+        tool_source: { status: "blocked_auth_required" },
+        automation_endpoint: { status: "disabled" },
+      },
+    },
+  });
+
+  assert.equal(prelude.configured, true);
+  assert.equal(prelude.enabled, true);
+  assert.equal(prelude.status, "blocked_auth_required");
+  assert.equal(prelude.statusLabel, "Auth required");
+  assert.equal(prelude.loopback, false);
+  assert.equal(prelude.authRequired, true);
+  assert.equal(prelude.authConfigured, false);
+  assert.equal(prelude.toolSourceStatus, "blocked_auth_required");
+  assert.equal(prelude.automationEndpointStatus, "disabled");
 });
