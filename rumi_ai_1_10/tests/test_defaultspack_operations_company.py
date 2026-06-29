@@ -563,6 +563,102 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_refresh(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:8766/chat"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    qa_schedule = next(
+        schedule
+        for schedule in first["schedules"]
+        if schedule["task"]["metadata"]["loop_key"] == "qa_loop"
+    )
+    qa_schedule_id = qa_schedule["id"]
+    qa_conversation_id = first["loop_conversation_ids"]["qa_loop"]
+    current_target = f"http://127.0.0.1:18766/chat?chat={qa_conversation_id}"
+    old_bare_target = "http://127.0.0.1:18766/chat"
+    old_message = qa_schedule["task"]["message"].replace(current_target, old_bare_target)
+    assert old_message != qa_schedule["task"]["message"]
+
+    scheduler = Scheduler()
+    active_execution_id = "sexec-old-bare-chat-target"
+    started_at = "2026-06-30T00:00:00Z"
+    persisted = load_schedule(qa_schedule_id)
+    persisted["task"]["message"] = old_message
+    persisted["running_execution"] = {
+        "execution_id": active_execution_id,
+        "schedule_id": qa_schedule_id,
+        "started_at": started_at,
+        "trigger": "scheduled",
+        "timeout_seconds": 1800,
+    }
+    persisted["running_started_at"] = started_at
+    persisted["updated_at"] = started_at
+    save_schedule(persisted)
+    with scheduler._lock:
+        scheduler._schedules[qa_schedule_id] = persisted
+
+    second = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:8766/chat"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    refreshed_qa = next(
+        schedule
+        for schedule in second["schedules"]
+        if schedule["task"]["metadata"]["loop_key"] == "qa_loop"
+    )
+
+    assert refreshed_qa["id"] == qa_schedule_id
+    assert current_target in refreshed_qa["task"]["message"]
+    assert "running_execution" not in refreshed_qa
+
+    saved = load_schedule(qa_schedule_id)
+    assert "running_execution" not in saved
+    entries, total = load_history(qa_schedule_id)
+    assert total == 1
+    assert entries[0]["execution_id"] == active_execution_id
+    assert entries[0]["status"] == "obsolete"
+    assert entries[0]["obsolete_reason"] == "execution_input_changed"
+    assert entries[0]["recovered_obsolete_running_execution"] is True
+    assert entries[0]["error"] is None
+
+    for schedule in second["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until_state_saved(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import save_schedule

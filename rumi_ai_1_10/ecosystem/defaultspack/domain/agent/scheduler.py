@@ -12,6 +12,8 @@ No external dependencies. Pure stdlib.
 
 import sys
 import os
+import hashlib
+import json
 import threading
 import time
 import calendar
@@ -203,6 +205,26 @@ def _scheduled_chat_message_has_visible_text(message: dict[str, Any]) -> bool:
             elif isinstance(block, str) and block.strip():
                 return True
     return False
+
+
+def _scheduled_chat_message_text(message: dict[str, Any]) -> str:
+    raw_text = message.get("raw_text")
+    if isinstance(raw_text, str) and raw_text.strip():
+        return raw_text.strip()
+    content = message.get("content")
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    parts.append(text.strip())
+            elif isinstance(block, str) and block.strip():
+                parts.append(block.strip())
+        return "\n".join(parts).strip()
+    return ""
 
 
 def _scheduled_chat_assistant_is_terminal(message: dict[str, Any]) -> bool:
@@ -763,6 +785,28 @@ def _parse_iso_datetime(dt_str):
     return dt
 
 
+def _fingerprint_json_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {
+            str(key): _fingerprint_json_value(item)
+            for key, item in sorted(value.items(), key=lambda entry: str(entry[0]))
+        }
+    if isinstance(value, (list, tuple)):
+        return [_fingerprint_json_value(item) for item in value]
+    if isinstance(value, set):
+        return [_fingerprint_json_value(item) for item in sorted(value, key=repr)]
+    return str(value)
+
+
+def _schedule_execution_input_fingerprint(sched: dict[str, Any]) -> str:
+    task = sched.get("task") if isinstance(sched.get("task"), dict) else {}
+    payload = {"task": _fingerprint_json_value(task)}
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _running_execution_details(sched: dict[str, Any]) -> dict[str, Any] | None:
     running = sched.get("running_execution")
     if isinstance(running, dict):
@@ -829,11 +873,109 @@ def _stale_running_execution(sched: dict[str, Any], *, now_dt: datetime | None =
     }
 
 
+def _scheduled_user_message_for_running_execution(
+    sched: dict[str, Any],
+    running: dict[str, Any],
+) -> dict[str, Any] | None:
+    task_cfg = sched.get("task") if isinstance(sched.get("task"), dict) else {}
+    conversation_id = str(task_cfg.get("conversation_id") or "").strip()
+    schedule_id = str(sched.get("id") or running.get("schedule_id") or "").strip()
+    execution_id = str(running.get("execution_id") or "").strip()
+    if not conversation_id or not schedule_id or not execution_id:
+        return None
+    try:
+        from domain.chat.store import ChatStore
+    except Exception:
+        return None
+
+    try:
+        conversation = ChatStore().get_conversation(conversation_id)
+    except Exception:
+        return None
+    if not isinstance(conversation, dict):
+        return None
+    messages = conversation.get("messages")
+    if not isinstance(messages, list):
+        return None
+    for message in reversed(messages):
+        if not isinstance(message, dict) or str(message.get("role") or "") != "user":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if str(metadata.get("schedule_id") or "").strip() != schedule_id:
+            continue
+        if str(metadata.get("schedule_execution_id") or "").strip() != execution_id:
+            continue
+        source = str(metadata.get("source") or "").strip()
+        if source not in {"scheduler", "scheduler_approval_followup"}:
+            continue
+        return message
+    return None
+
+
+def _obsolete_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
+    running = _running_execution_details(sched)
+    if running is None:
+        return None
+
+    reason = str(running.get("obsolete_reason") or "").strip()
+    running_fingerprint = str(
+        running.get("input_fingerprint")
+        or running.get("task_fingerprint")
+        or ""
+    ).strip()
+    current_fingerprint = _schedule_execution_input_fingerprint(sched)
+    if not reason and running_fingerprint and running_fingerprint != current_fingerprint:
+        reason = "execution_input_changed"
+
+    message_id = ""
+    if not reason:
+        task_cfg = sched.get("task") if isinstance(sched.get("task"), dict) else {}
+        current_message = str(task_cfg.get("message") or "").strip()
+        scheduled_user = _scheduled_user_message_for_running_execution(sched, running)
+        if isinstance(scheduled_user, dict):
+            previous_message = _scheduled_chat_message_text(scheduled_user)
+            if previous_message and current_message and previous_message != current_message:
+                reason = "execution_input_message_changed"
+                message_id = str(scheduled_user.get("id") or "").strip()
+
+    if not reason:
+        return None
+
+    started_at, started_dt = _running_execution_started_at(sched)
+    execution_id = str(running.get("execution_id") or "").strip()
+    if not execution_id:
+        execution_id = "sexec_recovered_" + gen_id()
+    details = {
+        "execution_id": execution_id,
+        "started_at": started_at or (started_dt.strftime("%Y-%m-%dT%H:%M:%SZ") if started_dt else timestamp()),
+        "trigger": _running_execution_trigger(sched),
+        "timeout_seconds": _running_execution_timeout_seconds(sched),
+        "obsolete_reason": reason,
+        "input_fingerprint": running_fingerprint,
+        "current_input_fingerprint": current_fingerprint,
+    }
+    if message_id:
+        details["scheduled_user_message_id"] = message_id
+    return details
+
+
+def _recoverable_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
+    obsolete = _obsolete_running_execution(sched)
+    if obsolete is not None:
+        obsolete["recovery_kind"] = "obsolete"
+        return obsolete
+    stale = _stale_running_execution(sched)
+    if stale is not None:
+        stale["recovery_kind"] = "stale"
+        return stale
+    return None
+
+
 def _active_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
     running = _running_execution_details(sched)
     if running is None:
         return None
-    if _stale_running_execution(sched) is not None:
+    if _recoverable_running_execution(sched) is not None:
         return None
     started_at, _started_dt = _running_execution_started_at(sched)
     execution_id = str(running.get("execution_id") or "").strip()
@@ -1051,12 +1193,20 @@ class Scheduler:
                     if not isinstance(updates["task"], dict):
                         raise ValueError("task must be a dict")
                     # Merge with existing task
-                    merged_task = dict(sched.get("task", {}))
+                    old_task = dict(sched.get("task", {}))
+                    old_input_fingerprint = _schedule_execution_input_fingerprint(sched)
+                    merged_task = dict(old_task)
                     merged_task.update(updates["task"])
                     if not merged_task.get("message"):
                         raise ValueError("task.message cannot be empty")
-                    sched["task"] = merged_task
-                    changed = True
+                    if merged_task != old_task:
+                        running = _running_execution_details(sched)
+                        if isinstance(running, dict):
+                            running.setdefault("input_fingerprint", old_input_fingerprint)
+                            running["obsolete_reason"] = "execution_input_changed"
+                            running["obsolete_at"] = timestamp()
+                        sched["task"] = merged_task
+                        changed = True
                     continue
                 sched[key] = updates[key]
                 changed = True
@@ -1371,7 +1521,7 @@ class Scheduler:
             sched = self._schedules.get(schedule_id)
             if sched is None:
                 return False
-            stale = _stale_running_execution(sched)
+            stale = _recoverable_running_execution(sched)
             if stale is None:
                 return False
             stale_execution_id = stale["execution_id"]
@@ -1385,21 +1535,39 @@ class Scheduler:
 
         try:
             completed_at = timestamp()
-            history_entry = {
-                "execution_id": stale["execution_id"],
-                "schedule_id": schedule_id,
-                "started_at": stale["started_at"],
-                "completed_at": completed_at,
-                "status": "error",
-                "trigger": stale["trigger"],
-                "result": None,
-                "error": _scheduler_timeout_error(stale["timeout_seconds"]),
-                "timeout_seconds": stale["timeout_seconds"],
-                "recovered_stale_running_execution": True,
-            }
+            if stale.get("recovery_kind") == "obsolete":
+                history_entry = {
+                    "execution_id": stale["execution_id"],
+                    "schedule_id": schedule_id,
+                    "started_at": stale["started_at"],
+                    "completed_at": completed_at,
+                    "status": "obsolete",
+                    "trigger": stale["trigger"],
+                    "result": None,
+                    "error": None,
+                    "obsolete_reason": stale.get("obsolete_reason") or "execution_input_changed",
+                    "recovered_obsolete_running_execution": True,
+                    "input_fingerprint": stale.get("input_fingerprint") or "",
+                    "current_input_fingerprint": stale.get("current_input_fingerprint") or "",
+                }
+                if stale.get("scheduled_user_message_id"):
+                    history_entry["scheduled_user_message_id"] = stale.get("scheduled_user_message_id")
+            else:
+                history_entry = {
+                    "execution_id": stale["execution_id"],
+                    "schedule_id": schedule_id,
+                    "started_at": stale["started_at"],
+                    "completed_at": completed_at,
+                    "status": "error",
+                    "trigger": stale["trigger"],
+                    "result": None,
+                    "error": _scheduler_timeout_error(stale["timeout_seconds"]),
+                    "timeout_seconds": stale["timeout_seconds"],
+                    "recovered_stale_running_execution": True,
+                }
             task_cfg = sched.get("task", {}) if isinstance(sched.get("task"), dict) else {}
             conversation_id = str(task_cfg.get("conversation_id") or "").strip()
-            if conversation_id:
+            if conversation_id and stale.get("recovery_kind") != "obsolete":
                 stored_error = _ensure_scheduled_chat_error_message(
                     conversation_id=conversation_id,
                     schedule_id=schedule_id,
@@ -1490,15 +1658,18 @@ class Scheduler:
             sched = self._schedules.get(schedule_id)
         if sched is None:
             return
+        marked_at = timestamp()
         sched["running_execution"] = {
             "execution_id": execution_id,
             "schedule_id": schedule_id,
             "started_at": started_at,
+            "marked_at": marked_at,
             "trigger": trigger,
             "timeout_seconds": timeout_seconds,
+            "input_fingerprint": _schedule_execution_input_fingerprint(sched),
         }
         sched["running_started_at"] = started_at
-        sched["updated_at"] = timestamp()
+        sched["updated_at"] = marked_at
         save_schedule(sched)
         with self._lock:
             self._schedules[schedule_id] = sched
