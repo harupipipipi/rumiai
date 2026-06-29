@@ -1311,7 +1311,10 @@ class ChatRunEngine:
                 not stream_mode
                 and should_create_subagent_durable_draft(prepared.conversation, context)
             )
-            if stream_mode or durable_subagent_draft:
+            durable_scheduled_mimo_followup_draft = (
+                not stream_mode and _scheduled_mimo_approval_followup(prepared)
+            )
+            if stream_mode or durable_subagent_draft or durable_scheduled_mimo_followup_draft:
                 draft = _AssistantDraft(
                     store=self._store,
                     conversation_id=prepared.conversation_id,

@@ -1425,6 +1425,134 @@ def test_stream_engine_treats_consumed_approval_followup_as_idempotent_duplicate
     assert replay.code == "APPROVAL_TOKEN_USED"
 
 
+def test_nonstream_scheduled_mimo_followup_syncs_replay_to_draft_before_summary(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="opencode-go/mimo-v2.5-pro")
+    conversation_id = conversation["id"]
+
+    approved_args = {"owner_id": "local-user", "seat_id": "seat-1"}
+    request = approval.create_approval_request(
+        "tool.desktop_frame",
+        "high",
+        approved_args,
+        details={
+            "tool_name": "desktop_frame",
+            "action": "tool.desktop_frame",
+            "arguments": approved_args,
+            "conversation_id": conversation_id,
+        },
+    )
+    token = approval.approve(request["request_id"])["token"]
+    metadata = {
+        "source": "scheduler_approval_followup",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "approval_followup": {
+            "approval_token": token,
+            "request_id": request["request_id"],
+            "tool_name": "desktop_frame",
+        },
+    }
+    user_message = store.add_message(
+        conversation_id,
+        {
+            "id": "user-scheduled-followup",
+            "role": "user",
+            "content": "continue approved scheduled desktop QA",
+            "metadata": metadata,
+        },
+    )
+    assert store.get_conversation(conversation_id)["current_node_id"] == user_message["id"]
+
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "desktop_frame",
+                "description": "desktop_frame",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation=store.get_conversation(conversation_id),
+        input_data={},
+        request_id="req-scheduled-followup-draft",
+        content=[],
+        metadata=metadata,
+        user_message=user_message,
+        model="opencode-go/mimo-v2.5-pro",
+        params={},
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={"tool_approval_tokens": {"desktop_frame": token}},
+        standard_messages=[{"role": "user", "content": "continue approved scheduled desktop QA"}],
+        user_text="continue approved scheduled desktop QA",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["desktop_frame"],
+        connected_tool_names={"desktop_frame"},
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_execute(self, name, arguments, context):
+        calls.append((name, dict(arguments)))
+        return {"result": "frame captured", "is_error": False, "widget": {"type": "desktop_frame"}}
+
+    observed: dict[str, object] = {}
+
+    def fake_model_turn(self, prepared_arg, working_messages, draft):
+        del prepared_arg, working_messages, draft
+        current = store.get_conversation(conversation_id)
+        current_id = current["current_node_id"]
+        current_message = next(item for item in current["messages"] if item["id"] == current_id)
+        observed["current_role"] = current_message["role"]
+        observed["current_parent_id"] = current_message["parent_id"]
+        observed["current_metadata"] = dict(current_message.get("metadata") or {})
+        observed["current_tool_logs"] = list(current_message.get("tool_logs") or [])
+        raise RuntimeError("summary model blocked")
+        yield
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    engine = ChatRunEngine(store=store)
+    events = list(engine.stream({}, {}, stream_mode=False))
+
+    assert calls == [("desktop_frame", {**approved_args, "approval_token": token})]
+    assert observed["current_role"] == "assistant"
+    assert observed["current_parent_id"] == user_message["id"]
+    assert observed["current_metadata"]["draft"] is True
+    assert observed["current_metadata"]["streaming"] is True
+    assert observed["current_tool_logs"][0]["tool_name"] == "desktop_frame"
+    assert observed["current_tool_logs"][0]["tool_call_id"] == request["request_id"]
+    assert any(event.get("type") == "assistant_message_started" for event in events)
+    assert any(event.get("type") == "task_failed" for event in events)
+    ChatStore._instance = None
+
+
 def test_stream_engine_scheduled_mimo_approval_replay_keeps_tools_for_distinct_followup(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.run_request import PreparedChatRun
