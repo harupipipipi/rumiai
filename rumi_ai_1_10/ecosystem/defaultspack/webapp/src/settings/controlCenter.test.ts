@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { SettingsSection } from "../lib/api";
 import {
+  buildAccountConnectionPrelude,
   buildControlCenterSections,
   controlCenterSectionForField,
   safeSettingsLabel,
@@ -41,7 +42,10 @@ test("settings control center separates computer control from tools", () => {
 
 test("settings control center removes raw labels from normal UI", () => {
   assert.equal(safeSettingsLabel("mimo"), "Mimo model preset");
+  assert.equal(safeSettingsLabel("mimo_model_preset"), "Mimo model preset");
   assert.equal(safeSettingsLabel("computer_use_gradient"), "Automation visual indicator");
+  assert.equal(safeSettingsLabel("computer_use_gradient_enabled"), "Automation visual indicator");
+  assert.equal(safeSettingsLabel("openrouter_auto_mode"), "OpenRouter auto routing");
 
   const sections = buildControlCenterSections([
     {
@@ -60,4 +64,64 @@ test("settings control center removes raw labels from normal UI", () => {
   const modelField = sections.find((section) => section.id === "models_api")?.fields[0];
   assert.equal(modelField?.label, "Mimo model preset");
   assert.equal(modelField?.options?.[0]?.label, "OpenRouter auto routing");
+});
+
+test("account connection prelude disables unsupported Cloudflare backend", () => {
+  const cards = buildAccountConnectionPrelude({
+    apis: {
+      api_keys: [
+        {
+          provider_id: "cloudflare",
+          oauth: {
+            backend_supported: false,
+            connect_enabled: false,
+            connection_status: "missing_scope_config",
+            status_label: "Missing scope config",
+            disabled_reason: "Configure self-host OAuth",
+          },
+        },
+      ],
+    },
+  });
+
+  const cloudflare = cards.find((card) => card.providerId === "cloudflare");
+  assert.equal(cloudflare?.canConnect, false);
+  assert.equal(cloudflare?.connectAction, undefined);
+  assert.equal(cloudflare?.status, "missing_scope_config");
+  assert.equal(cloudflare?.disabledReason, "Configure self-host OAuth");
+  assert.match(cloudflare?.officialAppDescription ?? "", /Official app required/);
+});
+
+test("account connection prelude gives Google a real Workspace OAuth action when connectable", () => {
+  const cards = buildAccountConnectionPrelude({
+    apis: {
+      api_keys: [
+        {
+          provider_id: "google",
+          oauth: {
+            supported: true,
+            backend_supported: true,
+            client_configured: true,
+            connect_enabled: true,
+            connection_status: "not_connected",
+            status_label: "Ready to connect",
+            scopes: [
+              "openid",
+              "email",
+              "profile",
+              "https://www.googleapis.com/auth/drive.file",
+              "https://www.googleapis.com/auth/gmail.labels",
+            ],
+          },
+        },
+      ],
+    },
+  });
+
+  const google = cards.find((card) => card.providerId === "google");
+  assert.equal(google?.canConnect, true);
+  assert.deepEqual(google?.connectAction, { providerId: "google", scopeMode: "google_workspace" });
+  assert.equal(google?.scopeMode, "google_workspace");
+  assert.ok(google?.scopes.includes("https://www.googleapis.com/auth/drive.file"));
+  assert.ok(google?.scopes.includes("https://www.googleapis.com/auth/gmail.labels"));
 });

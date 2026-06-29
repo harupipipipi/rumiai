@@ -4,9 +4,10 @@ import base64
 import hashlib
 import os
 import secrets
+import time
 import urllib.parse
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Callable, Literal, Protocol
 
 from .models import ConnectionProvider
 
@@ -36,22 +37,32 @@ class OAuthStateStore(Protocol):
 
 
 class InMemoryOAuthStateStore:
-    def __init__(self) -> None:
+    def __init__(self, now: Callable[[], float] | None = None) -> None:
         self._values: dict[str, dict] = {}
+        self._now = now or time.time
 
     def put(self, state: str, payload: dict, ttl_seconds: int) -> None:
-        self._values[state] = payload
+        ttl = max(0, int(ttl_seconds))
+        self._values[state] = {
+            "payload": dict(payload),
+            "expires_at": self._now() + ttl,
+        }
 
     def pop(self, state: str) -> dict:
         try:
-            return self._values.pop(state)
+            entry = self._values.pop(state)
         except KeyError as exc:
             raise ValueError("Invalid or expired OAuth state") from exc
+        if float(entry.get("expires_at") or 0.0) < self._now():
+            raise ValueError("Invalid or expired OAuth state")
+        payload = entry.get("payload")
+        return dict(payload) if isinstance(payload, dict) else {}
 
 
 class OAuthService:
-    def __init__(self, state_store: OAuthStateStore) -> None:
+    def __init__(self, state_store: OAuthStateStore, state_ttl_seconds: int = 600) -> None:
         self.state_store = state_store
+        self.state_ttl_seconds = max(1, int(state_ttl_seconds))
 
     def start(self, provider: ConnectionProvider, config: OAuthClientConfig, profile_id: str | None = None) -> OAuthStartResponse:
         if provider.oauth is None:
@@ -59,11 +70,14 @@ class OAuthService:
 
         state = secrets.token_urlsafe(32)
         code_verifier = None
+        scopes = config.scopes or provider.oauth.default_scopes
+        if not scopes:
+            raise ValueError(f"Provider {provider.provider_id} is missing OAuth scope configuration")
         params = {
             "response_type": "code",
             "client_id": config.client_id,
             "redirect_uri": config.redirect_uri,
-            "scope": " ".join(config.scopes or provider.oauth.default_scopes),
+            "scope": " ".join(scopes),
             "state": state,
         }
 
@@ -85,11 +99,11 @@ class OAuthService:
                 "provider_id": provider.provider_id,
                 "mode": config.mode,
                 "redirect_uri": config.redirect_uri,
-                "scopes": config.scopes,
+                "scopes": list(scopes),
                 "profile_id": profile_id,
                 "code_verifier": code_verifier,
             },
-            ttl_seconds=600,
+            ttl_seconds=self.state_ttl_seconds,
         )
         return OAuthStartResponse(authorization_url=f"{base_url}?{urllib.parse.urlencode(params)}", state=state, code_verifier=code_verifier)
 

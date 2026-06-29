@@ -17,9 +17,11 @@ import type { SettingsModalRendererProps } from "./types";
 import type { DesktopPermissionStatus, DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import {
   buildControlCenterSections,
+  buildAccountConnectionPrelude,
   filterControlCenterSections,
   mapSettingsSectionId,
   safeSettingsLabel,
+  type AccountConnectionPreludeCard,
   type ControlCenterField,
   type ControlCenterSection,
 } from "../settings/controlCenter";
@@ -262,6 +264,34 @@ function oauthProviderRows(providers: Array<Record<string, unknown>>): Array<Rec
     const oauth = provider.oauth;
     return Boolean(oauth) && typeof oauth === "object" && Boolean((oauth as Record<string, unknown>).supported);
   });
+}
+
+function activeSettingsProfileLabel(settingsValues: Record<string, Record<string, unknown>>, catalog: SettingsModalRendererProps["catalog"]): {
+  label: string;
+  detail: string;
+} {
+  const candidates = [
+    settingsValues.profiles?.active_profile,
+    settingsValues.profiles?.profile_id,
+    settingsValues.profile?.active_profile,
+    settingsValues.profile?.profile_id,
+    settingsValues.models?.active_profile,
+    settingsValues.models?.selected_profile_id,
+    settingsValues.models?.preferred_model,
+    catalog?.settings?.values?.profiles?.active_profile,
+    catalog?.settings?.values?.models?.preferred_model,
+  ].map((value) => String(value ?? "").trim()).filter(Boolean);
+  const label = candidates[0] ?? "";
+  if (!label) {
+    return {
+      label: "No active profile reported",
+      detail: "Profile-aware settings will show live state after the runtime reports a profile.",
+    };
+  }
+  return {
+    label,
+    detail: "Profile-aware settings use the runtime profile currently reported by settings data.",
+  };
 }
 
 function apiRowLabel(api: Record<string, unknown>): string {
@@ -971,6 +1001,7 @@ function ProviderOAuthPanel({
         const draft = clientDrafts[providerId] ?? "";
         const isBusy = busyAction.startsWith(`${providerId}:`);
         const banner = messages[providerId];
+        const oauthSurfaceLabel = providerId === "google" ? "Google AI browser login" : `${providerId} browser login`;
         const stateLabel = connected ? "Connected" : clientConfigured ? "Ready to connect" : "Client config needed";
         const stateTone = connected
           ? "border-emerald-800 bg-emerald-950/20 text-emerald-300"
@@ -983,7 +1014,7 @@ function ProviderOAuthPanel({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h4 className="text-sm font-medium text-zinc-100">{providerId} browser login</h4>
+                  <h4 className="text-sm font-medium text-zinc-100">{oauthSurfaceLabel}</h4>
                   <span className={cn("rounded-full border px-2 py-0.5 text-[11px]", stateTone)}>
                     {stateLabel}
                   </span>
@@ -1006,7 +1037,10 @@ function ProviderOAuthPanel({
                     try {
                       popup = window.open("", `rumi-oauth-${providerId}`, "popup=yes,width=560,height=760");
                       setBusyAction(`${providerId}:start`);
-                      const result = await settingsApiResources.startProviderOAuth(providerId);
+                      const result = await settingsApiResources.startProviderOAuth(
+                        providerId,
+                        providerId === "google" ? { scopeMode: "google_ai" } : undefined,
+                      );
                       if (popup) {
                         popup.location.href = result.authorize_url;
                         popup.focus();
@@ -2876,11 +2910,21 @@ export function SettingsModalRenderer({
   );
   const [settingsSearch, setSettingsSearch] = useState("");
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
+  const [connectionBusy, setConnectionBusy] = useState("");
+  const [connectionMessages, setConnectionMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const controlCenterSections = useMemo(
     () => buildControlCenterSections(settingsSections),
     [settingsSections],
+  );
+  const accountConnectionCards = useMemo(
+    () => buildAccountConnectionPrelude(settingsValues),
+    [settingsValues],
+  );
+  const activeProfile = useMemo(
+    () => activeSettingsProfileLabel(settingsValues, catalog),
+    [catalog, settingsValues],
   );
   const placementManifestMap = useMemo(
     () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
@@ -2962,6 +3006,40 @@ export function SettingsModalRenderer({
   const openSection = (sectionId: string) => {
     setActiveSectionId(mapSettingsSectionId(sectionId) ?? "packs_extensions");
     onOpenSection?.(sectionId);
+  };
+  const refreshConnectionStatus = (providerId: string) => {
+    onSettingChange("apis", "api_keys", { action: "oauth_refresh", provider_id: providerId });
+  };
+  const startAccountConnection = async (card: AccountConnectionPreludeCard) => {
+    if (!card.connectAction) return;
+    let popup: Window | null = null;
+    try {
+      popup = window.open("", `rumi-oauth-${card.providerId}`, "popup=yes,width=560,height=760");
+      setConnectionBusy(`${card.providerId}:start`);
+      const result = await settingsApiResources.startProviderOAuth(card.providerId, { scopeMode: card.scopeMode });
+      if (popup) {
+        popup.location.href = result.authorize_url;
+        popup.focus();
+      } else {
+        window.location.href = result.authorize_url;
+      }
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "success", text: `${card.label} OAuth opened with ${card.scopeMode ?? "default"} scopes.` },
+      }));
+      refreshConnectionStatus(card.providerId);
+    } catch (errorValue) {
+      if (popup && !popup.closed) popup.close();
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : `Failed to start ${card.label} OAuth.`,
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
   };
 
   const renderField = (field: ControlCenterField) => (
@@ -3065,31 +3143,75 @@ export function SettingsModalRenderer({
     if (section.id === "accounts_connections") {
       return (
         <div className="grid gap-3 lg:grid-cols-2">
-          {["Cloudflare", "Google"].map((provider) => (
-            <div key={provider} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium text-zinc-100">{provider}</div>
-                  <p className="mt-1 text-xs leading-5 text-zinc-500">
-                    {provider === "Cloudflare"
-                      ? "Continue Rumi tasks in the user's Cloudflare account when this computer is offline."
-                      : "Connect Gmail and Google Drive capabilities through an explicit OAuth account connection."}
-                  </p>
+          {accountConnectionCards.map((card) => {
+            const isBusy = connectionBusy === `${card.providerId}:start`;
+            const message = connectionMessages[card.providerId];
+            return (
+              <div key={card.providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-zinc-100">{card.label}</div>
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">
+                      {card.description}
+                    </p>
+                  </div>
+                  <span className={cn(
+                    "rounded-full border px-2 py-0.5 text-[10px] font-medium",
+                    card.connected
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                      : card.canConnect
+                        ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
+                        : "border-amber-500/30 bg-amber-500/10 text-amber-200",
+                  )}>
+                    {card.statusLabel}
+                  </span>
                 </div>
-                <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
-                  Not connected
-                </span>
+                {card.scopes.length > 0 && (
+                  <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
+                    Scopes: {card.scopes.join(", ")}
+                  </div>
+                )}
+                {card.disabledReason && (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <p className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
+                      {card.officialAppDescription}
+                    </p>
+                    <p className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
+                      {card.selfHostDescription}
+                    </p>
+                  </div>
+                )}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={!card.canConnect || isBusy}
+                    onClick={() => void startAccountConnection(card)}
+                    title={card.disabledReason || `${card.primaryLabel}${card.scopeMode ? ` using ${card.scopeMode}` : ""}`}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs transition-colors",
+                      !card.canConnect || isBusy
+                        ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
+                        : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
+                    )}
+                  >
+                    {isBusy ? "Opening..." : card.primaryLabel}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => openSection(card.configureSectionId)}
+                    className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+                  >
+                    Configure self-host OAuth
+                  </button>
+                </div>
+                {message && (
+                  <p className={cn("mt-3 text-[11px]", message.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
+                    {message.text}
+                  </p>
+                )}
               </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-100 hover:border-zinc-500">
-                  Connect {provider}
-                </button>
-                <button type="button" className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200">
-                  Configure self-host OAuth
-                </button>
-              </div>
-            </div>
-          ))}
+            );
+          })}
           <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-4 lg:col-span-2">
             <div className="text-sm font-medium text-sky-100">OSS / official app mode</div>
             <p className="mt-1 text-xs leading-5 text-sky-100/75">
@@ -3139,9 +3261,9 @@ export function SettingsModalRenderer({
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">
           <div className="text-xs font-medium uppercase tracking-normal text-zinc-500">Active profile</div>
-          <div className="mt-2 text-sm text-zinc-100">default</div>
+          <div className="mt-2 break-words text-sm text-zinc-100">{activeProfile.label}</div>
           <p className="mt-2 text-xs leading-5 text-zinc-500">
-            Profile-aware settings can report configured, missing, disabled, unapproved, or unavailable states.
+            {activeProfile.detail}
           </p>
         </section>
         <section className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-4">

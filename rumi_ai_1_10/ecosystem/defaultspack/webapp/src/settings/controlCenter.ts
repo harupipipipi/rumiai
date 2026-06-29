@@ -32,12 +32,40 @@ export type ControlCenterSection = {
 };
 
 type SettingsField = SettingsSection["fields"][number];
+type SettingsValues = Record<string, Record<string, unknown>>;
+
+export type AccountConnectionPreludeCard = {
+  providerId: "cloudflare" | "google";
+  label: string;
+  description: string;
+  connected: boolean;
+  statusLabel: string;
+  status: string;
+  canConnect: boolean;
+  connectAction?: {
+    providerId: string;
+    scopeMode?: string;
+  };
+  primaryLabel: string;
+  disabledReason: string;
+  officialAppDescription: string;
+  selfHostDescription: string;
+  configureSectionId: ControlCenterSectionId;
+  scopeMode?: string;
+  scopes: string[];
+};
 
 const BLOCKED_RAW_LABELS = new Map([
   ["mimo", "Mimo model preset"],
   ["computer_use_gradient", "Automation visual indicator"],
   ["openrouter_auto", "OpenRouter auto routing"],
 ]);
+
+const BLOCKED_RAW_LABEL_PATTERNS: Array<[RegExp, string]> = [
+  [/\bmimo(?:[_ -]?(?:model|preset|coding|company|v\d+(?:\.\d+)?))*\b/i, "Mimo model preset"],
+  [/\bcomputer[_ -]?use[_ -]?gradient(?:[_ -]?(?:enabled|color|opacity|mode))*\b/i, "Automation visual indicator"],
+  [/\bopenrouter[_ -]?auto(?:[_ -]?(?:mode|routing|fallback))*\b/i, "OpenRouter auto routing"],
+];
 
 const SECTION_META: Array<Omit<ControlCenterSection, "fields" | "sourceSections">> = [
   {
@@ -192,7 +220,12 @@ export function controlCenterSectionMeta(): ControlCenterSection[] {
 
 export function safeSettingsLabel(value: unknown, fallback: unknown = ""): string {
   const label = String(value ?? fallback ?? "").trim();
-  return BLOCKED_RAW_LABELS.get(label.toLowerCase()) ?? label;
+  const exact = BLOCKED_RAW_LABELS.get(label.toLowerCase());
+  if (exact) return exact;
+  for (const [pattern, replacement] of BLOCKED_RAW_LABEL_PATTERNS) {
+    if (pattern.test(label)) return replacement;
+  }
+  return label;
 }
 
 export function normalizeSettingsField(field: SettingsField): SettingsField {
@@ -309,4 +342,97 @@ function quickSetupScore(field: ControlCenterField): number {
   if (fieldType === "secret" || fieldType === "api_key_setup" || fieldType === "model_select") score += 20;
   if ((field as SettingsField & { advanced?: boolean }).advanced) score -= 40;
   return score;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function oauthStatusForProvider(settingsValues: SettingsValues, providerId: string): Record<string, unknown> {
+  const apiRows = Array.isArray(settingsValues.apis?.api_keys) ? settingsValues.apis.api_keys : [];
+  for (const row of apiRows) {
+    const provider = recordValue(row);
+    if (String(provider.provider_id ?? "").trim() !== providerId) continue;
+    return recordValue(provider.oauth);
+  }
+  const connections = recordValue(settingsValues.accounts_connections?.providers);
+  return recordValue(connections[providerId]);
+}
+
+export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {}): AccountConnectionPreludeCard[] {
+  const definitions: Array<{
+    providerId: AccountConnectionPreludeCard["providerId"];
+    label: string;
+    description: string;
+    fallbackStatus: Record<string, unknown>;
+    scopeMode?: string;
+    configureSectionId: ControlCenterSectionId;
+  }> = [
+    {
+      providerId: "cloudflare",
+      label: "Cloudflare",
+      description: "Continue Rumi tasks in the user's Cloudflare account when this computer is offline.",
+      fallbackStatus: {
+        backend_supported: false,
+        connect_enabled: false,
+        connected: false,
+        connection_status: "missing_scope_config",
+        status_label: "Missing scope config",
+        disabled_reason: "Configure self-host OAuth",
+        scopes: [],
+      },
+      scopeMode: undefined,
+      configureSectionId: "accounts_connections" as const,
+    },
+    {
+      providerId: "google",
+      label: "Google",
+      description: "Connect Google Drive files and Gmail labels through an explicit Workspace OAuth scope mode.",
+      fallbackStatus: {
+        backend_supported: true,
+        connect_enabled: false,
+        connected: false,
+        connection_status: "missing_self_host_config",
+        status_label: "Client config needed",
+        disabled_reason: "Configure self-host OAuth",
+        scopes: [],
+      },
+      scopeMode: "google_workspace",
+      configureSectionId: "models_api" as const,
+    },
+  ];
+  return definitions.map((definition) => {
+    const status = {
+      ...definition.fallbackStatus,
+      ...oauthStatusForProvider(settingsValues, definition.providerId),
+    };
+    const connected = Boolean(status.connected);
+    const canConnect = Boolean(status.connect_enabled);
+    const disabledReason = connected || canConnect ? "" : String(status.disabled_reason || status.status_label || "Configure self-host OAuth");
+    return {
+      providerId: definition.providerId,
+      label: definition.label,
+      description: definition.description,
+      connected,
+      statusLabel: String(status.status_label || (connected ? "Connected" : "Not connected")),
+      status: String(status.connection_status || (connected ? "connected" : "not_connected")),
+      canConnect,
+      connectAction: canConnect
+        ? { providerId: definition.providerId, scopeMode: definition.scopeMode }
+        : undefined,
+      primaryLabel: connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
+      disabledReason,
+      officialAppDescription: "Official app required for hosted broker mode.",
+      selfHostDescription: disabledReason === "Configure self-host OAuth"
+        ? "Configure self-host OAuth with explicit scopes before connecting."
+        : "Self-host OAuth remains available when a client and scopes are configured.",
+      configureSectionId: definition.configureSectionId,
+      scopeMode: definition.scopeMode,
+      scopes: stringList(status.scopes),
+    };
+  });
 }

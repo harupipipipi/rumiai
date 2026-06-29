@@ -96,6 +96,55 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(started["redirect_uri"], "http://127.0.0.1:8766/api/ai/oauth/google/callback")
         self.assertIn("state=", started["authorize_url"])
 
+    def test_google_workspace_scope_mode_matches_drive_gmail_manifest_scopes(self):
+        from domain.ai_client.oauth_store import (
+            save_provider_oauth_client_config,
+            start_provider_oauth,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                save_provider_oauth_client_config("google", self._google_client_json(), pack_root=pack_root)
+                started = start_provider_oauth(
+                    "google",
+                    request_headers={"Host": "127.0.0.1:8766"},
+                    scope_mode="google_workspace",
+                    pack_root=pack_root,
+                )
+
+        self.assertTrue(started["success"], started)
+        self.assertEqual(started["scope_mode"], "google_workspace")
+        self.assertIn("https://www.googleapis.com/auth/drive.file", started["scopes"])
+        self.assertIn("https://www.googleapis.com/auth/gmail.labels", started["scopes"])
+        self.assertNotIn("https://www.googleapis.com/auth/generative-language", started["scopes"])
+        self.assertIn(
+            "scope=openid+email+profile+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file+https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fgmail.labels",
+            started["authorize_url"],
+        )
+
+    def test_cloudflare_oauth_is_not_connectable_until_scopes_are_configured(self):
+        from domain.ai_client.oauth_store import provider_oauth_status, start_provider_oauth
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            status = provider_oauth_status("cloudflare", pack_root=pack_root)
+            started = start_provider_oauth(
+                "cloudflare",
+                request_headers={"Host": "127.0.0.1:8766"},
+                pack_root=pack_root,
+            )
+
+        self.assertFalse(status["supported"])
+        self.assertFalse(status["backend_supported"])
+        self.assertFalse(status["connect_enabled"])
+        self.assertEqual(status["connection_status"], "missing_scope_config")
+        self.assertEqual(status["disabled_reason"], "Configure self-host OAuth")
+        self.assertFalse(started["success"])
+        self.assertEqual(started["status"], "missing_scope_config")
+
     def test_finish_provider_oauth_exchanges_code_and_persists_connection(self):
         from domain.ai_client.oauth_store import (
             finish_provider_oauth,

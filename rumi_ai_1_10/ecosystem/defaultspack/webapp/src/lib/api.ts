@@ -2888,12 +2888,13 @@ export const api = {
     });
   },
 
-  startProviderOAuth(providerId: string) {
-    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scopes: string[] }>("/api/ai/oauth", {
+  startProviderOAuth(providerId: string, options: { scopeMode?: string } = {}) {
+    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scope_mode?: string; scopes: string[] }>("/api/ai/oauth", {
       method: "POST",
       body: JSON.stringify({
         action: "start",
         provider_id: providerId,
+        scope_mode: options.scopeMode,
       }),
     });
   },

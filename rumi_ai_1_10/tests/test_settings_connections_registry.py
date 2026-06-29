@@ -1,4 +1,5 @@
 from core_runtime.connections.registry import ConnectionsRegistry
+from core_runtime.connections.oauth_service import InMemoryOAuthStateStore
 from core_runtime.connections.providers.cloudflare import CLOUDFLARE_PROVIDER
 from core_runtime.connections.providers.google import GOOGLE_PROVIDER
 
@@ -18,3 +19,18 @@ def test_provider_safe_payload_has_no_secret():
     assert payload["selfHostClientSupported"] is True
     assert payload["pkceSupported"] is True
     assert payload["capabilities"][0]["displayName"] == "Read account metadata"
+
+
+def test_oauth_state_store_expires_state():
+    now = 1_000.0
+    store = InMemoryOAuthStateStore(now=lambda: now)
+    store.put("state", {"provider_id": "google"}, ttl_seconds=10)
+
+    now = 1_011.0
+
+    try:
+        store.pop("state")
+    except ValueError as exc:
+        assert str(exc) == "Invalid or expired OAuth state"
+    else:
+        raise AssertionError("expired OAuth state should fail closed")

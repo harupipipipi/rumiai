@@ -883,3 +883,115 @@ test("settings system info shows browser context message when info is null", () 
   assert.match(html, /Rumi Viewerを起動し/);
   assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
 });
+
+test("settings accounts prelude renders actionable Google and disabled Cloudflare states", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "google",
+              oauth: {
+                supported: true,
+                backend_supported: true,
+                client_configured: true,
+                connect_enabled: true,
+                connection_status: "not_connected",
+                status_label: "Ready to connect",
+                scopes: [
+                  "openid",
+                  "email",
+                  "profile",
+                  "https://www.googleapis.com/auth/drive.file",
+                  "https://www.googleapis.com/auth/gmail.labels",
+                ],
+              },
+            },
+            {
+              provider_id: "cloudflare",
+              oauth: {
+                backend_supported: false,
+                connect_enabled: false,
+                connection_status: "missing_scope_config",
+                status_label: "Missing scope config",
+                disabled_reason: "Configure self-host OAuth",
+              },
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Connect Google/);
+  assert.match(html, /Ready to connect/);
+  assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/drive\.file/);
+  assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/gmail\.labels/);
+  assert.match(html, /Connect Cloudflare/);
+  assert.match(html, /Missing scope config/);
+  assert.match(html, /Official app required/);
+  assert.match(html, /Configure self-host OAuth/);
+  assert.match(html, /<button[^>]*disabled=""[^>]*title="Configure self-host OAuth"[^>]*>Connect Cloudflare<\/button>/);
+  assert.doesNotMatch(html, />Not connected</);
+});
+
+test("settings help pane uses reported active profile with fallback when absent", () => {
+  const withProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: { profiles: { active_profile: "workbench/deep-focus" } },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  const withoutProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(withProfile, /workbench\/deep-focus/);
+  assert.doesNotMatch(withProfile, />default</);
+  assert.match(withoutProfile, /No active profile reported/);
+  assert.doesNotMatch(withoutProfile, />default</);
+});

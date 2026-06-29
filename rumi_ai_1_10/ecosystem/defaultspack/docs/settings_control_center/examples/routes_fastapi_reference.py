@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-from typing import Annotated
-
 # Reference implementation. Adapt to the repo's actual HTTP framework.
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
-from .oauth_service import OAuthClientConfig, OAuthService
-from .registry import ConnectionsRegistry
+from core_runtime.connections.oauth_service import OAuthClientConfig, OAuthService
+from core_runtime.connections.registry import ConnectionsRegistry
 
 
 def build_connections_router(registry: ConnectionsRegistry, oauth_service: OAuthService) -> APIRouter:
