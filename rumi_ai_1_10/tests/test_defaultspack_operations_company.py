@@ -200,7 +200,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     qa_schedule = schedules_by_loop["qa_loop"]
     assert kickoff_schedule["task"]["timeout"] == 900
     assert heartbeat_schedule["task"]["timeout"] == 600
-    assert improvement_schedule["task"]["timeout"] == 600
+    assert improvement_schedule["task"]["timeout"] == 1800
     assert qa_schedule["task"]["timeout"] == 1800
     assert improvement_schedule["task"]["conversation_id"] == loop_conversation_ids["improvement_loop"]
     assert qa_schedule["task"]["conversation_id"] == loop_conversation_ids["qa_loop"]
@@ -225,6 +225,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "conversation_running" in qa_schedule["task"]["tool_policy"]["schedule_suppress_external_issue_on"]
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
+    assert "one small, useful, testable change" in improvement_schedule["task"]["message"]
+    assert "Keep repo discovery narrow" in improvement_schedule["task"]["message"]
     assert "Do not create GitHub issues for scheduler bookkeeping noise" in qa_schedule["task"]["message"]
     assert "provider billing/credits/auth failures" in qa_schedule["task"]["message"]
     assert "CreditsError" in qa_schedule["task"]["message"]
@@ -604,7 +606,7 @@ def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until
     schedules_by_loop = {schedule["task"]["metadata"]["loop_key"]: schedule for schedule in status["schedules"]}
     assert schedules_by_loop["kickoff_review"]["task"]["timeout"] == 900
     assert schedules_by_loop["heartbeat"]["task"]["timeout"] == 600
-    assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 600
+    assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 1800
     assert schedules_by_loop["qa_loop"]["task"]["timeout"] == 1800
     qa_schedule = schedules_by_loop["qa_loop"]
     qa_next = datetime.fromisoformat(qa_schedule["next_execution_at"].replace("Z", "+00:00"))
@@ -958,7 +960,7 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
         "once",
         {
             "message": "Dedicated manager schedule.",
-            "model": "opencode-go/mimo-v2.5",
+            "model": "opencode-zen/mimo-v2.5-free",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "project_manager",

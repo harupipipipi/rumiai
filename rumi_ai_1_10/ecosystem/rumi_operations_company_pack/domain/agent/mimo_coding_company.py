@@ -48,6 +48,7 @@ SCHEDULE_CONVERSATION_LANES = {
 }
 SCHEDULE_NOISE_SUPPRESSION_REASONS = {"already_running", "conversation_running", "scheduled_timeout"}
 DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS = 600
+IMPROVEMENT_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
 QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
 DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
 DEFAULT_DOCKER_WORKER_COUNT = 3
@@ -713,6 +714,7 @@ class MimoCodingCompanyRuntime:
                 agent_id="project_manager",
                 tools=["rumi_api", "todo", "subagent", "knowledge_search", "knowledge_create", "web_search"],
                 description="Self-improvement loop for coding, provider, and tooling work.",
+                timeout_seconds=IMPROVEMENT_LOOP_SCHEDULE_TIMEOUT_SECONDS,
             )
             self._ensure_interval_schedule(
                 state,
@@ -2761,12 +2763,13 @@ class MimoCodingCompanyRuntime:
         focus_items = self._autonomy_board(state).get("next_focus", [])
         focus = "; ".join(str(item.get("title") or item.get("id") or "") for item in focus_items[:3] if isinstance(item, dict))
         return (
-            "Run the self-improvement loop. Keep prompts short. Pick one stream"
+            "Run the self-improvement loop. Keep prompts short and choose one small, useful, testable change. Pick one stream"
             + (": " + focus if focus else "")
             + ". Use "
             + main_model
-            + " as the main reasoning model. If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
-            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change, then capture what changed in knowledge. "
+            + " as the main reasoning model. Keep repo discovery narrow, prefer focused defaults/tests/tooling fixes, and avoid broad refactors. "
+            "If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
+            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change with focused tests, then capture what changed in knowledge. "
             + self._scheduler_noise_prompt()
         )
 
