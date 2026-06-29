@@ -40,6 +40,9 @@ DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5-pro"
 DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
 DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5-pro"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
+DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS = 600
+QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
+DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
 DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
@@ -702,6 +705,7 @@ class MimoCodingCompanyRuntime:
                     "web_search",
                 ],
                 description="Persona-based browser/computer-use QA loop.",
+                timeout_seconds=QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
             )
             self._pause_stale_mimo_schedules(state)
         state["last_bootstrapped_at"] = timestamp()
@@ -2091,8 +2095,10 @@ class MimoCodingCompanyRuntime:
         agent_id: str,
         tools: list[str],
         description: str,
+        timeout_seconds: int = DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS,
     ) -> str | None:
         safe_minutes = max(1, min(int(minutes or 1), 1440))
+        safe_timeout_seconds = max(1, int(timeout_seconds or DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS))
         schedule_ids = state.setdefault("schedule_ids", {})
         scheduler = Scheduler()
         existing_id = schedule_ids.get(key)
@@ -2100,7 +2106,7 @@ class MimoCodingCompanyRuntime:
             "message": message,
             "model": model,
             "conversation_id": state.get("conversation_id"),
-            "timeout": 600,
+            "timeout": safe_timeout_seconds,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
             "thinking_level": "high",
@@ -2152,7 +2158,7 @@ class MimoCodingCompanyRuntime:
             "message": message,
             "model": model,
             "conversation_id": state.get("conversation_id"),
-            "timeout": 900,
+            "timeout": DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS,
             "profile_id": PROFILE_ID,
             "agent_id": agent_id,
             "thinking_level": "high",

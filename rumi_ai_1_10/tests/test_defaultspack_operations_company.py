@@ -187,8 +187,15 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     loop_keys = {schedule["task"]["metadata"]["loop_key"] for schedule in status["schedules"]}
     assert {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"} <= loop_keys
     assert any(schedule["task"]["agent_id"] == "browser_qa" for schedule in status["schedules"])
-    heartbeat_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "heartbeat")
-    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    schedules_by_loop = {schedule["task"]["metadata"]["loop_key"]: schedule for schedule in status["schedules"]}
+    kickoff_schedule = schedules_by_loop["kickoff_review"]
+    heartbeat_schedule = schedules_by_loop["heartbeat"]
+    improvement_schedule = schedules_by_loop["improvement_loop"]
+    qa_schedule = schedules_by_loop["qa_loop"]
+    assert kickoff_schedule["task"]["timeout"] == 900
+    assert heartbeat_schedule["task"]["timeout"] == 600
+    assert improvement_schedule["task"]["timeout"] == 600
+    assert qa_schedule["task"]["timeout"] == 1800
     assert heartbeat_schedule["task"]["tool_policy"]["max_tool_calls"] is None
     assert heartbeat_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
     assert qa_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
@@ -566,7 +573,12 @@ def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until
 
     saved_state = json.loads(state_path.read_text(encoding="utf-8"))
     bootstrapped_at = datetime.fromisoformat(saved_state["last_bootstrapped_at"].replace("Z", "+00:00"))
-    qa_schedule = next(schedule for schedule in status["schedules"] if schedule["task"]["metadata"]["loop_key"] == "qa_loop")
+    schedules_by_loop = {schedule["task"]["metadata"]["loop_key"]: schedule for schedule in status["schedules"]}
+    assert schedules_by_loop["kickoff_review"]["task"]["timeout"] == 900
+    assert schedules_by_loop["heartbeat"]["task"]["timeout"] == 600
+    assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 600
+    assert schedules_by_loop["qa_loop"]["task"]["timeout"] == 1800
+    qa_schedule = schedules_by_loop["qa_loop"]
     qa_next = datetime.fromisoformat(qa_schedule["next_execution_at"].replace("Z", "+00:00"))
     assert qa_schedule["status"] == "active"
     assert qa_next > bootstrapped_at
