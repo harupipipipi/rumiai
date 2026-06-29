@@ -56,6 +56,24 @@ SUBAGENT_GAP_GRACE_SECONDS = 300
 MIMO_OBSERVABILITY_HISTORY_LIMIT = 5
 MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE = timedelta(hours=1)
 MIMO_CURRENT_OBSERVABILITY_MODELS = {DEFAULT_MAIN_MODEL, DEFAULT_VISION_MODEL}
+MIMO_PROVIDER_ID = "opencode-go"
+MIMO_PROVIDER_DISPLAY = "OpenCode Go"
+PROVIDER_HEALTH_BLOCKER_SIGNAL = "provider_health_blocker"
+PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY = "provider_health_only"
+PROVIDER_HEALTH_BLOCKER_PATTERNS = (
+    ("credits_error", ("creditserror", "credits error")),
+    (
+        "insufficient_balance",
+        (
+            "insufficient balance",
+            "insufficient credits",
+            "not enough credits",
+            "out of credits",
+            "balance is insufficient",
+        ),
+    ),
+    ("http_401", ("http 401", "status 401", "401 unauthorized", "unauthorized: 401", "401: unauthorized")),
+)
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -1556,12 +1574,25 @@ class MimoCodingCompanyRuntime:
             return True
         return status not in TERMINAL_TASK_STATUSES
 
+    @staticmethod
+    def _provider_health_baseline(state: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "status": "unknown",
+            "blocked": False,
+            "provider": MIMO_PROVIDER_ID,
+            "provider_name": MIMO_PROVIDER_DISPLAY,
+            "configured_model": str(state.get("main_model") or DEFAULT_MAIN_MODEL),
+            "external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
+            "signals": [],
+        }
+
     def _sync_company_observability(self, state: dict[str, Any]) -> dict[str, Any]:
         summary: dict[str, Any] = {
             "status": "ok",
             "company_id": COMPANY_ID,
             "channel_id": "ops-company",
             "team_workspace": {"synced_messages": 0},
+            "provider_health": self._provider_health_baseline(state),
             "schedule_history": {"checked": 0, "latest": [], "signals": []},
             "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": []},
             "desktop_monitoring": {
@@ -1586,25 +1617,42 @@ class MimoCodingCompanyRuntime:
                     summary["schedule_history"]["latest"].append(latest)
                     if latest.get("signal"):
                         summary["schedule_history"]["signals"].append(latest)
+                    provider_health = latest.get("provider_health")
+                    if isinstance(provider_health, dict):
+                        summary["status"] = "provider_blocked"
+                        summary["provider_health"].update(
+                            {
+                                "status": "blocked",
+                                "blocked": True,
+                                "blocked_reason": provider_health.get("reason"),
+                                "configured_model": provider_health.get("configured_model") or DEFAULT_MAIN_MODEL,
+                                "last_observed_at": latest.get("completed_at") or latest.get("started_at"),
+                            }
+                        )
+                        summary["provider_health"]["signals"].append(deepcopy(provider_health))
                     if latest.get("suppressed"):
                         continue
                     sync_key = "schedule:" + str(entry.get("execution_id") or "").strip()
                     if sync_key == "schedule:" or sync_key in known_sync_keys:
                         continue
+                    message_metadata = {
+                        "sync_source": "mimo_schedule_history",
+                        "sync_key": sync_key,
+                        "loop_key": loop_key,
+                        "schedule_id": str(entry.get("schedule_id") or schedule_id),
+                        "execution_id": str(entry.get("execution_id") or ""),
+                        "status": str(entry.get("status") or ""),
+                        "signal": latest.get("signal"),
+                    }
+                    if isinstance(provider_health, dict):
+                        message_metadata["provider_health"] = deepcopy(provider_health)
+                        message_metadata["external_issue_policy"] = PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY
                     runtime_store.add_message(
                         COMPANY_ID,
                         channel_id="ops-company",
                         sender_id=str((schedule or {}).get("task", {}).get("agent_id") or "scheduler"),
                         content=self._schedule_history_message(loop_key, schedule, entry),
-                        metadata={
-                            "sync_source": "mimo_schedule_history",
-                            "sync_key": sync_key,
-                            "loop_key": loop_key,
-                            "schedule_id": str(entry.get("schedule_id") or schedule_id),
-                            "execution_id": str(entry.get("execution_id") or ""),
-                            "status": str(entry.get("status") or ""),
-                            "signal": latest.get("signal"),
-                        },
+                        metadata=message_metadata,
                     )
                     known_sync_keys.add(sync_key)
                     synced += 1
@@ -1670,6 +1718,7 @@ class MimoCodingCompanyRuntime:
             }
             summary["schedule_history"]["latest"] = summary["schedule_history"]["latest"][-12:]
             summary["schedule_history"]["signals"] = summary["schedule_history"]["signals"][-12:]
+            summary["provider_health"]["signals"] = summary["provider_health"]["signals"][-12:]
             summary["subagents"]["unanswered"] = summary["subagents"]["unanswered"][:10]
             return summary
         except Exception as exc:
@@ -1872,7 +1921,10 @@ class MimoCodingCompanyRuntime:
         text = (str(entry.get("error") or "") + "\n" + str(entry.get("result") or "")).lower()
         signal = ""
         suppressed_reason = MimoCodingCompanyRuntime._schedule_noise_suppression_reason(schedule, entry, text)
-        if "subagent" in text and ("timeout" in text or "timed out" in text):
+        provider_health = MimoCodingCompanyRuntime._provider_health_blocker(schedule, entry, text)
+        if provider_health:
+            signal = PROVIDER_HEALTH_BLOCKER_SIGNAL
+        elif "subagent" in text and ("timeout" in text or "timed out" in text):
             signal = "subagent_timeout"
         elif "handler execution failed" in text or ("rumi_api" in text and "fail" in text):
             signal = "tool_handler_failure"
@@ -1887,9 +1939,9 @@ class MimoCodingCompanyRuntime:
             signal = "approval_wait"
         elif str(entry.get("status") or "").lower() == "error" or entry.get("error"):
             signal = "schedule_error"
-        if suppressed_reason:
+        if suppressed_reason and signal != PROVIDER_HEALTH_BLOCKER_SIGNAL:
             signal = ""
-        return {
+        observation = {
             "loop_key": loop_key,
             "schedule_id": str(entry.get("schedule_id") or (schedule or {}).get("id") or ""),
             "schedule_name": str((schedule or {}).get("name") or ""),
@@ -1901,6 +1953,63 @@ class MimoCodingCompanyRuntime:
             "signal": signal,
             "suppressed": bool(suppressed_reason),
             "suppressed_reason": suppressed_reason,
+        }
+        if provider_health:
+            observation["provider_health"] = provider_health
+            observation["external_blocker"] = True
+        return observation
+
+    @staticmethod
+    def _provider_health_blocker(
+        schedule: dict[str, Any] | None,
+        entry: dict[str, Any],
+        lowered_text: str | None = None,
+    ) -> dict[str, Any] | None:
+        task = schedule.get("task") if isinstance(schedule, dict) and isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        configured_model = str(
+            task.get("model")
+            or metadata.get("model")
+            or entry.get("model")
+            or ""
+        ).strip()
+        text = lowered_text if lowered_text is not None else (str(entry.get("error") or "") + "\n" + str(entry.get("result") or "")).lower()
+        model_text = configured_model.lower()
+        mentions_current_mimo = (
+            model_text == DEFAULT_MAIN_MODEL.lower()
+            or DEFAULT_MAIN_MODEL.lower() in text
+            or (MIMO_PROVIDER_ID in text and "mimo-v2.5" in text)
+        )
+        if not mentions_current_mimo:
+            return None
+
+        matched_reason = ""
+        evidence: list[str] = []
+        for reason, patterns in PROVIDER_HEALTH_BLOCKER_PATTERNS:
+            if any(pattern in text for pattern in patterns):
+                if not matched_reason:
+                    matched_reason = reason
+                if reason == "credits_error":
+                    evidence.append("CreditsError")
+                elif reason == "insufficient_balance":
+                    evidence.append("insufficient balance")
+                elif reason == "http_401":
+                    evidence.append("HTTP 401")
+        if not matched_reason:
+            return None
+
+        deduped_evidence = list(dict.fromkeys(evidence))
+        return {
+            "status": "blocked",
+            "blocked": True,
+            "signal": PROVIDER_HEALTH_BLOCKER_SIGNAL,
+            "provider": MIMO_PROVIDER_ID,
+            "provider_name": MIMO_PROVIDER_DISPLAY,
+            "configured_model": configured_model or DEFAULT_MAIN_MODEL,
+            "reason": matched_reason,
+            "evidence": deduped_evidence,
+            "external_blocker": True,
+            "external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
         }
 
     @staticmethod
@@ -1935,6 +2044,25 @@ class MimoCodingCompanyRuntime:
     def _schedule_history_message(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> str:
         status = str(entry.get("status") or "unknown")
         name = str((schedule or {}).get("name") or loop_key)
+        provider_health = MimoCodingCompanyRuntime._provider_health_blocker(schedule, entry)
+        if provider_health:
+            evidence = provider_health.get("evidence") if isinstance(provider_health.get("evidence"), list) else []
+            evidence_text = ", ".join("`" + str(item) + "`" for item in evidence if str(item or "").strip()) or "`provider billing/auth failure`"
+            return "\n".join(
+                [
+                    "**MiMo provider-health blocker: OpenCode Go externally blocked**",
+                    f"- Loop: `{loop_key}`",
+                    f"- Schedule: `{entry.get('schedule_id') or (schedule or {}).get('id') or ''}`",
+                    f"- Execution: `{entry.get('execution_id') or ''}`",
+                    f"- Provider: `{provider_health.get('provider')}`",
+                    f"- Configured model: `{provider_health.get('configured_model')}`",
+                    f"- Reason: `{provider_health.get('reason')}`",
+                    f"- Evidence: {evidence_text}",
+                    f"- External issue policy: `{provider_health.get('external_issue_policy')}`",
+                    "",
+                    "Treat this as an external provider billing/auth blocker. Do not create GitHub issues for it, do not count it as evidence-backed QA, and keep Gemma/vision QA monitoring active.",
+                ]
+            )
         body = str(entry.get("error") or entry.get("result") or "").strip()
         if len(body) > 2400:
             body = body[:2400].rstrip() + "\n\n... truncated by MiMo Team Workspace sync ..."
@@ -2260,6 +2388,8 @@ class MimoCodingCompanyRuntime:
             "schedule_auto_approve_max_followups": "unlimited",
             "schedule_failure_external_issue_policy": "blocked_only",
             "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
+            "provider_health_external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
+            "provider_health_blocker_signal": PROVIDER_HEALTH_BLOCKER_SIGNAL,
         }
         if state.get("workspace_id"):
             policy["workspace_id"] = state["workspace_id"]
@@ -2305,6 +2435,8 @@ class MimoCodingCompanyRuntime:
                 "schedule_lane": SCHEDULE_CONVERSATION_LANES.get(key, key),
                 "schedule_failure_external_issue_policy": "blocked_only",
                 "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
+                "provider_health_external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
+                "provider_health_blocker_signal": PROVIDER_HEALTH_BLOCKER_SIGNAL,
                 **self._workspace_metadata(
                     workspace_id=state.get("workspace_id"),
                     workspace_label=state.get("workspace_label"),
@@ -2364,6 +2496,8 @@ class MimoCodingCompanyRuntime:
                 "schedule_lane": SCHEDULE_CONVERSATION_LANES.get(key, key),
                 "schedule_failure_external_issue_policy": "blocked_only",
                 "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
+                "provider_health_external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
+                "provider_health_blocker_signal": PROVIDER_HEALTH_BLOCKER_SIGNAL,
                 **self._workspace_metadata(
                     workspace_id=state.get("workspace_id"),
                     workspace_label=state.get("workspace_label"),
@@ -2670,5 +2804,7 @@ class MimoCodingCompanyRuntime:
         return (
             "Do not create GitHub issues for scheduler bookkeeping noise such as CONVERSATION_RUNNING, "
             "already_running, or a single scheduled task timeout; only externalize repeated, evidence-backed blockers "
-            "after an in-loop fix is blocked."
+            "after an in-loop fix is blocked. Treat provider billing/credits/auth failures such as CreditsError, "
+            "insufficient balance, or HTTP 401 from the configured MiMo/OpenCode Go model as provider-health blockers, "
+            "not QA bugs; report status without secrets and keep Gemma/vision QA monitoring active."
         )

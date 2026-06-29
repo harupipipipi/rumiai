@@ -1142,6 +1142,60 @@ def test_desktop_frame_tool_overwrites_payload_owner_with_trusted_context(monkey
     assert context["principal_id"] == "agent-1"
 
 
+def test_defaultspack_desktop_tools_use_local_owner_but_keep_agent_identity(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((dict(payload), dict(context)))
+            if payload["_handler"] == "desktop_frame":
+                return {
+                    "_binary": True,
+                    "content_type": "image/png",
+                    "body": b"fake-png",
+                    "headers": {},
+                }
+            if payload["_handler"] == "desktop_ai_input":
+                return {"status": "ok", "data": {"ok": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {
+            "workspace_root": str(tmp_path),
+            "owner_pack": "defaultspack",
+            "source": "scheduler_approval_followup",
+            "agent_id": "browser_qa",
+        },
+        {"action": "allow", "allowed": True},
+    )
+
+    frame = desktop_tools.desktop_frame({"desktop_id": "seat-1"}, context)
+    input_result = desktop_tools.desktop_input(
+        {"desktop_id": "seat-1", "action": "click", "x": 1, "y": 2},
+        context,
+    )
+
+    assert frame["status"] == "ok"
+    assert input_result["status"] == "ok"
+    frame_payload, frame_context = fake_api.calls[0]
+    input_payload, input_context = fake_api.calls[1]
+    assert frame_payload["owner_id"] == "local-user"
+    assert frame_payload["access_owner_id"] == "local-user"
+    assert frame_context["principal_id"] == "local-user"
+    assert frame_context["agent_id"] == "browser_qa"
+    assert input_payload["owner_id"] == "local-user"
+    assert input_payload["access_owner_id"] == "local-user"
+    assert input_payload["agent_id"] == "browser_qa"
+    assert input_context["principal_id"] == "local-user"
+    assert input_context["agent_id"] == "browser_qa"
+
+
 def test_desktop_input_tool_generates_client_action_id_when_manifest_omits_it(tmp_path, monkeypatch):
     from domain.tool import desktop_tools
     from domain.tool_policy.internal_context import seal_tool_context

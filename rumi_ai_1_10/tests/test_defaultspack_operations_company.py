@@ -210,6 +210,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         assert schedule["task"]["metadata"]["parent_conversation_id"] == status["conversation_id"]
         assert schedule["task"]["metadata"]["schedule_failure_external_issue_policy"] == "blocked_only"
         assert "scheduled_timeout" in schedule["task"]["metadata"]["schedule_suppress_external_issue_on"]
+        assert schedule["task"]["metadata"]["provider_health_external_issue_policy"] == "provider_health_only"
+        assert schedule["task"]["metadata"]["provider_health_blocker_signal"] == "provider_health_blocker"
         loop_conversation = ChatStore().get_conversation(schedule["task"]["conversation_id"])
         assert loop_conversation["parent_conversation_id"] == status["conversation_id"]
         assert loop_conversation["conversation_kind"] == "mimo_coding_company_loop"
@@ -217,10 +219,15 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert heartbeat_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
     assert qa_schedule["task"]["tool_policy"]["schedule_initial_tool_choice"] == "required"
     assert qa_schedule["task"]["tool_policy"]["schedule_failure_external_issue_policy"] == "blocked_only"
+    assert qa_schedule["task"]["tool_policy"]["provider_health_external_issue_policy"] == "provider_health_only"
+    assert qa_schedule["task"]["tool_policy"]["provider_health_blocker_signal"] == "provider_health_blocker"
     assert "conversation_running" in qa_schedule["task"]["tool_policy"]["schedule_suppress_external_issue_on"]
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert "Do not create GitHub issues for scheduler bookkeeping noise" in qa_schedule["task"]["message"]
+    assert "provider billing/credits/auth failures" in qa_schedule["task"]["message"]
+    assert "CreditsError" in qa_schedule["task"]["message"]
+    assert "HTTP 401" in qa_schedule["task"]["message"]
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(qa_schedule["task"]["tools"])
     auto_approve_allowlist = set(qa_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "rumi_api" not in auto_approve_allowlist
@@ -1392,6 +1399,119 @@ def test_mimo_coding_company_observability_suppresses_expected_schedule_noise(tm
     assert summary["team_workspace"]["synced_messages"] == 1
     assert total == 1
     assert messages[0]["metadata"]["execution_id"] == "exec_real_error"
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        DEFAULT_MAIN_MODEL,
+        DEFAULT_VISION_MODEL,
+        MimoCodingCompanyRuntime,
+    )
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+        }),
+    )
+
+    parent = ChatStore().create_conversation(
+        model=DEFAULT_MAIN_MODEL,
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {
+            "message": "Improvement loop.",
+            "model": DEFAULT_MAIN_MODEL,
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "project_manager",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "improvement_loop",
+            },
+        },
+        {"value": 30, "unit": "minutes"},
+        name="MiMo Coding Company improvement loop",
+    )
+    append_history(
+        schedule["id"],
+        {
+            "schedule_id": schedule["id"],
+            "execution_id": "exec_mimo_credits_blocker",
+            "trigger": "scheduled",
+            "status": "error",
+            "started_at": "2026-06-29T01:30:00Z",
+            "completed_at": "2026-06-29T01:30:08Z",
+            "error": (
+                "CreditsError: insufficient balance for opencode-go/mimo-v2.5. "
+                "HTTP 401 Unauthorized. Authorization: Bearer sk-test-secret"
+            ),
+        },
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    summary = runtime._sync_company_observability(
+        {
+            "conversation_id": parent["id"],
+            "conversation_group_id": "company:mimo-coding-company",
+            "main_model": DEFAULT_MAIN_MODEL,
+            "vision_model": DEFAULT_VISION_MODEL,
+            "schedule_ids": {"improvement_loop": schedule["id"]},
+        }
+    )
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
+
+    latest = summary["schedule_history"]["latest"][0]
+    provider_health = summary["provider_health"]
+    assert summary["status"] == "provider_blocked"
+    assert latest["signal"] == "provider_health_blocker"
+    assert latest["external_blocker"] is True
+    assert latest["provider_health"]["configured_model"] == DEFAULT_MAIN_MODEL
+    assert latest["provider_health"]["reason"] == "credits_error"
+    assert {"CreditsError", "insufficient balance", "HTTP 401"} <= set(latest["provider_health"]["evidence"])
+    assert provider_health["status"] == "blocked"
+    assert provider_health["blocked"] is True
+    assert provider_health["configured_model"] == DEFAULT_MAIN_MODEL
+    assert provider_health["blocked_reason"] == "credits_error"
+    assert provider_health["signals"][0]["signal"] == "provider_health_blocker"
+    assert total == 1
+    assert messages[0]["metadata"]["signal"] == "provider_health_blocker"
+    assert messages[0]["metadata"]["external_issue_policy"] == "provider_health_only"
+    assert messages[0]["metadata"]["provider_health"]["configured_model"] == DEFAULT_MAIN_MODEL
+    assert "provider-health blocker" in messages[0]["content"]
+    assert DEFAULT_MAIN_MODEL in messages[0]["content"]
+    assert "CreditsError" in messages[0]["content"]
+    assert "insufficient balance" in messages[0]["content"]
+    assert "HTTP 401" in messages[0]["content"]
+    assert "Do not create GitHub issues" in messages[0]["content"]
+    assert "Gemma/vision QA monitoring active" in messages[0]["content"]
+    assert "Authorization" not in messages[0]["content"]
+    assert "sk-test-secret" not in messages[0]["content"]
 
     scheduler.delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()

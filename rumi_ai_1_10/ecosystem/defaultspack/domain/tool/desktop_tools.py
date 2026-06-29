@@ -178,6 +178,10 @@ def _trusted_desktop_context(context: dict[str, Any] | None) -> tuple[dict[str, 
 
 
 def _trusted_owner_id(context: dict[str, Any]) -> str:
+    if context.get("flow_id") == "transport_direct" or context.get("owner_pack") == "defaultspack":
+        return "local-user"
+    if context.get("source") == "defaultspack_local_ui":
+        return "local-user"
     for key in (
         "principal_id",
         "actor_id",
@@ -191,10 +195,6 @@ def _trusted_owner_id(context: dict[str, Any]) -> str:
         text = str(context.get(key) or "").strip()
         if text:
             return text[:160]
-    if context.get("flow_id") == "transport_direct" or context.get("owner_pack") == "defaultspack":
-        return "local-user"
-    if context.get("source") == "defaultspack_local_ui":
-        return "local-user"
     return ""
 
 
