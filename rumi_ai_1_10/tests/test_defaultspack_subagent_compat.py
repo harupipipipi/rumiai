@@ -88,6 +88,18 @@ def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(mo
     assert seen["conversation_id"] == "conv_1"
 
 
+def test_agent_subagent_http_route_gets_long_running_timeout():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    assert (
+        DefaultsHttpServer._fallback_function_timeout_seconds(
+            "blocks.agent.run_subagent",
+            {},
+        )
+        == 300.0
+    )
+
+
 def test_agent_run_subagent_delegate_provider_error_surfaces_safe_text(monkeypatch):
     secret = "sk-subagent-secret"
 
@@ -143,43 +155,53 @@ def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
     assert result["data"]["widget"]["type"] == "subagent"
 
 
-def test_tool_subagent_manifest_timeout_is_forwarded_to_capability_executor():
-    manifest = json.loads(
-        (ROOT / "ecosystem" / "rumi_default_tools_pack" / "tools" / "subagent" / "manifest.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    tool_def = {**manifest["config"], "source_pack_id": "rumi_default_tools_pack"}
+def test_subagent_rumi_function_executes_local_controller(monkeypatch):
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+    tool_def = ToolRegistry().get("subagent")
+    assert tool_def is not None
     seen: dict[str, object] = {}
 
     class FakeCapabilityExecutor:
+        _initialized = True
+
         def execute(self, principal_id, request):
-            seen["principal_id"] = principal_id
-            seen["request"] = dict(request)
-            return SimpleNamespace(
-                success=True,
-                output={
-                    "status": "ok",
-                    "data": {
-                        "result": "subagent completed",
-                        "is_error": False,
-                        "widget": {"type": "subagent"},
-                    },
-                },
-                error=None,
-                error_type=None,
-            )
+            raise AssertionError("subagent must not use capability subprocess dispatch")
+
+    def fake_run(self, arguments, context):
+        seen["arguments"] = dict(arguments)
+        seen["conversation_id"] = context.get("conversation_id")
+        return {
+            "summary": "subagent answered",
+            "child_conversation_id": "child-1",
+            "parent_conversation_id": context.get("conversation_id"),
+        }
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.SubagentController.run",
+        fake_run,
+    )
 
     result = ToolExecutor()._execute_rumi_function(
         tool_def,
         {"task": "hello from child"},
-        {"capability_executor": FakeCapabilityExecutor()},
+        {
+            "conversation_id": "parent-1",
+            "principal_id": "rumi_default_tools_pack",
+            "_tool_server_approved": True,
+            "capability_executor": FakeCapabilityExecutor(),
+        },
     )
 
     assert result["is_error"] is False
-    assert seen["principal_id"] == "rumi_default_tools_pack"
-    assert seen["request"]["qualified_name"] == "defaultspack:tool_subagent"
-    assert seen["request"]["timeout_seconds"] == 240
+    assert result["result"] == "subagent answered"
+    assert result["widget"]["type"] == "subagent"
+    assert result["widget"]["child_conversation_id"] == "child-1"
+    assert seen == {
+        "arguments": {"task": "hello from child"},
+        "conversation_id": "parent-1",
+    }
 
 
 def test_tool_subagent_defaultspack_function_manifest_keeps_long_timeout():

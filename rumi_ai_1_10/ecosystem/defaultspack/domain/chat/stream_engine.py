@@ -1227,6 +1227,7 @@ class ChatRunEngine:
         self._event_seq = 0
         self._cancel_event = threading.Event()
         self._current_stream: Any = None
+        self._external_cancel_checker: Any = None
         self._activity_events: list[dict[str, Any]] = []
         self._tool_logs: list[dict[str, Any]] = []
         self._thinking_transcript_parts: list[str] = []
@@ -1263,6 +1264,7 @@ class ChatRunEngine:
         self._progress_state = {}
         self._cancel_event = threading.Event()
         self._current_stream = None
+        self._external_cancel_checker = context.get("is_cancelled") if isinstance(context, dict) else None
 
         cancellation_registry = get_chat_cancellation_registry()
 
@@ -2355,7 +2357,7 @@ class ChatRunEngine:
                 events=list(self._activity_events),
             )
         if not _tool_use_blocks(response) and not self._response_text(response).strip():
-            retry_params = _params_without_thinking(prepared.params)
+            retry_params = self._empty_response_retry_params(prepared)
             if retry_params != prepared.params:
                 retry_response = self._call_ai_complete_with_retry(
                     prepared.model,
@@ -3023,6 +3025,13 @@ class ChatRunEngine:
         model_warnings: list[str] = []
         if isinstance(prepared.model_routing, dict) and isinstance(prepared.model_routing.get("warnings"), list):
             model_warnings = [str(item) for item in prepared.model_routing.get("warnings", [])]
+        existing_thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+        thinking = {
+            **existing_thinking,
+            "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
+        }
+        if self._thinking_transcript_parts:
+            thinking["transcript"] = "".join(self._thinking_transcript_parts)
         metadata.update(
             {
                 "model": prepared.model,
@@ -3033,10 +3042,7 @@ class ChatRunEngine:
                 "executed_tools": executed_tools,
                 "unattached_requested_tools": unattached_requested_tools,
                 "unknown_selected_tools": unknown_selected_tools,
-                "thinking": {
-                    "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
-                    **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
-                },
+                "thinking": thinking,
                 "thinking_level": prepared.params.get("thinking_level"),
                 "deepthink_enabled": bool(prepared.params.get("deepthink_enabled")),
                 "model_routing": dict(prepared.model_routing or {}),
@@ -3408,7 +3414,18 @@ class ChatRunEngine:
         self._legacy_tool_event_sink(event)
 
     def _is_cancelled(self) -> bool:
-        return self._cancel_event.is_set() or get_chat_cancellation_registry().is_cancelled(self._conversation_id)
+        external_cancelled = False
+        checker = self._external_cancel_checker
+        if callable(checker):
+            try:
+                external_cancelled = bool(checker())
+            except Exception:
+                external_cancelled = False
+        return (
+            self._cancel_event.is_set()
+            or external_cancelled
+            or get_chat_cancellation_registry().is_cancelled(self._conversation_id)
+        )
 
     def _raise_if_cancelled(self) -> None:
         if self._is_cancelled():
@@ -3454,6 +3471,14 @@ class ChatRunEngine:
                 parts.append(block)
         return "".join(parts).strip()
 
+    @staticmethod
+    def _empty_response_retry_params(prepared: PreparedChatRun) -> dict[str, Any]:
+        retry_params = _params_without_thinking(prepared.params)
+        model = str(prepared.model or "")
+        if model.startswith("google/gemma-4"):
+            retry_params["thinking_level"] = "none"
+        return retry_params
+
     def _fallback_complete_without_thinking(
         self,
         prepared: PreparedChatRun,
@@ -3472,7 +3497,7 @@ class ChatRunEngine:
                         "model": prepared.model,
                         "messages": messages,
                         "tools": tools,
-                        "params": _provider_visible_params(_params_without_thinking(prepared.params)),
+                        "params": _provider_visible_params(self._empty_response_retry_params(prepared)),
                         "authority_context": prepared.request_context.get("authority", {}),
                     }
                 )

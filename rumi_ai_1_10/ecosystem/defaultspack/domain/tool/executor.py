@@ -291,6 +291,16 @@ class ToolExecutor:
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
         if approval_error is not None:
             return approval_error
+        local_tool = self._eager_first_party_local_tool_for_function(pack_id, function_id)
+        if local_tool:
+            if _requires_approval(tool_def) and not _context_has_tool_server_approval(approved_context):
+                return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
+            return self._execute_local_with_tool_def(
+                local_tool,
+                arguments or {},
+                approved_context,
+                tool_def,
+            )
         if _requires_rumi_api_request_approval(tool_def, arguments) and not _context_has_tool_server_approval(approved_context):
             return _approval_required_tool_response(tool_def, arguments or {}, approved_context)
         forwarded_context = _function_call_context(approved_context, tool_def)
@@ -589,6 +599,7 @@ class ToolExecutor:
         if pack_id == "rumi_default_tools_pack":
             return {
                 "calculator": "calculator",
+                "subagent": "subagent",
             }.get(function_id)
         if pack_id == "defaultspack":
             return {
@@ -599,6 +610,15 @@ class ToolExecutor:
                 "tool_todo": "todo",
             }.get(function_id)
         return None
+
+    @staticmethod
+    def _eager_first_party_local_tool_for_function(pack_id, function_id):
+        # Subagent runs a nested chat turn, so keep it in-process instead of the
+        # generic function subprocess timeout envelope.
+        return {
+            ("defaultspack", "tool_subagent"): "subagent",
+            ("rumi_default_tools_pack", "subagent"): "subagent",
+        }.get((pack_id, function_id))
 
     @staticmethod
     def _allows_direct_first_party_function_fallback(pack_id, function_id):

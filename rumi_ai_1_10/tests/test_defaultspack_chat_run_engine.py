@@ -885,12 +885,70 @@ def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
 
     assert gateway.complete_requests
     assert gateway.complete_requests[0]["tools"] == provider_tools
-    assert "thinking_level" not in gateway.complete_requests[0]["params"]
+    assert gateway.complete_requests[0]["params"]["thinking_level"] == "none"
     assert "reasoning_effort" not in gateway.complete_requests[0]["params"]
     assert response["metadata"]["recovered_from_empty_stream"] is True
     assert response["metadata"]["fallback_kept_tools"] is True
     assert tool_uses[0]["name"] == "browser_computer"
     assert any(event.get("type") == "thinking_delta" for event in events)
+
+
+def test_final_response_preserves_provider_thinking_metadata():
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    engine = ChatRunEngine(store=object())
+    prepared = PreparedChatRun(
+        conversation_id="conv-1",
+        conversation={"id": "conv-1"},
+        input_data={},
+        request_id="req-1",
+        content=[],
+        metadata=None,
+        user_message={"id": "user-1"},
+        model="google/gemma-4-31b-it",
+        params={"thinking_level": "high"},
+        request_context={},
+        tool_context={},
+        standard_messages=[],
+        user_text="qa",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+    response = {
+        "content": [{"type": "text", "text": "visible QA finding"}],
+        "finish_reason": "stop",
+        "metadata": {
+            "thinking": {
+                "state": "completed",
+                "transcript": "provider diagnostic trace",
+                "source": "google_native_thought",
+            }
+        },
+    }
+
+    finalized = engine._final_response(prepared, response)
+
+    assert finalized["metadata"]["thinking"]["transcript"] == "provider diagnostic trace"
+    assert finalized["metadata"]["thinking"]["source"] == "google_native_thought"
+
+
+def test_chat_run_engine_observes_external_cancel_checker():
+    from domain.chat.stream_engine import ChatRunEngine
+
+    engine = ChatRunEngine(store=object())
+    cancelled = {"value": False}
+    engine._external_cancel_checker = lambda: cancelled["value"]
+
+    assert engine._is_cancelled() is False
+    cancelled["value"] = True
+    assert engine._is_cancelled() is True
 
 
 def test_complete_with_tools_rejects_unattached_model_tool_call():

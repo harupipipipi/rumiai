@@ -59,6 +59,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
 
 _LONG_RUNNING_FALLBACK_BLOCKS = {
     "blocks.ambient.event_submit",
+    "blocks.agent.run_subagent",
     "blocks.chat.send",
     "blocks.integrations.line",
     "blocks.webhooks.inbound",

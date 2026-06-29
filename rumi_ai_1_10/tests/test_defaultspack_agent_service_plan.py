@@ -887,7 +887,7 @@ def test_chat_stream_recovers_when_provider_returns_only_thinking(tmp_path, monk
     assert final["raw_text"] == "Recovered visible answer."
     assert final["metadata"]["thinking"]["transcript"] == "private plan"
     assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2}
+    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
     ChatStore._instance = None
 
 

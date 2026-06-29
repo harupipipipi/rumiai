@@ -269,7 +269,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             return None
 
         if model_id.startswith("gemma-4"):
-            if level in {"minimal", "low"}:
+            if level in {"none", "minimal", "low"}:
                 return "minimal"
             if level in {"medium", "high"}:
                 return "high"
@@ -739,8 +739,9 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     def _native_complete(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
-        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        with self._native_request_json(model, body, timeout=self._request_timeout(params)) as resp:
+        native_params = self._translate_params(dict(params or {}), model)
+        body = self._native_body(model, messages, tools, native_params, name_map)
+        with self._native_request_json(model, body, timeout=self._request_timeout(native_params)) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text, thought, finish_reason, tool_uses = self._native_extract_parts(raw, reverse_name_map)
         content = [{"type": "text", "text": text}]
@@ -762,8 +763,9 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     def _native_stream(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
-        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(params))
+        native_params = self._translate_params(dict(params or {}), model)
+        body = self._native_body(model, messages, tools, native_params, name_map)
+        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(native_params))
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:

@@ -563,6 +563,10 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             {"reasoning_effort": "high"},
         )
         self.assertEqual(
+            GoogleProvider._translate_params({"thinking_level": "none"}, "gemma-4-31b-it"),
+            {"reasoning_effort": "minimal"},
+        )
+        self.assertEqual(
             GoogleProvider._translate_params({"thinking_level": "MINIMAL"}, "gemma-4-31b-it"),
             {"reasoning_effort": "minimal"},
         )
@@ -663,7 +667,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             "gemma-4-31b-it",
             [{"role": "user", "content": "hello"}],
             [],
-            {"thinking_level": "minimal"},
+            {"thinking_level": "none"},
         )
 
         self.assertEqual(captured["model"], "gemma-4-31b-it")
