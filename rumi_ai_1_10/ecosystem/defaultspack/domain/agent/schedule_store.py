@@ -8,6 +8,7 @@ Execution history is stored as {schedule_id}_history.json.
 """
 
 import json
+import math
 import os
 import threading
 
@@ -41,6 +42,119 @@ def _sanitize_json_text(value):
     return value
 
 
+def _json_safe(value):
+    if isinstance(value, str):
+        return _sanitize_json_text(value)
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        return str(value)
+    if isinstance(value, set):
+        return [_json_safe(item) for item in sorted(value, key=repr)]
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(_sanitize_json_text(key)): _json_safe(item)
+            for key, item in value.items()
+        }
+    return _sanitize_json_text(str(value))
+
+
+def _write_json_atomic(path, data):
+    tmp_path = path + ".tmp"
+    safe_data = _json_safe(data)
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(safe_data, f, ensure_ascii=False, indent=2, allow_nan=False)
+    os.replace(tmp_path, path)
+
+
+def _skip_json_whitespace(text, index):
+    length = len(text)
+    while index < length and text[index] in " \t\r\n":
+        index += 1
+    return index
+
+
+def _find_next_json_object_start(text, index):
+    in_string = False
+    escaped = False
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                return index
+            elif char == "]":
+                return -1
+        index += 1
+    return -1
+
+
+def _recover_history_entries(text):
+    """Best-effort recovery for legacy malformed history arrays."""
+    decoder = json.JSONDecoder()
+    entries = []
+    index = _skip_json_whitespace(text, 0)
+    if index >= len(text) or text[index] != "[":
+        return entries
+    index += 1
+    while index < len(text):
+        index = _skip_json_whitespace(text, index)
+        if index >= len(text) or text[index] == "]":
+            break
+        if text[index] == ",":
+            index += 1
+            continue
+        if text[index] != "{":
+            next_index = _find_next_json_object_start(text, index + 1)
+            if next_index < 0:
+                break
+            index = next_index
+        try:
+            entry, next_index = decoder.raw_decode(text, index)
+        except json.JSONDecodeError:
+            next_index = _find_next_json_object_start(text, index + 1)
+            if next_index < 0:
+                break
+            index = next_index
+            continue
+        if isinstance(entry, dict):
+            entries.append(_json_safe(entry))
+        index = next_index
+    return entries
+
+
+def _load_history_unlocked(path):
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            history = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                return _recover_history_entries(f.read())
+        except OSError:
+            return []
+    if not isinstance(history, list):
+        return []
+    return [_json_safe(entry) for entry in history if isinstance(entry, dict)]
+
+
 def _ensure_dir():
     """Create the schedules directory if it does not exist."""
     schedules_dir = _schedules_dir()
@@ -66,8 +180,7 @@ def save_schedule(schedule_dict):
         raise ValueError("schedule dict must have an 'id' field")
     path = _schedule_path(sid)
     with _lock:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(_sanitize_json_text(schedule_dict), f, ensure_ascii=False, indent=2)
+        _write_json_atomic(path, schedule_dict)
 
 
 def load_schedule(schedule_id):
@@ -122,20 +235,11 @@ def append_history(schedule_id, entry):
     path = _history_path(schedule_id)
     max_entries = 200
     with _lock:
-        history = []
-        if os.path.isfile(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    history = json.load(f)
-            except (json.JSONDecodeError, OSError):
-                history = []
-        if not isinstance(history, list):
-            history = []
-        history.append(entry)
+        history = _load_history_unlocked(path)
+        history.append(_json_safe(entry))
         if len(history) > max_entries:
             history = history[-max_entries:]
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(_sanitize_json_text(history), f, ensure_ascii=False, indent=2)
+        _write_json_atomic(path, history)
 
 
 def load_history(schedule_id, limit=50, offset=0):
@@ -144,12 +248,8 @@ def load_history(schedule_id, limit=50, offset=0):
     with _lock:
         if not os.path.isfile(path):
             return [], 0
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                history = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return [], 0
-    if not isinstance(history, list):
+        history = _load_history_unlocked(path)
+    if not history:
         return [], 0
     total = len(history)
     # Return in reverse chronological order

@@ -370,6 +370,22 @@ def _scheduled_mimo_approval_followup(prepared: PreparedChatRun) -> bool:
     return source == "scheduler_approval_followup" and profile_id == "defaultspack.mimo_coding_company"
 
 
+def _scheduled_mimo_run(prepared: PreparedChatRun) -> bool:
+    metadata_value = prepared.user_message.get("metadata")
+    metadata = metadata_value if isinstance(metadata_value, dict) else {}
+    profile_id = str(
+        metadata.get("profile_id")
+        or prepared.request_context.get("profile_id")
+        or ""
+    ).strip()
+    source = str(
+        metadata.get("source")
+        or prepared.request_context.get("source")
+        or ""
+    ).strip()
+    return source in {"scheduler", "scheduler_approval_followup"} and profile_id == "defaultspack.mimo_coding_company"
+
+
 def _text_tool_call_blocks(
     response: dict[str, Any],
     connected_tool_names: set[str],
@@ -1311,10 +1327,8 @@ class ChatRunEngine:
                 not stream_mode
                 and should_create_subagent_durable_draft(prepared.conversation, context)
             )
-            durable_scheduled_mimo_followup_draft = (
-                not stream_mode and _scheduled_mimo_approval_followup(prepared)
-            )
-            if stream_mode or durable_subagent_draft or durable_scheduled_mimo_followup_draft:
+            durable_scheduled_mimo_draft = not stream_mode and _scheduled_mimo_run(prepared)
+            if stream_mode or durable_subagent_draft or durable_scheduled_mimo_draft:
                 draft = _AssistantDraft(
                     store=self._store,
                     conversation_id=prepared.conversation_id,

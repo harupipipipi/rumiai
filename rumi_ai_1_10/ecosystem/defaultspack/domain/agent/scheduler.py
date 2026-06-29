@@ -43,6 +43,8 @@ _SCHEDULE_AUTO_APPROVAL_MAX_FOLLOWUPS = 64
 _SCHEDULE_AUTO_APPROVAL_UNLIMITED_VALUES = {"none", "null", "unlimited", "infinite", "infinity"}
 _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS = 300.0
 _SCHEDULE_ONCE_ALREADY_RUNNING_RETRY_SECONDS = 30.0
+_SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS = 1.0
+_SCHEDULED_CONVERSATION_LOCK_MAX_WAIT_SECONDS = 5.0
 
 
 class _SchedulerTaskTimedOut(TimeoutError):
@@ -88,6 +90,18 @@ def _wait_timeout_seconds(value: float) -> float:
 
 def _remaining_timeout_seconds(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
+
+
+def _scheduled_conversation_lock_wait_seconds(task_cfg: dict[str, Any], remaining_timeout: float) -> float:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    raw_value = policy.get("schedule_conversation_lock_wait_seconds", _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS)
+    try:
+        value = float(raw_value)
+    except (TypeError, ValueError):
+        value = _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS
+    if not math.isfinite(value) or value < 0:
+        value = _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS
+    return max(0.0, min(value, _SCHEDULED_CONVERSATION_LOCK_MAX_WAIT_SECONDS, remaining_timeout))
 
 
 def _retry_once_after_running_skip() -> str:
@@ -158,12 +172,27 @@ def _chat_result_content(result: dict[str, Any] | None) -> str:
 def _pending_approval_from_chat_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
     data = _chat_result_data(result)
     metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-    pending = metadata.get("pending_approval")
-    if isinstance(pending, dict):
-        return pending
+    for pending in (
+        metadata.get("pending_approval"),
+        metadata.get("pendingApproval"),
+        metadata.get("pendingAuthorityApproval"),
+        data.get("pending_approval"),
+        data.get("pendingApproval"),
+        data.get("pendingAuthorityApproval"),
+    ):
+        if isinstance(pending, dict):
+            return pending
     events = data.get("events") if isinstance(data.get("events"), list) else []
     for event in reversed(events):
-        if isinstance(event, dict) and event.get("type") == "approval_requested":
+        if not isinstance(event, dict) or event.get("type") != "approval_requested":
+            continue
+        event_data = event.get("data")
+        if isinstance(event_data, dict):
+            return event_data
+        details = event.get("details")
+        if isinstance(details, dict):
+            return details
+        if event.get("approval_required") or event.get("requires_approval"):
             return event
     return None
 
@@ -1310,6 +1339,43 @@ class Scheduler:
         latest_running = latest.get("running_execution") if isinstance(latest.get("running_execution"), dict) else {}
         return str(latest_running.get("execution_id") or "").strip() == active_execution_id
 
+    def _conversation_running_entry(self, schedule_id, conversation_id, manual):
+        now = timestamp()
+        conversation_id = str(conversation_id or "").strip()
+        detail = "conversation is already running"
+        if conversation_id:
+            detail += ": " + conversation_id
+        return {
+            "execution_id": "sexec_skipped_" + gen_id(),
+            "schedule_id": schedule_id,
+            "started_at": now,
+            "completed_at": now,
+            "status": "skipped" if not manual else "error",
+            "trigger": "manual" if manual else "scheduled",
+            "result": None,
+            "error": detail,
+            "error_code": "CONVERSATION_RUNNING",
+            "skipped_reason": "conversation_running",
+            "conversation_id": conversation_id,
+        }
+
+    def _last_history_is_duplicate_conversation_running_skip(self, schedule_id, conversation_id):
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return False
+        try:
+            entries, _total = load_history(schedule_id, limit=1)
+        except Exception:
+            return False
+        if not entries:
+            return False
+        latest = entries[0]
+        if not isinstance(latest, dict):
+            return False
+        if latest.get("status") != "skipped" or latest.get("skipped_reason") != "conversation_running":
+            return False
+        return str(latest.get("conversation_id") or "").strip() == conversation_id
+
     def _advance_after_skipped_scheduled_execution(self, schedule_id):
         with self._lock:
             sched = self._schedules.get(schedule_id)
@@ -1389,6 +1455,7 @@ class Scheduler:
         trigger = _scheduler_trigger_name(manual)
         conversation_lock = None
         conversation_lock_acquired = False
+        history_finalized = False
         with self._lock:
             self._active_execution_ids.add(exec_id)
         try:
@@ -1399,13 +1466,21 @@ class Scheduler:
                 if manual:
                     acquired = conversation_lock.acquire(blocking=False)
                 else:
-                    lock_timeout = _remaining_timeout_seconds(deadline)
+                    lock_timeout = _scheduled_conversation_lock_wait_seconds(
+                        task_cfg,
+                        _remaining_timeout_seconds(deadline),
+                    )
                     acquired = conversation_lock.acquire(timeout=_wait_timeout_seconds(lock_timeout))
                 if not acquired:
                     cancel_event.set()
                     if manual:
                         raise _SchedulerConversationBusy(str(conversation_id))
-                    raise _SchedulerTaskTimedOut(timeout_seconds)
+                    history_entry = self._conversation_running_entry(schedule_id, conversation_id, manual=False)
+                    if not self._last_history_is_duplicate_conversation_running_skip(schedule_id, conversation_id):
+                        append_history(schedule_id, history_entry)
+                    self._advance_after_skipped_scheduled_execution(schedule_id)
+                    history_finalized = True
+                    return history_entry
                 conversation_lock_acquired = True
                 self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
                 try:
@@ -1526,7 +1601,7 @@ class Scheduler:
             try:
                 with self._lock:
                     recovered_as_stale = exec_id in self._stale_recovered_execution_ids
-                if not recovered_as_stale:
+                if not recovered_as_stale and not history_finalized:
                     history_entry["completed_at"] = timestamp()
                     append_history(schedule_id, history_entry)
 

@@ -1425,6 +1425,103 @@ def test_stream_engine_treats_consumed_approval_followup_as_idempotent_duplicate
     assert replay.code == "APPROVAL_TOKEN_USED"
 
 
+def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="opencode-go/mimo-v2.5-pro")
+    conversation_id = conversation["id"]
+
+    metadata = {
+        "source": "scheduler",
+        "profile_id": "defaultspack.mimo_coding_company",
+    }
+    user_message = store.add_message(
+        conversation_id,
+        {
+            "id": "user-scheduled-initial",
+            "role": "user",
+            "content": "run scheduled MiMo desktop QA",
+            "metadata": metadata,
+        },
+    )
+    assert store.get_conversation(conversation_id)["current_node_id"] == user_message["id"]
+
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "desktop_frame",
+                "description": "desktop_frame",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation=store.get_conversation(conversation_id),
+        input_data={},
+        request_id="req-scheduled-initial-draft",
+        content=[],
+        metadata=metadata,
+        user_message=user_message,
+        model="opencode-go/mimo-v2.5-pro",
+        params={},
+        request_context={
+            "source": "scheduler",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={},
+        standard_messages=[{"role": "user", "content": "run scheduled MiMo desktop QA"}],
+        user_text="run scheduled MiMo desktop QA",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["desktop_frame"],
+        connected_tool_names={"desktop_frame"},
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+
+    observed: dict[str, object] = {}
+
+    def fake_model_turn(self, prepared_arg, working_messages, draft):
+        del prepared_arg, working_messages, draft
+        current = store.get_conversation(conversation_id)
+        current_id = current["current_node_id"]
+        current_message = next(item for item in current["messages"] if item["id"] == current_id)
+        observed["current_role"] = current_message["role"]
+        observed["current_parent_id"] = current_message["parent_id"]
+        observed["current_metadata"] = dict(current_message.get("metadata") or {})
+        observed["current_events"] = list(current_message.get("events") or [])
+        observed["current_tool_logs"] = list(current_message.get("tool_logs") or [])
+        raise RuntimeError("initial scheduler model blocked")
+        yield
+
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    engine = ChatRunEngine(store=store)
+    events = list(engine.stream({}, {}, stream_mode=False))
+
+    assert observed["current_role"] == "assistant"
+    assert observed["current_parent_id"] == user_message["id"]
+    assert observed["current_metadata"]["draft"] is True
+    assert observed["current_metadata"]["streaming"] is True
+    assert any(event.get("phase") == "tools_attached" for event in observed["current_events"])
+    assert observed["current_tool_logs"] == []
+    assert any(event.get("type") == "assistant_message_started" for event in events)
+    assert any(event.get("type") == "task_failed" for event in events)
+    ChatStore._instance = None
+
+
 def test_nonstream_scheduled_mimo_followup_syncs_replay_to_draft_before_summary(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.run_request import PreparedChatRun

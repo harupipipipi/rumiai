@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
@@ -733,6 +734,99 @@ def test_manual_trigger_fails_fast_when_conversation_is_busy_without_running_mar
         assert entries[0]["status"] == "error"
         assert entries[0]["error_code"] == "CONVERSATION_RUNNING"
         assert entries[0]["skipped_reason"] == "conversation_running"
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
+def test_scheduled_conversation_lock_contention_skips_quickly_without_count_spam(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "should not start"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {
+            "message": "scheduled heartbeat",
+            "conversation_id": "conv-shared",
+            "timeout": 600,
+            "tool_policy": {"schedule_conversation_lock_wait_seconds": 0.01},
+        },
+        {"value": 30, "unit": "minutes"},
+    )
+    conversation_lock = scheduler._conversation_execution_lock("conv-shared")
+    assert conversation_lock is not None
+    assert conversation_lock.acquire(blocking=False)
+    try:
+        started = time.monotonic()
+        first = scheduler._execute_task(schedule["id"], manual=False)
+        second = scheduler._execute_task(schedule["id"], manual=False)
+        elapsed = time.monotonic() - started
+    finally:
+        conversation_lock.release()
+
+    try:
+        assert elapsed < 1
+        assert calls == []
+        assert first["status"] == "skipped"
+        assert first["error_code"] == "CONVERSATION_RUNNING"
+        assert first["skipped_reason"] == "conversation_running"
+        assert first["conversation_id"] == "conv-shared"
+        assert second["status"] == "skipped"
+        assert second["skipped_reason"] == "conversation_running"
+
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert "running_started_at" not in saved
+        assert saved["execution_count"] == 0
+        assert saved["last_executed_at"] is None
+        assert saved["next_execution_at"]
+
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["status"] == "skipped"
+        assert entries[0]["error_code"] == "CONVERSATION_RUNNING"
+        assert entries[0]["skipped_reason"] == "conversation_running"
+        assert entries[0]["conversation_id"] == "conv-shared"
     finally:
         scheduler.delete_schedule(schedule["id"])
         _reset_scheduler_singleton()
@@ -1763,6 +1857,118 @@ def test_scheduler_auto_approves_display_name_tool_requests(tmp_path, monkeypatc
     _reset_scheduler_singleton()
 
 
+def test_scheduler_auto_approves_mimo_request_from_approval_requested_event_data(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        calls.append({"payload": payload, "context": context})
+        if len(calls) == 1:
+            arguments = {}
+            request = approval.create_approval_request(
+                "tool.desktop_list",
+                "medium",
+                arguments,
+                details={
+                    "tool_name": "desktop_list",
+                    "action": "tool.desktop_list",
+                    "function_id": "tool.desktop_list",
+                    "pack_id": "defaultspack",
+                    "conversation_id": "conv-mimo",
+                    "arguments": arguments,
+                },
+            )
+            pending = {
+                "tool_name": "desktop_list",
+                "tool_call_id": "call_desktop_list",
+                "action": "tool.desktop_list",
+                "operation": "tool.desktop_list",
+                "payload": arguments,
+                "approval_required": True,
+                "approval_request_id": request["request_id"],
+                "request_id": request["request_id"],
+                "expires_at": request["expires_at"],
+            }
+            return {
+                "status": "ok",
+                "data": {
+                    "id": "assistant-approval",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "approval needed"}],
+                    "finish_reason": "approval_required",
+                    "metadata": {},
+                    "events": [
+                        {
+                            "type": "approval_requested",
+                            "phase": "approval_requested",
+                            "data": pending,
+                        }
+                    ],
+                },
+            }
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "desktop list completed"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "List managed desktops.",
+            "model": "stub/default",
+            "conversation_id": "conv-mimo",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["desktop_list"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["desktop_list"],
+                "schedule_auto_approve_max_followups": 2,
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    history = scheduler.trigger_now(schedule["id"])
+
+    assert history["status"] == "completed"
+    assert history["result"] == "desktop list completed"
+    assert len(calls) == 2
+    followup = calls[1]["payload"]["message"]["metadata"]["approval_followup"]
+    assert followup["tool_name"] == "desktop_list"
+    assert followup["operation"] == "tool.desktop_list"
+    assert followup["approval_token"]
+    assert history["auto_approvals"] == [
+        {
+            "request_id": followup["request_id"],
+            "tool_name": "desktop_list",
+            "operation": "tool.desktop_list",
+            "status": "approved",
+        }
+    ]
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_scheduler_singleton()
+
+
 def test_scheduler_unlimited_auto_approves_repeated_rumi_api_get_desktop_frame_requests(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
@@ -2254,6 +2460,73 @@ def test_schedule_history_replaces_lone_surrogates_before_persisting(tmp_path, m
     assert "bad ? schedule" in (tmp_path / "user_data" / "shared" / "schedules" / "sched-surrogate.json").read_text(
         encoding="utf-8"
     )
+
+
+def test_schedule_history_recovers_valid_entries_from_corrupt_legacy_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    from domain.agent.schedule_store import append_history, load_history, save_schedule
+
+    save_schedule(
+        {
+            "id": "sched-corrupt-history",
+            "type": "once",
+            "task": {"message": "recover history"},
+            "config": {"run_at": "2099-01-01T00:00:00Z"},
+            "status": "active",
+        }
+    )
+    history_path = tmp_path / "user_data" / "shared" / "schedules" / "sched-corrupt-history_history.json"
+    history_path.write_text(
+        """[
+  {"execution_id": "sexec-valid-before", "status": "completed", "result": "before"},
+  {"execution_id": "sexec-corrupt", "status": "authority_approval_required", "result": "authority_approval_required "needs approval""},
+  {"execution_id": "sexec-valid-after", "status": "error", "error": "after"}
+]""",
+        encoding="utf-8",
+    )
+
+    entries, total = load_history("sched-corrupt-history")
+
+    assert total == 2
+    assert [entry["execution_id"] for entry in entries] == ["sexec-valid-after", "sexec-valid-before"]
+
+    append_history(
+        "sched-corrupt-history",
+        {"execution_id": "sexec-new", "status": "completed", "result": "new"},
+    )
+    reparsed = json.loads(history_path.read_text(encoding="utf-8"))
+
+    assert [entry["execution_id"] for entry in reparsed] == [
+        "sexec-valid-before",
+        "sexec-valid-after",
+        "sexec-new",
+    ]
+
+
+def test_schedule_history_coerces_non_json_result_and_error_payloads(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    from domain.agent.schedule_store import append_history, load_history
+
+    append_history(
+        "sched-json-safe",
+        {
+            "execution_id": "sexec-json-safe",
+            "status": "error",
+            "result": {"bad_number": float("nan"), "odd_set": {"alpha", "beta"}},
+            "error": ValueError("authority_approval_required \"quoted\" result"),
+        },
+    )
+
+    entries, total = load_history("sched-json-safe")
+
+    assert total == 1
+    assert entries[0]["result"]["bad_number"] == "nan"
+    assert sorted(entries[0]["result"]["odd_set"]) == ["alpha", "beta"]
+    assert entries[0]["error"] == 'authority_approval_required "quoted" result'
 
 
 def test_schedule_store_can_use_explicit_schedules_dir_when_cwd_differs(tmp_path, monkeypatch):
