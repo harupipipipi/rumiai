@@ -1010,6 +1010,12 @@ def _sandbox_payload(item: dict[str, Any]) -> dict[str, Any]:
 def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[str, Any]:
     seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
     desktop = item.get("desktop_spec") if isinstance(item.get("desktop_spec"), dict) else {}
+    opaque = item.get("provider_opaque_state") if isinstance(item.get("provider_opaque_state"), dict) else {}
+    metadata = opaque.get("metadata") if isinstance(opaque.get("metadata"), dict) else {}
+    startup = _desktop_startup_payload(opaque=opaque, metadata=metadata)
+    startup_status = opaque.get("startup_status")
+    if startup_status is None and isinstance(metadata.get("startup_status"), dict):
+        startup_status = metadata.get("startup_status")
     state = str(item.get("state") or item.get("status") or "unknown")
     frame = service.frame_cache.last_metadata(seat_id)
     lease = service.lease_manager.active_lease(seat_id)
@@ -1027,6 +1033,12 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
         "provider_id": item.get("provider_id"),
         "provider_label": _provider_label(str(item.get("provider_id") or "")),
         "template_id": item.get("template_id") or "desktop.ubuntu",
+        "startup": startup,
+        "desktop_spec": _desktop_spec_payload(desktop),
+        "metadata": {
+            "startup": startup,
+            "startup_status": _jsonable(startup_status) if isinstance(startup_status, dict) else None,
+        },
         "resolution": {
             "width": _positive_int(desktop.get("width"), 1440),
             "height": _positive_int(desktop.get("height"), 900),
@@ -1081,6 +1093,34 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     }
 
 
+def _desktop_startup_payload(*, opaque: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any] | None:
+    startup = opaque.get("startup") if isinstance(opaque.get("startup"), dict) else None
+    if startup is None and isinstance(metadata.get("startup"), dict):
+        startup = metadata.get("startup")
+    if not isinstance(startup, dict):
+        return None
+    payload: dict[str, Any] = {}
+    starter = str(startup.get("starter") or "").strip()
+    if starter:
+        payload["starter"] = starter
+    browser_url = str(startup.get("browser_url") or "").strip()
+    if browser_url:
+        payload["browser_url"] = browser_url
+    return payload or None
+
+
+def _desktop_spec_payload(desktop: dict[str, Any]) -> dict[str, Any] | None:
+    if not isinstance(desktop, dict) or not desktop:
+        return None
+    return {
+        "enabled": bool(desktop.get("enabled")),
+        "width": _positive_int(desktop.get("width"), 1440),
+        "height": _positive_int(desktop.get("height"), 900),
+        "display_backend": desktop.get("display_backend"),
+        "preset": desktop.get("preset"),
+    }
+
+
 def _desktop_payload_error(item: dict[str, Any]) -> dict[str, Any]:
     seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
     provider_id = str(item.get("provider_id") or "")
@@ -1092,6 +1132,9 @@ def _desktop_payload_error(item: dict[str, Any]) -> dict[str, Any]:
         "provider_id": provider_id,
         "provider_label": _provider_label(provider_id),
         "template_id": item.get("template_id") or "desktop.ubuntu",
+        "startup": None,
+        "desktop_spec": None,
+        "metadata": {"startup": None, "startup_status": None},
         "resolution": {"width": 1440, "height": 900},
         "frame": None,
         "assigned_agent": item.get("assigned_agent_id"),

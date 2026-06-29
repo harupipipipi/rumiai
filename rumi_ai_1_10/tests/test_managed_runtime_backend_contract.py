@@ -1059,6 +1059,12 @@ def test_desktop_create_browser_url_defaults_to_browser_template_and_context_net
         "browser_url": "http://127.0.0.1:8766/chat",
     }
     assert provider.create_specs[0].metadata["network_approved"] is True
+    assert created["data"]["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "http://127.0.0.1:8766/chat",
+    }
+    assert created["data"]["metadata"]["startup"] == created["data"]["startup"]
+    assert created["data"]["desktop_spec"]["enabled"] is True
 
 
 def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> None:

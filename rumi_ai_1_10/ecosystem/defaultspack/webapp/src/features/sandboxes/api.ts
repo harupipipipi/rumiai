@@ -22,6 +22,8 @@ type ApiEnvelope<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: { code?: string; message?: string } };
 
+type DesktopListPayload = { desktops: DesktopInstance[] };
+
 function encodeId(value: string): string {
   return encodeURIComponent(value);
 }
@@ -81,7 +83,7 @@ function normalizeSandboxInstance(instance: SandboxInstance): SandboxInstance {
 function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
   return {
     ...instance,
-    status: normalizeDesktopStatus(instance.status),
+    status: normalizeDesktopStatus(instance.status ?? instance.state),
     provisioning: instance.provisioning
       ? {
           ...instance.provisioning,
@@ -89,6 +91,31 @@ function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
         }
       : instance.provisioning,
   };
+}
+
+async function requestDesktopList(): Promise<DesktopListPayload> {
+  const response = await defaultspackApiFetch("/api/desktops", { cache: "no-store" });
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error(explainDefaultspackApiError(response.status, undefined, response.statusText));
+  }
+  const envelope = payload as Partial<ApiEnvelope<DesktopListPayload>>;
+  if (!response.ok || envelope.status === "error") {
+    throw new Error(explainDefaultspackApiError(
+      response.status,
+      envelope.status === "error" ? envelope.error : undefined,
+      response.statusText,
+    ));
+  }
+  const data = envelope.status === "ok" && "data" in envelope
+    ? envelope.data
+    : payload;
+  if (!data || typeof data !== "object" || !Array.isArray((data as DesktopListPayload).desktops)) {
+    throw new Error("Desktop list response did not include a desktops array.");
+  }
+  return data as DesktopListPayload;
 }
 
 function normalizeLeaseExpiresAt(value: unknown): string {
@@ -201,7 +228,7 @@ export const sandboxesApi = {
   },
 
   listDesktops() {
-    return request<{ desktops: DesktopInstance[] }>("/api/desktops", { cache: "no-store" })
+    return requestDesktopList()
       .then((payload) => ({ desktops: payload.desktops.map(normalizeDesktopInstance) }));
   },
 

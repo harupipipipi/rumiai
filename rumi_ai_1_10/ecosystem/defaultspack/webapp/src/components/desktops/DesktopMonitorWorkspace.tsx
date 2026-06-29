@@ -306,6 +306,7 @@ export function DesktopMonitorWorkspace() {
                 selectedSeatId={visibleSelectedSeatId}
                 density={density}
                 leaseSeatId={control.lease?.seat_id ?? null}
+                emptyReason={desktopInstances.desktops.length > 0 ? "filter" : "backend"}
                 accessKeys={accessKeys}
                 controlBusy={control.busy}
                 onSelect={setSelectedSeatId}

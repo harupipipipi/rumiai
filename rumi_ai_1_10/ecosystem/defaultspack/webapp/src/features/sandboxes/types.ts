@@ -242,14 +242,36 @@ export type DesktopFrameMetadata = {
   error?: string | null;
 };
 
+export type DesktopStartup = {
+  starter?: string | null;
+  browser_url?: string | null;
+};
+
+export type DesktopSpecSummary = {
+  enabled?: boolean;
+  width?: number;
+  height?: number;
+  display_backend?: string | null;
+  preset?: string | null;
+};
+
+export type DesktopMetadataSummary = {
+  startup?: DesktopStartup | null;
+  startup_status?: Record<string, unknown> | null;
+};
+
 export type DesktopInstance = {
   seat_id: string;
   sandbox_id?: string | null;
   name: string;
   status: DesktopStatus;
+  state?: string | null;
   provider_id?: string | null;
   provider_label?: string | null;
   template_id?: string | null;
+  startup?: DesktopStartup | null;
+  desktop_spec?: DesktopSpecSummary | null;
+  metadata?: DesktopMetadataSummary | null;
   resolution?: DesktopResolution | null;
   frame?: DesktopFrameMetadata | null;
   assigned_agent?: string | null;
@@ -453,7 +475,7 @@ export function normalizeSandboxState(value: unknown): SandboxState {
 }
 
 export function normalizeDesktopStatus(value: unknown): DesktopStatus {
-  const raw = String(value || "").toLowerCase();
+  const raw = String(value || "").trim().toLowerCase();
   if (raw === "ready" || raw === "busy") return "running";
   if (desktopStatuses.includes(raw as DesktopStatus)) return raw as DesktopStatus;
   const status = normalizeSandboxState(raw);

@@ -54,6 +54,29 @@ test("multiple desktop grid keeps compact multi-column sizing", () => {
   assert.doesNotMatch(html, /min-h-\[calc\(100vh-180px\)\]/);
 });
 
+test("desktop grid distinguishes filter-empty from backend-empty", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopGrid, {
+      desktops: [],
+      selectedSeatId: null,
+      density: "comfortable",
+      leaseSeatId: null,
+      emptyReason: "filter",
+      onSelect: noop,
+      onTakeOver: noop,
+      onReturnToAI: noop,
+      onInput: noop,
+      onStart: noop,
+      onRestart: noop,
+      onStop: noop,
+      onDelete: noop,
+    }),
+  );
+
+  assert.match(html, /No matching desktop seats/);
+  assert.doesNotMatch(html, /backend returned an empty desktop list/);
+});
+
 test("desktop workspace keeps existing seats visible while runtime setup is degraded", () => {
   assert.equal(shouldShowDesktopList({
     runtimeReady: false,

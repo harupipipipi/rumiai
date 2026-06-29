@@ -1822,11 +1822,7 @@ class MimoCodingCompanyRuntime:
 
             store = ChatStore()
             parent = store.get_conversation(conversation_id) or {}
-            child_ids = [
-                str(item)
-                for item in parent.get("child_conversation_ids", [])
-                if str(item or "").strip()
-            ]
+            child_ids = self._subagent_child_conversation_ids(store, parent, conversation_id)
             unanswered: list[dict[str, Any]] = []
             repaired: list[str] = []
             for child_id in child_ids:
@@ -1875,6 +1871,44 @@ class MimoCodingCompanyRuntime:
             return {"checked_ids": child_ids, "unanswered": unanswered, "repaired": repaired}
         except Exception:
             return {"checked_ids": [], "unanswered": [], "repaired": []}
+
+    @staticmethod
+    def _subagent_child_conversation_ids(store: Any, parent: dict[str, Any], conversation_id: str) -> list[str]:
+        child_ids: list[str] = []
+        seen: set[str] = set()
+
+        def add(raw_child_id: Any) -> None:
+            child_id = str(raw_child_id or "").strip()
+            if child_id and child_id not in seen:
+                seen.add(child_id)
+                child_ids.append(child_id)
+
+        for item in parent.get("child_conversation_ids", []) if isinstance(parent, dict) else []:
+            add(item)
+
+        try:
+            summaries, _total = store.list_conversations(
+                limit=1000,
+                offset=0,
+                conversation_kind="subagent",
+                include_messages=False,
+            )
+        except Exception:
+            return child_ids
+
+        parent_id = str(conversation_id or "").strip()
+        for summary in summaries if isinstance(summaries, list) else []:
+            if not isinstance(summary, dict):
+                continue
+            metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+            linked_parent_id = str(
+                summary.get("parent_conversation_id")
+                or metadata.get("parent_conversation_id")
+                or ""
+            ).strip()
+            if linked_parent_id == parent_id:
+                add(summary.get("id"))
+        return child_ids
 
     @staticmethod
     def _conversation_age_seconds(conversation: dict[str, Any]) -> float | None:

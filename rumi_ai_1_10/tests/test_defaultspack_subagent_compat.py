@@ -541,6 +541,45 @@ def test_mimo_monitor_repairs_stale_running_durable_subagent_draft(monkeypatch, 
     assert SUBAGENT_DURABLE_DRAFT_FLAG not in metadata
 
 
+def test_mimo_monitor_repairs_stale_subagent_child_missing_from_parent_index(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "orphaned child", "source": "subagent_tool"},
+        },
+    )
+    store.update_conversation(parent["id"], {"child_conversation_ids": []})
+    store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Simple test JSON probe"}],
+        },
+    )
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    monkeypatch.setattr(runtime, "_conversation_age_seconds", lambda conversation: 999.0)
+
+    result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
+
+    assert result["checked_ids"] == [child["id"]]
+    assert result["unanswered"] == []
+    assert result["repaired"] == [child["id"]]
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assert child_after["metadata"]["subagent"]["status"] == "error"
+    assert child_after["metadata"]["subagent"]["error_code"] == "SUBAGENT_DISPATCH_INTERRUPTED"
+
+
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):
     seen: dict[str, object] = {}
 

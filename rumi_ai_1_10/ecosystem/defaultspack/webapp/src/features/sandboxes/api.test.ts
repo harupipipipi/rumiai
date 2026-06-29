@@ -144,6 +144,69 @@ test("listDesktops normalizes unknown provisioning status to the explicit fallba
   }
 });
 
+test("listDesktops accepts bare desktop list payloads and trims desktop status", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    desktops: [
+      {
+        ...desktopResponse("running"),
+        status: " running ",
+        startup: { starter: "browser_url", browser_url: "http://127.0.0.1:18766/chat" },
+        desktop_spec: { enabled: true, width: 1440, height: 900, display_backend: "x11" },
+      },
+    ],
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.listDesktops();
+    assert.equal(result.desktops[0].status, "running");
+    assert.equal(result.desktops[0].startup?.browser_url, "http://127.0.0.1:18766/chat");
+    assert.equal(result.desktops[0].desktop_spec?.enabled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("listDesktops normalizes desktop state when status is missing", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      desktops: [
+        {
+          ...desktopResponse("stopped"),
+          status: undefined,
+          state: "ready",
+        },
+      ],
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.listDesktops();
+    assert.equal(result.desktops[0].status, "running");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("listDesktops reports malformed desktop payloads clearly", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: { seats: [] },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => sandboxesApi.listDesktops(),
+      /desktops array/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("fetchDesktopFrame sends access key without caller-owned authority headers", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;

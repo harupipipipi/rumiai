@@ -2585,9 +2585,6 @@ class ChatRunEngine:
         if request_tool_name and not _tool_identity_text_matches(request_tool_name, tool_name):
             return None
 
-        stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
-        if stored_args is None:
-            return None
         operation = str(request.get("operation") or "").strip()
         if not operation:
             return None
@@ -2596,8 +2593,24 @@ class ChatRunEngine:
         if isinstance(prepared.tool_context, dict):
             prepared.tool_context["_approval_followup_block_legacy"] = True
 
+        stored_args = details.get("arguments") if isinstance(details.get("arguments"), dict) else None
+        fallback_args_used = False
+        if stored_args is None:
+            for candidate_key in ("arguments", "payload"):
+                candidate = followup.get(candidate_key)
+                if isinstance(candidate, dict):
+                    stored_args = dict(candidate)
+                    stored_args.pop("approval_token", None)
+                    fallback_args_used = True
+                    break
+        if stored_args is None:
+            return None
+
         try:
-            args_hash = str(request.get("args_hash") or "").strip() or _approval_mod.hash_arguments(stored_args)
+            args_hash = str(request.get("args_hash") or "").strip()
+            if fallback_args_used and args_hash and _approval_mod.hash_arguments(stored_args) != args_hash:
+                return None
+            args_hash = args_hash or _approval_mod.hash_arguments(stored_args)
             verification = _approval_mod.verify_execution_token(
                 token, operation, args_hash, consume=False,
             )
