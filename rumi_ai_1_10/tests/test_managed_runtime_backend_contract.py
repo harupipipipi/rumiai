@@ -931,6 +931,7 @@ def test_desktop_list_survives_invalid_desktop_payload(monkeypatch) -> None:
                 None,
                 {
                     "display": True,
+                    "id": None,
                     "sandbox_id": "seat-broken",
                     "name": "Broken desktop",
                     "provider_id": "windows_wsl",
@@ -950,7 +951,9 @@ def test_desktop_list_survives_invalid_desktop_payload(monkeypatch) -> None:
     desktops = api._desktop_list(service)
 
     assert len(desktops) == 1
+    assert desktops[0]["id"] == "seat-broken"
     assert desktops[0]["seat_id"] == "seat-broken"
+    assert desktops[0]["sandbox_id"] == "seat-broken"
     assert desktops[0]["status"] == "failed"
     assert desktops[0]["last_error"] == "Desktop state could not be serialized."
 
@@ -974,6 +977,7 @@ def test_desktop_list_prioritizes_running_desktops() -> None:
                 },
                 {
                     "display": True,
+                    "id": None,
                     "sandbox_id": "current-running-seat",
                     "name": "Current QA worker",
                     "state": "ready",
@@ -983,7 +987,8 @@ def test_desktop_list_prioritizes_running_desktops() -> None:
                 },
                 {
                     "display": True,
-                    "sandbox_id": "newer-stopped-seat",
+                    "id": None,
+                    "seat_id": "newer-stopped-seat",
                     "name": "Newer stopped desktop",
                     "state": "stopped",
                     "provider_id": "windows_wsl",
@@ -1004,6 +1009,9 @@ def test_desktop_list_prioritizes_running_desktops() -> None:
         "old-destroyed-seat",
     ]
     assert desktops[0]["status"] == "running"
+    for desktop in desktops:
+        assert desktop["id"] == desktop["seat_id"]
+        assert desktop["id"] == desktop["sandbox_id"]
 
 
 def test_desktops_list_skips_malformed_manager_instances() -> None:

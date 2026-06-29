@@ -1028,8 +1028,22 @@ def _sandbox_payload(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _desktop_seat_id(item: dict[str, Any]) -> str:
+    return str(item.get("sandbox_id") or item.get("seat_id") or "").strip()
+
+
+def _desktop_id(item: dict[str, Any], *, seat_id: str) -> str:
+    raw_id = item.get("id")
+    if raw_id is not None:
+        desktop_id = str(raw_id).strip()
+        if desktop_id:
+            return desktop_id
+    return seat_id
+
+
 def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[str, Any]:
-    seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
+    seat_id = _desktop_seat_id(item)
+    desktop_id = _desktop_id(item, seat_id=seat_id)
     desktop = item.get("desktop_spec") if isinstance(item.get("desktop_spec"), dict) else {}
     opaque = item.get("provider_opaque_state") if isinstance(item.get("provider_opaque_state"), dict) else {}
     metadata = opaque.get("metadata") if isinstance(opaque.get("metadata"), dict) else {}
@@ -1047,6 +1061,7 @@ def _desktop_payload(service: _SandboxApiService, item: dict[str, Any]) -> dict[
     network = item.get("network_policy") if isinstance(item.get("network_policy"), dict) else {}
     network_mode = str(network.get("mode") or "off")
     return {
+        "id": desktop_id,
         "seat_id": seat_id,
         "sandbox_id": seat_id,
         "name": item.get("name") or "Ubuntu Desktop",
@@ -1143,9 +1158,11 @@ def _desktop_spec_payload(desktop: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _desktop_payload_error(item: dict[str, Any]) -> dict[str, Any]:
-    seat_id = str(item.get("sandbox_id") or item.get("seat_id") or "")
+    seat_id = _desktop_seat_id(item)
+    desktop_id = _desktop_id(item, seat_id=seat_id)
     provider_id = str(item.get("provider_id") or "")
     return {
+        "id": desktop_id,
         "seat_id": seat_id,
         "sandbox_id": seat_id,
         "name": item.get("name") or "Desktop",
