@@ -57,17 +57,18 @@ def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, mon
     allowlist = current_model_allowlist()
     runtime = MimoCodingCompanyRuntime()
 
-    assert "opencode-go/mimo-v2.5" in allowlist
+    assert "opencode-zen/mimo-v2.5-free" in allowlist
     assert "google/gemma-4-31b-it" in allowlist
+    assert "opencode-go/mimo-v2.5" not in allowlist
     assert "opencode-go/mimo-v2.5-pro" not in allowlist
     assert "opencode-go/minimax-m3" not in allowlist
     assert "opencode-zen/minimax-m3-free" not in allowlist
     assert "groq/openai/gpt-oss-20b" not in allowlist
     assert "cerebras/zai-glm-4.7" not in allowlist
-    assert DEFAULT_MAIN_MODEL == "opencode-go/mimo-v2.5"
-    assert DEFAULT_FAST_MODEL == "opencode-go/mimo-v2.5"
+    assert DEFAULT_MAIN_MODEL == "opencode-zen/mimo-v2.5-free"
+    assert DEFAULT_FAST_MODEL == "opencode-zen/mimo-v2.5-free"
     assert DEFAULT_VISION_MODEL == "google/gemma-4-31b-it"
-    assert runtime._allowed_model("opencode-go/mimo-v2.5") == "opencode-go/mimo-v2.5"
+    assert runtime._allowed_model("opencode-zen/mimo-v2.5-free") == "opencode-zen/mimo-v2.5-free"
     assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
 
 
@@ -1468,7 +1469,7 @@ def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tm
             "started_at": "2026-06-29T01:30:00Z",
             "completed_at": "2026-06-29T01:30:08Z",
             "error": (
-                "CreditsError: insufficient balance for opencode-go/mimo-v2.5. "
+                "CreditsError: insufficient balance for opencode-zen/mimo-v2.5-free. "
                 "HTTP 401 Unauthorized. Authorization: Bearer sk-test-secret"
             ),
         },
@@ -1626,7 +1627,7 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
     allowlist = set(runtime.manifest()["model_self_selection"]["allowlist"])
 
     assert allowlist == {
-        "opencode-go/mimo-v2.5",
+        "opencode-zen/mimo-v2.5-free",
         "google/gemma-4-31b-it",
         "stub/default",
     }

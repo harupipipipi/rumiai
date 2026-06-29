@@ -43,24 +43,24 @@ disabled_nodes: []
 
 node_settings:
   defaultspack.ai_client:
-    default_model: opencode-go/mimo-v2.5
+    default_model: opencode-zen/mimo-v2.5-free
     model_self_selection:
       enabled: true
       allowlist:
-        - opencode-go/mimo-v2.5
+        - opencode-zen/mimo-v2.5-free
         - google/gemma-4-31b-it
         - stub/default
       default_reasoning_effort: high
       max_switches_per_day: 48
       require_audit_reason: false
     utility_models:
-      subagent_default: opencode-go/mimo-v2.5
-      model_router: opencode-go/mimo-v2.5
+      subagent_default: opencode-zen/mimo-v2.5-free
+      model_router: opencode-zen/mimo-v2.5-free
       vision_ocr: google/gemma-4-31b-it
-      tool_selector: opencode-go/mimo-v2.5
-      prompt_compactor: opencode-go/mimo-v2.5
-      context_summarizer: opencode-go/mimo-v2.5
-      fast_reply: opencode-go/mimo-v2.5
+      tool_selector: opencode-zen/mimo-v2.5-free
+      prompt_compactor: opencode-zen/mimo-v2.5-free
+      context_summarizer: opencode-zen/mimo-v2.5-free
+      fast_reply: opencode-zen/mimo-v2.5-free
   defaultspack.tool:
     shared_with_profiles:
       - defaultspack.local_agent
@@ -175,7 +175,7 @@ policy:
     - knowledge_update
   tool_denylist: []
   model_allowlist:
-    - opencode-go/mimo-v2.5
+    - opencode-zen/mimo-v2.5-free
     - google/gemma-4-31b-it
     - stub/default
 

@@ -36,9 +36,9 @@ CONVERSATION_KIND = "mimo_coding_company"
 COMPANY_ID = "mimo-coding-company"
 COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
-DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5"
+DEFAULT_MAIN_MODEL = "opencode-zen/mimo-v2.5-free"
 DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
-DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5"
+DEFAULT_FAST_MODEL = "opencode-zen/mimo-v2.5-free"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 SCHEDULE_CONVERSATION_LANES = {
     "kickoff_review": "review",
@@ -56,8 +56,8 @@ SUBAGENT_GAP_GRACE_SECONDS = 300
 MIMO_OBSERVABILITY_HISTORY_LIMIT = 5
 MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE = timedelta(hours=1)
 MIMO_CURRENT_OBSERVABILITY_MODELS = {DEFAULT_MAIN_MODEL, DEFAULT_VISION_MODEL}
-MIMO_PROVIDER_ID = "opencode-go"
-MIMO_PROVIDER_DISPLAY = "OpenCode Go"
+MIMO_PROVIDER_ID = "opencode-zen"
+MIMO_PROVIDER_DISPLAY = "OpenCode Zen"
 PROVIDER_HEALTH_BLOCKER_SIGNAL = "provider_health_blocker"
 PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY = "provider_health_only"
 PROVIDER_HEALTH_BLOCKER_PATTERNS = (
@@ -207,7 +207,7 @@ FALLBACK_KNOWLEDGE_DOCS = [
 ]
 
 MODEL_ALLOWLIST = [
-    "opencode-go/mimo-v2.5",
+    "opencode-zen/mimo-v2.5-free",
     "google/gemma-4-31b-it",
     "stub/default",
 ]
@@ -2050,7 +2050,7 @@ class MimoCodingCompanyRuntime:
             evidence_text = ", ".join("`" + str(item) + "`" for item in evidence if str(item or "").strip()) or "`provider billing/auth failure`"
             return "\n".join(
                 [
-                    "**MiMo provider-health blocker: OpenCode Go externally blocked**",
+                    "**MiMo provider-health blocker: OpenCode Zen externally blocked**",
                     f"- Loop: `{loop_key}`",
                     f"- Schedule: `{entry.get('schedule_id') or (schedule or {}).get('id') or ''}`",
                     f"- Execution: `{entry.get('execution_id') or ''}`",
@@ -2805,6 +2805,6 @@ class MimoCodingCompanyRuntime:
             "Do not create GitHub issues for scheduler bookkeeping noise such as CONVERSATION_RUNNING, "
             "already_running, or a single scheduled task timeout; only externalize repeated, evidence-backed blockers "
             "after an in-loop fix is blocked. Treat provider billing/credits/auth failures such as CreditsError, "
-            "insufficient balance, or HTTP 401 from the configured MiMo/OpenCode Go model as provider-health blockers, "
+            "insufficient balance, or HTTP 401 from the configured MiMo/OpenCode Zen model as provider-health blockers, "
             "not QA bugs; report status without secrets and keep Gemma/vision QA monitoring active."
         )

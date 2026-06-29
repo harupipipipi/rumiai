@@ -7,13 +7,13 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parent.parent
-MIMO_FREE_MODEL = "opencode-go/mimo-v2.5"
+MIMO_FREE_MODEL = "opencode-zen/mimo-v2.5-free"
 MIMO_VISION_MODEL = "google/gemma-4-31b-it"
 STUB_MODEL = "stub/default"
 MIMO_CONFIG_MODELS = [MIMO_FREE_MODEL, MIMO_VISION_MODEL, STUB_MODEL]
 
 
-def test_mimo_coding_company_profile_defaults_to_opencode_go_free_mimo() -> None:
+def test_mimo_coding_company_profile_defaults_to_opencode_zen_free_mimo() -> None:
     profile_path = ROOT / "ecosystem" / "rumi_operations_company_pack" / "profiles" / "mimo_coding_company.profile.yaml"
     profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
 
@@ -32,7 +32,7 @@ def test_mimo_coding_company_profile_defaults_to_opencode_go_free_mimo() -> None
     assert utility_models["fast_reply"] == MIMO_FREE_MODEL
 
 
-def test_mimo_coding_company_ui_defaults_to_opencode_go_free_mimo() -> None:
+def test_mimo_coding_company_ui_defaults_to_opencode_zen_free_mimo() -> None:
     ui_path = ROOT / "ecosystem" / "rumi_operations_company_pack" / "frontend_extensions" / "operations_company.ui.json"
     ui = json.loads(ui_path.read_text(encoding="utf-8"))
 
