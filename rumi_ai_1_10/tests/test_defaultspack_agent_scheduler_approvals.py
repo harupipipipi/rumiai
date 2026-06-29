@@ -532,6 +532,121 @@ def test_stale_scheduled_chat_recovery_appends_durable_error(tmp_path, monkeypat
         ChatStore._instance = None
 
 
+def test_stale_scheduled_chat_recovery_ignores_empty_streaming_assistant(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, save_schedule
+
+    schedule_id = "sched-stale-chat-streaming"
+    stale_execution_id = "sexec-stale-chat-streaming"
+    scheduled_user = store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "Run scheduled browser QA.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": stale_execution_id,
+                "trigger": "scheduled",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    stuck_assistant = store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "parent_id": scheduled_user["id"],
+            "content": [],
+            "raw_text": "",
+            "finish_reason": "streaming",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": stale_execution_id,
+                "thinking": {"state": "running"},
+            },
+        },
+    )
+
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Stale streaming chat QA",
+            "description": "",
+            "type": "interval",
+            "task": {
+                "message": "Run scheduled browser QA.",
+                "model": "google/gemma-4-31b-it",
+                "conversation_id": conversation_id,
+                "timeout": 1800,
+                "profile_id": "defaultspack.mimo_coding_company",
+                "agent_id": "browser_qa",
+                "metadata": {"company_id": "mimo-coding-company"},
+            },
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2099-01-01T00:00:00Z",
+            "created_at": "2026-06-28T15:00:00Z",
+            "updated_at": "2026-06-28T15:53:36Z",
+            "running_execution": {
+                "execution_id": stale_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": "2000-01-01T00:00:00Z",
+                "trigger": "scheduled",
+                "timeout_seconds": 1800,
+            },
+            "running_started_at": "2000-01-01T00:00:00Z",
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        assert scheduler.get_schedule(schedule_id)["execution_count"] == 1
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        history = entries[0]
+        assert history["status"] == "error"
+        assert history["assistant_error_message_id"]
+        assert history["assistant_error_message_id"] != stuck_assistant["id"]
+
+        stored = store.get_conversation(conversation_id)
+        assistant_children = [
+            message
+            for message in stored["messages"]
+            if message["role"] == "assistant" and message["parent_id"] == scheduled_user["id"]
+        ]
+        assert [message["id"] for message in assistant_children] == [
+            stuck_assistant["id"],
+            history["assistant_error_message_id"],
+        ]
+        recovered = assistant_children[-1]
+        assert recovered["finish_reason"] == "error"
+        assert recovered["metadata"]["durable_scheduler_error"] is True
+        assert recovered["metadata"]["schedule_execution_id"] == stale_execution_id
+        assert "scheduled task timed out after 1800 seconds" in recovered["raw_text"]
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_scheduler_recovers_active_stale_running_execution_once_when_original_unwinds(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

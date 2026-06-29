@@ -187,6 +187,50 @@ def _redact_scheduler_error_text(value: Any) -> str:
     return text
 
 
+def _scheduled_chat_message_has_visible_text(message: dict[str, Any]) -> bool:
+    raw_text = message.get("raw_text")
+    if isinstance(raw_text, str) and raw_text.strip():
+        return True
+    content = message.get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict):
+                text = block.get("text")
+                if isinstance(text, str) and text.strip():
+                    return True
+            elif isinstance(block, str) and block.strip():
+                return True
+    return False
+
+
+def _scheduled_chat_assistant_is_terminal(message: dict[str, Any]) -> bool:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    if metadata.get("durable_scheduler_error") is True:
+        return True
+    finish_reason = str(message.get("finish_reason") or "").strip().lower()
+    if finish_reason in {"streaming", "in_progress", "pending"}:
+        return False
+    thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+    thinking_state = str(thinking.get("state") or "").strip().lower()
+    if thinking_state in {"running", "streaming", "thinking"}:
+        return False
+    if finish_reason in {
+        "stop",
+        "error",
+        "cancelled",
+        "canceled",
+        "approval_required",
+        "tool_calls",
+        "length",
+        "ai_error",
+        "ai_error_after_tool_use",
+    }:
+        return True
+    return _scheduled_chat_message_has_visible_text(message)
+
+
 def _ensure_scheduled_chat_error_message(
     *,
     conversation_id: str,
@@ -239,6 +283,7 @@ def _ensure_scheduled_chat_error_message(
             isinstance(message, dict)
             and str(message.get("role") or "") == "assistant"
             and str(message.get("parent_id") or "").strip() == parent_id
+            and _scheduled_chat_assistant_is_terminal(message)
         ):
             return message
 
