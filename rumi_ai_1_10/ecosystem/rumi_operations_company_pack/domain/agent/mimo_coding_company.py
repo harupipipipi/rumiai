@@ -44,6 +44,7 @@ SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loo
 DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
+MIMO_OBSERVABILITY_HISTORY_LIMIT = 5
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -1485,13 +1486,14 @@ class MimoCodingCompanyRuntime:
             known_sync_keys = self._company_runtime_sync_keys(runtime_store)
             synced = 0
             scheduler = Scheduler()
-            schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
-            for loop_key, schedule_id in schedule_ids.items():
-                schedule = scheduler.get_schedule(str(schedule_id))
-                history = scheduler.get_history(str(schedule_id), limit=5).get("entries", [])
+            for observed_schedule in self._mimo_company_observability_schedules(state, scheduler):
+                schedule_id = observed_schedule["schedule_id"]
+                loop_key = observed_schedule["loop_key"]
+                schedule = observed_schedule.get("schedule")
+                history = scheduler.get_history(schedule_id, limit=MIMO_OBSERVABILITY_HISTORY_LIMIT).get("entries", [])
                 for entry in reversed([item for item in history if isinstance(item, dict)]):
                     summary["schedule_history"]["checked"] += 1
-                    latest = self._schedule_history_observation(str(loop_key), schedule, entry)
+                    latest = self._schedule_history_observation(loop_key, schedule, entry)
                     summary["schedule_history"]["latest"].append(latest)
                     if latest.get("signal"):
                         summary["schedule_history"]["signals"].append(latest)
@@ -1502,11 +1504,11 @@ class MimoCodingCompanyRuntime:
                         COMPANY_ID,
                         channel_id="ops-company",
                         sender_id=str((schedule or {}).get("task", {}).get("agent_id") or "scheduler"),
-                        content=self._schedule_history_message(str(loop_key), schedule, entry),
+                        content=self._schedule_history_message(loop_key, schedule, entry),
                         metadata={
                             "sync_source": "mimo_schedule_history",
                             "sync_key": sync_key,
-                            "loop_key": str(loop_key),
+                            "loop_key": loop_key,
                             "schedule_id": str(entry.get("schedule_id") or schedule_id),
                             "execution_id": str(entry.get("execution_id") or ""),
                             "status": str(entry.get("status") or ""),
@@ -1583,6 +1585,83 @@ class MimoCodingCompanyRuntime:
             summary["status"] = "error"
             summary["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
             return summary
+
+    def _mimo_company_observability_schedules(self, state: dict[str, Any], scheduler: Scheduler) -> list[dict[str, Any]]:
+        schedules: list[dict[str, Any]] = []
+        seen_schedule_ids: set[str] = set()
+
+        def add_schedule(raw_schedule_id: Any, *, loop_key: str = "", schedule: dict[str, Any] | None = None) -> None:
+            schedule_id = str(raw_schedule_id or "").strip()
+            if not schedule_id or schedule_id in seen_schedule_ids:
+                return
+            seen_schedule_ids.add(schedule_id)
+            current = schedule if isinstance(schedule, dict) else scheduler.get_schedule(schedule_id)
+            schedules.append(
+                {
+                    "schedule_id": schedule_id,
+                    "loop_key": self._mimo_company_observability_loop_key(current, loop_key),
+                    "schedule": current if isinstance(current, dict) else None,
+                }
+            )
+
+        schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        for loop_key, schedule_id in schedule_ids.items():
+            add_schedule(schedule_id, loop_key=str(loop_key or "").strip())
+
+        for schedule in scheduler.list_schedules():
+            if not isinstance(schedule, dict):
+                continue
+            if not self._is_mimo_company_observability_schedule(schedule, state):
+                continue
+            add_schedule(schedule.get("id"), schedule=schedule)
+        return schedules
+
+    @staticmethod
+    def _mimo_company_observability_loop_key(schedule: dict[str, Any] | None, fallback: str = "") -> str:
+        cleaned_fallback = str(fallback or "").strip()
+        if cleaned_fallback:
+            return cleaned_fallback
+        task = schedule.get("task") if isinstance(schedule, dict) and isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        loop_key = str(metadata.get("loop_key") or "").strip()
+        if loop_key:
+            return loop_key
+        agent_id = str(task.get("agent_id") or "").strip()
+        return agent_id or "schedule"
+
+    def _is_mimo_company_observability_schedule(self, schedule: dict[str, Any], state: dict[str, Any]) -> bool:
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        task_metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        schedule_metadata = schedule.get("metadata") if isinstance(schedule.get("metadata"), dict) else {}
+        metadata = {**schedule_metadata, **task_metadata}
+        policy = task.get("tool_policy") if isinstance(task.get("tool_policy"), dict) else {}
+
+        company_id = str(metadata.get("company_id") or task.get("company_id") or policy.get("company_id") or "").strip()
+        if company_id == COMPANY_ID:
+            return True
+
+        profile_id = str(metadata.get("profile_id") or task.get("profile_id") or policy.get("profile_id") or "").strip()
+        if profile_id == PROFILE_ID:
+            return True
+
+        state_conversation_id = str(state.get("conversation_id") or "").strip()
+        conversation_ids = {
+            str(task.get("conversation_id") or "").strip(),
+            str(metadata.get("conversation_id") or "").strip(),
+        }
+        if state_conversation_id and state_conversation_id in conversation_ids:
+            return True
+
+        expected_group_id = str(state.get("conversation_group_id") or self._conversation_group_id()).strip()
+        group_ids = {
+            str(metadata.get("conversation_group_id") or "").strip(),
+            str(metadata.get("group_id") or "").strip(),
+            str(metadata.get("group") or "").strip(),
+            str(task.get("conversation_group_id") or "").strip(),
+            str(task.get("group_id") or "").strip(),
+            str(task.get("group") or "").strip(),
+        }
+        return bool(expected_group_id and expected_group_id in group_ids)
 
     @staticmethod
     def _company_runtime_sync_keys(runtime_store: CompanyRuntimeStore) -> set[str]:
@@ -2140,15 +2219,12 @@ class MimoCodingCompanyRuntime:
         return paused
 
     def _resume_mimo_loop_schedules_after_bootstrap(self, state: dict[str, Any], paused_schedule_ids: set[str]) -> list[str]:
-        if not paused_schedule_ids:
-            return []
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
         current_ids = {
             str(schedule_id)
             for loop_key, schedule_id in schedule_ids.items()
             if str(loop_key) in SCHEDULE_LOOP_KEYS
             and str(schedule_id or "").strip()
-            and str(schedule_id) in paused_schedule_ids
         }
         if not current_ids:
             return []

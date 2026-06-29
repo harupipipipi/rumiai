@@ -228,6 +228,14 @@ export function CompanyWorkspacePanel({
     void loadCompany();
   }, [activeConversationId, normalizedActiveCompanyIdHint]);
 
+  useEffect(() => {
+    if (!activeCompanyId) return undefined;
+    const intervalId = window.setInterval(() => {
+      void loadCompany(activeCompanyId);
+    }, 30000);
+    return () => window.clearInterval(intervalId);
+  }, [activeCompanyId, loadCompany]);
+
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 
   const run = async (work: () => Promise<unknown>) => {

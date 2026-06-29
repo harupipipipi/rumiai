@@ -355,14 +355,26 @@ def test_company_channels_include_runtime_message_counts(tmp_path, monkeypatch):
         },
         {},
     )
+    latest_created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "scheduler",
+            "content": "MiMo workspace latest visibility check",
+        },
+        {},
+    )
     listed = channels.run({"company_id": company_id}, {})
     fetched = channels.run({"action": "get", "company_id": company_id, "channel_id": "ops-company"}, {})
 
     assert created["status"] == "ok"
+    assert latest_created["status"] == "ok"
     ops_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "ops-company")
-    assert ops_channel["message_count"] == 1
-    assert ops_channel["last_message_at"]
-    assert fetched["data"]["message_count"] == 1
+    latest_created_at = latest_created["data"]["message"]["created_at"]
+    assert ops_channel["message_count"] == 2
+    assert ops_channel["last_message_at"] == latest_created_at
+    assert fetched["data"]["message_count"] == 2
     assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
 
 

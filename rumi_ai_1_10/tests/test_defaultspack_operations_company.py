@@ -384,6 +384,8 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
         {"value": 30, "unit": "minutes"},
         name="MiMo Coding Company heartbeat",
     )
+    paused_current_qa = Scheduler().pause_schedule(qa_schedule_id)
+    assert paused_current_qa is not None and paused_current_qa["status"] == "paused"
 
     second = runtime.bootstrap(
         start_nonstop=True,
@@ -410,6 +412,7 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     )
 
     assert qa_schedule["id"] == qa_schedule_id
+    assert qa_schedule["status"] == "active"
     assert "http://127.0.0.1:3001" in qa_schedule["task"]["message"]
     assert "Power user" in qa_schedule["task"]["message"]
     assert "desktop_create" in qa_schedule["task"]["tools"]
@@ -826,6 +829,120 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+            "desktops": [],
+        }),
+    )
+
+    parent = ChatStore().create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        agent_id="client_manager",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    scheduler = Scheduler()
+    run_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    tracked_schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Tracked state schedule.",
+            "model": "stub/default",
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "scheduler",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "heartbeat",
+            },
+        },
+        {"run_at": run_at},
+        name="MiMo Coding Company heartbeat",
+    )
+    dedicated_schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Dedicated manager schedule.",
+            "model": "stub/default",
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "project_manager",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "dedicated_manager",
+            },
+        },
+        {"run_at": run_at},
+        name="MiMo Coding Company dedicated manager",
+    )
+    append_history(
+        dedicated_schedule["id"],
+        {
+            "schedule_id": dedicated_schedule["id"],
+            "execution_id": "exec_dedicated_after_state",
+            "trigger": "scheduled",
+            "status": "completed",
+            "started_at": "2026-06-28T23:50:00Z",
+            "completed_at": "2026-06-28T23:50:08Z",
+            "result": "Dedicated MiMo manager schedule continued after the state schedule list stopped.",
+        },
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    state = {
+        "conversation_id": parent["id"],
+        "conversation_group_id": "company:mimo-coding-company",
+        "schedule_ids": {"heartbeat": tracked_schedule["id"]},
+    }
+    summary = runtime._sync_company_observability(state)
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=10, offset=0)
+
+    assert dedicated_schedule["id"] not in state["schedule_ids"].values()
+    assert summary["status"] == "ok"
+    assert summary["schedule_history"]["checked"] == 1
+    assert summary["team_workspace"]["synced_messages"] == 1
+    assert total == 1
+    assert messages[0]["metadata"]["sync_source"] == "mimo_schedule_history"
+    assert messages[0]["metadata"]["schedule_id"] == dedicated_schedule["id"]
+    assert messages[0]["metadata"]["loop_key"] == "dedicated_manager"
+    assert messages[0]["metadata"]["execution_id"] == "exec_dedicated_after_state"
+
+    runtime._sync_company_observability(state)
+    _messages_again, total_again = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=10, offset=0)
+    assert total_again == total
+
+    scheduler.delete_schedule(tracked_schedule["id"])
+    scheduler.delete_schedule(dedicated_schedule["id"])
     _reset_defaultspack_singletons()
 
 

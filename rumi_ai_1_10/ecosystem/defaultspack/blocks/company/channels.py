@@ -8,19 +8,10 @@ from ._helpers import company_id_from, invalid, missing_company, require_dict
 def _with_runtime_counts(company_id, channel, runtime_store):
     enriched = dict(channel)
     channel_id = str(enriched.get("id") or enriched.get("channel_id") or "ops-company")
-    messages, total = runtime_store.list_messages(company_id, channel_id=channel_id, limit=1, offset=0)
+    latest_messages, total = runtime_store.list_messages(company_id, channel_id=channel_id, limit=1, offset=0, order="desc")
     enriched["message_count"] = max(int(enriched.get("message_count", 0) or 0), int(total))
-    if total:
-        latest, _latest_total = runtime_store.list_messages(
-            company_id,
-            channel_id=channel_id,
-            limit=1,
-            offset=max(int(total) - 1, 0),
-        )
-        if latest:
-            enriched["last_message_at"] = latest[0].get("created_at") or enriched.get("last_message_at")
-        elif messages:
-            enriched["last_message_at"] = messages[0].get("created_at") or enriched.get("last_message_at")
+    if latest_messages:
+        enriched["last_message_at"] = latest_messages[0].get("created_at") or enriched.get("last_message_at")
     return enriched
 
 
