@@ -111,3 +111,47 @@ test("desktop workspace resolves selection from visible desktops", () => {
     runningDesktop.seat_id,
   );
 });
+
+test("desktop workspace defaults focus to a running desktop when stale seats appear first", () => {
+  const destroyedDesktop = {
+    ...desktop("1c1dd944-destroyed-seat"),
+    name: "QA-Swarm-18766-Worker1",
+    status: "destroyed",
+  } satisfies DesktopInstance;
+  const runningDesktop = {
+    ...desktop("822f90f9-running-seat"),
+    name: "QA-Swarm-18766-Worker1",
+  };
+  const visibleDesktops = [destroyedDesktop, runningDesktop];
+
+  assert.equal(
+    resolveVisibleSelectedDesktop(visibleDesktops, null)?.seat_id,
+    runningDesktop.seat_id,
+  );
+  assert.equal(
+    resolveVisibleSelectedSeatId(visibleDesktops, destroyedDesktop.seat_id),
+    runningDesktop.seat_id,
+  );
+});
+
+test("desktop workspace preserves an explicit non-running selection", () => {
+  const destroyedDesktop = {
+    ...desktop("1c1dd944-destroyed-seat"),
+    name: "QA-Swarm-18766-Worker1",
+    status: "destroyed",
+  } satisfies DesktopInstance;
+  const runningDesktop = {
+    ...desktop("822f90f9-running-seat"),
+    name: "QA-Swarm-18766-Worker1",
+  };
+  const visibleDesktops = [destroyedDesktop, runningDesktop];
+
+  assert.equal(
+    resolveVisibleSelectedDesktop(visibleDesktops, destroyedDesktop.seat_id, { preserveSelected: true })?.seat_id,
+    destroyedDesktop.seat_id,
+  );
+  assert.equal(
+    resolveVisibleSelectedSeatId(visibleDesktops, destroyedDesktop.seat_id, { preserveSelected: true }),
+    destroyedDesktop.seat_id,
+  );
+});

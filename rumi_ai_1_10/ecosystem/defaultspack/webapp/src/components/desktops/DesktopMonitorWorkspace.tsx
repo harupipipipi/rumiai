@@ -32,8 +32,14 @@ export function shouldShowDesktopList({
 export function resolveVisibleSelectedDesktop(
   visibleDesktops: DesktopInstance[],
   selectedSeatId: string | null,
+  options: { preserveSelected?: boolean } = {},
 ): DesktopInstance | null {
-  return visibleDesktops.find((desktop) => desktop.seat_id === selectedSeatId)
+  const selectedDesktop = visibleDesktops.find((desktop) => desktop.seat_id === selectedSeatId);
+  if (selectedDesktop && (options.preserveSelected || selectedDesktop.status === "running")) {
+    return selectedDesktop;
+  }
+  return visibleDesktops.find((desktop) => desktop.status === "running")
+    ?? selectedDesktop
     ?? visibleDesktops[0]
     ?? null;
 }
@@ -41,8 +47,9 @@ export function resolveVisibleSelectedDesktop(
 export function resolveVisibleSelectedSeatId(
   visibleDesktops: DesktopInstance[],
   selectedSeatId: string | null,
+  options: { preserveSelected?: boolean } = {},
 ): string | null {
-  return resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId)?.seat_id ?? null;
+  return resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId, options)?.seat_id ?? null;
 }
 
 export function DesktopMonitorWorkspace() {
@@ -51,6 +58,7 @@ export function DesktopMonitorWorkspace() {
   const templates = useSandboxTemplates({ enabled: runtimeReady });
   const desktopInstances = useDesktopInstances({ pollIntervalMs: 2500 });
   const processedLinkedSeatIdRef = useRef<string | null>(null);
+  const explicitSelectedSeatIdRef = useRef<string | null>(null);
   const [filter, setFilter] = useState<DesktopFilter>("all");
   const [density, setDensity] = useState<DesktopDensity>("comfortable");
   const [selectedSeatId, setSelectedSeatId] = useState<string | null>(null);
@@ -75,7 +83,8 @@ export function DesktopMonitorWorkspace() {
       : desktopInstances.desktops,
     [desktopInstances.desktops, filter],
   );
-  const selectedDesktop = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId);
+  const preserveSelected = selectedSeatId !== null && explicitSelectedSeatIdRef.current === selectedSeatId;
+  const selectedDesktop = resolveVisibleSelectedDesktop(visibleDesktops, selectedSeatId, { preserveSelected });
   const visibleSelectedSeatId = selectedDesktop?.seat_id ?? null;
   const selectedAccessKey = visibleSelectedSeatId ? accessKeys[visibleSelectedSeatId] || "" : "";
   const control = useDesktopControlLease(visibleSelectedSeatId, sandboxesApi, selectedAccessKey);
@@ -104,13 +113,18 @@ export function DesktopMonitorWorkspace() {
     }
     if (desktopInstances.desktops.some((desktop) => desktop.seat_id === linkedSeatId)) {
       processedLinkedSeatIdRef.current = linkedSeatId;
+      explicitSelectedSeatIdRef.current = linkedSeatId;
       setSelectedSeatId(linkedSeatId);
     }
   }, [desktopInstances.desktops]);
 
   useEffect(() => {
-    const nextSelectedSeatId = resolveVisibleSelectedSeatId(visibleDesktops, selectedSeatId);
+    const preserveSelected = selectedSeatId !== null && explicitSelectedSeatIdRef.current === selectedSeatId;
+    const nextSelectedSeatId = resolveVisibleSelectedSeatId(visibleDesktops, selectedSeatId, { preserveSelected });
     if (nextSelectedSeatId === selectedSeatId) return;
+    if (explicitSelectedSeatIdRef.current === selectedSeatId) {
+      explicitSelectedSeatIdRef.current = null;
+    }
     setSelectedSeatId(nextSelectedSeatId);
   }, [selectedSeatId, visibleDesktops]);
 
@@ -155,6 +169,7 @@ export function DesktopMonitorWorkspace() {
           [desktop.seat_id]: returnedAccessKey,
         }));
       }
+      explicitSelectedSeatIdRef.current = desktop.seat_id;
       setSelectedSeatId(desktop.seat_id);
       setIsCreateOpen(false);
       await desktopInstances.refresh();
@@ -178,6 +193,9 @@ export function DesktopMonitorWorkspace() {
       if (action === "delete") await sandboxesApi.deleteDesktop(seatId, accessKeys[seatId] || undefined);
       if (action === "stop") setStopTargetSeatId(null);
       if (action === "delete" && seatId === visibleSelectedSeatId) {
+        if (explicitSelectedSeatIdRef.current === seatId) {
+          explicitSelectedSeatIdRef.current = null;
+        }
         setSelectedSeatId(null);
         setDeleteTargetSeatId(null);
       }
@@ -187,9 +205,15 @@ export function DesktopMonitorWorkspace() {
     }
   }, [accessKeys, desktopInstances, visibleSelectedSeatId]);
 
+  const handleSelectDesktop = useCallback((seatId: string) => {
+    explicitSelectedSeatIdRef.current = seatId;
+    setSelectedSeatId(seatId);
+  }, []);
+
   const handleTakeOver = useCallback((seatId: string) => {
     setActionError(null);
     if (seatId !== visibleSelectedSeatId) {
+      explicitSelectedSeatIdRef.current = seatId;
       setSelectedSeatId(seatId);
       setPendingTakeoverSeatId(seatId);
       return;
@@ -309,7 +333,7 @@ export function DesktopMonitorWorkspace() {
                 emptyReason={desktopInstances.desktops.length > 0 ? "filter" : "backend"}
                 accessKeys={accessKeys}
                 controlBusy={control.busy}
-                onSelect={setSelectedSeatId}
+                onSelect={handleSelectDesktop}
                 onTakeOver={handleTakeOver}
                 onReturnToAI={() => void control.release()}
                 onInput={handleDesktopInput}
