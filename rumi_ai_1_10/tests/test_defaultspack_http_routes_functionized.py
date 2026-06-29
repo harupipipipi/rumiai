@@ -133,6 +133,103 @@ def test_agent_subagent_function_route_uses_direct_block_without_function_grant_
     legacy.assert_called_once()
 
 
+def test_agent_subagent_local_mimo_company_route_uses_profile_authority_context():
+    from transport import http
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    payload = {
+        http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+        "task": "Gemma visual QA smoke",
+        "model": "google/gemma-4-31b-it",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "company_id": "mimo-coding-company",
+        "principal_id": "profile:payload-spoof",
+        "authority_principal_id": "profile:payload-spoof",
+    }
+
+    with patch("transport.http.invoke_block", return_value={"status": "ok"}) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.agent.run_subagent",
+            payload,
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok"}
+    legacy.assert_called_once()
+    context = legacy.call_args.args[2]
+    assert context["_tool_server_approved"] is True
+    assert context["profile_id"] == "defaultspack.mimo_coding_company"
+    assert context["authority_principal_id"] == "profile:defaultspack.mimo_coding_company"
+    assert context["principal_id"] == "profile:defaultspack.mimo_coding_company"
+
+
+def test_agent_subagent_payload_profile_is_not_promoted_without_local_ui_authority():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    payload = {
+        "task": "Gemma visual QA smoke",
+        "model": "google/gemma-4-31b-it",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "company_id": "mimo-coding-company",
+        "principal_id": "profile:payload-spoof",
+        "authority_principal_id": "profile:payload-spoof",
+    }
+
+    with patch("transport.http.invoke_block", return_value={"status": "ok"}) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.agent.run_subagent",
+            payload,
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok"}
+    legacy.assert_called_once()
+    context = legacy.call_args.args[2]
+    assert "_tool_server_approved" not in context
+    assert "profile_id" not in context
+    assert "authority_principal_id" not in context
+    assert "principal_id" not in context
+
+
+def test_agent_subagent_local_ui_does_not_promote_other_company_profile():
+    from transport import http
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    payload = {
+        http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+        "task": "Gemma visual QA smoke",
+        "model": "google/gemma-4-31b-it",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "company_id": "other-company",
+    }
+
+    with patch("transport.http.invoke_block", return_value={"status": "ok"}) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.agent.run_subagent",
+            payload,
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok"}
+    context = legacy.call_args.args[2]
+    assert context["_tool_server_approved"] is True
+    assert "profile_id" not in context
+    assert "authority_principal_id" not in context
+    assert "principal_id" not in context
+
+
 def test_long_running_grant_denied_does_not_fallback_for_chat_send():
     from transport.http import DefaultsHttpServer
 

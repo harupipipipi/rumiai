@@ -1424,6 +1424,7 @@ _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
+    "/api/agent/subagent": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
     "/api/runtime/ensure": {"POST"},
@@ -1649,6 +1650,36 @@ def _apply_defaultspack_local_ui_context(context, payload):
     context["_tool_server_approved"] = True
     context["source"] = "defaultspack_local_ui"
     context["approval_id"] = "defaultspack_local_ui"
+    _apply_mimo_company_profile_authority_context(context, payload)
+
+
+def _apply_mimo_company_profile_authority_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    if context.get("_tool_server_approved") is not True:
+        return
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    tool_policy = payload.get("tool_policy") if isinstance(payload.get("tool_policy"), dict) else {}
+    profile_id = str(
+        payload.get("profile_id")
+        or metadata.get("profile_id")
+        or params.get("profile_id")
+        or tool_policy.get("profile_id")
+        or ""
+    ).strip()
+    company_id = str(
+        payload.get("company_id")
+        or metadata.get("company_id")
+        or params.get("company_id")
+        or ""
+    ).strip()
+    if profile_id != "defaultspack.mimo_coding_company" or company_id != "mimo-coding-company":
+        return
+    principal_id = "profile:" + profile_id
+    context["profile_id"] = profile_id
+    context["authority_principal_id"] = principal_id
+    context["principal_id"] = principal_id
 
 
 def _apply_authenticated_principal_context(context, payload):
