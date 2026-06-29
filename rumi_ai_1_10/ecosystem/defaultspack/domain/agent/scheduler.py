@@ -331,9 +331,11 @@ def _scheduler_chat_params_and_tools(
     return params, tools
 
 
-def _scheduler_chat_context(task_cfg: dict[str, Any]) -> dict[str, Any]:
+def _scheduler_chat_context(task_cfg: dict[str, Any], *, cancel_event=None) -> dict[str, Any]:
     policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
     context: dict[str, Any] = {"profile_policy": policy}
+    if cancel_event is not None:
+        context["is_cancelled"] = cancel_event.is_set
     metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
     profile_id = str(task_cfg.get("profile_id") or policy.get("profile_id") or metadata.get("profile_id") or "").strip()
     company_id = str(metadata.get("company_id") or "").strip()
@@ -392,7 +394,7 @@ def _resume_scheduled_chat_approvals(
                     "scheduled_task_agent_id": str(task_cfg.get("agent_id") or ""),
                 },
             ),
-            _scheduler_chat_context(task_cfg),
+            _scheduler_chat_context(task_cfg, cancel_event=cancel_event),
         )
     return result, auto_approvals
 
@@ -1500,7 +1502,7 @@ class Scheduler:
                                 params=params,
                                 tools=tools,
                             ),
-                            _scheduler_chat_context(task_cfg),
+                            _scheduler_chat_context(task_cfg, cancel_event=cancel_event),
                         )
                         return _resume_scheduled_chat_approvals(
                             result=chat_result,

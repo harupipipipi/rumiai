@@ -1284,15 +1284,16 @@ def test_scheduler_times_out_conversation_run_and_allows_next_interval(tmp_path,
             return self.started and not self.cancelled
 
     calls: list[dict] = []
+    contexts: list[dict] = []
     calls_lock = threading.Lock()
     first_call_started = threading.Event()
     first_call_release = threading.Event()
     first_call_finished = threading.Event()
 
     def fake_send_chat(payload, context):
-        del context
         with calls_lock:
             calls.append(payload)
+            contexts.append(context)
             index = len(calls)
         if index == 1:
             first_call_started.set()
@@ -1346,6 +1347,9 @@ def test_scheduler_times_out_conversation_run_and_allows_next_interval(tmp_path,
         assert first_history["status"] == "error"
         assert "timed out after 0.2 seconds" in first_history["error"]
         assert first_history["timeout_seconds"] == 0.2
+        with calls_lock:
+            assert callable(contexts[0].get("is_cancelled"))
+            assert contexts[0]["is_cancelled"]() is True
         saved_after_timeout = load_schedule(schedule["id"])
         assert "running_execution" not in saved_after_timeout
         assert "running_started_at" not in saved_after_timeout
