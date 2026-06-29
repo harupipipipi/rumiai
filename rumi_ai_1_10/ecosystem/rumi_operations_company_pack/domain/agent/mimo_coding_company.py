@@ -178,6 +178,10 @@ FALLBACK_KNOWLEDGE_DOCS = [
 ]
 
 MODEL_ALLOWLIST = [
+    "opencode-go/mimo-v2.5-pro",
+    "opencode-go/mimo-v2.5",
+    "google/gemma-4-31b-it",
+    "google/gemma-4-26b-a4b-it",
     "xiaomi-token-plan-sgp/mimo-v2.5-pro",
     "xiaomi-token-plan-sgp/mimo-v2.5",
     "xiaomi-token-plan-sgp/mimo-v2-pro",
@@ -193,7 +197,7 @@ MODEL_ALLOWLIST = [
     "stub/default",
 ]
 
-CATALOG_EXPANDED_MODEL_PROVIDERS = ("groq", "cerebras")
+CATALOG_EXPANDED_MODEL_PROVIDERS = ("opencode-go", "google", "groq", "cerebras")
 
 UTILITY_MODELS = {
     "subagent_default": DEFAULT_MAIN_MODEL,

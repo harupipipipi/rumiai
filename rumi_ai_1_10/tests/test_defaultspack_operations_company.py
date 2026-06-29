@@ -44,6 +44,21 @@ def test_operations_company_profile_coexists_with_default_profile():
     assert manifest["counts"]["profiles"] >= 2
 
 
+def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma():
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        MimoCodingCompanyRuntime,
+        current_model_allowlist,
+    )
+
+    allowlist = current_model_allowlist()
+    runtime = MimoCodingCompanyRuntime()
+
+    assert "opencode-go/mimo-v2.5-pro" in allowlist
+    assert "google/gemma-4-31b-it" in allowlist
+    assert runtime._allowed_model("opencode-go/mimo-v2.5-pro") == "opencode-go/mimo-v2.5-pro"
+    assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
+
+
 def test_operations_company_bootstrap_creates_org_conversation_and_heartbeat(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler
