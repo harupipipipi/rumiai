@@ -431,6 +431,131 @@ def test_scheduler_recovers_persisted_stale_manual_running_execution_and_can_tri
         _reset_scheduler_singleton()
 
 
+def test_scheduler_recovers_active_stale_running_execution_once_when_original_unwinds(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+    calls_lock = threading.Lock()
+    first_call_started = threading.Event()
+    first_call_release = threading.Event()
+
+    def fake_complete(payload, context):
+        del context
+        with calls_lock:
+            calls.append(payload)
+            index = len(calls)
+        if index == 1:
+            first_call_started.set()
+            first_call_release.wait(timeout=5)
+            return {"status": "ok", "data": {"content": "late first run"}}
+        return {"status": "ok", "data": {"content": "manual retry done"}}
+
+    monkeypatch.setattr("blocks.ai.complete.run", fake_complete)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = None
+    original_timestamp = scheduler_module.timestamp
+    try:
+        schedule = scheduler.create_schedule(
+            "interval",
+            {"message": "keep testing", "model": "stub/default", "timeout": 600},
+            {"value": 30, "unit": "minutes"},
+        )
+
+        ids = iter(["active-stale", "manual-retry"])
+        monkeypatch.setattr(scheduler_module, "gen_id", lambda: next(ids))
+        first_started_at = "2000-01-01T00:00:00Z"
+        timestamp_values = iter([first_started_at])
+
+        def fake_timestamp():
+            try:
+                return next(timestamp_values)
+            except StopIteration:
+                return original_timestamp()
+
+        monkeypatch.setattr(scheduler_module, "timestamp", fake_timestamp)
+
+        first_result: dict[str, dict | None] = {"history": None}
+
+        def run_first():
+            first_result["history"] = scheduler._execute_task(schedule["id"], manual=False)
+
+        first_thread = threading.Thread(target=run_first)
+        first_thread.start()
+        assert first_call_started.wait(timeout=2)
+
+        active_execution_id = "sexec_active-stale"
+        with scheduler._lock:
+            assert active_execution_id in scheduler._active_execution_ids
+
+        assert scheduler._recover_stale_running_execution(schedule["id"]) is True
+
+        recovered = load_schedule(schedule["id"])
+        assert "running_execution" not in recovered
+        assert "running_started_at" not in recovered
+        assert recovered["execution_count"] == 1
+
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["execution_id"] == active_execution_id
+        assert entries[0]["status"] == "error"
+        assert entries[0]["timeout_seconds"] == 600
+        assert entries[0]["recovered_stale_running_execution"] is True
+
+        retry = scheduler.trigger_now(schedule["id"])
+
+        assert retry["status"] == "completed"
+        assert retry["result"] == "manual retry done"
+
+        first_call_release.set()
+        first_thread.join(timeout=2)
+        assert not first_thread.is_alive()
+
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert saved["execution_count"] == 2
+        entries, total = load_history(schedule["id"])
+        assert total == 2
+        assert entries[0]["execution_id"] == "sexec_manual-retry"
+        assert entries[0]["status"] == "completed"
+        assert entries[1]["execution_id"] == active_execution_id
+        assert entries[1]["recovered_stale_running_execution"] is True
+        with calls_lock:
+            assert len(calls) == 2
+        with scheduler._lock:
+            assert active_execution_id not in scheduler._active_execution_ids
+            assert active_execution_id not in scheduler._stale_recovered_execution_ids
+    finally:
+        first_call_release.set()
+        if "first_thread" in locals():
+            first_thread.join(timeout=2)
+        if schedule is not None:
+            scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_trigger_now_skips_when_schedule_has_active_running_execution(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

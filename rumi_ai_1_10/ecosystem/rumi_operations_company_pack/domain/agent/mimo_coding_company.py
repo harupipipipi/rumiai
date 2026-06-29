@@ -25,7 +25,6 @@ from domain.agent.role_registry import RoleRegistry
 from domain.agent.schedule_store import load_all_schedules, save_schedule
 from domain.agent.scheduler import Scheduler
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
-from domain.ai_client.providers import get_all_known_models
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.service import CompanyService
 from domain.company.task_store import CompanyTaskStore
@@ -37,9 +36,9 @@ CONVERSATION_KIND = "mimo_coding_company"
 COMPANY_ID = "mimo-coding-company"
 COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
-DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
-DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
-DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5"
+DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5-pro"
+DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
+DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5-pro"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
@@ -179,25 +178,9 @@ FALLBACK_KNOWLEDGE_DOCS = [
 
 MODEL_ALLOWLIST = [
     "opencode-go/mimo-v2.5-pro",
-    "opencode-go/mimo-v2.5",
     "google/gemma-4-31b-it",
-    "google/gemma-4-26b-a4b-it",
-    "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-    "xiaomi-token-plan-sgp/mimo-v2.5",
-    "xiaomi-token-plan-sgp/mimo-v2-pro",
-    "xiaomi-token-plan-sgp/mimo-v2-omni",
-    "xiaomi-token-plan-sgp/mimo-v2-flash",
-    "gitlawb-opengateway/mimo-v2.5-pro",
-    "gitlawb-opengateway/mimo-v2.5",
-    "gitlawb-opengateway/mimo-v2-pro",
-    "gitlawb-opengateway/mimo-v2-omni",
-    "gitlawb-opengateway/mimo-v2-flash",
-    "groq/openai/gpt-oss-120b",
-    "cerebras/gpt-oss-120b",
     "stub/default",
 ]
-
-CATALOG_EXPANDED_MODEL_PROVIDERS = ("opencode-go", "google", "groq", "cerebras")
 
 UTILITY_MODELS = {
     "subagent_default": DEFAULT_MAIN_MODEL,
@@ -391,19 +374,6 @@ def current_model_allowlist() -> list[str]:
 
     for model_id in MODEL_ALLOWLIST:
         append(model_id)
-
-    for provider_id in CATALOG_EXPANDED_MODEL_PROVIDERS:
-        try:
-            catalog_models = get_all_known_models(provider_id=provider_id)
-        except Exception:
-            continue
-        for model in catalog_models:
-            if not isinstance(model, dict):
-                continue
-            model_type = str(model.get("type") or "chat").strip().lower()
-            if model_type not in {"", "chat", "reasoning"}:
-                continue
-            append(model.get("qualified_model_id") or model.get("id"))
 
     return allowlist
 

@@ -668,6 +668,7 @@ class Scheduler:
         self._schedules = {}     # schedule_id -> schedule dict (in-memory cache)
         self._conversation_locks = {}  # conversation_id -> threading.Lock
         self._active_execution_ids = set()
+        self._stale_recovered_execution_ids = set()
         self._loaded = False
         self._loaded_schedules_dir = None
 
@@ -683,6 +684,7 @@ class Scheduler:
                 timers_to_cancel = list(self._timers.values())
                 self._timers.clear()
                 self._schedules.clear()
+                self._stale_recovered_execution_ids.clear()
                 self._loaded = False
                 self._loaded_schedules_dir = schedules_dir
             if not self._loaded:
@@ -1150,9 +1152,14 @@ class Scheduler:
             stale = _stale_running_execution(sched)
             if stale is None:
                 return False
-            if stale["execution_id"] in self._active_execution_ids:
+            stale_execution_id = stale["execution_id"]
+            if stale_execution_id in self._stale_recovered_execution_ids:
                 return False
-            self._active_execution_ids.add(stale["execution_id"])
+            self._stale_recovered_execution_ids.add(stale_execution_id)
+            release_active_claim = False
+            if stale_execution_id not in self._active_execution_ids:
+                self._active_execution_ids.add(stale_execution_id)
+                release_active_claim = True
 
         try:
             completed_at = timestamp()
@@ -1197,9 +1204,15 @@ class Scheduler:
                 save_schedule(sched)
                 self._schedules[schedule_id] = sched
             return True
+        except Exception:
+            with self._lock:
+                self._stale_recovered_execution_ids.discard(stale["execution_id"])
+            raise
         finally:
             with self._lock:
-                self._active_execution_ids.discard(stale["execution_id"])
+                if release_active_claim:
+                    self._active_execution_ids.discard(stale["execution_id"])
+                    self._stale_recovered_execution_ids.discard(stale["execution_id"])
 
     def _ensure_active_timers(self):
         with self._lock:
@@ -1511,37 +1524,41 @@ class Scheduler:
                     pass
 
             try:
-                history_entry["completed_at"] = timestamp()
-                append_history(schedule_id, history_entry)
-
-                # Update schedule metadata
                 with self._lock:
-                    sched = self._schedules.get(schedule_id)
-                if sched is not None:
-                    current = _running_execution_details(sched)
-                    if isinstance(current, dict):
-                        current_execution_id = str(current.get("execution_id") or "").strip()
-                        if not current_execution_id or current_execution_id == exec_id:
+                    recovered_as_stale = exec_id in self._stale_recovered_execution_ids
+                if not recovered_as_stale:
+                    history_entry["completed_at"] = timestamp()
+                    append_history(schedule_id, history_entry)
+
+                    # Update schedule metadata
+                    with self._lock:
+                        sched = self._schedules.get(schedule_id)
+                    if sched is not None:
+                        current = _running_execution_details(sched)
+                        if isinstance(current, dict):
+                            current_execution_id = str(current.get("execution_id") or "").strip()
+                            if not current_execution_id or current_execution_id == exec_id:
+                                sched.pop("running_execution", None)
+                                sched.pop("running_started_at", None)
+                        else:
                             sched.pop("running_execution", None)
                             sched.pop("running_started_at", None)
-                    else:
-                        sched.pop("running_execution", None)
-                        sched.pop("running_started_at", None)
-                    sched["execution_count"] = sched.get("execution_count", 0) + 1
-                    sched["last_executed_at"] = history_entry["completed_at"]
-                    if not manual:
-                        if sched.get("type") == "once":
-                            sched["status"] = "completed"
-                            sched["next_execution_at"] = None
-                        elif sched.get("status") == "active":
-                            sched["next_execution_at"] = self._compute_next_execution(sched)
-                    sched["updated_at"] = timestamp()
-                    save_schedule(sched)
-                    with self._lock:
-                        self._schedules[schedule_id] = sched
+                        sched["execution_count"] = sched.get("execution_count", 0) + 1
+                        sched["last_executed_at"] = history_entry["completed_at"]
+                        if not manual:
+                            if sched.get("type") == "once":
+                                sched["status"] = "completed"
+                                sched["next_execution_at"] = None
+                            elif sched.get("status") == "active":
+                                sched["next_execution_at"] = self._compute_next_execution(sched)
+                        sched["updated_at"] = timestamp()
+                        save_schedule(sched)
+                        with self._lock:
+                            self._schedules[schedule_id] = sched
             finally:
                 with self._lock:
                     self._active_execution_ids.discard(exec_id)
+                    self._stale_recovered_execution_ids.discard(exec_id)
         return history_entry
 
     def shutdown(self):

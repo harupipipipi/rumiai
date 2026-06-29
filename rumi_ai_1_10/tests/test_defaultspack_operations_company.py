@@ -44,17 +44,29 @@ def test_operations_company_profile_coexists_with_default_profile():
     assert manifest["counts"]["profiles"] >= 2
 
 
-def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma():
+def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        DEFAULT_FAST_MODEL,
+        DEFAULT_MAIN_MODEL,
+        DEFAULT_VISION_MODEL,
         MimoCodingCompanyRuntime,
         current_model_allowlist,
     )
 
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
     allowlist = current_model_allowlist()
     runtime = MimoCodingCompanyRuntime()
 
     assert "opencode-go/mimo-v2.5-pro" in allowlist
     assert "google/gemma-4-31b-it" in allowlist
+    assert "opencode-go/mimo-v2.5" not in allowlist
+    assert "opencode-go/minimax-m3" not in allowlist
+    assert "opencode-zen/minimax-m3-free" not in allowlist
+    assert "groq/openai/gpt-oss-20b" not in allowlist
+    assert "cerebras/zai-glm-4.7" not in allowlist
+    assert DEFAULT_MAIN_MODEL == "opencode-go/mimo-v2.5-pro"
+    assert DEFAULT_FAST_MODEL == "opencode-go/mimo-v2.5-pro"
+    assert DEFAULT_VISION_MODEL == "google/gemma-4-31b-it"
     assert runtime._allowed_model("opencode-go/mimo-v2.5-pro") == "opencode-go/mimo-v2.5-pro"
     assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
 
@@ -712,6 +724,7 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
     monkeypatch.setattr(
@@ -1062,28 +1075,22 @@ def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
     assert all(Path(path).is_file() for path in knowledge_docs)
 
 
-def test_mimo_coding_company_manifest_expands_catalog_backed_groq_and_cerebras_models():
-    from domain.ai_client.providers import get_all_known_models
+def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowlist(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
     runtime = MimoCodingCompanyRuntime()
     allowlist = set(runtime.manifest()["model_self_selection"]["allowlist"])
 
-    expected = {
-        str(model.get("qualified_model_id") or model.get("id"))
-        for provider_id in ("groq", "cerebras")
-        for model in get_all_known_models(provider_id=provider_id)
-        if isinstance(model, dict) and str(model.get("type") or "chat").strip().lower() in {"", "chat", "reasoning"}
+    assert allowlist == {
+        "opencode-go/mimo-v2.5-pro",
+        "google/gemma-4-31b-it",
+        "stub/default",
     }
 
-    assert "groq/openai/gpt-oss-20b" in allowlist
-    assert "cerebras/zai-glm-4.7" in allowlist
-    assert expected <= allowlist
 
-
-def test_mimo_coding_company_bootstrap_block_accepts_catalog_backed_models(tmp_path, monkeypatch):
+def test_mimo_coding_company_bootstrap_block_rejects_catalog_and_free_models(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import bootstrap
-    from domain.agent.scheduler import Scheduler
 
     _reset_defaultspack_singletons()
     monkeypatch.chdir(tmp_path)
@@ -1091,27 +1098,29 @@ def test_mimo_coding_company_bootstrap_block_accepts_catalog_backed_models(tmp_p
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
 
-    result = bootstrap.run(
-        {
-            "start_nonstop": True,
-            "heartbeat_minutes": 30,
-            "review_interval_minutes": 180,
-            "qa_interval_minutes": 240,
-            "model": "groq/openai/gpt-oss-20b",
-            "vision_model": "stub/default",
-            "fast_model": "cerebras/zai-glm-4.7",
-            "seed_knowledge": False,
-            "run_initial_review_now": False,
-        },
-        {},
-    )
+    for model in (
+        "groq/openai/gpt-oss-20b",
+        "cerebras/zai-glm-4.7",
+        "opencode-go/minimax-m3",
+        "opencode-zen/minimax-m3-free",
+    ):
+        result = bootstrap.run(
+            {
+                "start_nonstop": True,
+                "heartbeat_minutes": 30,
+                "review_interval_minutes": 180,
+                "qa_interval_minutes": 240,
+                "model": model,
+                "vision_model": "stub/default",
+                "fast_model": "stub/default",
+                "seed_knowledge": False,
+                "run_initial_review_now": False,
+            },
+            {},
+        )
 
-    assert result["status"] == "ok"
-    assert result["data"]["harness"]["main_model"] == "groq/openai/gpt-oss-20b"
-    assert result["data"]["harness"]["fast_model"] == "cerebras/zai-glm-4.7"
-
-    for schedule in result["data"]["schedules"]:
-        Scheduler().delete_schedule(schedule["id"])
+        assert result["status"] == "error"
+        assert result["error"]["code"] == "MODEL_NOT_ALLOWED"
     _reset_defaultspack_singletons()
 
 
