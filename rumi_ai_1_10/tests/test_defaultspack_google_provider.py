@@ -63,6 +63,23 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         finally:
             AIClient._instance = None
 
+    def test_ai_client_lazily_registers_google_after_key_becomes_available(self):
+        from domain.ai_client.client import AIClient
+
+        AIClient._instance = None
+        try:
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-google-key"}, clear=True):
+                client = AIClient()
+                client._providers.pop("google", None)
+
+            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-google-key"}, clear=True):
+                provider, model_name = client.resolve_provider("google/gemma-4-31b-it")
+
+            self.assertEqual(provider.__class__.__name__, "GoogleProvider")
+            self.assertEqual(model_name, "gemma-4-31b-it")
+        finally:
+            AIClient._instance = None
+
     def test_google_provider_prefers_google_api_key_when_both_are_set(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
