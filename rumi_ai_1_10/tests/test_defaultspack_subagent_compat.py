@@ -15,7 +15,9 @@ from blocks.agent.run_subagent import run as run_subagent_block  # noqa: E402
 from domain.chat.store import ChatStore  # noqa: E402
 from domain.chat.subagent_durability import (  # noqa: E402
     SUBAGENT_DURABLE_DRAFT_FLAG,
+    SUBAGENT_FAILED_TEXT,
     SUBAGENT_PENDING_TEXT,
+    has_completed_assistant_text,
     subagent_durable_draft_metadata,
 )
 from domain.function_runtime.dispatcher import run_defaultspack_function  # noqa: E402
@@ -1090,8 +1092,10 @@ def test_mimo_monitor_repairs_stale_running_durable_subagent_draft(monkeypatch, 
 
     result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
 
-    assert result["unanswered"] == []
-    assert result["repaired"] == [child["id"]]
+    assert result["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert result["unanswered"][0]["failed"] is True
+    assert result["failed"][0]["child_conversation_id"] == child["id"]
+    assert result["repaired"] == []
     child_after = ChatStore().get_conversation(child["id"])
     assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
     assert child_after["metadata"]["subagent"]["status"] == "error"
@@ -1138,12 +1142,92 @@ def test_mimo_monitor_repairs_stale_subagent_child_missing_from_parent_index(mon
     result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
 
     assert result["checked_ids"] == [child["id"]]
-    assert result["unanswered"] == []
-    assert result["repaired"] == [child["id"]]
+    assert result["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert result["unanswered"][0]["failed"] is True
+    assert result["failed"][0]["child_conversation_id"] == child["id"]
+    assert result["repaired"] == []
     child_after = ChatStore().get_conversation(child["id"])
     assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
     assert child_after["metadata"]["subagent"]["status"] == "error"
     assert child_after["metadata"]["subagent"]["error_code"] == "SUBAGENT_DISPATCH_INTERRUPTED"
+
+
+def test_subagent_completed_assistant_text_counts_success_json_stop():
+    assert has_completed_assistant_text(
+        [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": json.dumps({"status": "ok", "answer": "done"})}],
+                "raw_text": json.dumps({"status": "ok", "answer": "done"}),
+                "finish_reason": "stop",
+                "metadata": {"status": "completed"},
+            }
+        ]
+    )
+
+
+def test_mimo_monitor_keeps_failed_subagent_child_unanswered(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "failed child", "source": "subagent_tool"},
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "please finish"}],
+        },
+    )
+    store.add_message(
+        child["id"],
+        {
+            "role": "assistant",
+            "content": [{"type": "text", "text": SUBAGENT_FAILED_TEXT}],
+            "raw_text": SUBAGENT_FAILED_TEXT,
+            "finish_reason": "error",
+            "metadata": {
+                "source": "subagent_tool",
+                "status": "error",
+                "error_code": "SUBAGENT_DISPATCH_TIMEOUT",
+                "final": True,
+            },
+        },
+    )
+
+    assert not has_completed_assistant_text(store.get_conversation(child["id"])["messages"])
+    assert not has_completed_assistant_text(
+        [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "The delegated agent could not complete."}],
+                "raw_text": "The delegated agent could not complete.",
+                "finish_reason": "stop",
+                "metadata": {"status": "error"},
+            }
+        ]
+    )
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    monkeypatch.setattr(runtime, "_conversation_age_seconds", lambda conversation: 999.0)
+
+    result = runtime._subagent_reply_gaps({"conversation_id": parent["id"]})
+
+    assert result["repaired"] == []
+    assert result["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert result["unanswered"][0]["failed"] is True
+    assert result["unanswered"][0]["failure_code"] == "SUBAGENT_DISPATCH_TIMEOUT"
+    assert result["failed"][0]["child_conversation_id"] == child["id"]
 
 
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):

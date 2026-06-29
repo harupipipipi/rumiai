@@ -72,6 +72,10 @@ _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS = {
     "blocks.agent.run_subagent",
 }
 
+_DIRECT_HTTP_COMPATIBILITY_BLOCKS = {
+    "blocks.agent.run_subagent",
+}
+
 _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
     "blocks.sandbox.api",
 }
@@ -406,6 +410,9 @@ class DefaultsHttpServer:
         if module_name in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
             context["_defaultspack_http_route_adapter"] = True
             return invoke_block(module_name, payload, context)
+        if module_name in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
         if (
             module_name in _DIRECT_SAFE_GET_FALLBACK_BLOCKS
             and self._safe_get_fallback_allowed(module_name, payload)
@@ -540,6 +547,8 @@ class DefaultsHttpServer:
                 context.get("approval_id"),
             )
         if fallback_block_module in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            return invoke_block(fallback_block_module, payload, context)
+        if fallback_block_module in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:
             return invoke_block(fallback_block_module, payload, context)
         if fallback_block_module and self._safe_get_fallback_allowed(fallback_block_module, payload):
             return invoke_block(fallback_block_module, payload, context)

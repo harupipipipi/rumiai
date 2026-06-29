@@ -1609,7 +1609,7 @@ class MimoCodingCompanyRuntime:
             "team_workspace": {"synced_messages": 0},
             "provider_health": self._provider_health_baseline(state),
             "schedule_history": {"checked": 0, "latest": [], "signals": []},
-            "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": []},
+            "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": [], "failed_count": 0, "failed": []},
             "desktop_monitoring": {
                 "surface": "desktops",
                 "expected_api": "GET /api/desktops",
@@ -1684,6 +1684,8 @@ class MimoCodingCompanyRuntime:
             summary["subagents"]["repaired_count"] = len(summary["subagents"]["repaired"])
             summary["subagents"]["unanswered"] = subagent_gaps.get("unanswered", [])
             summary["subagents"]["unanswered_count"] = len(summary["subagents"]["unanswered"])
+            summary["subagents"]["failed"] = subagent_gaps.get("failed", [])
+            summary["subagents"]["failed_count"] = len(summary["subagents"]["failed"])
             resolved_gap_messages = self._resolve_stale_subagent_gap_messages(runtime_store, state, subagent_gaps)
             summary["subagents"]["resolved_messages"] = resolved_gap_messages[:10]
             summary["subagents"]["resolved_message_count"] = len(resolved_gap_messages)
@@ -1741,6 +1743,7 @@ class MimoCodingCompanyRuntime:
             summary["schedule_history"]["signals"] = summary["schedule_history"]["signals"][-12:]
             summary["provider_health"]["signals"] = summary["provider_health"]["signals"][-12:]
             summary["subagents"]["unanswered"] = summary["subagents"]["unanswered"][:10]
+            summary["subagents"]["failed"] = summary["subagents"]["failed"][:10]
             return summary
         except Exception as exc:
             summary["status"] = "error"
@@ -2108,6 +2111,7 @@ class MimoCodingCompanyRuntime:
             from domain.chat.store import ChatStore
             from domain.chat.subagent_durability import (
                 has_completed_assistant_text,
+                is_failed_assistant_response,
                 is_running_subagent_durable_draft,
                 mark_subagent_child_failed,
             )
@@ -2116,6 +2120,7 @@ class MimoCodingCompanyRuntime:
             parent = store.get_conversation(conversation_id) or {}
             child_ids = self._subagent_child_conversation_ids(store, parent, conversation_id)
             unanswered: list[dict[str, Any]] = []
+            failed: list[dict[str, Any]] = []
             repaired: list[str] = []
             checked_ids: list[str] = []
             for child_id in child_ids:
@@ -2129,42 +2134,74 @@ class MimoCodingCompanyRuntime:
                     for message in messages
                     if isinstance(message, dict)
                 )
+                failed_message = next(
+                    (
+                        message
+                        for message in reversed(messages)
+                        if isinstance(message, dict) and is_failed_assistant_response(message)
+                    ),
+                    None,
+                )
                 if has_completed_assistant_text(messages) and not has_running_draft:
                     continue
                 age_seconds = self._conversation_age_seconds(child)
                 if age_seconds is not None and age_seconds < SUBAGENT_GAP_GRACE_SECONDS:
                     continue
-                repaired_message = mark_subagent_child_failed(
-                    store,
-                    child_id,
-                    metadata=child.get("metadata") if isinstance(child.get("metadata"), dict) else {},
-                    code="SUBAGENT_DISPATCH_INTERRUPTED",
-                )
+                repaired_message = None
+                if failed_message is None:
+                    repaired_message = mark_subagent_child_failed(
+                        store,
+                        child_id,
+                        metadata=child.get("metadata") if isinstance(child.get("metadata"), dict) else {},
+                        code="SUBAGENT_DISPATCH_INTERRUPTED",
+                    )
                 if repaired_message is not None:
-                    repaired.append(child_id)
                     child = store.get_conversation(child_id) or child
                     messages = child.get("messages") if isinstance(child.get("messages"), list) else messages
-                    if has_completed_assistant_text(messages):
-                        continue
-                unanswered.append(
-                    {
-                        "child_conversation_id": child_id,
-                        "title": str(child.get("title") or "Subagent"),
-                        "message_count": len(messages),
-                        "created_at": child.get("created_at"),
-                        "last_user_prompt": next(
-                            (
-                                self._message_text(message)[:300]
-                                for message in messages
-                                if isinstance(message, dict) and str(message.get("role") or "") == "user"
-                            ),
-                            "",
+                    failed_message = repaired_message
+                elif failed_message is not None:
+                    child = store.get_conversation(child_id) or child
+                    messages = child.get("messages") if isinstance(child.get("messages"), list) else messages
+                if has_completed_assistant_text(messages):
+                    repaired.append(child_id)
+                    continue
+                gap = {
+                    "child_conversation_id": child_id,
+                    "title": str(child.get("title") or "Subagent"),
+                    "message_count": len(messages),
+                    "created_at": child.get("created_at"),
+                    "last_user_prompt": next(
+                        (
+                            self._message_text(message)[:300]
+                            for message in messages
+                            if isinstance(message, dict) and str(message.get("role") or "") == "user"
                         ),
-                    }
+                        "",
+                    ),
+                }
+                failed_message = next(
+                    (
+                        message
+                        for message in reversed(messages)
+                        if isinstance(message, dict) and is_failed_assistant_response(message)
+                    ),
+                    failed_message,
                 )
-            return {"checked_ids": checked_ids, "unanswered": unanswered, "repaired": repaired}
+                if failed_message is not None:
+                    metadata = failed_message.get("metadata") if isinstance(failed_message.get("metadata"), dict) else {}
+                    gap.update(
+                        {
+                            "status": "failed",
+                            "failed": True,
+                            "failure_code": str(metadata.get("error_code") or ""),
+                            "failure_reason": self._message_text(failed_message)[:300],
+                        }
+                    )
+                    failed.append(gap)
+                unanswered.append(gap)
+            return {"checked_ids": checked_ids, "unanswered": unanswered, "failed": failed, "repaired": repaired}
         except Exception:
-            return {"checked_ids": [], "unanswered": [], "repaired": []}
+            return {"checked_ids": [], "unanswered": [], "failed": [], "repaired": []}
 
     @staticmethod
     def _subagent_child_conversation_ids(store: Any, parent: dict[str, Any], conversation_id: str) -> list[str]:
@@ -2321,12 +2358,21 @@ class MimoCodingCompanyRuntime:
     @staticmethod
     def _subagent_gap_message(gap: dict[str, Any]) -> str:
         prompt = str(gap.get("last_user_prompt") or "").strip()
+        failed = gap.get("failed") is True or str(gap.get("status") or "") == "failed"
         lines = [
-            "**MiMo subagent child conversation has no assistant reply**",
+            (
+                "**MiMo subagent child conversation failed before a successful assistant reply**"
+                if failed
+                else "**MiMo subagent child conversation has no assistant reply**"
+            ),
             f"- Child conversation: `{gap.get('child_conversation_id') or ''}`",
             f"- Title: {gap.get('title') or 'Subagent'}",
             f"- Message count: {gap.get('message_count') or 0}",
         ]
+        if failed:
+            lines.append(f"- Failure code: `{gap.get('failure_code') or 'unknown'}`")
+            if gap.get("failure_reason"):
+                lines.extend(["", "Failure marker:", "```text", str(gap.get("failure_reason") or "")[:600], "```"])
         if prompt:
             lines.extend(["", "Latest user prompt:", "```text", prompt[:600], "```"])
         return "\n".join(lines)

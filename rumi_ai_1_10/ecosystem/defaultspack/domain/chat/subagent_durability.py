@@ -12,6 +12,8 @@ SUBAGENT_PENDING_TEXT = (
 )
 SUBAGENT_FAILED_TEXT = "The delegated agent could not complete before producing a response."
 SUBAGENT_EMPTY_RESPONSE_TEXT = "The delegated agent completed without producing a visible response."
+_FAILED_FINISH_REASONS = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
+_FAILED_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 
 
 def is_subagent_child_conversation(
@@ -88,11 +90,27 @@ def is_running_subagent_durable_draft(message: dict[str, Any]) -> bool:
     )
 
 
+def is_failed_assistant_response(message: dict[str, Any]) -> bool:
+    if not isinstance(message, dict) or str(message.get("role") or "") != "assistant":
+        return False
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    finish_reason = str(message.get("finish_reason") or "").strip().lower()
+    status = str(metadata.get("status") or message.get("status") or "").strip().lower()
+    if finish_reason in _FAILED_FINISH_REASONS or status in _FAILED_STATUSES:
+        return True
+    if str(metadata.get("error_code") or metadata.get("error") or "").strip():
+        return True
+    text = message_text(message)
+    return text in {SUBAGENT_FAILED_TEXT, SUBAGENT_EMPTY_RESPONSE_TEXT}
+
+
 def has_completed_assistant_text(messages: list[Any]) -> bool:
     for message in messages if isinstance(messages, list) else []:
         if not isinstance(message, dict) or str(message.get("role") or "") != "assistant":
             continue
         if is_running_subagent_durable_draft(message):
+            continue
+        if is_failed_assistant_response(message):
             continue
         if message_text(message):
             return True
@@ -200,6 +218,8 @@ def _latest_repairable_assistant(messages: list[Any]) -> dict[str, Any] | None:
         if not isinstance(message, dict) or str(message.get("role") or "") != "assistant":
             continue
         if is_running_subagent_durable_draft(message):
+            return message
+        if is_failed_assistant_response(message):
             return message
         if not message_text(message):
             return message

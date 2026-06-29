@@ -69,20 +69,20 @@ def test_fallback_http_long_running_timeout_uses_direct_block_fallback():
         return_value={"status": "ok", "data": {"assistant_text": "done"}},
     ) as legacy:
         result = server._invoke_fallback_block(
-            "blocks.agent.run_subagent",
-            {"task": "long delegate", "timeout_seconds": 180},
+            "blocks.ambient.event_submit",
+            {"trigger": "pinch", "mode": "dispatch_audio", "timeout_seconds": 180},
             {},
             {},
         )
 
     assert result == {"status": "ok", "data": {"assistant_text": "done"}}
     invoke.assert_called_once()
-    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    assert invoke.call_args.args[0] == "defaultspack:ambient_event_submit"
     assert invoke.call_args.kwargs["timeout_seconds"] == 180.0
     legacy.assert_called_once()
 
 
-def test_agent_subagent_grant_denied_uses_direct_block_fallback():
+def test_agent_subagent_uses_direct_block_without_function_grant_bridge():
     from transport.http import DefaultsHttpServer
 
     server = DefaultsHttpServer.__new__(DefaultsHttpServer)
@@ -90,10 +90,7 @@ def test_agent_subagent_grant_denied_uses_direct_block_fallback():
 
     with patch(
         "domain.function_runtime.bridge.invoke_function",
-        return_value={
-            "status": "error",
-            "error": {"code": "GRANT_DENIED", "message": "Permission denied"},
-        },
+        side_effect=AssertionError("subagent HTTP route must not require function grants"),
     ) as invoke, patch(
         "transport.http.invoke_block",
         return_value={"status": "ok", "data": {"assistant_text": "done"}},
@@ -106,12 +103,11 @@ def test_agent_subagent_grant_denied_uses_direct_block_fallback():
         )
 
     assert result == {"status": "ok", "data": {"assistant_text": "done"}}
-    invoke.assert_called_once()
-    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    invoke.assert_not_called()
     legacy.assert_called_once()
 
 
-def test_agent_subagent_function_route_grant_denied_uses_direct_block_fallback():
+def test_agent_subagent_function_route_uses_direct_block_without_function_grant_bridge():
     from transport.http import DefaultsHttpServer
 
     server = DefaultsHttpServer.__new__(DefaultsHttpServer)
@@ -119,10 +115,7 @@ def test_agent_subagent_function_route_grant_denied_uses_direct_block_fallback()
 
     with patch(
         "domain.function_runtime.bridge.invoke_function",
-        return_value={
-            "status": "error",
-            "error": {"code": "GRANT_DENIED", "message": "Permission denied"},
-        },
+        side_effect=AssertionError("subagent HTTP route must not require function grants"),
     ) as invoke, patch(
         "transport.http.invoke_block",
         return_value={"status": "ok", "data": {"assistant_text": "done"}},
@@ -136,8 +129,7 @@ def test_agent_subagent_function_route_grant_denied_uses_direct_block_fallback()
         )
 
     assert result == {"status": "ok", "data": {"assistant_text": "done"}}
-    invoke.assert_called_once()
-    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    invoke.assert_not_called()
     legacy.assert_called_once()
 
 

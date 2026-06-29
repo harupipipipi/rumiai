@@ -917,15 +917,18 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     signals = {item["signal"] for item in observability["schedule_history"]["signals"]}
     assert {"subagent_timeout", "text_tool_call_not_executed"} <= signals
     assert observability["subagents"]["checked"] == 2
-    assert observability["subagents"]["repaired_count"] == 1
-    assert observability["subagents"]["repaired"] == [child["id"]]
-    assert observability["subagents"]["unanswered_count"] == 0
-    assert observability["subagents"]["unanswered"] == []
+    assert observability["subagents"]["repaired_count"] == 0
+    assert observability["subagents"]["repaired"] == []
+    assert observability["subagents"]["unanswered_count"] == 1
+    assert observability["subagents"]["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert observability["subagents"]["failed_count"] == 1
+    assert observability["subagents"]["failed"][0]["child_conversation_id"] == child["id"]
     assert observability["desktop_monitoring"]["status"] in {"empty", "ok", "error"}
     company_subagents = observed["company"]["metadata"]["observability"]["subagents"]
-    assert company_subagents["repaired_count"] == 1
-    assert company_subagents["repaired"] == [child["id"]]
-    assert company_subagents["unanswered_count"] == 0
+    assert company_subagents["repaired_count"] == 0
+    assert company_subagents["repaired"] == []
+    assert company_subagents["unanswered_count"] == 1
+    assert company_subagents["failed_count"] == 1
     assert recent_child["id"] not in {
         str(message["metadata"].get("child_conversation_id") or "")
         for message in messages
@@ -937,11 +940,12 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         if isinstance(message.get("metadata"), dict)
     }
     assert "text_tool_call_not_executed" in message_signals
-    assert "subagent_unanswered" not in message_signals
-    assert total == 3
+    assert "subagent_unanswered" in message_signals
+    assert total == 4
     assert {message["metadata"]["sync_source"] for message in messages} == {
         "mimo_schedule_history",
         "mimo_desktop_monitor",
+        "mimo_subagent_monitor",
     }
 
     runtime.status()
@@ -1643,15 +1647,16 @@ def test_mimo_coding_company_observability_resolves_stale_subagent_unanswered_me
     messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=5, offset=0, order="desc")
 
     assert summary["status"] == "ok"
-    assert summary["subagents"]["repaired"] == [child["id"]]
-    assert summary["subagents"]["unanswered_count"] == 0
-    assert summary["subagents"]["resolved_message_count"] == 1
+    assert summary["subagents"]["repaired"] == []
+    assert summary["subagents"]["unanswered_count"] == 1
+    assert summary["subagents"]["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert summary["subagents"]["failed_count"] == 1
+    assert summary["subagents"]["failed"][0]["child_conversation_id"] == child["id"]
+    assert summary["subagents"]["resolved_message_count"] == 0
     assert total == 1
-    assert messages[0]["metadata"]["signal"] == "subagent_repaired"
-    assert messages[0]["metadata"]["previous_signal"] == "subagent_unanswered"
-    assert messages[0]["metadata"]["resolved"] is True
-    assert "repaired" in messages[0]["content"]
-    assert "has no assistant reply" not in messages[0]["content"]
+    assert messages[0]["metadata"]["signal"] == "subagent_unanswered"
+    assert messages[0]["metadata"].get("resolved") is not True
+    assert "has no assistant reply" in messages[0]["content"]
 
     _reset_defaultspack_singletons()
 
