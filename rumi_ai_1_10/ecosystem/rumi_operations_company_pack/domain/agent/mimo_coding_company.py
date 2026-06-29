@@ -36,9 +36,9 @@ CONVERSATION_KIND = "mimo_coding_company"
 COMPANY_ID = "mimo-coding-company"
 COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
-DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5-pro"
+DEFAULT_MAIN_MODEL = "opencode-go/mimo-v2.5"
 DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
-DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5-pro"
+DEFAULT_FAST_MODEL = "opencode-go/mimo-v2.5"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS = 600
 QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
@@ -86,7 +86,7 @@ IMPROVEMENT_STREAMS = [
     {
         "id": "provider_search_coverage",
         "title": "Provider and search coverage",
-        "description": "Improve search quality, provider discovery, and model catalogs for OpenCode MiMo Pro and Google Gemma vision.",
+        "description": "Improve search quality, provider discovery, and model catalogs for OpenCode MiMo V2.5 Free and Google Gemma vision.",
         "target_agent_ids": ["toolsmith", "project_manager"],
         "preferred_tools": ["web_search", "knowledge_search", "knowledge_create", "coding_file_patch"],
         "owner_role": "toolsmith",
@@ -95,7 +95,7 @@ IMPROVEMENT_STREAMS = [
     {
         "id": "frontend_qa_swarm",
         "title": "Frontend QA swarm",
-        "description": "Run browser and computer-use QA with multiple personas, then hand evidence-backed fixes to MiMo Pro.",
+        "description": "Run browser and computer-use QA with multiple personas, then hand evidence-backed fixes to MiMo V2.5 Free.",
         "target_agent_ids": ["browser_qa", "coding_engineer", "reviewer"],
         "preferred_tools": [
             "browser_use",
@@ -182,7 +182,7 @@ FALLBACK_KNOWLEDGE_DOCS = [
 ]
 
 MODEL_ALLOWLIST = [
-    "opencode-go/mimo-v2.5-pro",
+    "opencode-go/mimo-v2.5",
     "google/gemma-4-31b-it",
     "stub/default",
 ]
@@ -1116,7 +1116,7 @@ class MimoCodingCompanyRuntime:
             "mission": str(mission.get("mission") or str(persona_spec.get("goal") or "")),
             "probe_areas": list(mission.get("probe_areas") or []),
             "prompt_style": "Keep prompts short, concrete, and evidence-first. For desktop/sandbox tools, rely on the server-provided principal context; do not add payload owner_id as proof of access.",
-            "reporting_policy": "For each evidence-backed bug, include exact repro steps or screenshots and hand a fix task to MiMo Pro.",
+            "reporting_policy": "For each evidence-backed bug, include exact repro steps or screenshots and hand a fix task to MiMo V2.5 Free.",
             "tools_hint": ["browser_use", "browser_companion", "computer_use"],
             "desktop_tools_hint": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
             "model_hint": DEFAULT_VISION_MODEL,
@@ -2354,7 +2354,7 @@ class MimoCodingCompanyRuntime:
         if docker_swarm.get("enabled") is False:
             return {
                 "coordinator_agent_id": "browser_qa",
-                "reporting_policy": "Evidence first; hand bugs to MiMo Pro for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
+                "reporting_policy": "Evidence first; hand bugs to MiMo V2.5 Free for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
                 "managed_desktop_fallback": {
                     "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
                     "create_defaults": {
@@ -2392,7 +2392,7 @@ class MimoCodingCompanyRuntime:
             )
         return {
             "coordinator_agent_id": "browser_qa",
-            "reporting_policy": "Evidence first; hand bugs to MiMo Pro for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
+            "reporting_policy": "Evidence first; hand bugs to MiMo V2.5 Free for fixes, then ask reviewer to verify. Stay quiet if the assigned path passes.",
             "managed_desktop_fallback": {
                 "tools": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
                 "create_defaults": {

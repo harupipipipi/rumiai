@@ -57,17 +57,17 @@ def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, mon
     allowlist = current_model_allowlist()
     runtime = MimoCodingCompanyRuntime()
 
-    assert "opencode-go/mimo-v2.5-pro" in allowlist
+    assert "opencode-go/mimo-v2.5" in allowlist
     assert "google/gemma-4-31b-it" in allowlist
-    assert "opencode-go/mimo-v2.5" not in allowlist
+    assert "opencode-go/mimo-v2.5-pro" not in allowlist
     assert "opencode-go/minimax-m3" not in allowlist
     assert "opencode-zen/minimax-m3-free" not in allowlist
     assert "groq/openai/gpt-oss-20b" not in allowlist
     assert "cerebras/zai-glm-4.7" not in allowlist
-    assert DEFAULT_MAIN_MODEL == "opencode-go/mimo-v2.5-pro"
-    assert DEFAULT_FAST_MODEL == "opencode-go/mimo-v2.5-pro"
+    assert DEFAULT_MAIN_MODEL == "opencode-go/mimo-v2.5"
+    assert DEFAULT_FAST_MODEL == "opencode-go/mimo-v2.5"
     assert DEFAULT_VISION_MODEL == "google/gemma-4-31b-it"
-    assert runtime._allowed_model("opencode-go/mimo-v2.5-pro") == "opencode-go/mimo-v2.5-pro"
+    assert runtime._allowed_model("opencode-go/mimo-v2.5") == "opencode-go/mimo-v2.5"
     assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
 
 
@@ -930,7 +930,7 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
         "once",
         {
             "message": "Dedicated manager schedule.",
-            "model": "opencode-go/mimo-v2.5-pro",
+            "model": "opencode-go/mimo-v2.5",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "project_manager",
@@ -1012,7 +1012,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
     )
 
     parent = ChatStore().create_conversation(
-        model="opencode-go/mimo-v2.5-pro",
+        model="opencode-go/mimo-v2.5",
         system_prompt_id="mimo_coding_company",
         conversation_kind="mimo_coding_company",
         agent_id="client_manager",
@@ -1043,7 +1043,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "once",
         mimo_task(
             "kickoff_review",
-            model="opencode-go/mimo-v2.5-pro",
+            model="opencode-go/mimo-v2.5",
             agent_id="project_manager",
             message="State-owned completed kickoff review.",
         ),
@@ -1094,7 +1094,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "interval",
         mimo_task(
             "heartbeat",
-            model="opencode-go/mimo-v2.5-pro",
+            model="opencode-go/mimo-v2.5",
             agent_id="scheduler",
             message="Expired Xiaomi pre-expiry heartbeat.",
         ),
@@ -1119,7 +1119,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "once",
         mimo_task(
             "dedicated_manager",
-            model="opencode-go/mimo-v2.5-pro",
+            model="opencode-go/mimo-v2.5",
             agent_id="project_manager",
             message="Old dedicated MiMo loop.",
         ),
@@ -1194,7 +1194,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "once",
         mimo_task(
             "improvement_loop",
-            model="opencode-go/mimo-v2.5-pro",
+            model="opencode-go/mimo-v2.5",
             agent_id="project_manager",
             message="Expired Xiaomi pre-expiry improvement sprint.",
         ),
@@ -1360,7 +1360,7 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
     allowlist = set(runtime.manifest()["model_self_selection"]["allowlist"])
 
     assert allowlist == {
-        "opencode-go/mimo-v2.5-pro",
+        "opencode-go/mimo-v2.5",
         "google/gemma-4-31b-it",
         "stub/default",
     }
