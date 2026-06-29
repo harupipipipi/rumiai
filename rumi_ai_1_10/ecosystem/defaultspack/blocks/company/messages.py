@@ -14,6 +14,13 @@ def _bool_param(value):
     return False
 
 
+def _message_order(value):
+    normalized = str(value or "").strip().lower()
+    if normalized in {"desc", "descending", "latest", "newest"}:
+        return "desc"
+    return "asc"
+
+
 def run(input_data, context):
     if require_dict(input_data) is None:
         return invalid("input_data must be a dict")
@@ -43,6 +50,7 @@ def run(input_data, context):
                 thread_id=input_data.get("thread_id"),
                 limit=limit,
                 offset=offset,
+                order=_message_order(input_data.get("order")),
             )
             messages, total = result
             return ok({"messages": messages, "total": total})

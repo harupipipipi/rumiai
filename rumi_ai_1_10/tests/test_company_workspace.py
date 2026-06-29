@@ -438,6 +438,37 @@ def test_company_messages_tail_returns_latest_messages_in_chronological_order(tm
     ]
 
 
+def test_company_messages_order_desc_returns_newest_first(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, messages
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    for index in range(6):
+        messages.run(
+            {
+                "action": "create",
+                "company_id": company_id,
+                "channel_id": "ops-company",
+                "sender_id": "scheduler",
+                "content": f"MiMo ordered message {index}",
+            },
+            {},
+        )
+
+    listed = messages.run({"company_id": company_id, "limit": 3, "order": "desc"}, {})
+
+    assert listed["status"] == "ok"
+    assert listed["data"]["total"] == 6
+    assert [message["content"] for message in listed["data"]["messages"]] == [
+        "MiMo ordered message 5",
+        "MiMo ordered message 4",
+        "MiMo ordered message 3",
+    ]
+
+
 def test_company_get_and_status_include_runtime_workspace_counts(tmp_path, monkeypatch):
     from blocks.company import bootstrap, get, messages, status
 
