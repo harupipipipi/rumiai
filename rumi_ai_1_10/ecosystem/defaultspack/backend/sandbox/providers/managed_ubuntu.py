@@ -316,7 +316,7 @@ class ManagedUbuntuProvider:
             "width": width,
             "height": height,
             "desktop_enabled": desktop is not None and desktop.enabled,
-            "display": self._allocate_guest_display() if desktop is not None and desktop.enabled else "",
+            "display": self._allocate_guest_display(command_path) if desktop is not None and desktop.enabled else "",
             "workspace_binding": model_to_dict(spec.workspace_binding),
             "network_policy": model_to_dict(spec.template.network),
             "network_approved": network_approved,
@@ -567,13 +567,15 @@ class ManagedUbuntuProvider:
         result = self._guest_shell(command_path, _instance_exists_script(provider_instance_id, workspace_dir), timeout=10, check=False)
         return result.returncode == 0
 
-    def _allocate_guest_display(self) -> str:
+    def _allocate_guest_display(self, command_path: str | None = None) -> str:
         used = {
             display
             for instance in self._instances.values()
             for display in [_normalized_guest_display(instance.opaque_state.get("display"))]
             if display
         }
+        if command_path:
+            used.update(self._guest_used_displays(command_path))
         for number in range(GUEST_DISPLAY_MIN, GUEST_DISPLAY_MAX + 1):
             display = f":{number}"
             if display not in used:
@@ -584,6 +586,17 @@ class ManagedUbuntuProvider:
             status_code=503,
             details={"display_min": GUEST_DISPLAY_MIN, "display_max": GUEST_DISPLAY_MAX},
         )
+
+    def _guest_used_displays(self, command_path: str) -> set[str]:
+        result = self._guest_shell(command_path, _guest_used_displays_script(), timeout=5, check=False)
+        if result.returncode != 0:
+            return set()
+        return {
+            display
+            for line in result.stdout.splitlines()
+            for display in [_normalized_guest_display(line)]
+            if display
+        }
 
     def _setup_message(self, *, launcher_missing: bool = False, missing_capabilities: Sequence[str] = ()) -> str:
         if missing_capabilities:
@@ -1540,6 +1553,34 @@ def _desktop_start_script(
                 "fi\n"
             )
     return script
+
+
+def _guest_used_displays_script() -> str:
+    return (
+        "set +e\n"
+        "rumi_emit_display() {\n"
+        "  value=\"$1\"\n"
+        "  value=\"${value#:}\"\n"
+        "  value=\"${value#.X}\"\n"
+        "  value=\"${value#X}\"\n"
+        "  value=\"${value%-lock}\"\n"
+        "  value=\"${value%%.*}\"\n"
+        "  case \"$value\" in ''|*[!0-9]*) return 0;; esac\n"
+        "  echo \":$value\"\n"
+        "}\n"
+        "for path in /tmp/.X11-unix/X* /tmp/.X[0-9]*-lock; do\n"
+        "  [ -e \"$path\" ] || continue\n"
+        "  rumi_emit_display \"$(basename \"$path\")\"\n"
+        "done\n"
+        "for cmdline in /proc/[0-9]*/cmdline; do\n"
+        "  [ -r \"$cmdline\" ] || continue\n"
+        "  args=\"$(tr '\\0' ' ' < \"$cmdline\" 2>/dev/null || true)\"\n"
+        "  case \"$args\" in *Xvfb*) ;; *) continue;; esac\n"
+        "  for arg in $args; do\n"
+        "    case \"$arg\" in :[0-9]*|:[0-9]*.*) rumi_emit_display \"$arg\";; esac\n"
+        "  done\n"
+        "done | sort -u\n"
+    )
 
 
 def _guest_provisioning_script(provider_instance_id: str, workspace_dir: str, apt_packages: Sequence[str], mcp_servers: Sequence[str]) -> str:

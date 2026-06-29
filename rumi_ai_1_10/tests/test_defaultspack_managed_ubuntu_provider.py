@@ -45,6 +45,7 @@ class FakeManagedUbuntuCli:
         self.guest_exists = False
         self.deps_installed = False
         self.desktop_running = False
+        self.guest_displays_in_use: set[str] = set()
         self.imported_rootfs_path: str | None = None
         self.imported_install_dir: str | None = None
         self.port_probe_returncode = 0
@@ -135,13 +136,21 @@ class FakeManagedUbuntuCli:
             if "apt-get install" in script:
                 self.deps_installed = True
                 return GuestCommandResult(returncode=0)
+            if "rumi_emit_display" in script and "/tmp/.X11-unix" in script:
+                stdout = "".join(f"{display}\n" for display in sorted(self.guest_displays_in_use))
+                return GuestCommandResult(returncode=0, stdout=stdout)
+            if "DISPLAY_ID=" in script and "Xvfb" in script and "openbox" in script:
+                for line in script.splitlines():
+                    if "DISPLAY_ID=" in line:
+                        display = line.split("DISPLAY_ID=", 1)[1].strip().strip("'\"")
+                        if display:
+                            self.guest_displays_in_use.add(display)
+                self.desktop_running = True
+                return GuestCommandResult(returncode=0)
             if "command -v" in script:
                 if self.deps_installed:
                     return GuestCommandResult(returncode=0)
                 return GuestCommandResult(returncode=0, stdout="Xvfb\nopenbox\nxdotool\nimport\npython3\n")
-            if "Xvfb" in script and "openbox" in script:
-                self.desktop_running = True
-                return GuestCommandResult(returncode=0)
             if "kill -0" in script:
                 return GuestCommandResult(returncode=0 if self.desktop_running else 1)
             return GuestCommandResult(returncode=0)
@@ -383,6 +392,24 @@ def test_managed_ubuntu_desktops_get_distinct_guest_displays(monkeypatch) -> Non
     assert "Xvfb :98" in desktop_scripts[-2]
     assert "DISPLAY_ID=':99'" in desktop_scripts[-1]
     assert "Xvfb :99" in desktop_scripts[-1]
+
+
+def test_managed_ubuntu_desktop_create_skips_guest_occupied_displays(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.guest_exists = True
+    fake.deps_installed = True
+    fake.guest_displays_in_use.update({":98", ":99"})
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    instance = provider.create(_create_spec(_template(network_mode="host_shared", network_approval_required=False)))
+    started = provider.start(instance)
+    desktop_script = next(script for script in fake.guest_scripts if "DISPLAY_ID=':100'" in script)
+
+    assert instance.opaque_state["display"] == ":100"
+    assert started.state == "ready"
+    assert "Xvfb :100" in desktop_script
+    assert ":100" in fake.guest_displays_in_use
 
 
 def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch, tmp_path) -> None:
