@@ -328,6 +328,7 @@ ROLE_DEFINITIONS = [
         "system_prompt": (
             "Act like a real user. Click around, break things, and file only evidence-backed bugs. "
             "If browser tools are unpaired or unavailable, create/use a managed desktop seat before stopping. "
+            "Desktop and sandbox access comes from trusted local/server context; do not add payload owner_id as proof of access. "
             "For desktop_input, always include action; type with action=type_text plus text, "
             "and press keys with action=key plus key."
         ),
@@ -1132,7 +1133,7 @@ class MimoCodingCompanyRuntime:
             "qa_target": str(worker.get("qa_target") or ""),
             "mission": str(mission.get("mission") or str(persona_spec.get("goal") or "")),
             "probe_areas": list(mission.get("probe_areas") or []),
-            "prompt_style": "Keep prompts short, concrete, and evidence-first.",
+            "prompt_style": "Keep prompts short, concrete, and evidence-first. For desktop/sandbox tools, rely on the server-provided principal context; do not add payload owner_id as proof of access.",
             "reporting_policy": "Report only evidence-backed bugs with exact repro steps or screenshots.",
             "tools_hint": ["browser_use", "browser_companion", "computer_use"],
             "desktop_tools_hint": ["desktop_list", "desktop_create", "desktop_frame", "desktop_input"],
@@ -1521,6 +1522,9 @@ class MimoCodingCompanyRuntime:
             summary["subagents"]["repaired_count"] = len(summary["subagents"]["repaired"])
             summary["subagents"]["unanswered"] = subagent_gaps.get("unanswered", [])
             summary["subagents"]["unanswered_count"] = len(summary["subagents"]["unanswered"])
+            resolved_gap_messages = self._resolve_stale_subagent_gap_messages(runtime_store, state, subagent_gaps)
+            summary["subagents"]["resolved_messages"] = resolved_gap_messages[:10]
+            summary["subagents"]["resolved_message_count"] = len(resolved_gap_messages)
             for gap in summary["subagents"]["unanswered"]:
                 sync_key = "subagent_gap:" + str(gap.get("child_conversation_id") or "")
                 if sync_key in known_sync_keys:
@@ -1583,7 +1587,7 @@ class MimoCodingCompanyRuntime:
     @staticmethod
     def _company_runtime_sync_keys(runtime_store: CompanyRuntimeStore) -> set[str]:
         try:
-            messages, _total = runtime_store.list_messages(COMPANY_ID, limit=1000, offset=0)
+            messages, _total = runtime_store.list_messages(COMPANY_ID, limit=1000, offset=0, order="desc")
         except Exception:
             return set()
         keys: set[str] = set()
@@ -1593,6 +1597,61 @@ class MimoCodingCompanyRuntime:
             if sync_key:
                 keys.add(sync_key)
         return keys
+
+    @staticmethod
+    def _resolve_stale_subagent_gap_messages(
+        runtime_store: CompanyRuntimeStore,
+        state: dict[str, Any],
+        subagent_gaps: dict[str, Any],
+    ) -> list[dict[str, str]]:
+        checked_ids = {str(item) for item in subagent_gaps.get("checked_ids", []) if str(item or "").strip()}
+        unanswered_ids = {
+            str(item.get("child_conversation_id") or "")
+            for item in subagent_gaps.get("unanswered", [])
+            if isinstance(item, dict) and str(item.get("child_conversation_id") or "").strip()
+        }
+        if not checked_ids:
+            return []
+        parent_conversation_id = str(state.get("conversation_id") or "").strip()
+        try:
+            messages, _total = runtime_store.list_messages(COMPANY_ID, limit=1000, offset=0, order="desc")
+        except Exception:
+            return []
+        resolved: list[dict[str, str]] = []
+        for message in messages:
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            if metadata.get("sync_source") != "mimo_subagent_monitor":
+                continue
+            if metadata.get("signal") != "subagent_unanswered":
+                continue
+            child_id = str(metadata.get("child_conversation_id") or "").strip()
+            if not child_id or child_id not in checked_ids or child_id in unanswered_ids:
+                continue
+            message_parent_id = str(metadata.get("parent_conversation_id") or "").strip()
+            if parent_conversation_id and message_parent_id and message_parent_id != parent_conversation_id:
+                continue
+            updated = runtime_store.update_message(
+                str(message.get("message_id") or message.get("id") or ""),
+                {
+                    "content": MimoCodingCompanyRuntime._subagent_gap_resolved_message(child_id),
+                    "metadata": {
+                        "signal": "subagent_repaired",
+                        "previous_signal": "subagent_unanswered",
+                        "resolved": True,
+                        "resolved_at": timestamp(),
+                        "resolved_reason": "child_conversation_repaired",
+                    },
+                },
+                company_id=COMPANY_ID,
+            )
+            if updated is not None:
+                resolved.append(
+                    {
+                        "message_id": str(updated.get("message_id") or ""),
+                        "child_conversation_id": child_id,
+                    }
+                )
+        return resolved
 
     @staticmethod
     def _schedule_history_observation(loop_key: str, schedule: dict[str, Any] | None, entry: dict[str, Any]) -> dict[str, Any]:
@@ -1841,6 +1900,17 @@ class MimoCodingCompanyRuntime:
         return "\n".join(lines)
 
     @staticmethod
+    def _subagent_gap_resolved_message(child_conversation_id: str) -> str:
+        return "\n".join(
+            [
+                "**MiMo subagent child conversation repaired**",
+                f"- Child conversation: `{child_conversation_id}`",
+                "- Previous signal: `subagent_unanswered`",
+                "- Resolution: an assistant reply or repair marker is now present.",
+            ]
+        )
+
+    @staticmethod
     def _desktop_monitoring_message(observation: dict[str, Any]) -> str:
         status = str(observation.get("status") or "unknown")
         count = int(observation.get("desktop_count") or 0)
@@ -1881,6 +1951,11 @@ class MimoCodingCompanyRuntime:
             "schedule_auto_approve_tool_allowlist": [
                 "rumi_api:list_routes",
                 "GET /api/agent/mimo-company/status",
+                "GET /api/agent/self-improvement/status",
+                "GET /api/agent/multi/status",
+                "GET /api/company/mimo-coding-company/channels",
+                "GET /api/company/mimo-coding-company/messages",
+                "GET /api/company/mimo-coding-company/status",
                 "GET /api/company/status",
                 "GET /api/desktops",
                 "GET /api/health",
@@ -2281,7 +2356,7 @@ class MimoCodingCompanyRuntime:
             + (" " + monitoring_summary if monitoring_summary else "")
             + (" Assignments: " + summary + "." if summary else "")
             + (" Managed desktop target URLs: " + target_summary + "." if target_summary else "")
-            + " First call desktop_list. Reuse only desktops whose status is running and whose startup.browser_url, desktop_spec.browser_url, or metadata startup browser_url exactly matches the managed desktop target URL. Ignore destroyed, failed, stale, or wrong-target seats. If no current-target running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<managed desktop target URL>, assigned_agent=browser_qa, owner_id=mimo-coding-company. If a frame shows ERR_CONNECTION_REFUSED or a different address-bar URL, treat that seat as stale/wrong-target and create a current-target desktop. For desktop_frame and desktop_input, pass the selected desktop's access_policy.owner_id as owner_id, then continue with the desktop_frame and desktop_input tools directly. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<managed desktop target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
+            + " First call desktop_list. Reuse only desktops whose status is running and whose startup.browser_url, desktop_spec.browser_url, or metadata startup browser_url exactly matches the managed desktop target URL. Ignore destroyed, failed, stale, or wrong-target seats. If no current-target running browser desktop is available, create a managed desktop with desktop_create using template_id=desktop.browser, starter=browser_url, browser_url=<managed desktop target URL>, assigned_agent=browser_qa. Desktop and sandbox access comes from trusted local/server context; do not add payload owner_id as proof of access. If a frame shows ERR_CONNECTION_REFUSED or a different address-bar URL, treat that seat as stale/wrong-target and create a current-target desktop. For desktop_frame and desktop_input, use the selected desktop's seat_id directly and let the server-provided principal context authorize access. For desktop_input, always include action: type text with action=type_text and text, press Enter with action=key and key=Enter, and never send a text-only payload. Prefer desktop_create with starter=browser_url and browser_url=<managed desktop target URL> for URL navigation when possible. Do not use rumi_api for desktop frames or inputs; /api/desktops/{seat_id}/frame is a GET route, never POST. "
             "Click around, use browser_use, browser_companion, computer_use, or managed desktop tools as needed, and prioritize workers missing status or browser launch before broad exploration. "
             "Log only evidence-backed bugs with repro steps. "
             "Stay quiet if everything passes."

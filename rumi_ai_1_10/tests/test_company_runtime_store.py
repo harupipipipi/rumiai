@@ -77,6 +77,24 @@ def test_company_runtime_store_persists_slack_runtime_tables(tmp_path):
     }
 
 
+def test_company_runtime_store_can_page_latest_messages(tmp_path):
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    store = CompanyRuntimeStore(tmp_path / "company_runtime.db")
+    for index in range(6):
+        store.add_message("acme", sender_id="scheduler", content=f"message {index}")
+
+    oldest, oldest_total = store.list_messages("acme", limit=3, offset=0)
+    latest, latest_total = store.list_messages("acme", limit=3, offset=0, order="desc")
+    latest_alias, _latest_alias_total = store.list_messages("acme", limit=2, offset=0, order="latest")
+
+    assert oldest_total == 6
+    assert latest_total == 6
+    assert [message["content"] for message in oldest] == ["message 0", "message 1", "message 2"]
+    assert [message["content"] for message in latest] == ["message 5", "message 4", "message 3"]
+    assert [message["content"] for message in latest_alias] == ["message 5", "message 4"]
+
+
 def test_task_assignment_index_tracks_create_and_update(tmp_path):
     from domain.company.runtime_store import CompanyRuntimeStore
 

@@ -404,6 +404,49 @@ class CompanyRuntimeStore:
             )
         return self.get_message(message_id)
 
+    def update_message(
+        self,
+        message_id: str,
+        updates: dict[str, Any],
+        *,
+        company_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(updates, dict):
+            return None
+        message = self.get_message(message_id)
+        if message is None:
+            return None
+        if company_id and str(message.get("company_id") or "") != str(company_id):
+            return None
+        assignments = []
+        params: list[Any] = []
+        for key, value in updates.items():
+            if key == "metadata" and isinstance(value, dict):
+                metadata = {**(message.get("metadata") if isinstance(message.get("metadata"), dict) else {}), **value}
+                assignments.append("metadata_json = ?")
+                params.append(json_dumps(metadata))
+            elif key == "mentions":
+                assignments.append("mentions_json = ?")
+                params.append(json_dumps(list(value or [])))
+            elif key == "task_ids":
+                assignments.append("task_ids_json = ?")
+                params.append(json_dumps(list(value or [])))
+            elif key in {"content", "sender_id", "channel_id", "thread_id"}:
+                assignments.append(key + " = ?")
+                params.append(str(value))
+        if not assignments:
+            return message
+        now = utc_now()
+        assignments.append("updated_at = ?")
+        params.extend([now, str(message_id)])
+        with self.conn:
+            self.conn.execute("UPDATE company_messages SET " + ", ".join(assignments) + " WHERE message_id = ?", params)
+        updated = self.get_message(message_id)
+        if updated is not None:
+            self.mark_summary_dirty(str(updated.get("company_id") or ""), "thread", str(updated.get("thread_id") or ""))
+            self.mark_summary_dirty(str(updated.get("company_id") or ""), "channel", str(updated.get("channel_id") or DEFAULT_CHANNEL_ID))
+        return updated
+
     def list_messages(
         self,
         company_id: str,
@@ -412,6 +455,7 @@ class CompanyRuntimeStore:
         thread_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        order: str = "asc",
     ) -> tuple[list[dict[str, Any]], int]:
         sql = "SELECT * FROM company_messages WHERE company_id = ?"
         params: list[Any] = [str(company_id)]
@@ -422,7 +466,8 @@ class CompanyRuntimeStore:
             sql += " AND thread_id = ?"
             params.append(str(thread_id))
         total = self.conn.execute("SELECT COUNT(*) AS count FROM (" + sql + ")", params).fetchone()["count"]
-        sql += " ORDER BY created_at ASC LIMIT ? OFFSET ?"
+        direction = "DESC" if str(order or "").strip().lower() in {"desc", "descending", "latest", "newest"} else "ASC"
+        sql += f" ORDER BY created_at {direction}, rowid {direction} LIMIT ? OFFSET ?"
         rows = self.conn.execute(sql, [*params, int(limit), int(offset)]).fetchall()
         messages = []
         for row in rows:

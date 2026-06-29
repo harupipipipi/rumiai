@@ -173,6 +173,11 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert {
         "rumi_api:list_routes",
         "GET /api/agent/mimo-company/status",
+        "GET /api/agent/self-improvement/status",
+        "GET /api/agent/multi/status",
+        "GET /api/company/mimo-coding-company/channels",
+        "GET /api/company/mimo-coding-company/messages",
+        "GET /api/company/mimo-coding-company/status",
         "GET /api/company/status",
         "GET /api/desktops",
         "GET /api/health",
@@ -206,8 +211,10 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "Ignore destroyed, failed, stale, or wrong-target seats" in qa_schedule["task"]["message"]
     assert "If no current-target running browser desktop is available" in qa_schedule["task"]["message"]
     assert "ERR_CONNECTION_REFUSED" in qa_schedule["task"]["message"]
-    assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
-    assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
+    assert "trusted local/server context" in qa_schedule["task"]["message"]
+    assert "do not add payload owner_id" in qa_schedule["task"]["message"]
+    assert "access_policy.owner_id as owner_id" not in qa_schedule["task"]["message"]
+    assert "owner_id=mimo-coding-company" not in qa_schedule["task"]["message"]
     assert "action=type_text" in qa_schedule["task"]["message"]
     assert "action=key" in qa_schedule["task"]["message"]
     assert "never send a text-only payload" in qa_schedule["task"]["message"]
@@ -272,8 +279,10 @@ def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, mo
     assert "Ignore destroyed, failed, stale, or wrong-target seats" in qa_schedule["task"]["message"]
     assert "If no current-target running browser desktop is available" in qa_schedule["task"]["message"]
     assert "ERR_CONNECTION_REFUSED" in qa_schedule["task"]["message"]
-    assert "access_policy.owner_id as owner_id" in qa_schedule["task"]["message"]
-    assert "owner_id=mimo-coding-company" in qa_schedule["task"]["message"]
+    assert "trusted local/server context" in qa_schedule["task"]["message"]
+    assert "do not add payload owner_id" in qa_schedule["task"]["message"]
+    assert "access_policy.owner_id as owner_id" not in qa_schedule["task"]["message"]
+    assert "owner_id=mimo-coding-company" not in qa_schedule["task"]["message"]
     assert "action=type_text" in qa_schedule["task"]["message"]
     assert "action=key" in qa_schedule["task"]["message"]
     assert "never send a text-only payload" in qa_schedule["task"]["message"]
@@ -817,6 +826,91 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_resolves_stale_subagent_unanswered_message(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+            "desktops": [],
+        }),
+    )
+
+    chat_store = ChatStore()
+    parent = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    child = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        agent_id="subagent",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    chat_store.update_conversation(child["id"], {"title": "Previously stale subagent"})
+    chat_store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Please answer once the child runner resumes."}],
+        },
+    )
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
+    chat_store._conversations[child["id"]]["created_at"] = old_timestamp
+    chat_store._conversations[child["id"]]["updated_at"] = old_timestamp
+    chat_store._save_conversations()
+
+    runtime_store = CompanyRuntimeStore()
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="scheduler",
+        content="**MiMo subagent child conversation has no assistant reply**",
+        metadata={
+            "sync_source": "mimo_subagent_monitor",
+            "sync_key": "subagent_gap:" + child["id"],
+            "child_conversation_id": child["id"],
+            "parent_conversation_id": parent["id"],
+            "signal": "subagent_unanswered",
+        },
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    summary = runtime._sync_company_observability({"conversation_id": parent["id"], "schedule_ids": {}})
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=5, offset=0, order="desc")
+
+    assert summary["status"] == "ok"
+    assert summary["subagents"]["repaired"] == [child["id"]]
+    assert summary["subagents"]["unanswered_count"] == 0
+    assert summary["subagents"]["resolved_message_count"] == 1
+    assert total == 1
+    assert messages[0]["metadata"]["signal"] == "subagent_repaired"
+    assert messages[0]["metadata"]["previous_signal"] == "subagent_unanswered"
+    assert messages[0]["metadata"]["resolved"] is True
+    assert "repaired" in messages[0]["content"]
+    assert "has no assistant reply" not in messages[0]["content"]
+
     _reset_defaultspack_singletons()
 
 

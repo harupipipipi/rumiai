@@ -1092,6 +1092,54 @@ def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
     assert result["data"]["width"] == 800
     assert result["data"]["height"] == 600
     assert fake_api.calls[0][0]["owner_id"] == "agent-1"
+    assert fake_api.calls[0][1]["principal_id"] == "agent-1"
+
+
+def test_desktop_frame_tool_ignores_payload_owner_without_trusted_context(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}, {context}")
+
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    result = desktop_tools.desktop_frame({"desktop_id": "seat-1", "owner_id": "spoofed-owner"}, {})
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "DESKTOP_PRINCIPAL_REQUIRED"
+
+
+def test_desktop_frame_tool_overwrites_payload_owner_with_trusted_context(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((payload, context))
+            return {
+                "_binary": True,
+                "content_type": "image/png",
+                "body": b"fake-png",
+                "headers": {},
+            }
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+
+    result = desktop_tools.desktop_frame(
+        {"desktop_id": "seat-1", "owner_id": "spoofed-owner", "access": {"owner_id": "spoofed-owner"}},
+        {"agent_id": "agent-1"},
+    )
+
+    payload, context = fake_api.calls[0]
+    assert result["status"] == "ok"
+    assert payload["owner_id"] == "agent-1"
+    assert payload["access_owner_id"] == "agent-1"
+    assert payload["access"]["owner_id"] == "agent-1"
+    assert context["principal_id"] == "agent-1"
 
 
 def test_desktop_input_tool_generates_client_action_id_when_manifest_omits_it(tmp_path, monkeypatch):
