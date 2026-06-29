@@ -906,7 +906,7 @@ def _scheduled_user_message_for_running_execution(
         if str(metadata.get("schedule_execution_id") or "").strip() != execution_id:
             continue
         source = str(metadata.get("source") or "").strip()
-        if source not in {"scheduler", "scheduler_approval_followup"}:
+        if source != "scheduler":
             continue
         return message
     return None

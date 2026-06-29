@@ -1097,6 +1097,107 @@ def test_legacy_running_execution_obsoletes_when_chat_user_message_differs_from_
         ChatStore._instance = None
 
 
+def test_approval_followup_message_does_not_obsolete_running_execution(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+    schedule_id = "sched-approval-followup-active"
+    active_execution_id = "sexec-approval-followup-active"
+    current_message = "Run QA against http://127.0.0.1:18766/chat?chat=" + conversation_id
+    store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "Continue this approved scheduled task.\n\nScheduled task: " + current_message,
+            "metadata": {
+                "source": "scheduler_approval_followup",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": active_execution_id,
+                "trigger": "approval_followup",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    started_at = scheduler_module.timestamp()
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Approval followup QA",
+            "description": "",
+            "type": "interval",
+            "task": {
+                "message": current_message,
+                "model": "google/gemma-4-31b-it",
+                "conversation_id": conversation_id,
+                "timeout": 1800,
+                "profile_id": "defaultspack.mimo_coding_company",
+                "agent_id": "browser_qa",
+                "metadata": {"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+            },
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2099-01-01T00:00:00Z",
+            "created_at": "2026-06-30T00:00:00Z",
+            "updated_at": started_at,
+            "running_execution": {
+                "execution_id": active_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": started_at,
+                "trigger": "manual",
+                "timeout_seconds": 1800,
+            },
+            "running_started_at": started_at,
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
+        active = scheduler.get_schedule(schedule_id)
+
+        assert active["running_execution"]["execution_id"] == active_execution_id
+        assert active["execution_count"] == 0
+        entries, total = load_history(schedule_id)
+        assert total == 0
+        saved = load_schedule(schedule_id)
+        assert saved["running_execution"]["execution_id"] == active_execution_id
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_manual_trigger_fails_fast_when_conversation_is_busy_without_running_marker(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
