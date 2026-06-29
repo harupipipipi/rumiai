@@ -9,6 +9,7 @@ from domain.ai_client.capability_tokens import (
     model_requirements_from_tokens,
     normalize_capability_tokens,
 )
+from domain.ai_client.client import AuthorityApprovalRequired
 from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
@@ -119,6 +120,8 @@ def call_model(
             if authority_context:
                 request["authority_context"] = authority_context
             response = LLMGateway().complete(request)
+    except AuthorityApprovalRequired as exc:
+        return _authority_approval_response(exc, model)
     except RuntimeError as exc:
         return {"status": "error", "code": "PROVIDER_ERROR", "error": str(exc), "model": model}
     output = _extract_output(response, expect_json=bool(payload.get("output_schema")))
@@ -153,6 +156,29 @@ def _authority_context_from_runtime(context: dict[str, Any]) -> dict[str, Any]:
     if principal_id:
         result["principal_id"] = principal_id
     return {key: value for key, value in result.items() if value not in ("", None)}
+
+
+def _authority_approval_response(exc: AuthorityApprovalRequired, model: str) -> dict[str, Any]:
+    decision = getattr(exc, "decision", None)
+    details: dict[str, Any]
+    if decision is not None and callable(getattr(decision, "to_approval_event", None)):
+        details = dict(decision.to_approval_event())
+    elif decision is not None and callable(getattr(decision, "to_dict", None)):
+        details = dict(decision.to_dict())
+    else:
+        details = {}
+    message = str(details.get("message") or details.get("reason") or exc or "authority approval required")
+    return {
+        "status": "authority_approval_required",
+        "code": "authority_approval_required",
+        "error": message,
+        "message": message,
+        "model": model,
+        "approval_required": True,
+        "requires_approval": True,
+        "finish_reason": "authority_approval_required",
+        "authority": details,
+    }
 
 
 def _normalized_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:

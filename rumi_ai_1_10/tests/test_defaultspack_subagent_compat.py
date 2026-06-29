@@ -122,6 +122,34 @@ def test_agent_run_subagent_delegate_forwards_profile_authority_context(monkeypa
     assert seen["target"]["conversation_id"] == "conv_1"
 
 
+def test_agent_run_subagent_delegate_does_not_promote_untrusted_top_level_profile_authority(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_dispatch(envelope, context):
+        seen["context"] = context
+        seen["params"] = envelope.params
+        return {"status": "ok", "assistant_text": "done"}
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block(
+        {
+            "task": "Reply with exactly OK_GEMMA_CONTEXT.",
+            "model": "google/gemma-4-31b-it",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "principal_id": "profile:payload-spoof",
+            "authority_principal_id": "profile:payload-spoof",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert "profile_id" not in seen["context"]
+    assert "principal_id" not in seen["context"]
+    assert "authority_principal_id" not in seen["context"]
+    assert seen["params"]["profile_id"] == "defaultspack.mimo_coding_company"
+
+
 def test_agent_run_subagent_delegate_does_not_trust_payload_principal(monkeypatch):
     seen: dict[str, object] = {}
 
@@ -151,6 +179,52 @@ def test_agent_run_subagent_delegate_does_not_trust_payload_principal(monkeypatc
     assert seen["context"]["principal_id"] == "profile:trusted-profile"
     assert seen["context"]["authority_principal_id"] == "profile:trusted-profile"
     assert seen["params"]["profile_id"] == "profile-from-payload"
+
+
+def test_agent_run_subagent_delegate_authority_approval_surfaces_status(monkeypatch):
+    def fake_execute(input_data, context):
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent-needs-authority",
+                "status": "authority_approval_required",
+                "approval_required": True,
+                "requires_approval": True,
+                "finish_reason": "authority_approval_required",
+                "authority": {
+                    "status": "authority_approval_required",
+                    "approval_required": True,
+                    "requires_approval": True,
+                    "request_id": "auth_gemma",
+                    "approval_request_id": "auth_gemma",
+                    "permission_id": "model.invoke",
+                    "principal_id": "profile:defaultspack.mimo_coding_company",
+                    "message": "Gemma provider needs authority approval",
+                },
+                "result": {"status": "authority_approval_required"},
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = run_subagent_block(
+        {
+            "task": "Reply with exactly OK_GEMMA_CONTEXT.",
+            "model": "google/gemma-4-31b-it",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["status"] == "authority_approval_required"
+    assert data["code"] == "authority_approval_required"
+    assert data["approval_required"] is True
+    assert data["result"]["request_id"] == "auth_gemma"
+    assert data["result"]["permission_id"] == "model.invoke"
+    assert data["result"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
+    assert "DELEGATE_RUN_FAILED" not in json.dumps(data, ensure_ascii=False)
 
 
 def test_agent_delegate_forwards_profile_authority_context(monkeypatch):
@@ -251,6 +325,90 @@ def test_agent_delegate_does_not_trust_payload_principal(monkeypatch):
     assert "principal_id" not in seen["context"]
     assert "authority_principal_id" not in seen["context"]
     assert seen["context"]["conversation_id"] == "conv_1"
+
+
+def test_agent_engine_preserves_authority_approval_model_result(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    from domain.agent.engine import AgentEngine
+
+    def fake_ai(self, messages, model, context, tools=None):
+        return {
+            "status": "error",
+            "error": {
+                "code": "AUTHORITY_APPROVAL_REQUIRED",
+                "message": "Gemma provider needs authority approval",
+                "details": {
+                    "status": "authority_approval_required",
+                    "approval_required": True,
+                    "requires_approval": True,
+                    "finish_reason": "authority_approval_required",
+                    "request_id": "auth_gemma",
+                    "approval_request_id": "auth_gemma",
+                    "permission_id": "model.invoke",
+                    "principal_id": "profile:defaultspack.mimo_coding_company",
+                    "message": "Gemma provider needs authority approval",
+                },
+            },
+        }
+
+    monkeypatch.setattr("domain.agent.engine.AgentEngine._ai_complete", fake_ai)
+
+    result = AgentEngine().execute(
+        "Reply with exactly OK_GEMMA_CONTEXT.",
+        [],
+        "google/gemma-4-31b-it",
+        None,
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
+        },
+    )
+
+    assert result["status"] == "authority_approval_required"
+    assert result["approval_required"] is True
+    assert result["authority"]["request_id"] == "auth_gemma"
+    assert result["result"]["status"] == "authority_approval_required"
+    assert result["result"]["steps"][-1]["step_type"] == "authority_approval_required"
+
+
+def test_agent_engine_preserves_top_level_authority_approval_model_result(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    from domain.agent.engine import AgentEngine
+
+    def fake_ai(self, messages, model, context, tools=None):
+        return {
+            "status": "authority_approval_required",
+            "code": "authority_approval_required",
+            "error": "Gemma provider needs authority approval",
+            "message": "Gemma provider needs authority approval",
+            "approval_required": True,
+            "requires_approval": True,
+            "finish_reason": "authority_approval_required",
+            "authority": {
+                "status": "authority_approval_required",
+                "request_id": "auth_gemma",
+                "permission_id": "model.invoke",
+                "principal_id": "profile:defaultspack.mimo_coding_company",
+            },
+        }
+
+    monkeypatch.setattr("domain.agent.engine.AgentEngine._ai_complete", fake_ai)
+
+    result = AgentEngine().execute(
+        "Reply with exactly OK_GEMMA_CONTEXT.",
+        [],
+        "google/gemma-4-31b-it",
+        None,
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
+        },
+    )
+
+    assert result["status"] == "authority_approval_required"
+    assert result["approval_required"] is True
+    assert result["authority"]["request_id"] == "auth_gemma"
+    assert result["result"]["steps"][-1]["step_type"] == "authority_approval_required"
 
 
 def test_agent_run_subagent_utility_forwards_authority_context(monkeypatch):

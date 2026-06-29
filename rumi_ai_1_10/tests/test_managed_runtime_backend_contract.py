@@ -955,6 +955,57 @@ def test_desktop_list_survives_invalid_desktop_payload(monkeypatch) -> None:
     assert desktops[0]["last_error"] == "Desktop state could not be serialized."
 
 
+def test_desktop_list_prioritizes_running_desktops() -> None:
+    from types import SimpleNamespace
+
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    service = SimpleNamespace(
+        manager=SimpleNamespace(
+            list_instances=lambda: [
+                {
+                    "display": True,
+                    "sandbox_id": "old-destroyed-seat",
+                    "name": "Old destroyed desktop",
+                    "state": "destroyed",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 20,
+                },
+                {
+                    "display": True,
+                    "sandbox_id": "current-running-seat",
+                    "name": "Current QA worker",
+                    "state": "ready",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 10,
+                },
+                {
+                    "display": True,
+                    "sandbox_id": "newer-stopped-seat",
+                    "name": "Newer stopped desktop",
+                    "state": "stopped",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 30,
+                },
+            ]
+        ),
+        frame_cache=SimpleNamespace(last_metadata=lambda _seat_id: None),
+        lease_manager=SimpleNamespace(active_lease=lambda _seat_id: None),
+    )
+
+    desktops = api._desktop_list(service)
+
+    assert [desktop["seat_id"] for desktop in desktops] == [
+        "current-running-seat",
+        "newer-stopped-seat",
+        "old-destroyed-seat",
+    ]
+    assert desktops[0]["status"] == "running"
+
+
 def test_desktops_list_skips_malformed_manager_instances() -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 

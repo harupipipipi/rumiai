@@ -480,11 +480,79 @@ def _text_tool_call_blocks_for_prepared(
         if not replayed_name or not _tool_identity_text_matches(tool_name, replayed_name):
             filtered.append(block)
             continue
-        block_arguments = block.get("input", block.get("arguments", {}))
-        block_arguments = block_arguments if isinstance(block_arguments, dict) else {}
+        block_arguments = _tool_use_argument_dict(block)
         if replayed_arguments is not None and block_arguments != replayed_arguments:
             filtered.append(block)
     return filtered
+
+
+def _tool_use_argument_dict(block: dict[str, Any]) -> dict[str, Any] | None:
+    raw_arguments = block.get("input", block.get("arguments", {}))
+    if isinstance(raw_arguments, dict):
+        return dict(raw_arguments)
+    if isinstance(raw_arguments, str):
+        text = raw_arguments.strip()
+        if not text:
+            return None
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return None
+        if isinstance(parsed, dict):
+            return dict(parsed)
+    return None
+
+
+def _approval_replay_duplicate_tool_use(prepared: PreparedChatRun, block: dict[str, Any]) -> bool:
+    tool_context = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
+    replayed = tool_context.get("approval_replayed")
+    if not isinstance(replayed, dict) or replayed.get("duplicate"):
+        return False
+    replayed_name = str(replayed.get("tool_name") or "").strip()
+    replayed_arguments = replayed.get("arguments") if isinstance(replayed.get("arguments"), dict) else None
+    if not replayed_name or replayed_arguments is None:
+        return False
+
+    block_name = str(block.get("name") or block.get("tool_name") or "").strip()
+    block_arguments = _tool_use_argument_dict(block)
+    if block_arguments is None:
+        return False
+    block_name, block_arguments = _normalize_tool_call_name_and_arguments(block_name, block_arguments)
+    replayed_name, replayed_arguments = _normalize_tool_call_name_and_arguments(
+        replayed_name,
+        dict(replayed_arguments),
+    )
+    return _tool_identity_text_matches(block_name, replayed_name) and block_arguments == replayed_arguments
+
+
+def _suppress_duplicate_approval_replay_tool_uses(
+    prepared: PreparedChatRun,
+    response: dict[str, Any],
+    tool_uses: list[dict[str, Any]],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    if not tool_uses:
+        return response, tool_uses
+    filtered_tool_uses = [
+        block
+        for block in tool_uses
+        if not _approval_replay_duplicate_tool_use(prepared, block)
+    ]
+    if len(filtered_tool_uses) == len(tool_uses):
+        return response, tool_uses
+
+    filtered_response = dict(response or {})
+    content = filtered_response.get("content")
+    if isinstance(content, list):
+        filtered_response["content"] = [
+            block
+            for block in content
+            if not (
+                isinstance(block, dict)
+                and str(block.get("type") or "").strip() == "tool_use"
+                and _approval_replay_duplicate_tool_use(prepared, block)
+            )
+        ]
+    return filtered_response, filtered_tool_uses
 
 
 def _approval_followup_tool_use(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1780,6 +1848,11 @@ class ChatRunEngine:
                     events=list(self._activity_events),
                 )
                 tool_uses = []
+            response, tool_uses = _suppress_duplicate_approval_replay_tool_uses(
+                prepared,
+                response,
+                tool_uses,
+            )
             if tool_uses:
                 external_tool_uses = [
                     block for block in tool_uses if not self._is_assistant_progress_tool_use(block)

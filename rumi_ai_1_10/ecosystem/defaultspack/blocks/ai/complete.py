@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok, error, gen_id
 from domain.ai_client.gateway import LLMGateway
+from domain.ai_client.client import AuthorityApprovalRequired
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.dev.inspector import Inspector
 from domain.prompt.manager import get_manager
@@ -76,6 +77,12 @@ def run(input_data, context):
             if authority_context:
                 request["authority_context"] = authority_context
         result = LLMGateway().complete(request)
+    except AuthorityApprovalRequired as e:
+        return error(
+            str(e) or "authority approval required",
+            "AUTHORITY_APPROVAL_REQUIRED",
+            details=_authority_approval_details(e),
+        )
     except RuntimeError as e:
         return error(str(e), "PROVIDER_ERROR")
 
@@ -121,3 +128,25 @@ def run(input_data, context):
         pass  # Inspector のエラーで本来の処理を止めない
 
     return ok(result)
+
+
+def _authority_approval_details(exc):
+    decision = getattr(exc, "decision", None)
+    if decision is None:
+        return {
+            "status": "authority_approval_required",
+            "approval_required": True,
+            "requires_approval": True,
+            "finish_reason": "authority_approval_required",
+        }
+    if callable(getattr(decision, "to_approval_event", None)):
+        details = dict(decision.to_approval_event())
+    elif callable(getattr(decision, "to_dict", None)):
+        details = dict(decision.to_dict())
+    else:
+        details = {}
+    details.setdefault("status", "authority_approval_required")
+    details.setdefault("approval_required", True)
+    details.setdefault("requires_approval", True)
+    details.setdefault("finish_reason", "authority_approval_required")
+    return details

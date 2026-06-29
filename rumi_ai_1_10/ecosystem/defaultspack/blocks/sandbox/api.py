@@ -674,7 +674,28 @@ def _desktop_list(service: _SandboxApiService) -> list[dict[str, Any]]:
             desktops.append(_desktop_payload(service, item))
         except Exception:
             desktops.append(_desktop_payload_error(item))
-    return desktops
+    return sorted(desktops, key=_desktop_list_sort_key)
+
+
+def _desktop_list_sort_key(desktop: dict[str, Any]) -> tuple[int, float, str]:
+    status = str(desktop.get("status") or "").strip().lower()
+    if status == "running":
+        status_rank = 0
+    elif status in {"ready", "busy", "starting", "pending"}:
+        status_rank = 1
+    elif status in {"stopped", "paused"}:
+        status_rank = 2
+    elif status in {"destroyed", "deleted"}:
+        status_rank = 4
+    elif status == "failed":
+        status_rank = 5
+    else:
+        status_rank = 3
+    try:
+        updated_rank = -float(desktop.get("updated_at") or desktop.get("created_at") or 0)
+    except (TypeError, ValueError):
+        updated_rank = 0.0
+    return (status_rank, updated_rank, str(desktop.get("name") or desktop.get("seat_id") or ""))
 
 
 def _desktop_get(service: _SandboxApiService, payload: dict[str, Any], context: dict[str, Any]):

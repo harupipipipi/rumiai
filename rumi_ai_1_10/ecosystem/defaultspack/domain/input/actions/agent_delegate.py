@@ -6,6 +6,7 @@ from domain.input.envelope import RumiInputEnvelope
 
 
 _FAILED_DELEGATE_STATUSES = {"error", "failed", "failure"}
+_AUTHORITY_APPROVAL_STATUSES = {"authority_approval_required", "approval_required"}
 _PROVIDER_ERROR_HINTS = (
     "provider error",
     "provider is not configured",
@@ -49,6 +50,23 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
     if isinstance(result, dict) and result.get("status") == "ok":
         data = result.get("data") if isinstance(result.get("data"), dict) else {}
         delegate = _delegate_summary(data, payload, envelope)
+        authority_approval = _find_authority_approval(data)
+        if authority_approval is not None:
+            assistant_text = _authority_approval_text(authority_approval)
+            delegate["code"] = "authority_approval_required"
+            delegate["error"] = assistant_text
+            delegate["approval_required"] = True
+            return {
+                "status": "authority_approval_required",
+                "assistant_text": assistant_text,
+                "code": "authority_approval_required",
+                "error": assistant_text,
+                "approval_required": True,
+                "requires_approval": True,
+                "finish_reason": "authority_approval_required",
+                "delegate": delegate,
+                "result": _safe_authority_approval_result(data, authority_approval, assistant_text),
+            }
         if _delegate_failed(data):
             code, assistant_text = _delegate_failure_summary(data)
             delegate["code"] = code
@@ -145,6 +163,68 @@ def _delegate_failed(data: dict[str, Any]) -> bool:
     nested = data.get("result") if isinstance(data.get("result"), dict) else {}
     nested_status = str(nested.get("status") or "").strip().lower()
     return nested_status in _FAILED_DELEGATE_STATUSES
+
+
+def _find_authority_approval(value: Any, *, depth: int = 0) -> dict[str, Any] | None:
+    if depth > 5:
+        return None
+    if isinstance(value, dict):
+        authority = value.get("authority")
+        if isinstance(authority, dict):
+            found = _find_authority_approval(authority, depth=depth + 1)
+            if found is not None:
+                return found
+        status = str(value.get("status") or value.get("finish_reason") or "").strip().lower()
+        code = str(value.get("code") or "").strip().lower()
+        if (
+            status in _AUTHORITY_APPROVAL_STATUSES
+            or code == "authority_approval_required"
+            or (value.get("approval_required") is True and value.get("authority") is True)
+        ):
+            approval = dict(value)
+            approval.setdefault("status", "authority_approval_required")
+            approval.setdefault("approval_required", True)
+            approval.setdefault("requires_approval", True)
+            approval.setdefault("finish_reason", "authority_approval_required")
+            return approval
+        for item in value.values():
+            found = _find_authority_approval(item, depth=depth + 1)
+            if found is not None:
+                return found
+    if isinstance(value, list):
+        for item in value[:20]:
+            found = _find_authority_approval(item, depth=depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _authority_approval_text(approval: dict[str, Any]) -> str:
+    return str(
+        approval.get("message")
+        or approval.get("display_summary")
+        or approval.get("reason")
+        or "The delegated agent needs authority approval before it can continue."
+    )
+
+
+def _safe_authority_approval_result(data: dict[str, Any], approval: dict[str, Any], assistant_text: str) -> dict[str, Any]:
+    safe = {
+        "status": "authority_approval_required",
+        "code": "authority_approval_required",
+        "error": assistant_text,
+        "approval_required": True,
+        "requires_approval": True,
+        "finish_reason": "authority_approval_required",
+    }
+    execution_id = _execution_id_from_delegate_data(data)
+    if execution_id:
+        safe["execution_id"] = execution_id
+    for key in ("request_id", "approval_request_id", "permission_id", "principal_id", "risk_level", "resource"):
+        value = approval.get(key)
+        if value not in ("", None, [], {}):
+            safe[key] = value
+    return safe
 
 
 def _delegate_failure_summary(data: dict[str, Any]) -> tuple[str, str]:
