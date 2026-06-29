@@ -2611,6 +2611,8 @@ class ChatRunEngine:
             ):
                 self._suppress_consumed_approval_followup(prepared, tool_name, request_id, token)
             return None
+        if str(getattr(verification, "request_id", "") or "").strip() != request_id:
+            return None
 
         invoke_args = dict(stored_args)
         invoke_args["approval_token"] = token
@@ -2661,6 +2663,17 @@ class ChatRunEngine:
                 "is_error": True,
                 "widget": None,
             }
+
+        if not _tool_result_is_error(result):
+            consume_error = self._consume_replayed_approval_token(
+                _approval_mod,
+                token=token,
+                operation=operation,
+                args_hash=args_hash,
+                request_id=request_id,
+            )
+            if consume_error is not None:
+                result = consume_error
 
         summary = _tool_result_summary(tool_name, result)
         artifacts = _tool_result_artifacts(result)
@@ -2800,6 +2813,58 @@ class ChatRunEngine:
                 "arguments": dict(stored_args or {}),
             }
         return None
+
+    def _consume_replayed_approval_token(
+        self,
+        approval_module: Any,
+        *,
+        token: str,
+        operation: str,
+        args_hash: str,
+        request_id: str,
+    ) -> dict[str, Any] | None:
+        """Consume a deterministic approval replay token if execution did not.
+
+        Some approved followups target tools such as ``desktop_frame`` and
+        ``desktop_list`` that are approval-gated by scheduled policy but whose
+        local tool definitions are not intrinsically ``requires_approval``.
+        Those tools can execute successfully without entering the executor's
+        deferred approval consumer, leaving the request stuck in ``approved``.
+        """
+        try:
+            current = approval_module.get_approval_request(request_id)
+        except Exception:
+            current = None
+        if isinstance(current, dict) and str(current.get("status") or "") == "consumed":
+            return None
+        try:
+            verification = approval_module.verify_execution_token(
+                token,
+                operation,
+                args_hash,
+                consume=True,
+            )
+        except Exception:
+            return {
+                "result": "approval-followup replay could not consume the approval token",
+                "is_error": True,
+                "widget": None,
+            }
+        if getattr(verification, "valid", False):
+            return None
+        code = str(getattr(verification, "code", "") or "")
+        if code == "APPROVAL_TOKEN_USED":
+            try:
+                current = approval_module.get_approval_request(request_id)
+            except Exception:
+                current = None
+            if isinstance(current, dict) and str(current.get("status") or "") == "consumed":
+                return None
+        return {
+            "result": getattr(verification, "message", None) or "approval token is invalid",
+            "is_error": True,
+            "widget": None,
+        }
 
     def _suppress_consumed_approval_followup(
         self,
