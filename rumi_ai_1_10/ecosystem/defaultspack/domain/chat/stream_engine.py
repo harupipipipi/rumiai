@@ -107,6 +107,14 @@ _TEXT_TOOL_PARAMETER_RE = re.compile(
     r"<parameter=([A-Za-z0-9_.:-]+)>(.*?)</parameter>",
     re.DOTALL,
 )
+_DISPLAY_TOOL_ALIASES = {
+    "desktop_frame": "desktop_frame",
+    "managed_runtime_desktop_frame": "desktop_frame",
+    "desktop_input": "desktop_input",
+    "managed_runtime_desktop_input": "desktop_input",
+    "desktop_list": "desktop_list",
+    "desktop_create": "desktop_create",
+}
 
 
 def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
@@ -304,11 +312,17 @@ def _tool_identity_text_matches(left: Any, right: Any) -> bool:
     return normalize(left_text) == normalize(right_text)
 
 
+def _canonical_tool_name(value: Any) -> str:
+    text = str(value or "").strip()
+    normalized = re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")
+    return _DISPLAY_TOOL_ALIASES.get(normalized, text)
+
+
 def _normalize_tool_call_name_and_arguments(
     tool_name: str,
     arguments: dict[str, Any],
 ) -> tuple[str, dict[str, Any]]:
-    name = str(tool_name or "").strip()
+    name = _canonical_tool_name(tool_name)
     if ":" not in name:
         return name, arguments
     base, suffix = name.split(":", 1)
@@ -2649,7 +2663,7 @@ class ChatRunEngine:
         if not followup:
             return None
         token = str(followup.get("approval_token") or followup.get("token") or "").strip()
-        tool_name = str(followup.get("tool_name") or "").strip()
+        tool_name = _canonical_tool_name(followup.get("tool_name"))
         request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
         if not (token and tool_name and request_id):
             return None

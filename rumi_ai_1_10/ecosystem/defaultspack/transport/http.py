@@ -76,6 +76,10 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
     "blocks.sandbox.api",
 }
 
+_DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.conversation_preview",
+}
+
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
     (
@@ -400,6 +404,12 @@ class DefaultsHttpServer:
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
         if module_name in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
+        if (
+            module_name in _DIRECT_SAFE_GET_FALLBACK_BLOCKS
+            and self._safe_get_fallback_allowed(module_name, payload)
+        ):
             context["_defaultspack_http_route_adapter"] = True
             return invoke_block(module_name, payload, context)
         # Standalone live-server scripts start transport with no kernel facade.

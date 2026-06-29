@@ -29,6 +29,18 @@ def test_computer_use_action_suffix_tool_name_is_normalized():
     }
 
 
+def test_display_desktop_frame_tool_name_is_normalized():
+    from domain.chat.stream_engine import _normalize_tool_call_name_and_arguments
+
+    tool_name, arguments = _normalize_tool_call_name_and_arguments(
+        "Desktop Frame",
+        {"seat_id": "seat-1"},
+    )
+
+    assert tool_name == "desktop_frame"
+    assert arguments == {"seat_id": "seat-1"}
+
+
 def test_chat_run_engine_has_no_default_four_tool_call_limit(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.stream_engine import ChatRunEngine
@@ -1856,6 +1868,139 @@ def test_stream_engine_scheduled_desktop_frame_approval_replay_consumes_approval
     assert not any(event.get("type") == "approval_requested" for event in events)
 
 
+def test_stream_engine_scheduled_desktop_frame_replay_canonicalizes_display_tool_name(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
+    conversation_id = conversation["id"]
+
+    approved_args = {"owner_id": "local-user", "seat_id": "seat-1"}
+    request = approval.create_approval_request(
+        "tool.Desktop Frame",
+        "medium",
+        approved_args,
+        details={
+            "tool_name": "Desktop Frame",
+            "action": "tool.Desktop Frame",
+            "function_id": "tool.Desktop Frame",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": approved_args,
+        },
+    )
+    token = approval.approve(request["request_id"])["token"]
+
+    metadata = {
+        "source": "scheduler_approval_followup",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "approval_followup": {
+            "approval_token": token,
+            "request_id": request["request_id"],
+            "tool_name": "Desktop Frame",
+        },
+    }
+    user_message = {
+        "id": "user-approved-display-frame",
+        "role": "user",
+        "content": "continue approved scheduled desktop frame",
+        "metadata": metadata,
+    }
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "desktop_frame",
+                "description": "desktop_frame",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation={"id": conversation_id, "messages": [user_message]},
+        input_data={},
+        request_id="req-approved-display-frame",
+        content=[],
+        metadata=metadata,
+        user_message=user_message,
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        params={},
+        request_context={
+            "source": "scheduler_approval_followup",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={
+            "tool_approval_tokens": {"Desktop Frame": token},
+            "owner_pack": "defaultspack",
+            "source": "scheduler_approval_followup",
+            "conversation_id": conversation_id,
+        },
+        standard_messages=[{"role": "user", "content": "continue approved scheduled desktop frame"}],
+        user_text="continue approved scheduled desktop frame",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["desktop_frame"],
+        connected_tool_names={"desktop_frame"},
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_execute(self, name, arguments, context):
+        calls.append((name, dict(arguments)))
+        return {"result": "frame captured", "is_error": False, "widget": {"type": "desktop_frame"}}
+
+    class Gateway:
+        def complete(self, request_data):
+            return {
+                "content": [{"type": "text", "text": "frame replay summarized"}],
+                "finish_reason": "stop",
+                "usage": {},
+            }
+
+        def stream(self, request_data):
+            del request_data
+            return iter([])
+
+        def supports_stream(self, model):
+            del model
+            return False
+
+        def resolve_provider(self, model):
+            class Provider:
+                pass
+
+            return Provider(), model
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    events = list(ChatRunEngine(store=store, gateway=Gateway()).stream({}, {}, stream_mode=False))
+    stored = store.get_conversation(conversation_id)["messages"][-1]
+    ChatStore._instance = None
+
+    assert calls == [("desktop_frame", {**approved_args, "approval_token": token})]
+    assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+    assert stored["raw_text"] == "frame replay summarized"
+    assert any(event.get("type") == "tool_call_completed" for event in events)
+    assert not any(event.get("type") == "approval_requested" for event in events)
+
+
 def test_stream_engine_scheduled_desktop_frame_approval_replay_suppresses_duplicate_native_tool_use(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from domain.chat.run_request import PreparedChatRun
@@ -2141,6 +2286,8 @@ def test_stream_engine_scheduled_desktop_frame_replay_uses_defaultspack_local_ow
                 "owner_pack": "defaultspack",
                 "source": "scheduler_approval_followup",
                 "conversation_id": conversation_id,
+                "principal_id": "profile:defaultspack.mimo_coding_company",
+                "authority_principal_id": "profile:defaultspack.mimo_coding_company",
                 "agent_id": "browser_qa",
             },
             {"action": "allow", "allowed": True},

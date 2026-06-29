@@ -136,6 +136,39 @@ class ChatStore:
                 loaded[str(conversation_id)] = conversation
             return loaded
 
+    def _load_conversation_file(self, conversation_id):
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return None
+        history_path = self.conversation_dir(conversation_id) / "history.json"
+        try:
+            payload = json.loads(history_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        conversation = payload.get("conversation") if isinstance(payload, dict) else None
+        if not isinstance(conversation, dict):
+            return None
+        stored_id = str(conversation.get("id") or conversation_id)
+        if stored_id != conversation_id:
+            return None
+        self._normalize_conversation(conversation_id, conversation)
+        self._sanitize_inline_thought_messages(conversation)
+        return conversation
+
+    def _recover_conversation_from_file(self, conversation_id):
+        with self._lock:
+            if conversation_id in self._conversations:
+                return self._conversations[conversation_id]
+            conversation = self._load_conversation_file(conversation_id)
+            if conversation is None:
+                return None
+            self._conversations[conversation_id] = conversation
+            try:
+                self._save_conversation_index()
+            except OSError:
+                pass
+            return conversation
+
     def _atomic_write_json(self, path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
@@ -257,17 +290,23 @@ class ChatStore:
             return copy.deepcopy(conv)
 
     def get_conversation(self, conversation_id):
+        conversation_id = str(conversation_id or "")
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
-            return None
+            conv = self._recover_conversation_from_file(conversation_id)
+            if conv is None:
+                return None
         return copy.deepcopy(conv)
 
     def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
+        conversation_id = str(conversation_id or "")
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
-            return None, None
+            conv = self._recover_conversation_from_file(conversation_id)
+            if conv is None:
+                return None, None
         messages = conv.get("messages", [])
         if not isinstance(messages, list):
             messages = []

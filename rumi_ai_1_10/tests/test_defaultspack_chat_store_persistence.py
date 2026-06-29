@@ -187,3 +187,50 @@ def test_chat_store_load_replaces_persisted_icon_svg(tmp_path, monkeypatch):
     assert conversation["metadata"]["icon_svg"] != payload
     assert "onload" not in conversation["metadata"]["icon_svg"].lower()
     ChatStore._instance = None
+
+
+def test_chat_store_recovers_missing_index_entry_from_history_file(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage_path.write_text(
+        json.dumps({"schema_version": 1, "updated_at": 0, "conversations": {}}),
+        encoding="utf-8",
+    )
+    history_path = storage_path.parent / "conversations" / "conv-file-only" / "history.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    history_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "updated_at": 1,
+                "conversation": {
+                    "id": "conv-file-only",
+                    "title": "Recovered From History",
+                    "created_at": 0,
+                    "updated_at": 1,
+                    "model": "stub/default",
+                    "messages": [
+                        {"id": "m1", "role": "user", "content": "hello"},
+                        {"id": "m2", "role": "assistant", "content": "hi"},
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    recovered = store.get_conversation("conv-file-only")
+    windowed, window = store.get_conversation_window("conv-file-only", message_limit=1)
+    reindexed = json.loads(storage_path.read_text(encoding="utf-8"))["conversations"]
+
+    assert recovered["title"] == "Recovered From History"
+    assert [message["id"] for message in recovered["messages"]] == ["m1", "m2"]
+    assert [message["id"] for message in windowed["messages"]] == ["m2"]
+    assert window["total"] == 2
+    assert "conv-file-only" in reindexed
+    ChatStore._instance = None

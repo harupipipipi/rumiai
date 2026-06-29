@@ -173,7 +173,7 @@ def _trusted_desktop_context(context: dict[str, Any] | None) -> tuple[dict[str, 
     owner_id = _trusted_owner_id(desktop_context)
     if not owner_id:
         return {}, "", err("desktop tools require a server-derived principal context", "DESKTOP_PRINCIPAL_REQUIRED")
-    desktop_context.setdefault("principal_id", owner_id)
+    desktop_context["principal_id"] = owner_id
     return desktop_context, owner_id, None
 
 

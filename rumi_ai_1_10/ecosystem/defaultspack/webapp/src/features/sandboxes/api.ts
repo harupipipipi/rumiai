@@ -22,7 +22,7 @@ type ApiEnvelope<T> =
   | { status: "ok"; data: T }
   | { status: "error"; error: { code?: string; message?: string } };
 
-type DesktopListPayload = { desktops: DesktopInstance[] };
+type DesktopListPayload = { desktops: unknown[] };
 
 function encodeId(value: string): string {
   return encodeURIComponent(value);
@@ -80,20 +80,88 @@ function normalizeSandboxInstance(instance: SandboxInstance): SandboxInstance {
   };
 }
 
-function normalizeDesktopInstance(instance: DesktopInstance): DesktopInstance {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function trimString(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const text = trimString(value);
+    if (text) return text;
+  }
+  return null;
+}
+
+function desktopSeatId(record: Record<string, unknown>): string | null {
+  return firstString(
+    record.seat_id,
+    record.seatId,
+    record.sandbox_id,
+    record.sandboxId,
+    record.desktop_id,
+    record.desktopId,
+    record.id,
+  );
+}
+
+function desktopStatusValue(record: Record<string, unknown>): unknown {
+  const status = record.status
+    ?? record.state
+    ?? record.desktop_status
+    ?? record.desktopStatus
+    ?? record.lifecycle_state
+    ?? record.lifecycleState;
+  if (trimString(status)) return status;
+  if (record.running === true || record.ready === true) return "running";
+  return status;
+}
+
+function normalizeDesktopInstanceOrNull(instance: unknown): DesktopInstance | null {
+  if (!isRecord(instance)) return null;
+  const seatId = desktopSeatId(instance);
+  if (!seatId) return null;
+  const provisioning = isRecord(instance.provisioning)
+    ? {
+        ...instance.provisioning,
+        status: normalizeDesktopProvisioningStatus(instance.provisioning.status ?? instance.provisioning.state),
+      }
+    : instance.provisioning;
   return {
-    ...instance,
-    status: normalizeDesktopStatus(instance.status ?? instance.state),
-    provisioning: instance.provisioning
-      ? {
-          ...instance.provisioning,
-          status: normalizeDesktopProvisioningStatus(instance.provisioning.status),
-        }
-      : instance.provisioning,
+    ...(instance as unknown as DesktopInstance),
+    seat_id: seatId,
+    sandbox_id: firstString(instance.sandbox_id, instance.sandboxId) ?? seatId,
+    name: firstString(instance.name, instance.display_name, instance.displayName, instance.label) ?? `Desktop ${seatId}`,
+    status: normalizeDesktopStatus(desktopStatusValue(instance)),
+    assigned_agent: firstString(instance.assigned_agent, instance.assigned_agent_id, instance.assignedAgentId),
+    provisioning: provisioning as DesktopInstance["provisioning"],
   };
 }
 
-async function requestDesktopList(): Promise<DesktopListPayload> {
+function normalizeDesktopInstance(instance: unknown): DesktopInstance {
+  const normalized = normalizeDesktopInstanceOrNull(instance);
+  if (!normalized) {
+    throw new Error("Desktop response did not include a usable desktop record.");
+  }
+  return normalized;
+}
+
+function normalizeDesktopListPayload(payload: DesktopListPayload): { desktops: DesktopInstance[] } {
+  const desktops = payload.desktops
+    .map(normalizeDesktopInstanceOrNull)
+    .filter((desktop): desktop is DesktopInstance => desktop !== null);
+  if (payload.desktops.length > 0 && desktops.length === 0) {
+    throw new Error("Desktop list response contained desktop records, but none included a usable desktop id.");
+  }
+  return { desktops };
+}
+
+async function requestDesktopList(): Promise<{ desktops: DesktopInstance[] }> {
   const response = await defaultspackApiFetch("/api/desktops", { cache: "no-store" });
   let payload: unknown;
   try {
@@ -115,7 +183,7 @@ async function requestDesktopList(): Promise<DesktopListPayload> {
   if (!data || typeof data !== "object" || !Array.isArray((data as DesktopListPayload).desktops)) {
     throw new Error("Desktop list response did not include a desktops array.");
   }
-  return data as DesktopListPayload;
+  return normalizeDesktopListPayload(data as DesktopListPayload);
 }
 
 function normalizeLeaseExpiresAt(value: unknown): string {
@@ -228,8 +296,7 @@ export const sandboxesApi = {
   },
 
   listDesktops() {
-    return requestDesktopList()
-      .then((payload) => ({ desktops: payload.desktops.map(normalizeDesktopInstance) }));
+    return requestDesktopList();
   },
 
   createDesktop(payload: CreateDesktopRequest) {

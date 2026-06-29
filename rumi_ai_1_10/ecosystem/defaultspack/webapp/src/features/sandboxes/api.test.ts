@@ -167,6 +167,48 @@ test("listDesktops accepts bare desktop list payloads and trims desktop status",
   }
 });
 
+test("listDesktops canonicalizes wrapped desktop records before rendering", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      desktops: [
+        {
+          id: "desktop-from-id",
+          displayName: "Primary Desktop",
+          running: true,
+          provider_id: "fake-runtime",
+          provisioning: {
+            state: "installed",
+          },
+        },
+        {
+          seatId: "desktop-from-seat-id",
+          sandboxId: "sandbox-alias",
+          name: "Secondary Desktop",
+          state: "ready",
+          provider_id: "fake-runtime",
+        },
+      ],
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.listDesktops();
+    assert.equal(result.desktops.length, 2);
+    assert.equal(result.desktops[0].seat_id, "desktop-from-id");
+    assert.equal(result.desktops[0].sandbox_id, "desktop-from-id");
+    assert.equal(result.desktops[0].name, "Primary Desktop");
+    assert.equal(result.desktops[0].status, "running");
+    assert.equal(result.desktops[0].provisioning?.status, "installed");
+    assert.equal(result.desktops[1].seat_id, "desktop-from-seat-id");
+    assert.equal(result.desktops[1].sandbox_id, "sandbox-alias");
+    assert.equal(result.desktops[1].status, "running");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("listDesktops normalizes desktop state when status is missing", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -185,6 +227,30 @@ test("listDesktops normalizes desktop state when status is missing", async () =>
   try {
     const result = await sandboxesApi.listDesktops();
     assert.equal(result.desktops[0].status, "running");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("listDesktops reports desktop records with no usable id", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: {
+      desktops: [
+        {
+          name: "Running but unaddressable",
+          status: "running",
+        },
+      ],
+    },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => sandboxesApi.listDesktops(),
+      /usable desktop id/,
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
