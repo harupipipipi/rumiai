@@ -166,10 +166,12 @@ def run(input_data, context):
         elif action == "disconnect":
             result = disconnect_provider_oauth(provider_id)
         elif action == "start":
+            requested_services = (input_data or {}).get("services")
             result = start_provider_oauth(
                 provider_id,
                 request_headers=request_headers,
                 scope_mode=str((input_data or {}).get("scope_mode") or "").strip() or None,
+                services=requested_services if isinstance(requested_services, list) else None,
             )
         else:
             result = {

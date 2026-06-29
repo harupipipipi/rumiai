@@ -22,6 +22,7 @@ import {
   mapSettingsSectionId,
   safeSettingsLabel,
   type AccountConnectionPreludeCard,
+  type AccountConnectionScopeModeOption,
   type ControlCenterField,
   type ControlCenterSection,
 } from "../settings/controlCenter";
@@ -1039,7 +1040,7 @@ function ProviderOAuthPanel({
                       setBusyAction(`${providerId}:start`);
                       const result = await settingsApiResources.startProviderOAuth(
                         providerId,
-                        providerId === "google" ? { scopeMode: "google_ai" } : undefined,
+                        providerId === "google" ? { scopeMode: "google_ai", services: ["identity", "generative_language"] } : undefined,
                       );
                       if (popup) {
                         popup.location.href = result.authorize_url;
@@ -2912,6 +2913,7 @@ export function SettingsModalRenderer({
   const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
   const [connectionBusy, setConnectionBusy] = useState("");
   const [connectionMessages, setConnectionMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
+  const [connectionScopeModes, setConnectionScopeModes] = useState<Record<string, string>>({});
   const normalizedSearch = settingsSearch.trim().toLowerCase();
   const sidebarSettings = settingsValues.sidebar ?? {};
   const controlCenterSections = useMemo(
@@ -3010,13 +3012,20 @@ export function SettingsModalRenderer({
   const refreshConnectionStatus = (providerId: string) => {
     onSettingChange("apis", "api_keys", { action: "oauth_refresh", provider_id: providerId });
   };
-  const startAccountConnection = async (card: AccountConnectionPreludeCard) => {
+  const selectedConnectionScopeMode = (card: AccountConnectionPreludeCard): AccountConnectionScopeModeOption | undefined => {
+    const selectedId = connectionScopeModes[card.providerId] || card.scopeMode || card.scopeModes[0]?.id || "";
+    return card.scopeModes.find((option) => option.id === selectedId) ?? card.scopeModes[0];
+  };
+  const startAccountConnection = async (card: AccountConnectionPreludeCard, scopeModeOption?: AccountConnectionScopeModeOption) => {
     if (!card.connectAction) return;
+    const selectedOption = scopeModeOption ?? selectedConnectionScopeMode(card);
+    const scopeMode = selectedOption?.id ?? card.scopeMode;
+    const services = selectedOption?.services ?? card.services;
     let popup: Window | null = null;
     try {
       popup = window.open("", `rumi-oauth-${card.providerId}`, "popup=yes,width=560,height=760");
       setConnectionBusy(`${card.providerId}:start`);
-      const result = await settingsApiResources.startProviderOAuth(card.providerId, { scopeMode: card.scopeMode });
+      const result = await settingsApiResources.startProviderOAuth(card.providerId, { scopeMode, services });
       if (popup) {
         popup.location.href = result.authorize_url;
         popup.focus();
@@ -3025,7 +3034,7 @@ export function SettingsModalRenderer({
       }
       setConnectionMessages((current) => ({
         ...current,
-        [card.providerId]: { tone: "success", text: `${card.label} OAuth opened with ${card.scopeMode ?? "default"} scopes.` },
+        [card.providerId]: { tone: "success", text: `${card.label} OAuth opened with ${selectedOption?.label ?? scopeMode ?? "selected"} scopes.` },
       }));
       refreshConnectionStatus(card.providerId);
     } catch (errorValue) {
@@ -3146,6 +3155,9 @@ export function SettingsModalRenderer({
           {accountConnectionCards.map((card) => {
             const isBusy = connectionBusy === `${card.providerId}:start`;
             const message = connectionMessages[card.providerId];
+            const selectedScopeOption = selectedConnectionScopeMode(card);
+            const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
+            const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;
             return (
               <div key={card.providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -3166,9 +3178,50 @@ export function SettingsModalRenderer({
                     {card.statusLabel}
                   </span>
                 </div>
-                {card.scopes.length > 0 && (
+                {card.scopeModes.length > 0 && (
+                  <div className="mt-3 space-y-2" role="radiogroup" aria-label={`${card.label} OAuth scope mode`}>
+                    {card.scopeModes.map((mode) => {
+                      const selected = mode.id === selectedScopeModeId;
+                      return (
+                        <label
+                          key={mode.id}
+                          className={cn(
+                            "block cursor-pointer rounded-md border px-3 py-2 transition-colors",
+                            selected
+                              ? "border-cyan-600 bg-cyan-950/30"
+                              : "border-zinc-800 bg-zinc-950 hover:border-zinc-700",
+                          )}
+                        >
+                          <input
+                            type="radio"
+                            name={`oauth-scope-mode-${card.providerId}`}
+                            value={mode.id}
+                            checked={selected}
+                            onChange={() => setConnectionScopeModes((current) => ({ ...current, [card.providerId]: mode.id }))}
+                            className="sr-only"
+                          />
+                          <span className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs font-medium text-zinc-100">{mode.label}</span>
+                            {mode.restricted && (
+                              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
+                                Restricted scope
+                              </span>
+                            )}
+                          </span>
+                          <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{mode.description}</span>
+                          {mode.restricted && mode.warning && (
+                            <span className="mt-2 block rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-5 text-amber-100/80">
+                              {mode.warning}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {selectedScopes.length > 0 && (
                   <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
-                    Scopes: {card.scopes.join(", ")}
+                    Selected scopes: {selectedScopes.join(", ")}
                   </div>
                 )}
                 {card.disabledReason && (
@@ -3185,8 +3238,8 @@ export function SettingsModalRenderer({
                   <button
                     type="button"
                     disabled={!card.canConnect || isBusy}
-                    onClick={() => void startAccountConnection(card)}
-                    title={card.disabledReason || `${card.primaryLabel}${card.scopeMode ? ` using ${card.scopeMode}` : ""}`}
+                    onClick={() => void startAccountConnection(card, selectedScopeOption)}
+                    title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`}
                     className={cn(
                       "rounded-lg border px-3 py-1.5 text-xs transition-colors",
                       !card.canConnect || isBusy

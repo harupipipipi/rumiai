@@ -34,6 +34,16 @@ export type ControlCenterSection = {
 type SettingsField = SettingsSection["fields"][number];
 type SettingsValues = Record<string, Record<string, unknown>>;
 
+export type AccountConnectionScopeModeOption = {
+  id: string;
+  label: string;
+  description: string;
+  scopes: string[];
+  services: string[];
+  restricted: boolean;
+  warning: string;
+};
+
 export type AccountConnectionPreludeCard = {
   providerId: "cloudflare" | "google";
   label: string;
@@ -45,6 +55,7 @@ export type AccountConnectionPreludeCard = {
   connectAction?: {
     providerId: string;
     scopeMode?: string;
+    services?: string[];
   };
   primaryLabel: string;
   disabledReason: string;
@@ -52,7 +63,9 @@ export type AccountConnectionPreludeCard = {
   selfHostDescription: string;
   configureSectionId: ControlCenterSectionId;
   scopeMode?: string;
+  services: string[];
   scopes: string[];
+  scopeModes: AccountConnectionScopeModeOption[];
 };
 
 const BLOCKED_RAW_LABELS = new Map([
@@ -352,6 +365,81 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
 }
 
+const GOOGLE_ACCOUNT_SCOPE_MODE_IDS = new Set([
+  "google_identity",
+  "google_drive",
+  "google_gmail_labels",
+  "google_gmail_metadata",
+  "google_gmail_readonly",
+]);
+
+const GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS: AccountConnectionScopeModeOption[] = [
+  {
+    id: "google_identity",
+    label: "Google identity",
+    description: "Basic sign-in identity only.",
+    scopes: ["openid", "email", "profile"],
+    services: ["identity"],
+    restricted: false,
+    warning: "",
+  },
+  {
+    id: "google_drive",
+    label: "Google Drive selected files",
+    description: "Drive file scope for files explicitly selected or shared with Rumi.",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"],
+    services: ["identity", "drive_file"],
+    restricted: false,
+    warning: "",
+  },
+  {
+    id: "google_gmail_labels",
+    label: "Gmail labels",
+    description: "Read Gmail labels without message bodies.",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"],
+    services: ["identity", "gmail_labels"],
+    restricted: false,
+    warning: "",
+  },
+  {
+    id: "google_gmail_metadata",
+    label: "Gmail metadata/search",
+    description: "Restricted metadata/search scope for Gmail.",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+    services: ["identity", "gmail_metadata"],
+    restricted: true,
+    warning: "Restricted Gmail scopes require explicit self-host acknowledgement or Google verification review.",
+  },
+  {
+    id: "google_gmail_readonly",
+    label: "Gmail read-only bodies",
+    description: "Restricted read-only access to Gmail message bodies.",
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.readonly"],
+    services: ["identity", "gmail_readonly"],
+    restricted: true,
+    warning: "Restricted Gmail scopes can expose message content and may require Google security review.",
+  },
+];
+
+function accountScopeModeOptions(value: unknown): AccountConnectionScopeModeOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    const row = recordValue(item);
+    const id = String(row.id ?? "").trim();
+    const surface = String(row.surface ?? "").trim();
+    if (!id || !GOOGLE_ACCOUNT_SCOPE_MODE_IDS.has(id) || surface === "models_api") return [];
+    return [{
+      id,
+      label: String(row.label || id),
+      description: String(row.description || ""),
+      scopes: stringList(row.scopes),
+      services: stringList(row.services),
+      restricted: Boolean(row.restricted),
+      warning: String(row.warning || ""),
+    }];
+  });
+}
+
 function oauthStatusForProvider(settingsValues: SettingsValues, providerId: string): Record<string, unknown> {
   const apiRows = Array.isArray(settingsValues.apis?.api_keys) ? settingsValues.apis.api_keys : [];
   for (const row of apiRows) {
@@ -391,7 +479,7 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     {
       providerId: "google",
       label: "Google",
-      description: "Connect Google Drive files and Gmail labels through an explicit Workspace OAuth scope mode.",
+      description: "Connect Google identity, Drive selected files, Gmail labels, or explicit restricted Gmail modes.",
       fallbackStatus: {
         backend_supported: true,
         connect_enabled: false,
@@ -400,8 +488,10 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
         status_label: "Client config needed",
         disabled_reason: "Configure self-host OAuth",
         scopes: [],
+        scope_mode: "google_identity",
+        scope_modes: GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS,
       },
-      scopeMode: "google_workspace",
+      scopeMode: "google_identity",
       configureSectionId: "models_api" as const,
     },
   ];
@@ -413,26 +503,41 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     const connected = Boolean(status.connected);
     const canConnect = Boolean(status.connect_enabled);
     const disabledReason = connected || canConnect ? "" : String(status.disabled_reason || status.status_label || "Configure self-host OAuth");
+    const scopeModes = definition.providerId === "google"
+      ? accountScopeModeOptions(status.scope_modes).length
+        ? accountScopeModeOptions(status.scope_modes)
+        : GOOGLE_ACCOUNT_SCOPE_MODE_FALLBACKS
+      : [];
+    const requestedScopeMode = String(status.scope_mode || definition.scopeMode || "").trim();
+    const selectedScopeMode = scopeModes.some((option) => option.id === requestedScopeMode)
+      ? requestedScopeMode
+      : scopeModes[0]?.id ?? definition.scopeMode;
+    const selectedScopeModeOption = scopeModes.find((option) => option.id === selectedScopeMode);
+    const selectedServices = selectedScopeModeOption?.services ?? [];
     return {
       providerId: definition.providerId,
       label: definition.label,
       description: definition.description,
       connected,
-      statusLabel: String(status.status_label || (connected ? "Connected" : "Not connected")),
-      status: String(status.connection_status || (connected ? "connected" : "not_connected")),
+      statusLabel: String(status.status_label || (connected ? "Connected" : "Disconnected")),
+      status: String(status.connection_status || (connected ? "connected" : "disconnected")),
       canConnect,
       connectAction: canConnect
-        ? { providerId: definition.providerId, scopeMode: definition.scopeMode }
+        ? { providerId: definition.providerId, scopeMode: selectedScopeMode, services: selectedServices }
         : undefined,
-      primaryLabel: connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
+      primaryLabel: definition.providerId === "google"
+        ? connected ? "Reconnect selected mode" : "Connect selected mode"
+        : connected ? `Reconnect ${definition.label}` : `Connect ${definition.label}`,
       disabledReason,
       officialAppDescription: "Official app required for hosted broker mode.",
       selfHostDescription: disabledReason === "Configure self-host OAuth"
         ? "Configure self-host OAuth with explicit scopes before connecting."
         : "Self-host OAuth remains available when a client and scopes are configured.",
       configureSectionId: definition.configureSectionId,
-      scopeMode: definition.scopeMode,
-      scopes: stringList(status.scopes),
+      scopeMode: selectedScopeMode,
+      services: selectedServices,
+      scopes: selectedScopeModeOption?.scopes.length ? selectedScopeModeOption.scopes : stringList(status.scopes),
+      scopeModes,
     };
   });
 }

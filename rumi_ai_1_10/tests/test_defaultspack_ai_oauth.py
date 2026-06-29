@@ -125,6 +125,41 @@ class TestDefaultspackAiOauth(unittest.TestCase):
             started["authorize_url"],
         )
 
+    def test_google_services_can_select_restricted_gmail_scope_mode(self):
+        from domain.ai_client.oauth_store import (
+            provider_oauth_status,
+            save_provider_oauth_client_config,
+            start_provider_oauth,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                save_provider_oauth_client_config("google", self._google_client_json(), pack_root=pack_root)
+                started = start_provider_oauth(
+                    "google",
+                    request_headers={"Host": "127.0.0.1:8766"},
+                    services=["identity", "gmail_metadata"],
+                    pack_root=pack_root,
+                )
+                status = provider_oauth_status("google", pack_root=pack_root)
+
+        self.assertTrue(started["success"], started)
+        self.assertEqual(started["scope_mode"], "google_gmail_metadata")
+        self.assertEqual(started["services"], ["identity", "gmail_metadata"])
+        self.assertIn("https://www.googleapis.com/auth/gmail.metadata", started["scopes"])
+        self.assertNotIn("https://www.googleapis.com/auth/gmail.readonly", started["scopes"])
+        restricted_modes = {
+            item["id"]: item
+            for item in status["scope_modes"]
+            if item.get("restricted")
+        }
+        self.assertIn("google_gmail_metadata", restricted_modes)
+        self.assertIn("google_gmail_readonly", restricted_modes)
+        self.assertIn("Restricted Gmail scopes", restricted_modes["google_gmail_metadata"]["warning"])
+
     def test_cloudflare_oauth_is_not_connectable_until_scopes_are_configured(self):
         from domain.ai_client.oauth_store import provider_oauth_status, start_provider_oauth
 

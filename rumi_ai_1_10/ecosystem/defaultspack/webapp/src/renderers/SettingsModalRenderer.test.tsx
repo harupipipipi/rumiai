@@ -912,6 +912,39 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
                 connect_enabled: true,
                 connection_status: "not_connected",
                 status_label: "Ready to connect",
+                scope_mode: "google_gmail_labels",
+                scope_modes: [
+                  {
+                    id: "google_identity",
+                    label: "Google identity",
+                    description: "Basic sign-in identity only.",
+                    scopes: ["openid", "email", "profile"],
+                    services: ["identity"],
+                  },
+                  {
+                    id: "google_drive",
+                    label: "Google Drive selected files",
+                    description: "Drive file scope.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"],
+                    services: ["identity", "drive_file"],
+                  },
+                  {
+                    id: "google_gmail_labels",
+                    label: "Gmail labels",
+                    description: "Labels only.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"],
+                    services: ["identity", "gmail_labels"],
+                  },
+                  {
+                    id: "google_gmail_metadata",
+                    label: "Gmail metadata/search",
+                    description: "Restricted metadata mode.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+                    services: ["identity", "gmail_metadata"],
+                    restricted: true,
+                    warning: "Restricted Gmail scopes require explicit review.",
+                  },
+                ],
                 scopes: [
                   "openid",
                   "email",
@@ -940,9 +973,15 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
     }),
   );
 
-  assert.match(html, /Connect Google/);
+  assert.match(html, /Connect selected mode/);
   assert.match(html, /Ready to connect/);
-  assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/drive\.file/);
+  assert.match(html, /Google identity/);
+  assert.match(html, /Google Drive selected files/);
+  assert.match(html, /Gmail labels/);
+  assert.match(html, /Gmail metadata\/search/);
+  assert.match(html, /Restricted scope/);
+  assert.match(html, /Restricted Gmail scopes require explicit review/);
+  assert.match(html, /<input[^>]*(value="google_gmail_labels"[^>]*checked=""|checked=""[^>]*value="google_gmail_labels")/);
   assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/gmail\.labels/);
   assert.match(html, /Connect Cloudflare/);
   assert.match(html, /Missing scope config/);

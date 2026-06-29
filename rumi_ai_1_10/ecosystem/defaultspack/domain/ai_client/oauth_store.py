@@ -26,11 +26,58 @@ _GOOGLE_DEFAULT_SCOPES = [
 _GOOGLE_IDENTITY_SCOPES = ["openid", "email", "profile"]
 _GOOGLE_DRIVE_FILE_SCOPE = "https://www.googleapis.com/auth/drive.file"
 _GOOGLE_GMAIL_LABELS_SCOPE = "https://www.googleapis.com/auth/gmail.labels"
+_GOOGLE_GMAIL_METADATA_SCOPE = "https://www.googleapis.com/auth/gmail.metadata"
+_GOOGLE_GMAIL_READONLY_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 _GOOGLE_SCOPE_MODES = {
+    "google_identity": list(_GOOGLE_IDENTITY_SCOPES),
     "google_ai": list(_GOOGLE_DEFAULT_SCOPES),
     "google_workspace": [*_GOOGLE_IDENTITY_SCOPES, _GOOGLE_DRIVE_FILE_SCOPE, _GOOGLE_GMAIL_LABELS_SCOPE],
     "google_drive": [*_GOOGLE_IDENTITY_SCOPES, _GOOGLE_DRIVE_FILE_SCOPE],
     "google_gmail_labels": [*_GOOGLE_IDENTITY_SCOPES, _GOOGLE_GMAIL_LABELS_SCOPE],
+    "google_gmail_metadata": [*_GOOGLE_IDENTITY_SCOPES, _GOOGLE_GMAIL_METADATA_SCOPE],
+    "google_gmail_readonly": [*_GOOGLE_IDENTITY_SCOPES, _GOOGLE_GMAIL_READONLY_SCOPE],
+}
+_GOOGLE_SCOPE_MODE_DETAILS = {
+    "google_identity": {
+        "label": "Google identity",
+        "description": "Basic Google sign-in identity only.",
+        "services": ["identity"],
+        "surface": "accounts_connections",
+    },
+    "google_drive": {
+        "label": "Google Drive selected files",
+        "description": "Drive file scope for files created, opened, or explicitly shared with Rumi.",
+        "services": ["identity", "drive_file"],
+        "surface": "accounts_connections",
+    },
+    "google_gmail_labels": {
+        "label": "Gmail labels",
+        "description": "Low-friction Gmail labels access without message bodies.",
+        "services": ["identity", "gmail_labels"],
+        "surface": "accounts_connections",
+    },
+    "google_gmail_metadata": {
+        "label": "Gmail metadata/search",
+        "description": "Restricted Gmail metadata scope for search and message metadata.",
+        "services": ["identity", "gmail_metadata"],
+        "restricted": True,
+        "warning": "Restricted Gmail scopes require explicit self-host acknowledgement or Google verification review.",
+        "surface": "accounts_connections",
+    },
+    "google_gmail_readonly": {
+        "label": "Gmail read-only bodies",
+        "description": "Restricted Gmail read-only scope for message bodies.",
+        "services": ["identity", "gmail_readonly"],
+        "restricted": True,
+        "warning": "Restricted Gmail scopes can expose message content and may require Google security review.",
+        "surface": "accounts_connections",
+    },
+    "google_ai": {
+        "label": "Google AI",
+        "description": "Gemini / Generative Language API access for model calls.",
+        "services": ["identity", "generative_language"],
+        "surface": "models_api",
+    },
 }
 
 _CLIENT_CONFIG_SECRET_KEYS = {
@@ -233,9 +280,9 @@ def _default_scopes(provider_id: str, scope_mode: str | None = None) -> list[str
     if provider_id != "google":
         provider = _connection_provider(provider_id)
         return list(provider.oauth.default_scopes if provider and provider.oauth else [])
-    mode = str(scope_mode or "google_ai").strip() or "google_ai"
+    mode = str(scope_mode or "google_identity").strip() or "google_identity"
     if mode == "default":
-        mode = "google_ai"
+        mode = "google_identity"
     if mode not in _GOOGLE_SCOPE_MODES:
         raise ValueError(f"unsupported Google OAuth scope mode: {mode}")
     override = os.environ.get("RUMI_DEFAULTSPACK_GOOGLE_OAUTH_SCOPES", "").strip()
@@ -245,32 +292,65 @@ def _default_scopes(provider_id: str, scope_mode: str | None = None) -> list[str
 
 
 def _google_scope_mode_rows() -> list[dict[str, Any]]:
-    return [
-        {
-            "id": "google_ai",
-            "label": "Google AI",
-            "description": "Gemini / Generative Language API access for model calls.",
-            "scopes": _default_scopes("google", "google_ai"),
-        },
-        {
-            "id": "google_workspace",
-            "label": "Google Drive + Gmail labels",
-            "description": "Workspace account connection for Drive file access and low-risk Gmail labels.",
-            "scopes": _default_scopes("google", "google_workspace"),
-        },
-        {
-            "id": "google_drive",
-            "label": "Google Drive",
-            "description": "Drive file scope only.",
-            "scopes": _default_scopes("google", "google_drive"),
-        },
-        {
-            "id": "google_gmail_labels",
-            "label": "Gmail labels",
-            "description": "Gmail labels scope only.",
-            "scopes": _default_scopes("google", "google_gmail_labels"),
-        },
-    ]
+    rows: list[dict[str, Any]] = []
+    for mode in (
+        "google_identity",
+        "google_drive",
+        "google_gmail_labels",
+        "google_gmail_metadata",
+        "google_gmail_readonly",
+        "google_ai",
+    ):
+        details = dict(_GOOGLE_SCOPE_MODE_DETAILS[mode])
+        rows.append(
+            {
+                "id": mode,
+                "label": str(details.get("label") or mode),
+                "description": str(details.get("description") or ""),
+                "scopes": _default_scopes("google", mode),
+                "services": list(details.get("services") or []),
+                "restricted": bool(details.get("restricted")),
+                "warning": str(details.get("warning") or ""),
+                "surface": str(details.get("surface") or ""),
+            }
+        )
+    return rows
+
+
+def _normalize_requested_services(services: Any) -> list[str]:
+    if not isinstance(services, list):
+        return []
+    normalized: list[str] = []
+    for item in services:
+        value = str(item or "").strip().lower().replace("-", "_")
+        if value and value not in normalized:
+            normalized.append(value)
+    return normalized
+
+
+def _scope_mode_from_services(provider_id: str, services: Any) -> str | None:
+    if str(provider_id or "").strip() != "google":
+        return None
+    service_set = set(_normalize_requested_services(services))
+    if not service_set:
+        return None
+    if service_set & {"gmail_readonly", "readonly_body", "gmail:readonly_body"}:
+        return "google_gmail_readonly"
+    if service_set & {"gmail_metadata", "metadata_search", "gmail:metadata_search"}:
+        return "google_gmail_metadata"
+    has_drive = bool(service_set & {"drive", "drive_file", "google_drive"})
+    has_gmail_labels = bool(service_set & {"gmail", "gmail_labels", "labels_only", "gmail:labels_only"})
+    if has_drive and has_gmail_labels:
+        return "google_workspace"
+    if has_drive:
+        return "google_drive"
+    if has_gmail_labels:
+        return "google_gmail_labels"
+    if service_set & {"ai", "google_ai", "generative_language"}:
+        return "google_ai"
+    if "identity" in service_set:
+        return "google_identity"
+    return None
 
 
 def _load_env_client_config(provider_id: str) -> dict[str, Any] | None:
@@ -481,6 +561,7 @@ def save_provider_oauth_connection(
         "token_type": str(token_data.get("token_type") or existing.get("token_type") or "Bearer"),
         "scopes": scopes,
         "scope_mode": str(token_data.get("scope_mode") or existing.get("scope_mode") or "").strip(),
+        "services": list(token_data.get("services") or existing.get("services") or []),
         "expires_at": expires_at,
         "connected_at": str(existing.get("connected_at") or _isoformat(_now_utc())),
         "updated_at": _isoformat(_now_utc()),
@@ -500,6 +581,7 @@ def save_provider_oauth_connection(
         "display_name": metadata.get("display_name", ""),
         "scopes": list(metadata.get("scopes") or []),
         "scope_mode": metadata.get("scope_mode", ""),
+        "services": list(metadata.get("services") or []),
         "expires_at": metadata.get("expires_at", ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
     }
@@ -546,6 +628,7 @@ def start_provider_oauth(
     *,
     request_headers: dict[str, Any] | None = None,
     scope_mode: str | None = None,
+    services: list[str] | None = None,
     pack_root: Path | None = None,
 ) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
@@ -559,15 +642,16 @@ def start_provider_oauth(
     client = load_provider_client_config(provider_id, pack_root=pack_root)
     if client is None:
         return {"success": False, "provider_id": provider_id, "error": "oauth client config is not saved"}
+    resolved_scope_mode = str(scope_mode or _scope_mode_from_services(provider_id, services) or "google_identity").strip() or "google_identity"
+    if resolved_scope_mode == "default":
+        resolved_scope_mode = "google_identity"
     try:
-        scopes = _default_scopes(provider_id, scope_mode)
+        scopes = _default_scopes(provider_id, resolved_scope_mode)
     except ValueError as exc:
         return {"success": False, "provider_id": provider_id, "error": str(exc)}
     if not scopes:
         return {"success": False, "provider_id": provider_id, "error": "missing scope config", "status": "missing_scope_config"}
-    resolved_scope_mode = str(scope_mode or "google_ai").strip() or "google_ai"
-    if resolved_scope_mode == "default":
-        resolved_scope_mode = "google_ai"
+    requested_services = _normalize_requested_services(services) or list(_GOOGLE_SCOPE_MODE_DETAILS.get(resolved_scope_mode, {}).get("services") or [])
     redirect_uri = _build_redirect_uri(provider_id, request_headers=request_headers)
     state = secrets.token_urlsafe(32)
     code_verifier = _generate_code_verifier()
@@ -578,6 +662,7 @@ def start_provider_oauth(
         "redirect_uri": redirect_uri,
         "code_verifier": code_verifier,
         "scope_mode": resolved_scope_mode,
+        "services": list(requested_services),
         "scopes": list(scopes),
         "created_at": time.time(),
     }
@@ -601,6 +686,7 @@ def start_provider_oauth(
         "state": state,
         "redirect_uri": redirect_uri,
         "scope_mode": resolved_scope_mode,
+        "services": list(requested_services),
         "scopes": list(scopes),
     }
 
@@ -736,6 +822,7 @@ def finish_provider_oauth(
     if not str(token_data.get("scope") or "").strip():
         token_data["scope"] = " ".join(str(item) for item in pending.get("scopes") or [] if str(item).strip())
     token_data["scope_mode"] = str(pending.get("scope_mode") or "")
+    token_data["services"] = list(pending.get("services") or [])
 
     userinfo: dict[str, Any] = {}
     try:
@@ -851,7 +938,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         connection_status = "not_connected"
         status_label = "Ready to connect"
         disabled_reason = ""
-    scope_mode = str(metadata.get("scope_mode") or "google_ai").strip() if provider_id == "google" else ""
+    scope_mode = str(metadata.get("scope_mode") or "google_identity").strip() if provider_id == "google" else ""
     try:
         status_scopes = list(metadata.get("scopes") or _default_scopes(provider_id, scope_mode or None))
     except ValueError:
@@ -877,6 +964,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "default_scopes": default_scopes,
         "scope_mode": scope_mode,
         "scope_modes": _google_scope_mode_rows() if provider_id == "google" else [],
+        "services": list(metadata.get("services") or []),
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
         "redirect_path": f"/api/ai/oauth/{provider_id}/callback" if supported else "",

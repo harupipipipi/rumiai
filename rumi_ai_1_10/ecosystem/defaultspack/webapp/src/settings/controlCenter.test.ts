@@ -92,7 +92,33 @@ test("account connection prelude disables unsupported Cloudflare backend", () =>
   assert.match(cloudflare?.officialAppDescription ?? "", /Official app required/);
 });
 
-test("account connection prelude gives Google a real Workspace OAuth action when connectable", () => {
+test("account connection prelude shows Cloudflare fallback when provider exists without client config", () => {
+  const cards = buildAccountConnectionPrelude({
+    accounts_connections: {
+      providers: {
+        cloudflare: {
+          supported: true,
+          backend_supported: false,
+          client_configured: false,
+          connect_enabled: false,
+          connection_status: "needs_official_app",
+          status_label: "Official app required",
+          disabled_reason: "Official app required",
+        },
+      },
+    },
+  });
+
+  const cloudflare = cards.find((card) => card.providerId === "cloudflare");
+  assert.equal(cloudflare?.label, "Cloudflare");
+  assert.equal(cloudflare?.canConnect, false);
+  assert.equal(cloudflare?.connectAction, undefined);
+  assert.equal(cloudflare?.statusLabel, "Official app required");
+  assert.match(cloudflare?.officialAppDescription ?? "", /Official app required/);
+  assert.match(cloudflare?.selfHostDescription ?? "", /Self-host OAuth remains available/);
+});
+
+test("account connection prelude gives Google explicit OAuth scope mode actions", () => {
   const cards = buildAccountConnectionPrelude({
     apis: {
       api_keys: [
@@ -105,6 +131,39 @@ test("account connection prelude gives Google a real Workspace OAuth action when
             connect_enabled: true,
             connection_status: "not_connected",
             status_label: "Ready to connect",
+            scope_mode: "google_gmail_labels",
+            scope_modes: [
+              {
+                id: "google_identity",
+                label: "Google identity",
+                description: "Basic identity",
+                scopes: ["openid", "email", "profile"],
+                services: ["identity"],
+              },
+              {
+                id: "google_drive",
+                label: "Google Drive selected files",
+                description: "Drive file",
+                scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"],
+                services: ["identity", "drive_file"],
+              },
+              {
+                id: "google_gmail_labels",
+                label: "Gmail labels",
+                description: "Labels only",
+                scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"],
+                services: ["identity", "gmail_labels"],
+              },
+              {
+                id: "google_gmail_metadata",
+                label: "Gmail metadata/search",
+                description: "Metadata",
+                scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+                services: ["identity", "gmail_metadata"],
+                restricted: true,
+                warning: "Restricted Gmail scopes require explicit review.",
+              },
+            ],
             scopes: [
               "openid",
               "email",
@@ -120,8 +179,11 @@ test("account connection prelude gives Google a real Workspace OAuth action when
 
   const google = cards.find((card) => card.providerId === "google");
   assert.equal(google?.canConnect, true);
-  assert.deepEqual(google?.connectAction, { providerId: "google", scopeMode: "google_workspace" });
-  assert.equal(google?.scopeMode, "google_workspace");
-  assert.ok(google?.scopes.includes("https://www.googleapis.com/auth/drive.file"));
+  assert.deepEqual(google?.connectAction, { providerId: "google", scopeMode: "google_gmail_labels", services: ["identity", "gmail_labels"] });
+  assert.equal(google?.scopeMode, "google_gmail_labels");
   assert.ok(google?.scopes.includes("https://www.googleapis.com/auth/gmail.labels"));
+  assert.equal(google?.scopeModes.length, 4);
+  assert.ok(google?.scopeModes.some((mode) => mode.id === "google_drive"));
+  assert.ok(google?.scopeModes.some((mode) => mode.id === "google_gmail_metadata" && mode.restricted));
+  assert.match(google?.scopeModes.find((mode) => mode.id === "google_gmail_metadata")?.warning ?? "", /Restricted Gmail/);
 });

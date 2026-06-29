@@ -15,7 +15,7 @@ export const settingsApiResources = {
     return providerApiKeyResources.saveProviderApiKey(providerId, value, options) as Promise<ProviderKeySaveResult>;
   },
 
-  startProviderOAuth(providerId: string, options?: { scopeMode?: string }) {
+  startProviderOAuth(providerId: string, options?: { scopeMode?: string; services?: string[] }) {
     return api.startProviderOAuth(providerId, options);
   },
 

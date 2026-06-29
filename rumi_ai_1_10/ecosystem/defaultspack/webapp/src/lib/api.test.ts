@@ -22,6 +22,44 @@ function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
   }
 }
 
+test("startProviderOAuth posts scope mode and requested services", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "google",
+        authorize_url: "https://accounts.google.com/oauth",
+        redirect_uri: "http://127.0.0.1:8766/api/ai/oauth/google/callback",
+        scope_mode: "google_gmail_metadata",
+        services: ["identity", "gmail_metadata"],
+        scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.startProviderOAuth("google", {
+      scopeMode: "google_gmail_metadata",
+      services: ["identity", "gmail_metadata"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/oauth");
+  assert.deepEqual(requestBody, {
+    action: "start",
+    provider_id: "google",
+    scope_mode: "google_gmail_metadata",
+    services: ["identity", "gmail_metadata"],
+  });
+});
+
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
     frontendCommandArgs({ enabled: "false" }, { enabled: false }),

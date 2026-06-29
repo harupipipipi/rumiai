@@ -25,6 +25,16 @@ Tool
 
 These are not interchangeable. Mixing them is how Settings becomes a spaghetti graph wearing a cardigan.
 
+## Responsibility layers
+
+Connections and OAuth are intentionally split into three layers:
+
+1. **Core abstraction**: `core_runtime/connections/` defines provider, capability, credential, registry, and OAuth service primitives. It knows how to describe a provider and validate OAuth state lifetimes, but it does not decide which defaultspack routes, settings sections, or local token files are active.
+2. **Defaultspack provider implementation**: `ecosystem/defaultspack/config/settings_control_center/providers/*.connection.json` and the defaultspack OAuth registry decide which providers appear in Settings, what scopes/services are available, and whether a provider is backed by the local runtime or by an official hosted app flow.
+3. **Local/self-host token lifecycle**: `ecosystem/defaultspack/domain/ai_client/oauth_store.py` owns the local OAuth client config, PKCE start/callback flow, pending state TTL cleanup, encrypted token storage, metadata returned to Settings, and self-host-only connect/clear/disconnect actions.
+
+The UI should read provider status and scope modes from the defaultspack registry/status payload. It should not infer scopes from button labels or make a provider appear connectable when the current runtime says the official app or self-host OAuth setup is required.
+
 ## Official app mode
 
 Used by Rumi hosted/official app.
