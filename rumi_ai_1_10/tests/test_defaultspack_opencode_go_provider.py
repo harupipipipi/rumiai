@@ -103,6 +103,7 @@ def test_opencode_go_catalog_includes_all_models():
     assert provider["default_model_for"]["general"] == "qwen3.7-plus"
     assert provider["default_model_for"]["fast"] == "deepseek-v4-flash"
     assert provider["default_model_for"]["cheap"] == "deepseek-v4-flash"
+    assert provider["default_model_for"]["reasoning"] == "mimo-v2.5"
     assert provider["default_model_for"]["vision"] == "qwen3.7-plus"
     assert "vision" in provider["capabilities"]
     assert {f"opencode-go/{model}" for model in ALL_MODELS}.issubset(models)

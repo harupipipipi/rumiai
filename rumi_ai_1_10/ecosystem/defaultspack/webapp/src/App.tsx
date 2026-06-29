@@ -4515,23 +4515,23 @@ function ChatApp() {
     const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
     const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
     if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
-    if (effectiveAllowlist.includes("xiaomi-token-plan-sgp/mimo-v2.5-pro")) return "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    if (effectiveAllowlist.includes("opencode-go/mimo-v2.5")) return "opencode-go/mimo-v2.5";
     if (effectiveAllowlist.includes("stub/default")) return "stub/default";
-    return effectiveAllowlist[0] ?? "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    return effectiveAllowlist[0] ?? "opencode-go/mimo-v2.5";
   };
 
   const preferredMimoVisionModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
+    const visionPreferred = allowlist.find((item) => /gemma|omni|vision|vl/i.test(item));
     if (visionPreferred) return visionPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+    return "google/gemma-4-31b-it";
   };
 
   const preferredMimoFastModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
     const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
     if (fastPreferred) return fastPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+    return "opencode-go/mimo-v2.5";
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);

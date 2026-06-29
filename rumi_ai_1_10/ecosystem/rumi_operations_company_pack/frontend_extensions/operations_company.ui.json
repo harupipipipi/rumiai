@@ -81,7 +81,7 @@
           "id": "model_allowlist",
           "label": "Model Allowlist",
           "type": "textarea",
-          "default": "xiaomi-token-plan-sgp/mimo-v2.5-pro\nxiaomi-token-plan-sgp/mimo-v2.5\nxiaomi-token-plan-sgp/mimo-v2-pro\nxiaomi-token-plan-sgp/mimo-v2-omni\nxiaomi-token-plan-sgp/mimo-v2-flash\ngitlawb-opengateway/mimo-v2.5-pro\ngitlawb-opengateway/mimo-v2.5\ngitlawb-opengateway/mimo-v2-pro\ngitlawb-opengateway/mimo-v2-omni\ngitlawb-opengateway/mimo-v2-flash\ngroq/openai/gpt-oss-120b\ncerebras/gpt-oss-120b\nstub/default"
+          "default": "opencode-go/mimo-v2.5\ngoogle/gemma-4-31b-it\nstub/default"
         },
         {
           "id": "qa_targets",
