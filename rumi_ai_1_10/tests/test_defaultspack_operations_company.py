@@ -199,7 +199,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     improvement_schedule = schedules_by_loop["improvement_loop"]
     qa_schedule = schedules_by_loop["qa_loop"]
     assert kickoff_schedule["task"]["timeout"] == 900
-    assert heartbeat_schedule["task"]["timeout"] == 600
+    assert heartbeat_schedule["task"]["timeout"] == 1800
     assert improvement_schedule["task"]["timeout"] == 1800
     assert qa_schedule["task"]["timeout"] == 1800
     assert improvement_schedule["task"]["conversation_id"] == loop_conversation_ids["improvement_loop"]
@@ -605,7 +605,7 @@ def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until
     bootstrapped_at = datetime.fromisoformat(saved_state["last_bootstrapped_at"].replace("Z", "+00:00"))
     schedules_by_loop = {schedule["task"]["metadata"]["loop_key"]: schedule for schedule in status["schedules"]}
     assert schedules_by_loop["kickoff_review"]["task"]["timeout"] == 900
-    assert schedules_by_loop["heartbeat"]["task"]["timeout"] == 600
+    assert schedules_by_loop["heartbeat"]["task"]["timeout"] == 1800
     assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 1800
     assert schedules_by_loop["qa_loop"]["task"]["timeout"] == 1800
     qa_schedule = schedules_by_loop["qa_loop"]

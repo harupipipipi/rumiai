@@ -48,6 +48,7 @@ SCHEDULE_CONVERSATION_LANES = {
 }
 SCHEDULE_NOISE_SUPPRESSION_REASONS = {"already_running", "conversation_running", "scheduled_timeout"}
 DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS = 600
+HEARTBEAT_SCHEDULE_TIMEOUT_SECONDS = 1800
 IMPROVEMENT_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
 QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = 1800
 DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
@@ -710,6 +711,7 @@ class MimoCodingCompanyRuntime:
                 agent_id="scheduler",
                 tools=["rumi_api", "todo", "subagent"],
                 description="Keep the coding company alive and quiet on normal ticks.",
+                timeout_seconds=HEARTBEAT_SCHEDULE_TIMEOUT_SECONDS,
             )
             self._ensure_interval_schedule(
                 state,
