@@ -577,6 +577,70 @@ def test_tool_executor_mimo_company_rumi_api_denial_falls_back_to_direct_pack_ca
     assert seen["context"]["_tool_server_approved"] is True
 
 
+def test_tool_executor_mimo_company_rumi_api_permission_denied_falls_back_to_direct_pack_call(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="Permission denied: function.call",
+        error_type="permission_denied",
+    )
+    seen = {}
+
+    def fake_invoke(pack_id, function_id, *, args, context):
+        seen["pack_id"] = pack_id
+        seen["function_id"] = function_id
+        seen["args"] = args
+        seen["context"] = context
+        return {"status": "ok", "data": {"routes": [], "count": 0}}
+
+    monkeypatch.setattr("core_runtime.pack_function_runtime.invoke_pack_function", fake_invoke)
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("rumi_api"),
+        {"action": "list_routes"},
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "principal_id": "rumi_default_tools_pack",
+            "capability_executor": capability_executor,
+        },
+    )
+
+    assert result["is_error"] is False
+    assert seen["pack_id"] == "rumi_default_tools_pack"
+    assert seen["function_id"] == "rumi_api"
+    assert seen["args"] == {"action": "list_routes"}
+    assert seen["context"]["_tool_server_approved"] is True
+
+
+def test_tool_executor_rumi_api_permission_denied_without_internal_approval_does_not_fallback(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    def fail_invoke(*args, **kwargs):
+        raise AssertionError("rumi_api permission_denied must not fallback without internal approval")
+
+    ToolRegistry._instance = None
+    monkeypatch.setattr("core_runtime.pack_function_runtime.invoke_pack_function", fail_invoke)
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("rumi_api"),
+        {"action": "list_routes"},
+        {
+            "profile_id": "defaultspack.regular",
+            "principal_id": "rumi_default_tools_pack",
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is True
+    assert result["result"] == "Permission denied: function.call"
+
+
 def test_tool_executor_mimo_company_post_rumi_api_request_still_requires_approval():
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry

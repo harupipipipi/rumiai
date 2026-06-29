@@ -580,7 +580,11 @@ class ToolExecutor:
                 return None
             return ToolExecutor()._execute_local_with_tool_def(local_tool, request.get("args") or {}, context, tool_def)
         if permission_denied:
-            return None
+            if not (
+                (pack_id, function_id) == ("rumi_default_tools_pack", "rumi_api")
+                and tool_server_approval_context_is_internal(context)
+            ):
+                return None
         if error_type == "pack_not_approved" and not _context_has_tool_server_approval(context):
             return None
         if not ToolExecutor._allows_direct_first_party_function_fallback(pack_id, function_id):
