@@ -66,6 +66,10 @@ _LONG_RUNNING_FALLBACK_BLOCKS = {
 }
 _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
 
+_GRANT_DENIED_DIRECT_FALLBACK_BLOCKS = {
+    "blocks.agent.run_subagent",
+}
+
 _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
     "blocks.sandbox.api",
 }
@@ -403,9 +407,6 @@ class DefaultsHttpServer:
             return invoke_block(module_name, payload, context)
         if module_name == "blocks.chat.stream":
             return invoke_block(module_name, payload, context)
-        if self._safe_get_fallback_allowed(module_name, payload):
-            context["_defaultspack_http_route_adapter"] = True
-            return invoke_block(module_name, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
             from domain.function_runtime.registry import function_id_for_block_module
@@ -445,6 +446,10 @@ class DefaultsHttpServer:
                         pass
                     else:
                         return result
+                elif error_code == "TIMEOUT" and module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
+                    pass
+                elif error_code == "GRANT_DENIED" and module_name in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS:
+                    pass
                 elif error_code not in {
                     "FUNCTION_REGISTRY_UNAVAILABLE",
                     "FUNCTION_NOT_FOUND",
@@ -561,7 +566,18 @@ class DefaultsHttpServer:
                 "CAPABILITY_RUNTIME_UNAVAILABLE",
                 "CAPABILITY_EXECUTION_FAILED",
             }:
-                return result
+                if (
+                    error_code == "TIMEOUT"
+                    and fallback_block_module in _LONG_RUNNING_FALLBACK_BLOCKS
+                ):
+                    return invoke_block(fallback_block_module, payload, context)
+                elif (
+                    error_code == "GRANT_DENIED"
+                    and fallback_block_module in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS
+                ):
+                    return invoke_block(fallback_block_module, payload, context)
+                else:
+                    return result
         except Exception as exc:
             if not fallback_block_module:
                 return error(str(exc), "FUNCTION_ROUTE_FAILED")

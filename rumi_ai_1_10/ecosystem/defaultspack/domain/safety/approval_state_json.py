@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import tempfile
@@ -11,6 +12,7 @@ from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
 _LOCK = threading.RLock()
+_REPLACE_RETRY_ATTEMPTS = 8
 
 
 def _pack_root() -> Path:
@@ -52,13 +54,43 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp_path, path)
+        _replace_atomic_file(tmp_path, path)
     except BaseException:
         try:
             tmp_path.unlink()
         except OSError:
             pass
         raise
+
+
+def _is_transient_replace_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    errno_value = getattr(exc, "errno", None)
+    if isinstance(exc, PermissionError):
+        return True
+    if winerror in {5, 32}:
+        return True
+    if errno_value in {errno.EACCES, errno.EBUSY, errno.EPERM}:
+        return True
+    message = str(exc).lower()
+    return "access is denied" in message or "permission denied" in message
+
+
+def _replace_atomic_file(tmp_path: Path, path: Path) -> None:
+    last_error: OSError | None = None
+    for attempt in range(_REPLACE_RETRY_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if not _is_transient_replace_error(exc) or attempt >= _REPLACE_RETRY_ATTEMPTS - 1:
+                break
+            time.sleep(min(0.05 * (2 ** attempt), 0.5))
+    if last_error is not None and _is_transient_replace_error(last_error):
+        raise PermissionError("approval state file is temporarily locked; retry later") from None
+    if last_error is not None:
+        raise last_error
 
 
 def _read_json(path: Path) -> Any:

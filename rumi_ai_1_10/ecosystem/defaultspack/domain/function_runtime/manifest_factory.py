@@ -564,7 +564,14 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 
 
 AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
-    _spec(function_id, description, ("agent",), risk=risk, block=block)
+    _spec(
+        function_id,
+        description,
+        ("agent",),
+        risk=risk,
+        block=block,
+        grant_config={"timeout": 300} if function_id == "agent_run_subagent" else None,
+    )
     for function_id, description, risk, block in (
         ("agent_execute", "Start an agent execution.", "medium", "blocks.agent.execute"),
         ("agent_plan", "Create an agent plan.", "medium", "blocks.agent.plan"),

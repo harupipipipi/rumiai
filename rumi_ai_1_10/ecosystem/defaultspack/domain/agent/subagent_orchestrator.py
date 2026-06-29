@@ -231,6 +231,18 @@ def _delegate_via_input(
     task = str(payload.get("task") or payload.get("prompt") or "").strip()
     if not task:
         raise ValueError("task is required for delegated compatibility alias")
+    params = {
+        "task": task,
+        "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+        "model": str(payload.get("model") or model or ""),
+        "system_prompt": payload.get("system_prompt"),
+        "runtime_profile_key": payload.get("runtime_profile_key"),
+        "capability_profile": payload.get("capability_profile"),
+        "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
+        "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+    }
+    if "timeout_seconds" in payload:
+        params["timeout_seconds"] = payload.get("timeout_seconds")
     result = dispatch_input(
         RumiInputEnvelope(
             role="user",
@@ -241,16 +253,7 @@ def _delegate_via_input(
             delivery={"action_id": "agent.delegate"},
             attachments=list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else []),
             metadata={"compatibility_alias": "subagent", "role_id": role_id},
-            params={
-                "task": task,
-                "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
-                "model": str(payload.get("model") or model or ""),
-                "system_prompt": payload.get("system_prompt"),
-                "runtime_profile_key": payload.get("runtime_profile_key"),
-                "capability_profile": payload.get("capability_profile"),
-                "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
-                "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
-            },
+            params=params,
             tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
         ),
         context or {},

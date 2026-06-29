@@ -11,6 +11,9 @@ def run(input_data, context):
     data = input_data if isinstance(input_data, dict) else {}
     role_id = str(data.get("role_id") or data.get("role") or "").strip()
     payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
+    if payload is not data and "timeout_seconds" in data and "timeout_seconds" not in payload:
+        payload = dict(payload)
+        payload["timeout_seconds"] = data.get("timeout_seconds")
     if not role_id and isinstance(payload, dict) and any(payload.get(key) for key in ("task", "prompt")):
         role_id = "delegate"
     if not role_id:

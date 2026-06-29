@@ -34,6 +34,11 @@ def _setup_approval_store(tmp_path, monkeypatch):
     return approval
 
 
+def _setup_schedule_store(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+
+
 def _approval_required_response(
     approval,
     *,
@@ -99,7 +104,7 @@ def test_schedule_auto_approval_limit_accepts_unlimited_policy():
 
 
 def test_scheduler_ensure_loaded_rearms_missing_active_timer(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _setup_schedule_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
 
     class FakeTimer:
@@ -152,7 +157,7 @@ def test_scheduler_ensure_loaded_rearms_missing_active_timer(tmp_path, monkeypat
 
 
 def test_scheduler_ensure_loaded_rearms_dead_active_timer(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _setup_schedule_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
 
     class FakeTimer:
@@ -200,7 +205,7 @@ def test_scheduler_ensure_loaded_rearms_dead_active_timer(tmp_path, monkeypatch)
 
 
 def test_scheduler_ensure_loaded_does_not_duplicate_live_active_timer(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    _setup_schedule_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
 
     class FakeTimer:
@@ -938,6 +943,121 @@ def test_timer_skips_active_running_execution_without_overwriting_or_chat_send(t
     finally:
         scheduler.delete_schedule(schedule_id)
         _reset_scheduler_singleton()
+
+
+def test_timer_refreshes_persisted_running_execution_before_starting_chat(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        created = []
+
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+            FakeTimer.created.append(self)
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "should not run"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {
+            "message": "scheduled QA heartbeat",
+            "model": "google/gemma-4-31b-it",
+            "conversation_id": conversation_id,
+            "timeout": 1800,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+        },
+        {"value": 30, "unit": "minutes"},
+    )
+    schedule_id = schedule["id"]
+    active_execution_id = "sexec-persisted-manual"
+    started_at = scheduler_module.timestamp()
+    persisted = load_schedule(schedule_id)
+    persisted["running_execution"] = {
+        "execution_id": active_execution_id,
+        "schedule_id": schedule_id,
+        "started_at": started_at,
+        "trigger": "manual",
+        "timeout_seconds": 1800,
+    }
+    persisted["running_started_at"] = started_at
+    save_schedule(persisted)
+
+    try:
+        with scheduler._lock:
+            assert "running_execution" not in scheduler._schedules[schedule_id]
+        initial_timer_count = len(FakeTimer.created)
+
+        scheduler._on_timer_fire(schedule_id)
+
+        assert calls == []
+        stored = store.get_conversation(conversation_id)
+        assert stored["messages"] == []
+
+        saved = load_schedule(schedule_id)
+        assert saved["running_execution"]["execution_id"] == active_execution_id
+        assert saved["running_execution"]["trigger"] == "manual"
+        assert saved["running_started_at"] == started_at
+        assert saved["execution_count"] == 0
+        assert saved["last_executed_at"] is None
+        assert saved["next_execution_at"]
+        assert len(FakeTimer.created) == initial_timer_count + 1
+        assert FakeTimer.created[-1].args == [schedule_id]
+        assert FakeTimer.created[-1].started is True
+
+        entries, total = load_history(schedule_id)
+        assert total == 1
+        assert entries[0]["status"] == "skipped"
+        assert entries[0]["skipped_reason"] == "already_running"
+        assert entries[0]["running_execution"]["execution_id"] == active_execution_id
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
 
 
 def test_once_timer_skip_for_active_running_execution_stays_active_and_retries(tmp_path, monkeypatch):
@@ -2587,6 +2707,149 @@ def test_scheduler_leaves_non_mimo_approval_waiting(tmp_path, monkeypatch):
 
     scheduler.delete_schedule(schedule["id"])
     _reset_scheduler_singleton()
+
+
+def test_scheduled_chat_timeout_after_user_commit_appends_durable_error(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+
+    def fake_send_chat(payload, context):
+        store.add_message(
+            payload["conversation_id"],
+            {
+                "role": "user",
+                "content": payload["message"]["content"],
+                "metadata": payload["message"]["metadata"],
+            },
+        )
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            checker = context.get("is_cancelled") if isinstance(context, dict) else None
+            if callable(checker) and checker():
+                break
+            time.sleep(0.01)
+        return {"status": "ok", "data": {"content": "late", "finish_reason": "stop"}}
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run scheduled browser QA.",
+            "model": "google/gemma-4-31b-it",
+            "conversation_id": conversation_id,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "timeout": 0.05,
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    try:
+        history = scheduler.trigger_now(schedule["id"])
+        time.sleep(0.05)
+        stored = store.get_conversation(conversation_id)
+        messages = stored["messages"]
+
+        assert history["status"] == "error"
+        assert history["timeout_seconds"] == 0.05
+        assert history["conversation_id"] == conversation_id
+        assert history["assistant_error_message_id"]
+        assert [message["role"] for message in messages] == ["user", "assistant"]
+        user, assistant = messages
+        assert assistant["parent_id"] == user["id"]
+        assert assistant["id"] == history["assistant_error_message_id"]
+        assert assistant["finish_reason"] == "error"
+        assert assistant["metadata"]["durable_scheduler_error"] is True
+        assert assistant["metadata"]["provider_invocation_started"] is False
+        assert assistant["metadata"]["schedule_execution_id"] == history["execution_id"]
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
+def test_scheduled_chat_failure_after_user_commit_appends_redacted_durable_error(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+
+    def fake_send_chat(payload, context):
+        store.add_message(
+            payload["conversation_id"],
+            {
+                "role": "user",
+                "content": payload["message"]["content"],
+                "metadata": payload["message"]["metadata"],
+            },
+        )
+        raise RuntimeError("provider setup failed with api_key=sk-abcdefghijklmnopqrstuvwxyz123456")
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run scheduled browser QA.",
+            "model": "google/gemma-4-31b-it",
+            "conversation_id": conversation_id,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "timeout": 5,
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    try:
+        history = scheduler.trigger_now(schedule["id"])
+        stored = store.get_conversation(conversation_id)
+        assistant = stored["messages"][-1]
+
+        assert history["status"] == "error"
+        assert history["assistant_error_message_id"] == assistant["id"]
+        assert assistant["role"] == "assistant"
+        assert assistant["finish_reason"] == "error"
+        assert assistant["metadata"]["error_code"] == "SCHEDULED_CHAT_EXECUTION_FAILED"
+        assert "api_key=[redacted]" in assistant["raw_text"]
+        assert "sk-abcdefghijklmnopqrstuvwxyz123456" not in assistant["raw_text"]
+        assert assistant["events"][0]["type"] == "task_failed"
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
 
 
 def test_schedule_history_replaces_lone_surrogates_before_persisting(tmp_path, monkeypatch):

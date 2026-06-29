@@ -45,6 +45,10 @@ _SCHEDULE_TASK_DEFAULT_TIMEOUT_SECONDS = 300.0
 _SCHEDULE_ONCE_ALREADY_RUNNING_RETRY_SECONDS = 30.0
 _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS = 1.0
 _SCHEDULED_CONVERSATION_LOCK_MAX_WAIT_SECONDS = 5.0
+_SCHEDULED_CHAT_ERROR_TEXT_LIMIT = 700
+_SCHEDULED_CHAT_SECRET_VALUE_RE = re.compile(
+    r"\b(AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z_]{20,})\b"
+)
 
 
 class _SchedulerTaskTimedOut(TimeoutError):
@@ -167,6 +171,131 @@ def _chat_result_content(result: dict[str, Any] | None) -> str:
     if isinstance(content, str):
         return content
     return str(content)
+
+
+def _redact_scheduler_error_text(value: Any) -> str:
+    text = str(value or "scheduled chat failed")
+    text = _SCHEDULED_CHAT_SECRET_VALUE_RE.sub("[redacted]", text)
+    text = re.sub(
+        r"(?i)\b(api[_-]?key|authorization|bearer|credential|password|secret|token)(\s*[:=]\s*)[^\s,}]+",
+        r"\1\2[redacted]",
+        text,
+    )
+    text = text.strip() or "scheduled chat failed"
+    if len(text) > _SCHEDULED_CHAT_ERROR_TEXT_LIMIT:
+        text = text[:_SCHEDULED_CHAT_ERROR_TEXT_LIMIT].rstrip() + "... (truncated)"
+    return text
+
+
+def _ensure_scheduled_chat_error_message(
+    *,
+    conversation_id: str,
+    schedule_id: str,
+    exec_id: str,
+    task_cfg: dict[str, Any],
+    trigger: str,
+    error_text: Any,
+) -> dict[str, Any] | None:
+    conversation_id = str(conversation_id or "").strip()
+    schedule_id = str(schedule_id or "").strip()
+    exec_id = str(exec_id or "").strip()
+    if not conversation_id or not schedule_id or not exec_id:
+        return None
+    try:
+        from domain.chat.store import ChatStore
+    except Exception:
+        return None
+
+    store = ChatStore()
+    conversation = store.get_conversation(conversation_id)
+    if not isinstance(conversation, dict):
+        return None
+    messages = conversation.get("messages")
+    if not isinstance(messages, list):
+        return None
+
+    scheduled_user: dict[str, Any] | None = None
+    for message in reversed(messages):
+        if not isinstance(message, dict) or str(message.get("role") or "") != "user":
+            continue
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        source = str(metadata.get("source") or "").strip()
+        if source not in {"scheduler", "scheduler_approval_followup"}:
+            continue
+        if str(metadata.get("schedule_id") or "").strip() != schedule_id:
+            continue
+        if str(metadata.get("schedule_execution_id") or "").strip() != exec_id:
+            continue
+        scheduled_user = message
+        break
+    if not isinstance(scheduled_user, dict):
+        return None
+
+    parent_id = str(scheduled_user.get("id") or "").strip()
+    if not parent_id:
+        return None
+    for message in messages:
+        if (
+            isinstance(message, dict)
+            and str(message.get("role") or "") == "assistant"
+            and str(message.get("parent_id") or "").strip() == parent_id
+        ):
+            return message
+
+    safe_error = _redact_scheduler_error_text(error_text)
+    content_text = (
+        "Scheduled chat did not complete. "
+        + safe_error
+        + "\n\nThe failure was saved so this scheduled conversation does not remain user-only."
+    )
+    try:
+        sequence_number = int(scheduled_user.get("sequence_number") or len(messages) or 1) + 1
+    except (TypeError, ValueError):
+        sequence_number = len(messages) + 1
+    model = str(task_cfg.get("model") or "").strip() or str(conversation.get("model") or "stub/default")
+    metadata = {
+        "model": model,
+        "source": "scheduler",
+        "schedule_id": schedule_id,
+        "schedule_execution_id": exec_id,
+        "trigger": trigger,
+        "profile_id": task_cfg.get("profile_id"),
+        "agent_id": task_cfg.get("agent_id"),
+        "status": "error",
+        "error_code": "SCHEDULED_CHAT_EXECUTION_FAILED",
+        "durable_scheduler_error": True,
+        "provider_invocation_started": False,
+        "thinking": {"state": "failed"},
+    }
+    task_metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
+    if task_metadata.get("company_id"):
+        metadata["company_id"] = task_metadata.get("company_id")
+    return store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "parent_id": parent_id,
+            "sequence_number": sequence_number,
+            "content": [{"type": "text", "text": content_text}],
+            "raw_text": content_text,
+            "finish_reason": "error",
+            "usage": {},
+            "widget": None,
+            "metadata": metadata,
+            "events": [
+                {
+                    "type": "task_failed",
+                    "message": safe_error,
+                    "terminal": True,
+                    "source": "scheduler",
+                    "schedule_id": schedule_id,
+                    "schedule_execution_id": exec_id,
+                }
+            ],
+            "tool_logs": [],
+            "model": model,
+        },
+    )
 
 
 def _pending_approval_from_chat_result(result: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -1175,7 +1304,20 @@ class Scheduler:
         for schedule_id in schedule_ids:
             self._recover_stale_running_execution(schedule_id)
 
+    def _refresh_schedule_from_store(self, schedule_id):
+        try:
+            persisted = load_schedule(schedule_id)
+        except Exception:
+            return None
+        with self._lock:
+            if persisted is None:
+                self._schedules.pop(schedule_id, None)
+                return None
+            self._schedules[schedule_id] = persisted
+            return persisted
+
     def _recover_stale_running_execution(self, schedule_id):
+        self._refresh_schedule_from_store(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
             if sched is None:
@@ -1418,6 +1560,7 @@ class Scheduler:
 
     def _execute_task(self, schedule_id, manual=False):
         """Execute the agent task for a schedule and record history."""
+        self._refresh_schedule_from_store(schedule_id)
         self._recover_stale_running_execution(schedule_id)
         with self._lock:
             sched = self._schedules.get(schedule_id)
@@ -1593,6 +1736,18 @@ class Scheduler:
             elif isinstance(exc, _SchedulerConversationBusy):
                 history_entry["error_code"] = "CONVERSATION_RUNNING"
                 history_entry["skipped_reason"] = "conversation_running"
+            if conversation_id and not isinstance(exc, _SchedulerConversationBusy):
+                stored_error = _ensure_scheduled_chat_error_message(
+                    conversation_id=str(conversation_id),
+                    schedule_id=schedule_id,
+                    exec_id=exec_id,
+                    task_cfg=task_cfg if isinstance(task_cfg, dict) else {},
+                    trigger=trigger,
+                    error_text=history_entry["error"],
+                )
+                if isinstance(stored_error, dict):
+                    history_entry["conversation_id"] = str(conversation_id)
+                    history_entry["assistant_error_message_id"] = stored_error.get("id")
         finally:
             if conversation_lock_acquired and conversation_lock is not None:
                 try:

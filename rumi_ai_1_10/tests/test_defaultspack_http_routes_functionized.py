@@ -52,6 +52,120 @@ def test_fallback_http_chat_send_uses_long_running_timeout():
     assert mocked.call_args.kwargs["timeout_seconds"] == 300.0
 
 
+def test_fallback_http_long_running_timeout_uses_direct_block_fallback():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={
+            "status": "error",
+            "error": {"code": "TIMEOUT", "message": "timed out"},
+        },
+    ) as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"assistant_text": "done"}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.agent.run_subagent",
+            {"task": "long delegate", "timeout_seconds": 180},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"assistant_text": "done"}}
+    invoke.assert_called_once()
+    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    assert invoke.call_args.kwargs["timeout_seconds"] == 180.0
+    legacy.assert_called_once()
+
+
+def test_agent_subagent_grant_denied_uses_direct_block_fallback():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={
+            "status": "error",
+            "error": {"code": "GRANT_DENIED", "message": "Permission denied"},
+        },
+    ) as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"assistant_text": "done"}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.agent.run_subagent",
+            {"task": "delegate this", "timeout_seconds": 180},
+            {},
+            {},
+        )
+
+    assert result == {"status": "ok", "data": {"assistant_text": "done"}}
+    invoke.assert_called_once()
+    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    legacy.assert_called_once()
+
+
+def test_agent_subagent_function_route_grant_denied_uses_direct_block_fallback():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    with patch(
+        "domain.function_runtime.bridge.invoke_function",
+        return_value={
+            "status": "error",
+            "error": {"code": "GRANT_DENIED", "message": "Permission denied"},
+        },
+    ) as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"assistant_text": "done"}},
+    ) as legacy:
+        result = server._invoke_function_route(
+            "defaultspack:agent_run_subagent",
+            {"task": "delegate this", "timeout_seconds": 180},
+            {},
+            {},
+            fallback_block_module="blocks.agent.run_subagent",
+        )
+
+    assert result == {"status": "ok", "data": {"assistant_text": "done"}}
+    invoke.assert_called_once()
+    assert invoke.call_args.args[0] == "defaultspack:agent_run_subagent"
+    legacy.assert_called_once()
+
+
+def test_long_running_grant_denied_does_not_fallback_for_chat_send():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "req-1"}
+
+    denied = {
+        "status": "error",
+        "error": {"code": "GRANT_DENIED", "message": "Permission denied"},
+    }
+    with patch("domain.function_runtime.bridge.invoke_function", return_value=denied), patch(
+        "transport.http.invoke_block",
+        return_value={"status": "ok", "data": {"unsafe": True}},
+    ) as legacy:
+        result = server._invoke_fallback_block(
+            "blocks.chat.send",
+            {"conversation_id": "c1", "timeout_seconds": 180},
+            {},
+            {},
+        )
+
+    assert result == denied
+    legacy.assert_not_called()
+
+
 def test_fallback_http_ambient_event_uses_long_running_timeout():
     from transport.http import DefaultsHttpServer
 

@@ -34,6 +34,7 @@ def handle(envelope: RumiInputEnvelope, context: dict[str, Any] | None = None) -
             "attachments": list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else envelope.attachments),
             "target": dict(envelope.target if isinstance(envelope.target, dict) else {}),
             "delivery": dict(envelope.delivery if isinstance(envelope.delivery, dict) else {}),
+            "timeout_seconds": payload.get("timeout_seconds"),
         },
         _delegate_context(envelope, context or {}),
     )

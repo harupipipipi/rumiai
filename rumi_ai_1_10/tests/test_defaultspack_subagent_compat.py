@@ -88,6 +88,51 @@ def test_agent_run_subagent_compat_task_payload_routes_through_agent_delegate(mo
     assert seen["conversation_id"] == "conv_1"
 
 
+def test_agent_run_subagent_nested_payload_keeps_http_fallback_timeout_for_execute(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_execute(input_data, context):
+        seen["timeout_seconds"] = input_data.get("timeout_seconds")
+        seen["task"] = input_data.get("task")
+        return {"status": "ok", "data": {"execution_id": "run_1", "status": "queued"}}
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = run_subagent_block(
+        {
+            "role_id": "delegate",
+            "timeout_seconds": 300,
+            "payload": {"task": "delegate this"},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert seen == {"timeout_seconds": 300, "task": "delegate this"}
+
+
+def test_agent_run_subagent_nested_timeout_wins_over_http_fallback_timeout(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_execute(input_data, context):
+        seen["timeout_seconds"] = input_data.get("timeout_seconds")
+        return {"status": "ok", "data": {"execution_id": "run_1", "status": "queued"}}
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = run_subagent_block(
+        {
+            "role_id": "delegate",
+            "timeout_seconds": 300,
+            "payload": {"task": "delegate this", "timeout_seconds": 123},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert seen["timeout_seconds"] == 123
+
+
 def test_agent_run_subagent_delegate_extracts_nested_assistant_text(monkeypatch):
     def fake_dispatch(envelope, context):
         return {
@@ -127,6 +172,77 @@ def test_agent_subagent_http_route_gets_long_running_timeout():
         )
         == 300.0
     )
+
+
+def test_agent_run_subagent_defaultspack_function_manifest_keeps_long_timeout():
+    from domain.function_runtime.manifest_factory import FUNCTION_SPECS_BY_ID, manifest_for
+
+    generated = manifest_for(FUNCTION_SPECS_BY_ID["agent_run_subagent"])
+    committed = json.loads(
+        (ROOT / "ecosystem" / "defaultspack" / "functions" / "agent_run_subagent" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert generated["grant_config"]["timeout"] == 300
+    assert committed["grant_config"]["timeout"] == 300
+
+
+def test_agent_run_subagent_direct_function_call_uses_manifest_timeout(monkeypatch):
+    from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+    from core_runtime.function_registry import FunctionRegistry
+
+    manifest = json.loads(
+        (ROOT / "ecosystem" / "defaultspack" / "functions" / "agent_run_subagent" / "manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    function_dir = ROOT / "ecosystem" / "defaultspack" / "functions" / "agent_run_subagent"
+    registry = FunctionRegistry()
+    assert registry.register(
+        pack_id="defaultspack",
+        function_id="agent_run_subagent",
+        manifest=manifest,
+        function_dir=function_dir,
+    )
+    seen: dict[str, object] = {}
+
+    class GrantManager:
+        def check(self, principal_id, permission_id):
+            return SimpleNamespace(allowed=True, reason="Granted", config={})
+
+    class ApprovalManager:
+        def is_pack_approved_and_verified(self, pack_id):
+            return True
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._function_registry = registry
+    executor._grant_manager = GrantManager()
+    executor._approval_manager = ApprovalManager()
+    executor._permission_manager = SimpleNamespace()
+    executor._trust_store = SimpleNamespace()
+
+    monkeypatch.setattr(executor, "_check_entry_trust", lambda entry, permission_id: None)
+
+    def fake_execute_handler_subprocess(**kwargs):
+        seen["timeout_seconds"] = kwargs["timeout_seconds"]
+        return CapabilityResponse(success=True, output={"status": "ok", "data": {}})
+
+    monkeypatch.setattr(executor, "_execute_handler_subprocess", fake_execute_handler_subprocess)
+
+    response = executor.execute(
+        "defaultspack",
+        {
+            "type": "function.call",
+            "qualified_name": "defaultspack:agent_run_subagent",
+            "args": {"task": "hello"},
+            "request_id": "req-direct-agent-subagent",
+        },
+    )
+
+    assert response.success is True
+    assert seen["timeout_seconds"] == 300
 
 
 def test_agent_run_subagent_delegate_provider_error_surfaces_safe_text(monkeypatch):
