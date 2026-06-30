@@ -71,6 +71,7 @@ domains:
     - domain/stream
     - domain/temporal_context
     - domain/tool
+    - domain/tool_policy
     - domain/vision
     path: domain/chat
   coding:
