@@ -14,11 +14,12 @@ def _timestamp() -> str:
 MODEL_ROLES = ("main", "vision", "fast")
 
 MIMO_PROFILE_ID = "defaultspack.mimo_coding_company"
+MIMO_COMPANY_ID = "mimo-coding-company"
 
 MIMO_ROLE_MAP: dict[str, str] = {
-    "main": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
-    "vision": "xiaomi-token-plan-sgp/mimo-v2-omni",
-    "fast": "xiaomi-token-plan-sgp/mimo-v2-flash",
+    "main": "opencode-zen/mimo-v2.5-free",
+    "vision": "google/gemma-4-31b-it",
+    "fast": "opencode-zen/mimo-v2.5-free",
 }
 
 SELF_IMPROVEMENT_TOOLS = [
@@ -313,11 +314,110 @@ def create_mimo_profile(
     """Create a SelfImprovingDefaultspackRuntime with the MiMo coding company profile."""
     return SelfImprovingDefaultspackRuntime(
         profile_id=MIMO_PROFILE_ID,
-        role_map=dict(MIMO_ROLE_MAP),
+        role_map=resolve_mimo_role_map(workspace_root=workspace_root),
         tool_allowlist=list(SELF_IMPROVEMENT_TOOLS),
         workspace_root=workspace_root,
         state_path=state_path,
     )
+
+
+def resolve_mimo_role_map(workspace_root: str | Path | None = None) -> dict[str, str]:
+    """Resolve MiMo self-improvement model roles from local company/profile state."""
+    role_map = dict(MIMO_ROLE_MAP)
+    for candidate in _mimo_role_map_sources(workspace_root):
+        role_map.update(candidate)
+    return {role: role_map[role] for role in MODEL_ROLES}
+
+
+def default_mimo_model(role: str = "main", workspace_root: str | Path | None = None) -> str:
+    role = str(role or "main").strip()
+    if role not in MODEL_ROLES:
+        role = "main"
+    return resolve_mimo_role_map(workspace_root=workspace_root)[role]
+
+
+def _mimo_role_map_sources(workspace_root: str | Path | None) -> list[dict[str, str]]:
+    sources: list[dict[str, str]] = []
+    root = Path(workspace_root) if workspace_root else Path.cwd()
+    for path in _mimo_profile_state_paths(root):
+        data = _read_json_object(path)
+        if not data:
+            continue
+        sources.extend(_extract_role_maps(data))
+    return sources
+
+
+def _mimo_profile_state_paths(workspace_root: Path) -> list[Path]:
+    paths = [
+        workspace_root / "user_data" / "shared" / "companies" / "companies.json",
+        workspace_root / "ecosystem" / "defaultspack" / "user_data" / "shared" / "companies" / "companies.json",
+        workspace_root / "rumi_ai_1_10" / "ecosystem" / "defaultspack" / "user_data" / "shared" / "companies" / "companies.json",
+        workspace_root / "user_data" / "shared" / "mimo_coding_company" / "codex_manager_status.json",
+        workspace_root / "rumi_ai_1_10" / "user_data" / "shared" / "mimo_coding_company" / "codex_manager_status.json",
+    ]
+    company_store = os.environ.get("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", "").strip()
+    if company_store:
+        path = Path(company_store)
+        paths.append(path if path.suffix == ".json" else path / "companies.json")
+    return paths
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _extract_role_maps(data: dict[str, Any]) -> list[dict[str, str]]:
+    maps: list[dict[str, str]] = []
+    maps.extend(_extract_role_maps_from_mapping(data))
+
+    provider = data.get("provider")
+    if isinstance(provider, dict):
+        maps.extend(_extract_role_maps_from_mapping(provider))
+
+    companies = data.get("companies")
+    if isinstance(companies, dict):
+        company = companies.get(MIMO_COMPANY_ID)
+        if isinstance(company, dict):
+            maps.extend(_extract_role_maps_from_mapping(company))
+            metadata = company.get("metadata")
+            if isinstance(metadata, dict):
+                maps.extend(_extract_role_maps_from_mapping(metadata))
+            settings = company.get("settings")
+            if isinstance(settings, dict):
+                maps.extend(_extract_role_maps_from_mapping(settings))
+    return maps
+
+
+def _extract_role_maps_from_mapping(data: dict[str, Any]) -> list[dict[str, str]]:
+    maps: list[dict[str, str]] = []
+    for key in ("role_map", "models", "model_roles", "mimo_role_map", "self_improvement_role_map"):
+        value = data.get(key)
+        if isinstance(value, dict):
+            normalized = _normalize_role_map(value)
+            if normalized:
+                maps.append(normalized)
+    metadata_models = {
+        "main": data.get("main_model"),
+        "vision": data.get("vision_model"),
+        "fast": data.get("fast_model"),
+    }
+    normalized = _normalize_role_map(metadata_models)
+    if normalized:
+        maps.append(normalized)
+    return maps
+
+
+def _normalize_role_map(value: dict[str, Any]) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    for role in MODEL_ROLES:
+        candidate = str(value.get(role) or "").strip()
+        if candidate:
+            normalized[role] = candidate
+    return normalized
 
 
 def validate_model_for_role(

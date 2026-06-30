@@ -19,13 +19,15 @@ def run(input_data, context=None):
 
     if action == "single":
         from domain.agent.self_improvement_live_loop import run_live_improvement
+        from domain.agent.self_improvement_runtime import default_mimo_model
 
+        workspace_root = input_data.get("workspace_root")
         result = run_live_improvement(
-            workspace_root=input_data.get("workspace_root"),
+            workspace_root=workspace_root,
             task_id=input_data.get("task_id", "live_01"),
             task_title=input_data.get("task_title", "Live self-improvement"),
             max_tool_calls=int(input_data.get("max_tool_calls", 15)),
-            model=input_data.get("model") or "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            model=input_data.get("model") or default_mimo_model("main", workspace_root=workspace_root),
             state_path=input_data.get("state_path"),
         )
         return ok(result)
