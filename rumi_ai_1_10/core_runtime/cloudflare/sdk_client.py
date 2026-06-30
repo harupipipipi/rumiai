@@ -7,6 +7,9 @@ import importlib.util
 from typing import Any
 
 
+_CLOUDFLARE_PAGES_MAX_PAGE_SIZE = 10
+
+
 @dataclass(frozen=True)
 class CloudflareSDKStatus:
     available: bool
@@ -85,11 +88,14 @@ class CloudflareSDKAdapter:
         account_id = self._require_account_id(account_id)
         return self._call(lambda client: _serialize_resource(client.accounts.get(account_id=account_id)))
 
-    def list_pages_projects(self, *, account_id: str | None = None, per_page: int = 50) -> list[dict[str, Any]]:
+    def list_pages_projects(self, *, account_id: str | None = None, per_page: int = 10) -> list[dict[str, Any]]:
         account_id = self._require_account_id(account_id)
         return self._call(
             lambda client: _serialize_collection(
-                client.pages.projects.list(account_id=account_id, per_page=per_page)
+                client.pages.projects.list(
+                    account_id=account_id,
+                    per_page=_bounded_pages_page_size(per_page),
+                )
             )
         )
 
@@ -162,7 +168,7 @@ class CloudflareSDKAdapter:
         project_name: str,
         *,
         account_id: str | None = None,
-        per_page: int = 50,
+        per_page: int = 10,
     ) -> list[dict[str, Any]]:
         account_id = self._require_account_id(account_id)
         return self._call(
@@ -170,7 +176,7 @@ class CloudflareSDKAdapter:
                 client.pages.projects.deployments.list(
                     project_name,
                     account_id=account_id,
-                    per_page=per_page,
+                    per_page=_bounded_pages_page_size(per_page),
                 )
             )
         )
@@ -235,6 +241,11 @@ def _serialize_collection(value: Iterable[Any], *, max_items: int = 100) -> list
         if len(items) >= max_items:
             break
     return items
+
+
+def _bounded_pages_page_size(per_page: int) -> int:
+    # Pages list endpoints reject larger page sizes even though the SDK accepts them.
+    return max(1, min(int(per_page), _CLOUDFLARE_PAGES_MAX_PAGE_SIZE))
 
 
 def _serialize_resource(value: Any) -> dict[str, Any]:

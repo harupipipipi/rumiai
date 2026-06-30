@@ -73,6 +73,10 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
             calls.append(("pages.projects.create", dict(kwargs)))
             return Resource(name=str(kwargs["name"]), production_branch=str(kwargs["production_branch"]))
 
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("pages.projects.list", dict(kwargs)))
+            return [Resource(name="rumi-pr440-smoke-pages-test")]
+
         def edit(self, project_name: str, **kwargs: object) -> Resource:
             calls.append(("pages.projects.edit", {"project_name": project_name, **kwargs}))
             return Resource(name=project_name, updated=True)
@@ -98,14 +102,16 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
     adapter = sdk_client.CloudflareSDKAdapter(api_token="cloudflare-secret-token", account_id="account-id")
     accounts = adapter.list_accounts(per_page=1)
     project = adapter.create_pages_project(name="rumi-pr440-smoke-pages-test")
+    projects = adapter.list_pages_projects(per_page=50)
     updated = adapter.update_pages_project("rumi-pr440-smoke-pages-test", production_branch="main")
     deployment = adapter.create_pages_deployment("rumi-pr440-smoke-pages-test", branch="main")
-    deployments = adapter.list_pages_deployments("rumi-pr440-smoke-pages-test")
+    deployments = adapter.list_pages_deployments("rumi-pr440-smoke-pages-test", per_page=50)
     deleted_deployment = adapter.delete_pages_deployment("rumi-pr440-smoke-pages-test", "deployment-id")
     deleted_project = adapter.delete_pages_project("rumi-pr440-smoke-pages-test")
 
     assert accounts == [{"id": "account-id", "name": "Test Account"}]
     assert project["name"] == "rumi-pr440-smoke-pages-test"
+    assert projects == [{"name": "rumi-pr440-smoke-pages-test"}]
     assert updated["updated"] is True
     assert deployment["id"] == "deployment-id"
     assert deployments == [{"id": "deployment-id", "project_name": "rumi-pr440-smoke-pages-test"}]
@@ -116,6 +122,8 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
         "accounts.list",
         "Cloudflare",
         "pages.projects.create",
+        "Cloudflare",
+        "pages.projects.list",
         "Cloudflare",
         "pages.projects.edit",
         "Cloudflare",
@@ -128,8 +136,10 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
         "pages.projects.delete",
     ]
     assert calls[0][1] == {"api_token": "cloudflare-secret-token"}
+    assert calls[5][1]["per_page"] == 10
+    assert calls[11][1]["per_page"] == 10
     assert "cloudflare-secret-token" not in str(
-        [accounts, project, updated, deployment, deployments, deleted_deployment, deleted_project]
+        [accounts, project, projects, updated, deployment, deployments, deleted_deployment, deleted_project]
     )
 
 
