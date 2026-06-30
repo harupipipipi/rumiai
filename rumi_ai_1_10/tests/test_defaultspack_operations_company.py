@@ -200,8 +200,10 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     qa_schedule = schedules_by_loop["qa_loop"]
     assert kickoff_schedule["task"]["timeout"] == 900
     assert heartbeat_schedule["task"]["timeout"] == 1800
-    assert improvement_schedule["task"]["timeout"] == 1800
-    assert qa_schedule["task"]["timeout"] == 1800
+    assert improvement_schedule["task"]["timeout"] == 30 * 24 * 60 * 60
+    assert qa_schedule["task"]["timeout"] == 30 * 24 * 60 * 60
+    assert improvement_schedule["task"]["timeout"] > heartbeat_schedule["task"]["timeout"]
+    assert qa_schedule["task"]["timeout"] > heartbeat_schedule["task"]["timeout"]
     assert improvement_schedule["task"]["conversation_id"] == loop_conversation_ids["improvement_loop"]
     assert qa_schedule["task"]["conversation_id"] == loop_conversation_ids["qa_loop"]
     assert improvement_schedule["task"]["conversation_id"] != qa_schedule["task"]["conversation_id"]
@@ -564,7 +566,10 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
 
 
 def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_refresh(tmp_path, monkeypatch):
-    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        MimoCodingCompanyRuntime,
+        QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
+    )
     from domain.agent.schedule_store import load_history, load_schedule, save_schedule
     from domain.agent.scheduler import Scheduler
 
@@ -612,7 +617,7 @@ def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_r
         "schedule_id": qa_schedule_id,
         "started_at": started_at,
         "trigger": "scheduled",
-        "timeout_seconds": 1800,
+        "timeout_seconds": QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
     }
     persisted["running_started_at"] = started_at
     persisted["updated_at"] = started_at
@@ -765,8 +770,8 @@ def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until
     schedules_by_loop = {schedule["task"]["metadata"]["loop_key"]: schedule for schedule in status["schedules"]}
     assert schedules_by_loop["kickoff_review"]["task"]["timeout"] == 900
     assert schedules_by_loop["heartbeat"]["task"]["timeout"] == 1800
-    assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 1800
-    assert schedules_by_loop["qa_loop"]["task"]["timeout"] == 1800
+    assert schedules_by_loop["improvement_loop"]["task"]["timeout"] == 30 * 24 * 60 * 60
+    assert schedules_by_loop["qa_loop"]["task"]["timeout"] == 30 * 24 * 60 * 60
     qa_schedule = schedules_by_loop["qa_loop"]
     qa_next = datetime.fromisoformat(qa_schedule["next_execution_at"].replace("Z", "+00:00"))
     assert qa_schedule["status"] == "active"

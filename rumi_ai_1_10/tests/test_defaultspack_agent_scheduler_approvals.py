@@ -2675,6 +2675,187 @@ def test_scheduler_auto_approves_mimo_request_from_approval_requested_event_data
     _reset_scheduler_singleton()
 
 
+def test_scheduler_consumes_auto_approved_desktop_list_before_model_can_reask(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    _setup_schedule_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+    from domain.tool.executor import ToolExecutor
+    import domain.chat.stream_engine as engine_module
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        metadata={
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    )
+    conversation_id = conversation["id"]
+
+    class FakeGateway:
+        def __init__(self):
+            self.complete_requests = []
+
+        def complete(self, request_data):
+            self.complete_requests.append(request_data)
+            if len(self.complete_requests) == 1:
+                return {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "call-desktop-list-initial",
+                            "name": "desktop_list",
+                            "input": {},
+                        }
+                    ],
+                    "finish_reason": "tool_calls",
+                    "usage": {},
+                }
+            return {
+                "content": [
+                    {"type": "text", "text": "desktop list already available"},
+                    {
+                        "type": "tool_use",
+                        "id": "call-desktop-list-duplicate",
+                        "name": "desktop_list",
+                        "input": {"include_destroyed": True},
+                    },
+                ],
+                "finish_reason": "tool_calls",
+                "usage": {},
+            }
+
+        def stream(self, request_data):
+            del request_data
+            return iter([])
+
+        def supports_stream(self, model):
+            del model
+            return False
+
+        def resolve_provider(self, model):
+            class Provider:
+                pass
+
+            return Provider(), model
+
+    gateway = FakeGateway()
+    monkeypatch.setattr(engine_module, "LLMGateway", lambda client=None: gateway)
+
+    invocations: list[dict] = []
+    approval_request_ids: list[str] = []
+
+    def fake_execute(self, tool_name, arguments, context):
+        del self, context
+        args = dict(arguments or {})
+        invocations.append({"tool_name": tool_name, "arguments": args})
+        token = str(args.get("approval_token") or "").strip()
+        if token:
+            verification = approval.verify_execution_token(
+                token,
+                "tool.desktop_list",
+                approval.hash_arguments({}),
+                consume=True,
+            )
+            assert verification.valid is True, getattr(verification, "message", verification)
+            return {
+                "result": "desktop list returned one seat",
+                "is_error": False,
+                "widget": {"desktops": [{"seat_id": "seat-1", "status": "running"}]},
+            }
+
+        approval_args = {key: value for key, value in args.items() if key != "approval_token"}
+        request = approval.create_approval_request(
+            "tool.desktop_list",
+            "medium",
+            approval_args,
+            details={
+                "tool_name": "desktop_list",
+                "action": "tool.desktop_list",
+                "function_id": "tool.desktop_list",
+                "pack_id": "defaultspack",
+                "conversation_id": conversation_id,
+                "arguments": approval_args,
+            },
+        )
+        approval_request_ids.append(request["request_id"])
+        return {
+            "result": "Tool 'desktop_list' requires approval",
+            "is_error": False,
+            "widget": {
+                "type": "approval_request",
+                "tool_name": "desktop_list",
+                "approval_required": True,
+                "requires_approval": True,
+                "risk_level": "medium",
+                "operation": "tool.desktop_list",
+                "action": "tool.desktop_list",
+                "arguments": approval_args,
+                "payload": approval_args,
+                "approval_request_id": request["request_id"],
+                "expires_at": request["expires_at"],
+                "display_summary": request["display_summary"],
+            },
+        }
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+
+    from domain.agent.scheduler import Scheduler
+
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "List managed desktops.",
+            "model": "stub/default",
+            "conversation_id": conversation_id,
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["desktop_list"],
+            "tool_policy": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "schedule_auto_approve_tool_requests": True,
+                "schedule_auto_approve_tool_allowlist": ["desktop_list"],
+                "schedule_auto_approve_max_followups": 1,
+            },
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    try:
+        history = scheduler.trigger_now(schedule["id"])
+
+        assert history["status"] == "completed"
+        assert history["result"] == "desktop list already available"
+        assert len(gateway.complete_requests) == 2
+        assert len(invocations) == 2
+        assert invocations[0] == {"tool_name": "desktop_list", "arguments": {}}
+        assert invocations[1]["tool_name"] == "desktop_list"
+        assert set(invocations[1]["arguments"]) == {"approval_token"}
+        assert invocations[1]["arguments"]["approval_token"]
+        assert len(approval_request_ids) == 1
+        assert approval.get_approval_request(approval_request_ids[0])["status"] == "consumed"
+        assert history["auto_approvals"] == [
+            {
+                "request_id": approval_request_ids[0],
+                "tool_name": "desktop_list",
+                "operation": "tool.desktop_list",
+                "status": "approved",
+            }
+        ]
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_scheduler_unlimited_auto_approves_repeated_rumi_api_get_desktop_frame_requests(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

@@ -539,6 +539,24 @@ def _tool_arguments_without_approval_token(arguments: dict[str, Any] | None) -> 
     return scrub(arguments)
 
 
+def _tool_has_empty_argument_schema(prepared: PreparedChatRun, tool_name: str) -> bool:
+    normalized_name = _canonical_tool_name(tool_name)
+    for tool in prepared.provider_tools or []:
+        if not _tool_identity_text_matches(tool_name_from_definition(tool), normalized_name):
+            continue
+        if not isinstance(tool, dict):
+            continue
+        function_def = tool.get("function") if isinstance(tool.get("function"), dict) else {}
+        parameters = function_def.get("parameters")
+        if not isinstance(parameters, dict):
+            parameters = tool.get("parameters") if isinstance(tool.get("parameters"), dict) else {}
+        properties = parameters.get("properties") if isinstance(parameters.get("properties"), dict) else {}
+        required = parameters.get("required") if isinstance(parameters.get("required"), list) else []
+        if not properties and not required:
+            return True
+    return False
+
+
 def _approval_replay_duplicate_tool_use(prepared: PreparedChatRun, block: dict[str, Any]) -> bool:
     tool_context = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
     replayed = tool_context.get("approval_replayed")
@@ -558,10 +576,16 @@ def _approval_replay_duplicate_tool_use(prepared: PreparedChatRun, block: dict[s
         replayed_name,
         dict(replayed_arguments),
     )
+    if not _tool_identity_text_matches(block_name, replayed_name):
+        return False
+    block_arguments = _tool_arguments_without_approval_token(block_arguments)
+    replayed_arguments = _tool_arguments_without_approval_token(replayed_arguments)
+    if block_arguments == replayed_arguments:
+        return True
     return (
-        _tool_identity_text_matches(block_name, replayed_name)
-        and _tool_arguments_without_approval_token(block_arguments)
-        == _tool_arguments_without_approval_token(replayed_arguments)
+        _scheduled_mimo_approval_followup(prepared)
+        and replayed_arguments == {}
+        and _tool_has_empty_argument_schema(prepared, replayed_name)
     )
 
 
