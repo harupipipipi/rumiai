@@ -1835,6 +1835,25 @@ class MimoCodingCompanyRuntime:
                 )
                 known_sync_keys.add(sync_key)
                 synced += 1
+            for gap in summary["subagents"]["failed"]:
+                sync_key = "subagent_failed:" + str(gap.get("child_conversation_id") or "")
+                if sync_key in known_sync_keys:
+                    continue
+                runtime_store.add_message(
+                    COMPANY_ID,
+                    channel_id="ops-company",
+                    sender_id="scheduler",
+                    content=self._subagent_gap_message(gap),
+                    metadata={
+                        "sync_source": "mimo_subagent_monitor",
+                        "sync_key": sync_key,
+                        "child_conversation_id": gap.get("child_conversation_id"),
+                        "parent_conversation_id": state.get("conversation_id"),
+                        "signal": "subagent_failed",
+                    },
+                )
+                known_sync_keys.add(sync_key)
+                synced += 1
 
             desktop_monitoring = self._desktop_monitoring_observation()
             summary["desktop_monitoring"] = desktop_monitoring
@@ -2332,6 +2351,7 @@ class MimoCodingCompanyRuntime:
                         }
                     )
                     failed.append(gap)
+                    continue
                 unanswered.append(gap)
             return {"checked_ids": checked_ids, "unanswered": unanswered, "failed": failed, "repaired": repaired}
         except Exception:
