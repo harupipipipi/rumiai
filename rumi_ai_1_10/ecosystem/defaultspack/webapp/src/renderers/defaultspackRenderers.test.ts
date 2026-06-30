@@ -5,7 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
-import { CompanyWorkspacePanel, resolveEffectiveCompanies } from "../components/company/CompanyWorkspacePanel";
+import {
+  CompanyWorkspacePanel,
+  resolveActiveChannelId,
+  resolveCompanyWorkspaceHint,
+  resolveCompanyWorkspaceHintFromGroup,
+  resolveEffectiveCompanies,
+} from "../components/company/CompanyWorkspacePanel";
+import { buildCompactHistoryRailItems, buildGroupsFromChats } from "../components/HistoryBoard";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
 
 test("defaultspack renderer registry covers visible shell regions", () => {
@@ -184,6 +191,79 @@ test("company workspace keeps global companies visible for conversation-scoped g
     "mimo-coding-company",
     "operations-company",
   ]);
+});
+
+test("company workspace resolves MiMo company hints from group and profile context", () => {
+  assert.equal(resolveCompanyWorkspaceHint({
+    groupId: "company:mimo-coding-company",
+  }), "mimo-coding-company");
+  assert.equal(resolveCompanyWorkspaceHint({
+    groupId: "group-coding",
+  }), null);
+  assert.equal(resolveCompanyWorkspaceHint({
+    conversationKind: "mimo_coding_company",
+  }), "mimo-coding-company");
+  assert.equal(resolveCompanyWorkspaceHint({
+    profileId: "defaultspack.mimo_coding_company",
+  }), "mimo-coding-company");
+  assert.equal(resolveCompanyWorkspaceHint({
+    tags: ["company", "mimo-coding-company"],
+  }), "mimo-coding-company");
+});
+
+test("company workspace resolves selected history company groups", () => {
+  assert.equal(resolveCompanyWorkspaceHintFromGroup({
+    id: "custom-company-mimo-coding-company",
+    sourceGroupId: "company:mimo-coding-company",
+    chats: [],
+    subGroups: [],
+  }), "mimo-coding-company");
+  assert.equal(resolveCompanyWorkspaceHintFromGroup({
+    id: "group-company",
+    chats: [{
+      metadata: { group_id: "company:mimo-coding-company" },
+      tags: [],
+    }],
+    subGroups: [],
+  }), "mimo-coding-company");
+  assert.equal(resolveCompanyWorkspaceHintFromGroup({
+    id: "group-coding",
+    chats: [],
+    subGroups: [],
+  }), null);
+});
+
+test("compact history company group keeps the selectable source group", () => {
+  const groups = buildGroupsFromChats([
+    {
+      id: "mimo-company-chat",
+      title: "MiMo coding company",
+      date: "Today",
+      type: "chat",
+      metadata: {
+        group_id: "company:mimo-coding-company",
+        group_title: "company:mimo-coding-company",
+      },
+    },
+  ]);
+  const railGroup = buildCompactHistoryRailItems(groups)
+    .find((item) => item.type === "group" && item.id === "company:mimo-coding-company");
+
+  if (!railGroup || railGroup.type !== "group") {
+    assert.fail("Expected compact rail to include the company group.");
+  }
+  assert.equal(resolveCompanyWorkspaceHintFromGroup(railGroup.group), "mimo-coding-company");
+});
+
+test("company workspace repairs stale channel selection when switching companies", () => {
+  const channels = [
+    { id: "ops-company" },
+    { id: "qa-findings" },
+  ];
+
+  assert.equal(resolveActiveChannelId("qa-findings", channels), "qa-findings");
+  assert.equal(resolveActiveChannelId("old-chat-channel", channels), "ops-company");
+  assert.equal(resolveActiveChannelId(null, [{ id: "research" }]), "research");
 });
 
 test("company task board renders agent run errors", () => {

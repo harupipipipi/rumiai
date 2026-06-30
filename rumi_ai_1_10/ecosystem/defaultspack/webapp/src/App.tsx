@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Hand, Loader2 } from "lucide-react";
 
-import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import {
+  CompanyWorkspacePanel,
+  resolveCompanyWorkspaceHint,
+  resolveCompanyWorkspaceHintFromGroup,
+} from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
 import { AdaptiveRuntimePage } from "./adaptive";
@@ -2252,6 +2256,7 @@ function ChatApp() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
@@ -3362,6 +3367,7 @@ function ChatApp() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     setPendingNewTaskContext(null);
+    setActiveHistoryCompanyId(null);
     const activeTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId);
     if (activeTab?.kind === "chat") {
       setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId ? { ...tab, conversationId } : tab));
@@ -3381,6 +3387,10 @@ function ChatApp() {
         if (activeConversationId === conversation.id) setActiveConversation(conversation);
       })
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
+  };
+
+  const handleHistoryGroupSelect = (group: ChatGroup) => {
+    setActiveHistoryCompanyId(resolveCompanyWorkspaceHintFromGroup(group));
   };
 
   const closeSpotlight = () => {
@@ -5352,11 +5362,16 @@ function ChatApp() {
   const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
     ? activeConversation.metadata
     : {};
-  const activeConversationCompanyId = typeof activeConversationMetadata.company_id === "string"
-    ? activeConversationMetadata.company_id
-    : typeof activeConversationMetadata.companyId === "string"
-      ? activeConversationMetadata.companyId
-      : null;
+  const activeConversationGroupId = cleanOptionalString(activeConversation?.group_id)
+    ?? cleanOptionalString(activeConversationMetadata.group_id ?? activeConversationMetadata.groupId);
+  const activeConversationCompanyId = resolveCompanyWorkspaceHint({
+    companyId: activeConversationMetadata.company_id ?? activeConversationMetadata.companyId,
+    groupId: activeConversationGroupId,
+    conversationKind: activeConversation?.conversation_kind,
+    profileId: activeConversationMetadata.profile_id,
+    tags: activeConversation?.tags,
+  });
+  const activeCompanyWorkspaceHint = activeConversationCompanyId ?? activeHistoryCompanyId;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -5528,6 +5543,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5558,6 +5574,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5890,7 +5907,7 @@ function ChatApp() {
               <CompanyWorkspacePanel
                 activeConversationId={activeConversationId}
                 activeConversationTitle={activeChatTitle}
-                activeCompanyIdHint={activeConversationCompanyId}
+                activeCompanyIdHint={activeCompanyWorkspaceHint}
               />
             )}
             codingPanel={codingSidebarPanel}

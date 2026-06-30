@@ -37,10 +37,110 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
 const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
 const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
 const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
-const MIMO_CODING_COMPANY_ID = "mimo-coding-company";
+export const MIMO_CODING_COMPANY_ID = "mimo-coding-company";
+export const OPERATIONS_COMPANY_ID = "operations-company";
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function companyIdFromHint(value: unknown): string | null {
+  const text = textValue(value);
+  if (!text) return null;
+  const companyPrefix = "company:";
+  if (text.toLowerCase().startsWith(companyPrefix)) {
+    return text.slice(companyPrefix.length).trim() || null;
+  }
+  return text;
+}
+
+export function companyIdFromGroupHint(value: unknown): string | null {
+  const text = textValue(value);
+  if (!text) return null;
+  const companyPrefix = "company:";
+  if (text.toLowerCase().startsWith(companyPrefix)) {
+    return text.slice(companyPrefix.length).trim() || null;
+  }
+  return null;
+}
+
+export function resolveCompanyWorkspaceHint({
+  companyId,
+  groupId,
+  conversationKind,
+  profileId,
+  tags,
+}: {
+  companyId?: unknown;
+  groupId?: unknown;
+  conversationKind?: unknown;
+  profileId?: unknown;
+  tags?: unknown;
+}): string | null {
+  const directCompanyId = companyIdFromHint(companyId);
+  if (directCompanyId) return directCompanyId;
+  const groupedCompanyId = companyIdFromGroupHint(groupId);
+  if (groupedCompanyId) return groupedCompanyId;
+
+  const kind = textValue(conversationKind);
+  const profile = textValue(profileId);
+  const tagList = Array.isArray(tags) ? tags.map((tag) => textValue(tag)).filter(Boolean) : [];
+  if (kind === "mimo_coding_company" || profile === "defaultspack.mimo_coding_company" || tagList.includes(MIMO_CODING_COMPANY_ID)) {
+    return MIMO_CODING_COMPANY_ID;
+  }
+  if (kind === "operations_company" || profile === "defaultspack.operations_company" || tagList.includes(OPERATIONS_COMPANY_ID)) {
+    return OPERATIONS_COMPANY_ID;
+  }
+  return null;
+}
+
+type CompanyHintChat = {
+  companyId?: unknown;
+  conversationKind?: unknown;
+  metadata?: Record<string, unknown> | null;
+  tags?: unknown;
+};
+
+type CompanyHintGroup = {
+  id?: unknown;
+  sourceGroupId?: unknown;
+  chats?: CompanyHintChat[];
+  subGroups?: CompanyHintGroup[];
+};
+
+export function resolveCompanyWorkspaceHintFromGroup(group: CompanyHintGroup | null | undefined): string | null {
+  if (!group) return null;
+  const groupCompanyId = companyIdFromGroupHint(group.sourceGroupId) ?? companyIdFromGroupHint(group.id);
+  if (groupCompanyId) return groupCompanyId;
+
+  for (const chat of group.chats ?? []) {
+    const metadata = chat.metadata && typeof chat.metadata === "object" ? chat.metadata : {};
+    const resolved = resolveCompanyWorkspaceHint({
+      companyId: chat.companyId ?? metadata.company_id ?? metadata.companyId,
+      groupId: metadata.group_id ?? metadata.groupId,
+      conversationKind: chat.conversationKind,
+      profileId: metadata.profile_id,
+      tags: chat.tags,
+    });
+    if (resolved) return resolved;
+  }
+
+  for (const subGroup of group.subGroups ?? []) {
+    const resolved = resolveCompanyWorkspaceHintFromGroup(subGroup);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+export function resolveActiveChannelId(
+  currentChannelId: string | null | undefined,
+  channels: Pick<CompanyChannel, "id">[],
+  fallbackChannelId = "ops-company",
+): string {
+  const current = textValue(currentChannelId);
+  if (current && channels.some((channel) => channel.id === current)) return current;
+  if (channels.some((channel) => channel.id === fallbackChannelId)) return fallbackChannelId;
+  return channels[0]?.id || fallbackChannelId;
 }
 
 export function resolveEffectiveCompanies({
@@ -54,7 +154,7 @@ export function resolveEffectiveCompanies({
   activeCompany?: CompanyRecord | null;
   companies: CompanyRecord[];
 }): CompanyRecord[] {
-  const normalizedHint = textValue(activeCompanyIdHint) || null;
+  const normalizedHint = companyIdFromHint(activeCompanyIdHint);
   if (!activeCompany) return companies;
   const ordered = [activeCompany, ...companies.filter((item) => item.id !== activeCompany.id)];
   if (activeConversationId && !normalizedHint) return ordered;
@@ -94,7 +194,7 @@ export function CompanyWorkspacePanel({
   activeCompanyIdHint?: string | null;
 }) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
-  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => textValue(activeCompanyIdHint) || null);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => companyIdFromHint(activeCompanyIdHint));
   const [company, setCompany] = useState<CompanyRecord | null>(null);
   const [agents, setAgents] = useState<CompanyAgent[]>([]);
   const [channels, setChannels] = useState<CompanyChannel[]>([]);
@@ -113,7 +213,7 @@ export function CompanyWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const hasActiveConversation = Boolean(activeConversationId);
   const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
-  const normalizedActiveCompanyIdHint = textValue(activeCompanyIdHint) || null;
+  const normalizedActiveCompanyIdHint = companyIdFromHint(activeCompanyIdHint);
 
   const effectiveCompanies = useMemo(() => resolveEffectiveCompanies({
     activeConversationId,
@@ -192,7 +292,7 @@ export function CompanyWorkspacePanel({
         setAgents(nextAgents);
         const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
         setChannels(nextChannels);
-        setActiveChannelId((current) => current ?? nextChannels[0]?.id ?? "ops-company");
+        setActiveChannelId((current) => resolveActiveChannelId(current, nextChannels));
         setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
         setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
         setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
