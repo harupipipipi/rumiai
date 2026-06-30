@@ -263,6 +263,75 @@ def approve(request_id: str) -> dict[str, Any]:
         )
 
 
+def approve_with_extended_expiry(
+    request_id: str,
+    *,
+    expires_in: int = _DEFAULT_EXPIRES_IN_SECONDS,
+) -> dict[str, Any]:
+    """Approve or refresh a request while extending its token window.
+
+    Unlike ``approve()``, this helper may refresh an ``expired`` request. Callers
+    must enforce their own policy before using it; the scheduler uses it only
+    after matching the MiMo scheduled auto-approval allowlist and conversation
+    scope.
+    """
+    with _LOCK:
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
+        now = _now()
+        if request is None:
+            return asdict(
+                ApprovalDecision(str(request_id), "missing", False, reason="approval request not found")
+            )
+        if request.status == "consumed":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request already consumed")
+            )
+        if request.status == "denied":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request denied")
+            )
+        if request.status not in {"pending", "approved", "expired"}:
+            return asdict(
+                ApprovalDecision(
+                    request.request_id,
+                    request.status,
+                    False,
+                    reason="approval request cannot be extended from status '{}'".format(request.status),
+                )
+            )
+        try:
+            extension_seconds = int(expires_in or _DEFAULT_EXPIRES_IN_SECONDS)
+        except Exception:
+            extension_seconds = _DEFAULT_EXPIRES_IN_SECONDS
+        request.status = "approved"
+        request.decision_at = now
+        request.expires_at = max(int(request.expires_at or 0), now + max(1, extension_seconds))
+        _REQUESTS[request.request_id] = request
+        get_approval_store().save_request(request)
+        _refresh_approval_state_mirrors_from_store()
+        details = request.details if isinstance(request.details, dict) else {}
+        token = issue_execution_token(
+            request.request_id,
+            request.args_hash,
+            expires_at=request.expires_at,
+            operation=request.operation,
+            function_id=str(details.get("function_id") or details.get("action") or ""),
+            pack_id=str(details.get("pack_id") or ""),
+            conversation_id=str(details.get("conversation_id") or ""),
+        )
+        return asdict(
+            ApprovalDecision(
+                request.request_id,
+                request.status,
+                True,
+                token=token,
+                expires_at=request.expires_at,
+            )
+        )
+
+
 def issue_execution_token(
     request_id: str,
     args_hash: str,

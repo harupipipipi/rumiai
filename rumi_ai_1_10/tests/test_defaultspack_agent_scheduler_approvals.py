@@ -2535,11 +2535,12 @@ def test_scheduler_replay_refreshes_expired_auto_approval_token_for_todo(tmp_pat
         },
     }
     real_approve = approval.approve
+    real_extended_approve = approval.approve_with_extended_expiry
     approve_calls: list[dict] = []
     expired_followup_token: dict[str, str] = {}
 
-    def approve_with_expired_first_token(request_id):
-        decision = dict(real_approve(request_id))
+    def approve_with_expired_first_token(request_id, **kwargs):
+        decision = dict(real_extended_approve(request_id, **kwargs))
         approve_calls.append(dict(decision))
         if len(approve_calls) == 1 and decision.get("approved"):
             stored = approval.get_approval_request(request_id)
@@ -2558,7 +2559,15 @@ def test_scheduler_replay_refreshes_expired_auto_approval_token_for_todo(tmp_pat
             decision["expires_at"] = approval._now() - 10
         return decision
 
-    monkeypatch.setattr(approval, "approve", approve_with_expired_first_token)
+    refresh_calls: list[dict] = []
+
+    def approve_counting_refresh(request_id):
+        decision = dict(real_approve(request_id))
+        refresh_calls.append(dict(decision))
+        return decision
+
+    monkeypatch.setattr(approval, "approve_with_extended_expiry", approve_with_expired_first_token)
+    monkeypatch.setattr(approval, "approve", approve_counting_refresh)
     approved = approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
     assert approved is not None
     followup = approved["followup"]
@@ -2654,13 +2663,172 @@ def test_scheduler_replay_refreshes_expired_auto_approval_token_for_todo(tmp_pat
             break
 
     assert blocked is None
-    assert len(approve_calls) == 2
+    assert len(approve_calls) == 1
+    assert len(refresh_calls) == 1
     assert len(invocations) == 1
     assert invocations[0]["valid_token"] is True
     assert invocations[0]["used_token"]
     assert invocations[0]["used_token"] != expired_followup_token["token"]
     assert prepared.tool_context["tool_approval_tokens"]["todo"] == invocations[0]["used_token"]
     assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+
+
+def test_scheduler_auto_approval_renews_expired_request_before_followup_replay(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine, _suppress_duplicate_approval_replay_tool_uses
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.scheduled_approval import approve_schedule_pending_approval
+
+    conversation_id = "conv-mimo"
+    approval_args: dict = {}
+    request = approval.create_approval_request(
+        "tool.desktop_list",
+        "medium",
+        approval_args,
+        details={
+            "tool_name": "desktop_list",
+            "action": "tool.desktop_list",
+            "function_id": "tool.desktop_list",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": approval_args,
+        },
+    )
+    stored = approval._REQUESTS[request["request_id"]]
+    stored.status = "expired"
+    stored.expires_at = approval._now() - 10
+    stored.decision_at = approval._now()
+    approval.get_approval_store().save_request(stored)
+
+    pending = {
+        "tool_name": "desktop_list",
+        "tool_call_id": "call-desktop-list",
+        "action": "tool.desktop_list",
+        "operation": "tool.desktop_list",
+        "payload": approval_args,
+        "arguments": approval_args,
+        "approval_required": True,
+        "approval_request_id": request["request_id"],
+        "request_id": request["request_id"],
+        "expires_at": request["expires_at"],
+    }
+    task_cfg = {
+        "message": "List managed desktops.",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "tool_policy": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "schedule_auto_approve_tool_requests": True,
+            "schedule_auto_approve_tool_allowlist": ["desktop_list"],
+        },
+        "metadata": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    }
+
+    approved = approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
+    assert approved is not None
+    followup = approved["followup"]
+    renewed = approval.get_approval_request(request["request_id"])
+    assert renewed["status"] == "approved"
+    assert renewed["expires_at"] > approval._now()
+
+    invocations: list[dict] = []
+
+    def fake_execute(self, tool_name, arguments, context):
+        del self, context
+        args = dict(arguments or {})
+        verification = approval.verify_execution_token(
+            str(args.get("approval_token") or ""),
+            "tool.desktop_list",
+            approval.hash_arguments(approval_args),
+            consume=True,
+        )
+        invocations.append({"tool_name": tool_name, "valid": verification.valid})
+        return {
+            "result": "desktop list returned one seat",
+            "is_error": not verification.valid,
+            "widget": {"desktops": [{"seat_id": "seat-1", "status": "running"}]},
+        }
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    metadata = {
+        "source": "scheduler_approval_followup",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "approval_followup": followup,
+    }
+    provider_tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "desktop_list",
+                "description": "desktop_list",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation={"id": conversation_id, "messages": []},
+        input_data={},
+        request_id="req-mimo",
+        content=[],
+        metadata=metadata,
+        user_message={"id": "user-followup", "role": "user", "metadata": metadata},
+        model="stub/default",
+        params={},
+        request_context={"source": "scheduler_approval_followup", "profile_id": "defaultspack.mimo_coding_company"},
+        tool_context={"tool_approval_tokens": {"desktop_list": followup["approval_token"]}},
+        standard_messages=[],
+        user_text="Continue this approved scheduled task.",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=provider_tools,
+        provider_tools=provider_tools,
+        tools_called=["desktop_list"],
+        connected_tool_names={"desktop_list"},
+        call_handler=None,
+        model_routing={},
+    )
+
+    engine = ChatRunEngine.__new__(ChatRunEngine)
+    engine._run_id = "run-mimo"
+    engine._conversation_id = conversation_id
+    engine._event_seq = 0
+    engine._activity_events = []
+    engine._tool_logs = []
+    engine._text_parts = []
+    engine._thinking_transcript_parts = []
+    engine._started_tool_call_ids = set()
+    engine._cancel_event = threading.Event()
+    engine._external_cancel_checker = None
+    engine._stream_mode = False
+
+    replay = engine._replay_approval_followup_if_present(prepared, [], prepared.chat_ir, None)
+    while True:
+        try:
+            next(replay)
+        except StopIteration as stop:
+            blocked = stop.value
+            break
+
+    assert blocked is None
+    assert invocations == [{"tool_name": "desktop_list", "valid": True}]
+    assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+
+    duplicate = {
+        "type": "tool_use",
+        "id": "call-duplicate",
+        "name": "desktop_list",
+        "input": {"include_destroyed": True},
+    }
+    _response, filtered = _suppress_duplicate_approval_replay_tool_uses(
+        prepared,
+        {"content": [duplicate], "finish_reason": "tool_calls"},
+        [duplicate],
+    )
+    assert filtered == []
 
 
 def test_scheduler_auto_approves_display_name_tool_requests(tmp_path, monkeypatch):

@@ -14,6 +14,8 @@ _ROUTE_IDENTITY_RE = re.compile(
 _DESKTOP_FRAME_PATH_RE = re.compile(r"^/api/desktops/[^/]+/frame$")
 _DESKTOP_FRAME_TEMPLATES = ("/api/desktops/{id}/frame", "/api/desktops/{seat_id}/frame")
 _APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_required"}
+_SCHEDULE_AUTO_APPROVAL_EXPIRES_IN_SECONDS = 24 * 60 * 60
+_SCHEDULE_AUTO_APPROVAL_MAX_EXPIRES_IN_SECONDS = 30 * 24 * 60 * 60
 _DISPLAY_TOOL_ALIASES = {
     "desktop_list": "desktop_list",
     "desktop_create": "desktop_create",
@@ -47,6 +49,19 @@ def _schedule_auto_approval_allowlist(task_cfg: dict[str, Any]) -> set[str]:
         if text:
             allowlist.update(_identity_variants(text))
     return allowlist
+
+
+def _schedule_auto_approval_expires_in_seconds(task_cfg: dict[str, Any]) -> int:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    raw_value = policy.get(
+        "schedule_auto_approve_expires_in_seconds",
+        _SCHEDULE_AUTO_APPROVAL_EXPIRES_IN_SECONDS,
+    )
+    try:
+        seconds = int(raw_value)
+    except Exception:
+        seconds = _SCHEDULE_AUTO_APPROVAL_EXPIRES_IN_SECONDS
+    return max(1, min(seconds, _SCHEDULE_AUTO_APPROVAL_MAX_EXPIRES_IN_SECONDS))
 
 
 def _identity_variants(value: str) -> set[str]:
@@ -437,9 +452,11 @@ def approve_schedule_pending_approval(
     if not isinstance(request, dict):
         return None
     request_status = str(request.get("status") or "").strip().lower()
-    # The manager can approve between approval_required and scheduler follow-up;
-    # approve() will mint a fresh one-shot token for an approved request.
-    if request_status not in {"pending", "approved"}:
+    # The manager can approve between approval_required and scheduler follow-up.
+    # Scheduler auto-approval is allowed to refresh an expired equivalent
+    # request after the scoped MiMo/allowlist checks below pass; normal user
+    # approval semantics remain in approval.approve().
+    if request_status not in {"pending", "approved", "expired"}:
         return None
     details = request.get("details") if isinstance(request.get("details"), dict) else {}
     stored_conversation_id = str(details.get("conversation_id") or "").strip()
@@ -461,7 +478,10 @@ def approve_schedule_pending_approval(
     if allowlist and not allowlist.intersection(identity_candidates):
         return None
 
-    decision = approval.approve(request_id)
+    decision = approval.approve_with_extended_expiry(
+        request_id,
+        expires_in=_schedule_auto_approval_expires_in_seconds(task_cfg),
+    )
     if not isinstance(decision, dict) or not decision.get("approved") or not decision.get("token"):
         return None
     token = str(decision.get("token") or "").strip()
