@@ -38,6 +38,17 @@ def test_codex_provider_safe_payload_has_no_token_material():
     assert payload["metadata"]["not_workspace_agent_token"] is True
 
 
+def test_codex_core_provider_exposes_high_risk_execution_capabilities():
+    capabilities = {capability.id: capability.risk for capability in CODEX_PROVIDER.capabilities}
+    assert capabilities["codex.access_token.configure"] == "high"
+    assert capabilities["codex.app_server.connect"] == "high"
+    assert capabilities["codex.thread.start"] == "medium"
+    assert capabilities["codex.turn.run"] == "medium"
+    assert capabilities["codex.events.stream"] == "medium"
+    assert capabilities["codex.approval.respond"] == "high"
+    assert capabilities["codex.exec.run"] == "high"
+
+
 def test_oauth_state_store_expires_state():
     now = 1_000.0
     store = InMemoryOAuthStateStore(now=lambda: now)

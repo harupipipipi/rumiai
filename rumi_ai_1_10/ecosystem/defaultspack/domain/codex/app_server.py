@@ -112,6 +112,28 @@ def _url_is_loopback(url: str) -> bool:
     return _hostname_is_loopback(parsed.hostname or "")
 
 
+def _transport_url_mismatch_reason(config: dict[str, Any]) -> str:
+    transport = str(config.get("transport") or "off")
+    if transport not in {"websocket_loopback", "websocket_remote"}:
+        return ""
+
+    urls = [
+        str(config.get("base_url") or "").strip(),
+        str(config.get("websocket_url") or "").strip(),
+    ]
+    configured_urls = [url for url in urls if url]
+    if not configured_urls:
+        return ""
+
+    has_loopback_url = any(_url_is_loopback(url) for url in configured_urls)
+    has_remote_url = any(not _url_is_loopback(url) for url in configured_urls)
+    if transport == "websocket_loopback" and has_remote_url:
+        return "websocket_loopback transport only accepts loopback base_url/websocket_url values."
+    if transport == "websocket_remote" and has_loopback_url:
+        return "websocket_remote transport only accepts non-loopback base_url/websocket_url values."
+    return ""
+
+
 def _normalize_path(value: Any) -> str:
     return str(value or "").strip()
 
@@ -223,6 +245,8 @@ def _config_is_loopback(config: dict[str, Any]) -> bool:
 def _config_is_configured(config: dict[str, Any]) -> bool:
     if not config.get("enabled") or config.get("transport") == "off":
         return False
+    if _transport_url_mismatch_reason(config):
+        return False
     transport = str(config.get("transport") or "off")
     if transport == "stdio":
         return True
@@ -251,6 +275,8 @@ def codex_app_server_auth_headers(
 def build_codex_app_server_command(config: dict[str, Any]) -> list[str]:
     normalized = _normalize_config(config if isinstance(config, dict) else {})
     if not normalized.get("enabled") or normalized.get("transport") == "off":
+        return []
+    if _transport_url_mismatch_reason(normalized):
         return []
     transport = str(normalized.get("transport") or "off")
     if transport == "stdio":
@@ -305,19 +331,35 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     auth_required = _endpoint_requires_auth(config)
     auth = _codex_app_server_auth(config, pack_root=pack_root)
     auth_configured = bool(auth.get("value"))
-    blocked_reason = (
+    transport_url_mismatch_reason = _transport_url_mismatch_reason(config)
+    auth_blocked_reason = (
         "Configure a Codex App Server WS token or shared secret before using a non-loopback endpoint."
         if auth_required and not auth_configured
         else ""
     )
+    blocked_reason = transport_url_mismatch_reason or auth_blocked_reason
+    if transport_url_mismatch_reason:
+        connection_status = "transport_url_mismatch"
+        status_label = "Transport mismatch"
+    elif auth_blocked_reason:
+        connection_status = "blocked_auth_required"
+        status_label = "Auth required"
+    elif configured:
+        connection_status = "configured"
+        status_label = "Configured"
+    else:
+        connection_status = "not_configured"
+        status_label = "Not configured"
     return {
         "provider_id": "codex",
         "configured": configured,
         "enabled": bool(config.get("enabled")),
         "transport": str(config.get("transport") or "off"),
-        "connection_status": "blocked_auth_required" if blocked_reason else "configured" if configured else "not_configured",
-        "status_label": "Auth required" if blocked_reason else "Configured" if configured else "Not configured",
+        "connection_status": connection_status,
+        "status_label": status_label,
         "blocked_reason": blocked_reason,
+        "transport_url_mismatch": bool(transport_url_mismatch_reason),
+        "transport_url_mismatch_reason": transport_url_mismatch_reason,
         "base_url": base_url,
         "websocket_url": websocket_url,
         "unix_socket_path": str(config.get("unix_socket_path") or ""),
@@ -331,11 +373,19 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "command": build_codex_app_server_command(config),
         "tool_source": {
             "enabled": bool(config.get("tool_source_enabled")),
-            "status": "blocked_auth_required" if blocked_reason else "configured" if config.get("tool_source_enabled") and configured else "disabled",
+            "status": connection_status
+            if connection_status in {"blocked_auth_required", "transport_url_mismatch"}
+            else "configured"
+            if config.get("tool_source_enabled") and configured
+            else "disabled",
         },
         "automation_endpoint": {
             "enabled": bool(config.get("automation_endpoint_enabled")),
-            "status": "blocked_auth_required" if blocked_reason else "configured" if config.get("automation_endpoint_enabled") and configured else "disabled",
+            "status": connection_status
+            if connection_status in {"blocked_auth_required", "transport_url_mismatch"}
+            else "configured"
+            if config.get("automation_endpoint_enabled") and configured
+            else "disabled",
         },
         "probe": {"status": "not_run"},
     }
@@ -343,7 +393,9 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
 
 def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.0) -> dict[str, Any]:
     status = codex_app_server_status(pack_root=pack_root)
-    if status.get("blocked_reason"):
+    if status.get("connection_status") == "transport_url_mismatch":
+        return {"success": False, "provider_id": "codex", "probe": {"status": "transport_url_mismatch"}}
+    if status.get("connection_status") == "blocked_auth_required":
         return {"success": False, "provider_id": "codex", "probe": {"status": "blocked_auth_required"}}
     base_url = str(status.get("base_url") or "").rstrip("/")
     if not base_url:

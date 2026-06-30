@@ -3153,10 +3153,20 @@ export function SettingsModalRenderer({
   const saveCodexAppServer = async () => {
     try {
       setConnectionBusy("codex_app_server:save");
-      await settingsApiResources.saveCodexAppServerConfig(codexAppServerDraft);
+      const result = await settingsApiResources.saveCodexAppServerConfig(codexAppServerDraft);
+      const appServerStatus = String(result.app_server?.connection_status || "");
+      const appServerBlockedReason = String(result.app_server?.blocked_reason || "");
+      const appServerMessage = appServerStatus === "transport_url_mismatch"
+        ? appServerBlockedReason || "Codex App Server config saved, but transport and URL do not match."
+        : appServerStatus === "blocked_auth_required"
+          ? appServerBlockedReason || "Codex App Server config saved, but App Server auth is required."
+          : "Codex App Server config saved.";
       setConnectionMessages((current) => ({
         ...current,
-        codex_app_server: { tone: "success", text: "Codex App Server config saved." },
+        codex_app_server: {
+          tone: appServerStatus === "transport_url_mismatch" || appServerStatus === "blocked_auth_required" ? "error" : "success",
+          text: appServerMessage,
+        },
       }));
       refreshConnectionStatus("codex");
     } catch (errorValue) {

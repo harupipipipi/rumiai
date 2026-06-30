@@ -112,6 +112,72 @@ def test_codex_app_server_remote_endpoint_requires_app_server_auth_not_codex_tok
     assert app_secret not in _text(status)
 
 
+def test_codex_app_server_rejects_transport_url_mismatch_even_with_app_server_auth():
+    from domain.codex.app_server import (
+        build_codex_app_server_command,
+        codex_app_server_probe,
+        codex_app_server_status,
+        save_codex_app_server_config,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        secrets_dir = pack_root / "user_data" / "secrets"
+        app_secret = _fresh_token()
+        env = {
+            "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+            "RUMI_CODEX_ACCESS_TOKEN": "",
+            "CODEX_ACCESS_TOKEN": "",
+            "RUMI_CODEX_APP_SERVER_WS_TOKEN": app_secret,
+            "RUMI_CODEX_APP_SERVER_SHARED_SECRET": "",
+        }
+        config = {
+            "enabled": True,
+            "transport": "websocket_loopback",
+            "base_url": "https://codex-app.example.test",
+            "websocket_url": "wss://codex-app.example.test/ws",
+            "tool_source_enabled": True,
+            "automation_endpoint_enabled": True,
+        }
+        with patch.dict(os.environ, env, clear=False):
+            saved = save_codex_app_server_config(config, pack_root=pack_root)
+            status = codex_app_server_status(pack_root=pack_root)
+            probe = codex_app_server_probe(pack_root=pack_root)
+            remote_saved = save_codex_app_server_config(
+                {
+                    "enabled": True,
+                    "transport": "websocket_remote",
+                    "base_url": "http://127.0.0.1:7331",
+                    "websocket_url": "ws://127.0.0.1:7331/ws",
+                    "tool_source_enabled": True,
+                },
+                pack_root=pack_root,
+            )
+            remote_status = codex_app_server_status(pack_root=pack_root)
+
+    assert build_codex_app_server_command(config) == []
+    assert saved["success"] is True
+    assert saved["app_server"]["connection_status"] == "transport_url_mismatch"
+    assert status["configured"] is False
+    assert status["connection_status"] == "transport_url_mismatch"
+    assert status["status_label"] == "Transport mismatch"
+    assert status["transport_url_mismatch"] is True
+    assert "loopback" in status["blocked_reason"]
+    assert status["auth_required"] is True
+    assert status["auth_configured"] is True
+    assert status["command"] == []
+    assert status["tool_source"]["status"] == "transport_url_mismatch"
+    assert status["automation_endpoint"]["status"] == "transport_url_mismatch"
+    assert probe["probe"]["status"] == "transport_url_mismatch"
+    assert app_secret not in _text(saved)
+    assert app_secret not in _text(status)
+    assert app_secret not in _text(probe)
+    assert remote_saved["app_server"]["connection_status"] == "transport_url_mismatch"
+    assert remote_status["configured"] is False
+    assert remote_status["connection_status"] == "transport_url_mismatch"
+    assert "non-loopback" in remote_status["blocked_reason"]
+
+
 def test_codex_app_server_probe_never_uses_codex_access_token_for_app_server_auth():
     from domain.codex.app_server import codex_app_server_probe, save_codex_app_server_config
     from domain.codex.connection_store import save_codex_access_token
