@@ -733,6 +733,7 @@ class MimoCodingCompanyRuntime:
                     "tool_allowlist": ["rumi_api"],
                     "schedule_auto_approve_tool_allowlist": [
                         "rumi_api:list_routes",
+                        "GET /api/agent/mimo-company/manifest",
                         "GET /api/agent/mimo-company/status",
                         "GET /api/company/mimo-coding-company/channels",
                         "GET /api/company/mimo-coding-company/messages",
@@ -2799,6 +2800,7 @@ class MimoCodingCompanyRuntime:
             "schedule_auto_approve_tool_requests": True,
             "schedule_auto_approve_tool_allowlist": [
                 "rumi_api:list_routes",
+                "GET /api/agent/mimo-company/manifest",
                 "GET /api/agent/mimo-company/status",
                 "GET /api/agent/self-improvement/status",
                 "GET /api/agent/multi/status",

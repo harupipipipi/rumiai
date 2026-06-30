@@ -238,6 +238,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "web_search" not in heartbeat_allowlist
     heartbeat_auto_approve = set(heartbeat_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "rumi_api:list_routes" in heartbeat_auto_approve
+    assert "GET /api/agent/mimo-company/manifest" in heartbeat_auto_approve
     assert "GET /api/agent/mimo-company/status" in heartbeat_auto_approve
     assert "GET /api/company/mimo-coding-company/channels" in heartbeat_auto_approve
     assert "GET /api/company/mimo-coding-company/messages" in heartbeat_auto_approve
@@ -264,6 +265,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "rumi_api" not in auto_approve_allowlist
     assert {
         "rumi_api:list_routes",
+        "GET /api/agent/mimo-company/manifest",
         "GET /api/agent/mimo-company/status",
         "GET /api/agent/self-improvement/status",
         "GET /api/agent/multi/status",
