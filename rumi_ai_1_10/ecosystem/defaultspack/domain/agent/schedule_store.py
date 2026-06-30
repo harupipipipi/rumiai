@@ -7,10 +7,13 @@ Each schedule is stored as {schedule_id}.json.
 Execution history is stored as {schedule_id}_history.json.
 """
 
+import errno
 import json
 import math
 import os
+import tempfile
 import threading
+import time
 
 
 _SCHEDULES_DIR = os.path.join("user_data", "shared", "schedules")
@@ -65,12 +68,54 @@ def _json_safe(value):
     return _sanitize_json_text(str(value))
 
 
+def _is_transient_replace_error(exc):
+    winerror = getattr(exc, "winerror", None)
+    errno_value = getattr(exc, "errno", None)
+    if isinstance(exc, PermissionError):
+        return True
+    if winerror in {5, 32}:
+        return True
+    if errno_value in {errno.EACCES, errno.EBUSY, errno.EPERM}:
+        return True
+    message = str(exc).lower()
+    return "access is denied" in message or "permission denied" in message
+
+
+def _replace_atomic_file(tmp_path, path):
+    last_error = None
+    for attempt in range(8):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except OSError as exc:
+            last_error = exc
+            if not _is_transient_replace_error(exc) or attempt >= 7:
+                break
+            time.sleep(min(0.05 * (2 ** attempt), 0.5))
+    raise last_error
+
+
 def _write_json_atomic(path, data):
-    tmp_path = path + ".tmp"
+    parent_dir = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(parent_dir, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        dir=parent_dir,
+        prefix="." + os.path.basename(path) + ".",
+        suffix=".tmp",
+    )
     safe_data = _json_safe(data)
-    with open(tmp_path, "w", encoding="utf-8") as f:
-        json.dump(safe_data, f, ensure_ascii=False, indent=2, allow_nan=False)
-    os.replace(tmp_path, path)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(safe_data, f, ensure_ascii=False, indent=2, allow_nan=False)
+            f.flush()
+            os.fsync(f.fileno())
+        _replace_atomic_file(tmp_path, path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def _skip_json_whitespace(text, index):
