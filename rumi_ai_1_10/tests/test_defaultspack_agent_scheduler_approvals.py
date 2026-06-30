@@ -1546,6 +1546,176 @@ def test_scheduled_conversation_lock_contention_skips_quickly_without_count_spam
         _reset_scheduler_singleton()
 
 
+def test_scheduled_execution_releases_orphaned_conversation_lock_when_running_cleared(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    calls: list[dict] = []
+
+    def fake_send_chat(payload, context):
+        del context
+        calls.append(payload)
+        return {
+            "status": "ok",
+            "data": {
+                "id": "assistant-final",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "orphan recovered"}],
+                "finish_reason": "stop",
+                "metadata": {},
+            },
+        }
+
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {
+            "message": "scheduled heartbeat",
+            "conversation_id": "conv-orphan",
+            "timeout": 600,
+            "tool_policy": {"schedule_conversation_lock_wait_seconds": 0.01},
+        },
+        {"value": 30, "unit": "minutes"},
+    )
+    old_execution_id = "sexec-orphaned-holder"
+    old_cancel_event = threading.Event()
+    conversation_lock = scheduler._conversation_execution_lock("conv-orphan")
+    assert conversation_lock is not None
+    assert conversation_lock.acquire(blocking=False)
+    with scheduler._lock:
+        scheduler._active_execution_ids.add(old_execution_id)
+    scheduler._set_conversation_lock_holder(
+        "conv-orphan",
+        schedule_id=schedule["id"],
+        execution_id=old_execution_id,
+        started_at="2026-06-30T00:00:00Z",
+        timeout_seconds=2592000,
+        trigger="scheduled",
+        cancel_event=old_cancel_event,
+        orphan_releasable=True,
+    )
+
+    try:
+        history = scheduler._execute_task(schedule["id"], manual=False)
+
+        assert old_cancel_event.is_set()
+        assert history["status"] == "completed"
+        assert history["result"] == "orphan recovered"
+        assert len(calls) == 1
+        assert calls[0]["message"]["content"] == "scheduled heartbeat"
+
+        saved = load_schedule(schedule["id"])
+        assert "running_execution" not in saved
+        assert "running_started_at" not in saved
+        assert saved["execution_count"] == 1
+        entries, total = load_history(schedule["id"])
+        assert total == 1
+        assert entries[0]["status"] == "completed"
+        with scheduler._lock:
+            assert "conv-orphan" not in scheduler._conversation_lock_holders
+    finally:
+        with scheduler._lock:
+            scheduler._active_execution_ids.discard(old_execution_id)
+            scheduler._stale_recovered_execution_ids.discard(old_execution_id)
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
+def test_orphan_recovery_keeps_matching_active_conversation_lock(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_schedule, save_schedule
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "interval",
+        {"message": "scheduled heartbeat", "conversation_id": "conv-active", "timeout": 600},
+        {"value": 30, "unit": "minutes"},
+    )
+    active_execution_id = "sexec-active-holder"
+    started_at = scheduler_module.timestamp()
+    persisted = load_schedule(schedule["id"])
+    persisted["running_execution"] = {
+        "execution_id": active_execution_id,
+        "schedule_id": schedule["id"],
+        "started_at": started_at,
+        "trigger": "scheduled",
+        "timeout_seconds": 600,
+    }
+    persisted["running_started_at"] = started_at
+    save_schedule(persisted)
+    with scheduler._lock:
+        scheduler._schedules[schedule["id"]] = persisted
+        scheduler._active_execution_ids.add(active_execution_id)
+    conversation_lock = scheduler._conversation_execution_lock("conv-active")
+    assert conversation_lock is not None
+    assert conversation_lock.acquire(blocking=False)
+    scheduler._set_conversation_lock_holder(
+        "conv-active",
+        schedule_id=schedule["id"],
+        execution_id=active_execution_id,
+        started_at=started_at,
+        timeout_seconds=600,
+        trigger="scheduled",
+        cancel_event=threading.Event(),
+        orphan_releasable=True,
+    )
+
+    try:
+        assert scheduler._release_orphaned_conversation_lock("conv-active") is False
+        assert conversation_lock.acquire(blocking=False) is False
+    finally:
+        scheduler._release_conversation_execution_lock("conv-active", conversation_lock, active_execution_id)
+        with scheduler._lock:
+            scheduler._active_execution_ids.discard(active_execution_id)
+            scheduler._stale_recovered_execution_ids.discard(active_execution_id)
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+
+
 def test_timer_skips_active_running_execution_without_overwriting_or_chat_send(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()

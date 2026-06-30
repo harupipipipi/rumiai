@@ -1048,6 +1048,7 @@ class Scheduler:
         self._timers = {}        # schedule_id -> threading.Timer
         self._schedules = {}     # schedule_id -> schedule dict (in-memory cache)
         self._conversation_locks = {}  # conversation_id -> threading.Lock
+        self._conversation_lock_holders = {}  # conversation_id -> in-process holder metadata
         self._active_execution_ids = set()
         self._stale_recovered_execution_ids = set()
         self._loaded = False
@@ -1066,6 +1067,7 @@ class Scheduler:
                 self._timers.clear()
                 self._schedules.clear()
                 self._stale_recovered_execution_ids.clear()
+                self._conversation_lock_holders.clear()
                 self._loaded = False
                 self._loaded_schedules_dir = schedules_dir
             if not self._loaded:
@@ -1357,6 +1359,16 @@ class Scheduler:
         params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
         deadline = time.monotonic() + timeout_seconds
         cancel_event = threading.Event()
+        self._set_conversation_lock_holder(
+            conversation_id,
+            schedule_id=schedule_id,
+            execution_id=recovered_exec_id,
+            started_at=started_at,
+            timeout_seconds=timeout_seconds,
+            trigger="approval_recovery",
+            cancel_event=cancel_event,
+            orphan_releasable=False,
+        )
         auto_approvals: list[dict[str, Any]] = []
         result = current["result"]
         history_entry = {
@@ -1431,7 +1443,7 @@ class Scheduler:
             if isinstance(exc, _SchedulerTaskTimedOut):
                 history_entry["timeout_seconds"] = exc.timeout_seconds
         finally:
-            conversation_lock.release()
+            self._release_conversation_execution_lock(conversation_id, conversation_lock, recovered_exec_id)
 
         if auto_approvals:
             history_entry["auto_approvals"] = auto_approvals
@@ -1808,6 +1820,123 @@ class Scheduler:
                 self._conversation_locks[key] = lock
             return lock
 
+    def _set_conversation_lock_holder(
+        self,
+        conversation_id,
+        *,
+        schedule_id,
+        execution_id,
+        started_at,
+        timeout_seconds,
+        trigger,
+        cancel_event=None,
+        orphan_releasable=False,
+    ):
+        key = str(conversation_id or "").strip()
+        if not key:
+            return None
+        holder = {
+            "conversation_id": key,
+            "schedule_id": str(schedule_id or "").strip(),
+            "execution_id": str(execution_id or "").strip(),
+            "started_at": started_at,
+            "timeout_seconds": timeout_seconds,
+            "trigger": str(trigger or "").strip(),
+            "cancel_event": cancel_event,
+            "orphan_releasable": bool(orphan_releasable),
+            "holder_marked_at": timestamp(),
+        }
+        with self._lock:
+            self._conversation_lock_holders[key] = holder
+        return holder
+
+    def _release_conversation_execution_lock(self, conversation_id, conversation_lock, execution_id):
+        key = str(conversation_id or "").strip()
+        execution_id = str(execution_id or "").strip()
+        should_release = False
+        if key:
+            with self._lock:
+                holder = self._conversation_lock_holders.get(key)
+                holder_execution_id = str(holder.get("execution_id") or "").strip() if isinstance(holder, dict) else ""
+                if holder_execution_id == execution_id:
+                    self._conversation_lock_holders.pop(key, None)
+                    should_release = True
+        if not should_release:
+            return False
+        try:
+            conversation_lock.release()
+            return True
+        except RuntimeError:
+            return False
+
+    def _conversation_lock_orphan_reason(self, holder):
+        if not isinstance(holder, dict) or not holder.get("orphan_releasable"):
+            return None
+        schedule_id = str(holder.get("schedule_id") or "").strip()
+        holder_execution_id = str(holder.get("execution_id") or "").strip()
+        if not schedule_id or not holder_execution_id:
+            return None
+        try:
+            persisted = load_schedule(schedule_id)
+        except Exception:
+            return None
+        with self._lock:
+            if persisted is None:
+                self._schedules.pop(schedule_id, None)
+            else:
+                self._schedules[schedule_id] = persisted
+        if persisted is None:
+            return "schedule_missing"
+        running = _running_execution_details(persisted)
+        if running is None:
+            return "running_execution_missing"
+        running_execution_id = str(running.get("execution_id") or "").strip()
+        if not running_execution_id or running_execution_id != holder_execution_id:
+            return "running_execution_changed"
+        if _recoverable_running_execution(persisted) is not None:
+            return "running_execution_recoverable"
+        return None
+
+    def _release_orphaned_conversation_lock(self, conversation_id):
+        key = str(conversation_id or "").strip()
+        if not key:
+            return False
+        with self._lock:
+            holder = self._conversation_lock_holders.get(key)
+            conversation_lock = self._conversation_locks.get(key)
+        if not isinstance(holder, dict) or conversation_lock is None:
+            return False
+        reason = self._conversation_lock_orphan_reason(holder)
+        if not reason:
+            return False
+        schedule_id = str(holder.get("schedule_id") or "").strip()
+        execution_id = str(holder.get("execution_id") or "").strip()
+        if reason == "running_execution_recoverable" and schedule_id:
+            self._recover_stale_running_execution(schedule_id)
+        cancel_event = holder.get("cancel_event")
+        if hasattr(cancel_event, "set"):
+            try:
+                cancel_event.set()
+            except Exception:
+                pass
+        should_release = False
+        with self._lock:
+            current = self._conversation_lock_holders.get(key)
+            current_execution_id = str(current.get("execution_id") or "").strip() if isinstance(current, dict) else ""
+            current_schedule_id = str(current.get("schedule_id") or "").strip() if isinstance(current, dict) else ""
+            if current_execution_id == execution_id and current_schedule_id == schedule_id:
+                self._conversation_lock_holders.pop(key, None)
+                if execution_id in self._active_execution_ids:
+                    self._stale_recovered_execution_ids.add(execution_id)
+                should_release = True
+        if not should_release:
+            return False
+        try:
+            conversation_lock.release()
+            return True
+        except RuntimeError:
+            return False
+
     def _on_timer_fire(self, schedule_id):
         """Called when a timer fires. Execute the task and re-arm."""
         self._recover_stale_running_execution(schedule_id)
@@ -1872,6 +2001,7 @@ class Scheduler:
                 conversation_lock = self._conversation_execution_lock(conversation_id)
                 if conversation_lock is None:
                     raise ValueError("task.conversation_id cannot be blank")
+                self._release_orphaned_conversation_lock(conversation_id)
                 if manual:
                     acquired = conversation_lock.acquire(blocking=False)
                 else:
@@ -1880,6 +2010,8 @@ class Scheduler:
                         _remaining_timeout_seconds(deadline),
                     )
                     acquired = conversation_lock.acquire(timeout=_wait_timeout_seconds(lock_timeout))
+                if not acquired and self._release_orphaned_conversation_lock(conversation_id):
+                    acquired = conversation_lock.acquire(blocking=False)
                 if not acquired:
                     cancel_event.set()
                     if manual:
@@ -1891,7 +2023,27 @@ class Scheduler:
                     history_finalized = True
                     return history_entry
                 conversation_lock_acquired = True
+                self._set_conversation_lock_holder(
+                    conversation_id,
+                    schedule_id=schedule_id,
+                    execution_id=exec_id,
+                    started_at=started_at,
+                    timeout_seconds=timeout_seconds,
+                    trigger=trigger,
+                    cancel_event=cancel_event,
+                    orphan_releasable=False,
+                )
                 self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
+                self._set_conversation_lock_holder(
+                    conversation_id,
+                    schedule_id=schedule_id,
+                    execution_id=exec_id,
+                    started_at=started_at,
+                    timeout_seconds=timeout_seconds,
+                    trigger=trigger,
+                    cancel_event=cancel_event,
+                    orphan_releasable=True,
+                )
                 try:
                     from blocks.chat.send import run as chat_send_run
 
@@ -1933,7 +2085,7 @@ class Scheduler:
                         cancel_event=cancel_event,
                     )
                 finally:
-                    conversation_lock.release()
+                    self._release_conversation_execution_lock(conversation_id, conversation_lock, exec_id)
                     conversation_lock_acquired = False
             else:
                 self._mark_schedule_running(schedule_id, exec_id, started_at, trigger, timeout_seconds)
@@ -2016,10 +2168,7 @@ class Scheduler:
                     history_entry["assistant_error_message_id"] = stored_error.get("id")
         finally:
             if conversation_lock_acquired and conversation_lock is not None:
-                try:
-                    conversation_lock.release()
-                except RuntimeError:
-                    pass
+                self._release_conversation_execution_lock(conversation_id, conversation_lock, exec_id)
 
             try:
                 with self._lock:
