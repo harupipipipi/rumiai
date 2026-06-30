@@ -245,6 +245,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert "one small, useful, testable change" in improvement_schedule["task"]["message"]
     assert "Keep repo discovery narrow" in improvement_schedule["task"]["message"]
+    assert "create a draft PR with coding_github_pr_create" in improvement_schedule["task"]["message"]
     assert "Do not create GitHub issues for scheduler bookkeeping noise" in qa_schedule["task"]["message"]
     assert "provider billing/credits/auth failures" in qa_schedule["task"]["message"]
     assert "CreditsError" in qa_schedule["task"]["message"]
@@ -273,13 +274,36 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         "desktop_create",
         "desktop_frame",
         "desktop_input",
+        "coding_file_read",
+        "coding_file_search",
+        "coding_file_list",
+        "coding_file_write",
+        "coding_file_create",
+        "coding_file_patch",
+        "coding_file_restore",
+        "coding_git_status",
+        "coding_git_diff",
+        "coding_git_commit",
+        "coding_git_push",
+        "coding_github_pr_create",
+        "coding_terminal_exec",
     } <= auto_approve_allowlist
     assert "managed desktop" in qa_schedule["task"]["message"]
     assert (tmp_path / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").is_file()
     assert not (tmp_path / "ops_pack" / "user_data" / "shared" / "schedules" / f"{qa_schedule['id']}.json").exists()
     browser_qa_role = next(role for role in status["manifest"]["roles"] if role["agent_id"] == "browser_qa")
     assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(browser_qa_role["allowed_tools"])
-    assert {"desktop_list", "desktop_create", "desktop_frame", "desktop_input"} <= set(status["manifest"]["tool_policy"]["allowlist"])
+    coding_engineer_role = next(role for role in status["manifest"]["roles"] if role["agent_id"] == "coding_engineer")
+    assert {"coding_git_commit", "coding_git_push", "coding_github_pr_create"} <= set(coding_engineer_role["allowed_tools"])
+    assert {
+        "desktop_list",
+        "desktop_create",
+        "desktop_frame",
+        "desktop_input",
+        "coding_git_commit",
+        "coding_git_push",
+        "coding_github_pr_create",
+    } <= set(status["manifest"]["tool_policy"]["allowlist"])
     assert status["harness"]["qa_swarm_plan"]["managed_desktop_fallback"]["tools"] == [
         "desktop_list",
         "desktop_create",

@@ -34,6 +34,7 @@ SELF_IMPROVEMENT_TOOLS = [
     "coding_git_diff",
     "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
     "coding_terminal_exec",
     "rumi_api",
     "todo",

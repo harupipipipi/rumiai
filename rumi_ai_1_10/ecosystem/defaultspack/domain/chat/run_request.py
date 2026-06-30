@@ -121,6 +121,7 @@ _CODING_PR_TOOL_IDS = [
     "coding_git_diff",
     "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
 ]
 _AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
     {"model.invoke", "api_key.use", "network.egress"}

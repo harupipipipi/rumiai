@@ -251,7 +251,9 @@ TOOL_ALLOWLIST = [
     "coding_file_restore",
     "coding_git_status",
     "coding_git_diff",
+    "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
     "coding_terminal_exec",
     "sandbox_exec",
     "python_exec",
@@ -301,7 +303,9 @@ ROLE_DEFINITIONS = [
             "coding_file_patch",
             "coding_git_status",
             "coding_git_diff",
+            "coding_git_commit",
             "coding_git_push",
+            "coding_github_pr_create",
             "coding_terminal_exec",
             "sandbox_exec",
             "python_exec",
@@ -2570,6 +2574,19 @@ class MimoCodingCompanyRuntime:
                 "desktop_create",
                 "desktop_frame",
                 "desktop_input",
+                "coding_file_read",
+                "coding_file_search",
+                "coding_file_list",
+                "coding_file_write",
+                "coding_file_create",
+                "coding_file_patch",
+                "coding_file_restore",
+                "coding_git_status",
+                "coding_git_diff",
+                "coding_git_commit",
+                "coding_git_push",
+                "coding_github_pr_create",
+                "coding_terminal_exec",
             ],
             "schedule_auto_approve_max_followups": "unlimited",
             "schedule_auto_approve_expires_in_seconds": 24 * 60 * 60,
@@ -3127,7 +3144,7 @@ class MimoCodingCompanyRuntime:
             + main_model
             + " as the main reasoning model. Keep repo discovery narrow, prefer focused defaults/tests/tooling fixes, and avoid broad refactors. "
             "If the best next step needs a new tool or skill, create the smallest viable version instead of stopping. "
-            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change with focused tests, then capture what changed in knowledge. "
+            "Convert browser/computer QA findings into fix tasks or patches rather than issue-only reports. Land one verified change with focused tests, push the branch, create a draft PR with coding_github_pr_create, then capture what changed in knowledge. "
             + self._scheduler_noise_prompt()
         )
 
