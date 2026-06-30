@@ -6,7 +6,9 @@
   "input_schema": {
     "type": "object",
     "properties": {
-      "path": {"type": "string"}
+      "path": {"type": "string"},
+      "max_chars": {"type": "integer", "minimum": 1},
+      "max_tokens": {"type": "integer", "minimum": 1}
     },
     "required": ["path"]
   }

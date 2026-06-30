@@ -1,21 +1,88 @@
 from __future__ import annotations
 
-import base64
 import json
-import struct
+from collections.abc import Callable
 
 from ecosystem.defaultspack.backend.sandbox.gui_sandbox import GUISandbox
-from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
+from ecosystem.defaultspack.backend.sandbox.models import ProviderInstance, ReconcileResult
+from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
+from ecosystem.defaultspack.backend.sandbox.sandbox_manager import (
+    SANDBOX_MAX_CPU_COUNT,
+    SANDBOX_MAX_MEMORY_MB,
+    SANDBOX_MAX_OUTPUT_BYTES,
+    SANDBOX_MAX_PIDS,
+    SANDBOX_MAX_TIMEOUT_MS,
+    SandboxManager,
+)
+from ecosystem.defaultspack.backend.sandbox.testing.fake_guest_agent import FakeGuestAgent
+from ecosystem.defaultspack.backend.sandbox.testing.fake_provider import FakeRuntimeProvider
+from ecosystem.defaultspack.backend.sandbox.errors import SandboxContractError
+from ecosystem.defaultspack.domain.coding.workspace_store import WorkspaceStore
 
 
-def _decode_data_uri(data_uri: str) -> bytes:
-    prefix = "data:image/png;base64,"
-    assert data_uri.startswith(prefix)
-    return base64.b64decode(data_uri.removeprefix(prefix), validate=True)
+def _registry(
+    *,
+    capabilities: set[str] | None = None,
+    ready: bool = True,
+    sandbox_id_factory: Callable[[], str] | None = None,
+) -> ProviderRegistry:
+    registry = ProviderRegistry()
+    registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities
+            or {
+                "sandbox.exec",
+                "sandbox.files",
+                "sandbox.resource_limits",
+                "sandbox.network_policy",
+                "sandbox.desktop",
+                "sandbox.desktop_input",
+                "sandbox.snapshot",
+            },
+            ready=ready,
+            sandbox_id_factory=sandbox_id_factory,
+        )
+    )
+    return registry
+
+
+def _manager(
+    tmp_path,
+    *,
+    capabilities: set[str] | None = None,
+    ready: bool = True,
+    gui_backend=None,
+    sandbox_id_factory: Callable[[], str] | None = None,
+) -> SandboxManager:
+    return SandboxManager(
+        state_dir=tmp_path,
+        gui_backend=gui_backend,
+        provider_registry=_registry(capabilities=capabilities, ready=ready, sandbox_id_factory=sandbox_id_factory),
+    )
+
+
+def _trusted_workspace(tmp_path, monkeypatch, *, workspace_id: str = "workspace-1"):
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CODING_WORKSPACE_STORE_PATH", str(tmp_path / "workspaces.json"))
+    root = tmp_path / "workspace"
+    root.mkdir(exist_ok=True)
+    WorkspaceStore().create(root, workspace_id=workspace_id, trusted=True)
+    return root
+
+
+def test_sandbox_create_fails_closed_without_registered_provider(tmp_path):
+    manager = SandboxManager(state_dir=tmp_path)
+
+    created = manager.create(display=False)
+
+    assert created["ok"] is False
+    assert created["status_code"] == 503
+    assert created["code"] == "RUNTIME_PROVIDER_UNAVAILABLE"
+    assert "No registered runtime provider" in created["error"]
 
 
 def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
 
     created = manager.create(image="ubuntu:24.04", display=False)
 
@@ -26,13 +93,16 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
     registry_path = tmp_path / "sandboxes.json"
     assert registry_path.is_file()
 
-    reloaded = SandboxManager(state_dir=tmp_path)
+    reloaded = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
     status = reloaded.status(sandbox_id)
     assert status["ok"] is True
     assert status["sandbox_id"] == sandbox_id
     assert status["image"] == "ubuntu:24.04"
     assert status["display"] is False
     assert status["status"] == "ready"
+    assert status["state"] == "ready"
+    assert status["provider_id"] == "fake-runtime"
+    assert status["template_id"] == "tool.ephemeral"
 
     destroyed = reloaded.destroy(sandbox_id)
     assert destroyed == {
@@ -40,41 +110,813 @@ def test_sandbox_registry_persists_instances_and_lifecycle(tmp_path):
         "destroyed": True,
         "sandbox_id": sandbox_id,
         "status": "destroyed",
+        "state": "destroyed",
     }
 
-    lifecycle = SandboxManager(state_dir=tmp_path).status(sandbox_id)
+    lifecycle = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files"}).status(sandbox_id)
     assert lifecycle["status"] == "destroyed"
     assert lifecycle["destroyed_at"] is not None
     assert lifecycle["updated_at"] >= lifecycle["created_at"]
 
 
-def test_sandbox_screenshot_returns_deterministic_valid_png_data_uri(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
-    sandbox_id = manager.create()["sandbox_id"]
+def test_sandbox_registry_reconciles_missing_runtime_session_to_stopped(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 3,
+                "instances": {
+                    "seat-1": {
+                        "sandbox_id": "seat-1",
+                        "name": "Desktop",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-1",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "desktop_spec": {"enabled": True, "width": 800, "height": 600},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
-    first = manager.screenshot(sandbox_id)
-    second = manager.screenshot(sandbox_id)
+    class ReconcileStoppedProvider(FakeRuntimeProvider):
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            return ReconcileResult(
+                instance=ProviderInstance(
+                    provider_id=persisted.provider_id,
+                    provider_instance_id=persisted.provider_instance_id,
+                    sandbox_id=persisted.sandbox_id,
+                    runtime_id=persisted.runtime_id,
+                    state="stopped",
+                    opaque_state=persisted.opaque_state,
+                    generation=persisted.generation,
+                ),
+                changed=True,
+            )
 
-    assert first["ok"] is True
-    assert first["source"] == "local_fallback"
-    assert first["gui_backend"] is False
-    assert first["format"] == "png"
-    assert first["mime_type"] == "image/png"
-    assert first["screenshot"] == first["data_uri"]
-    assert first["screenshot"] == second["screenshot"]
-    assert first["base64"] == second["base64"]
-    assert first["base64"] != "base64_placeholder"
+    registry = ProviderRegistry()
+    registry.register(ReconcileStoppedProvider(provider_id="fake-runtime"))
 
-    raw = _decode_data_uri(first["data_uri"])
-    assert raw == base64.b64decode(first["base64"], validate=True)
-    assert raw.startswith(b"\x89PNG\r\n\x1a\n")
-    assert raw[12:16] == b"IHDR"
-    width, height = struct.unpack("!II", raw[16:24])
-    assert (width, height) == (2, 2)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-1")
+    persisted = json.loads(registry_path.read_text(encoding="utf-8"))
+
+    assert status["status"] == "stopped"
+    assert status["stopped_at"] is not None
+    assert "startup reconcile" in status["last_error"]
+    assert persisted["instances"]["seat-1"]["state"] == "stopped"
+
+
+def test_sandbox_create_rolls_back_provider_instance_when_start_fails(tmp_path):
+    class StartFailProvider(FakeRuntimeProvider):
+        def start(self, instance: ProviderInstance) -> ProviderInstance:
+            raise SandboxContractError("FAKE_START_FAILED", "start failed", status_code=503)
+
+    provider = StartFailProvider(
+        provider_id="fake-runtime",
+        capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"},
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="tool.ephemeral")
+
+    assert created["ok"] is False
+    assert created["code"] == "FAKE_START_FAILED"
+    assert provider.instances == {}
+    assert manager.list_instances() == []
+
+
+def test_sandbox_unknown_template_is_rejected(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="missing.template")
+
+    assert created["ok"] is False
+    assert created["code"] == "SANDBOX_TEMPLATE_NOT_FOUND"
+
+
+def test_sandbox_create_rejects_endpoint_template_kind_mismatch(tmp_path):
+    manager = _manager(tmp_path)
+
+    desktop_template_on_sandbox_endpoint = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="desktop.coding",
+    )
+    tool_template_on_desktop_endpoint = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )
+
+    assert desktop_template_on_sandbox_endpoint["ok"] is False
+    assert desktop_template_on_sandbox_endpoint["code"] == "SANDBOX_TEMPLATE_KIND_MISMATCH"
+    assert tool_template_on_desktop_endpoint["ok"] is False
+    assert tool_template_on_desktop_endpoint["code"] == "SANDBOX_TEMPLATE_NOT_DESKTOP"
+
+
+def test_sandbox_template_policy_and_nested_fields_survive_reload(tmp_path, monkeypatch):
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.coding",
+        access_owner_id="local-user",
+        assigned_agent_id="agent-1",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+    )
+    assert created["ok"] is True
+
+    sandbox_id = created["sandbox_id"]
+    status = manager.status(sandbox_id)
+    assert status["template_id"] == "desktop.coding"
+    assert status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert status["secrets_policy"]["mode"] == "explicit_read_only"
+    assert status["secrets_policy"]["approval_required"] is True
+    assert status["filesystem_policy"]["mode"] == "writable_overlay"
+    assert status["filesystem_policy"]["workspace_access"] == "overlay"
+    assert status["resource_limits"]["memory_mb"] == 4096
+    assert status["workspace_binding"]["mode"] == "read_only"
+    assert status["workspace_binding"]["root"] == str(workspace_root)
+    assert status["assigned_agent_id"] == "agent-1"
+    assert "desktop.mcp.install.request" in status["capabilities"]
+
+    reloaded = _manager(tmp_path)
+    reloaded_status = reloaded.status(sandbox_id)
+
+    assert reloaded_status["network_policy"]["mode"] == "project_policy_or_first_use_approval"
+    assert reloaded_status["secrets_policy"]["mode"] == "explicit_read_only"
+    assert reloaded_status["secrets_policy"]["approval_required"] is True
+    assert reloaded_status["filesystem_policy"]["mode"] == "writable_overlay"
+    assert reloaded_status["filesystem_policy"]["workspace_access"] == "overlay"
+    assert reloaded_status["resource_limits"]["timeout_ms"] == 14_400_000
+    assert reloaded_status["desktop_spec"]["width"] == 1440
+    assert reloaded_status["assigned_agent_id"] == "agent-1"
+    assert reloaded_status["lifecycle_policy"]["ttl_seconds"] == 14_400
+    assert reloaded_status["lifecycle_policy"]["destroy_on_exit"] is False
+
+
+def test_desktop_create_spec_carries_user_selected_runtime_context(tmp_path, monkeypatch):
+    workspace_root = _trusted_workspace(tmp_path, monkeypatch)
+    provider = FakeRuntimeProvider(
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "desktop.app.install",
+            "desktop.browser.launch",
+            "desktop.mcp.install.request",
+            "sandbox.network.allowlist",
+        },
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake",
+        template_id="desktop.coding",
+        access_owner_id="local-user",
+        role="browser operator",
+        rules={"rule_ids": ["browser-only"], "instructions": "Open only the requested URL."},
+        assigned_agent_id="agent-1",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+        provisioning={"apps": ["chrome"], "mcp_servers": ["playwright"]},
+        starter="browser_url",
+        browser_url="https://example.com/task",
+    )
+
+    assert created["ok"] is True
+    assert len(provider.create_specs) == 1
+    spec = provider.create_specs[0]
+    assert spec.workspace_binding.workspace_id == "workspace-1"
+    assert spec.workspace_binding.mode == "read_only"
+    assert spec.workspace_binding.root == str(workspace_root)
+    assert spec.metadata["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "https://example.com/task",
+    }
+    assert spec.metadata["desktop_rules"]["role"] == "browser operator"
+    assert spec.metadata["desktop_rules"]["instructions"] == "Open only the requested URL."
+    assert spec.metadata["desktop_provisioning"]["apps"] == ["chrome"]
+    assert spec.metadata["desktop_provisioning"]["mcp_servers"] == ["playwright"]
+    assert spec.metadata["assigned_agent_id"] == "agent-1"
+
+    status = manager.status(created["sandbox_id"])
+    assert status["desktop_spec"]["preset"] == "browser_url"
+    assert status["provider_opaque_state"]["metadata"]["startup"]["browser_url"] == "https://example.com/task"
+    assert status["provider_opaque_state"]["workspace_binding"]["workspace_id"] == "workspace-1"
+
+    reloaded = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    reloaded_status = reloaded.status(created["sandbox_id"])
+    assert reloaded_status["provider_opaque_state"]["metadata"]["desktop_provisioning"]["apps"] == ["chrome"]
+    assert reloaded_status["provider_opaque_state"]["metadata"]["assigned_agent_id"] == "agent-1"
+
+
+def test_desktop_create_uses_template_starter_default_when_request_omits_starter(tmp_path):
+    provider = FakeRuntimeProvider(
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "desktop.browser.launch",
+        },
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake",
+        template_id="desktop.browser",
+        access_owner_id="local-user",
+    )
+
+    assert created["ok"] is True
+    assert provider.create_specs[0].metadata["startup"] == {"starter": "browser"}
+    status = manager.status(created["sandbox_id"])
+    assert status["desktop_spec"]["preset"] == "browser"
+    assert status["provider_opaque_state"]["metadata"]["startup"]["starter"] == "browser"
+
+
+def test_desktop_create_rejects_invalid_browser_url_starter(tmp_path):
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+        starter="browser_url",
+        browser_url="file:///etc/passwd",
+    )
+
+    assert created["ok"] is False
+    assert created["code"] == "DESKTOP_BROWSER_URL_INVALID"
+    assert created["status_code"] == 400
+
+
+def test_sandbox_lifecycle_policy_enforces_idle_stop_or_destroy(tmp_path):
+    manager = _manager(
+        tmp_path,
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    coding = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")
+    assert coding["ok"] is True
+    coding_status = manager.status(coding["sandbox_id"])
+
+    stop_results = manager.enforce_lifecycle(now=float(coding_status["started_at"]) + 14_401)
+
+    assert stop_results[0]["lifecycle_action"] == "stop"
+    assert manager.status(coding["sandbox_id"])["state"] == "stopped"
+
+    desktop_manager = _manager(
+        tmp_path / "desktop",
+        capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+    )
+    desktop = desktop_manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.linux_native",
+        access_owner_id="local-user",
+    )
+    assert desktop["ok"] is True
+    desktop_status = desktop_manager.status(desktop["sandbox_id"])
+
+    destroy_results = desktop_manager.enforce_lifecycle(now=float(desktop_status["started_at"]) + 14_401)
+
+    assert destroy_results[0]["lifecycle_action"] == "destroy"
+    assert desktop_manager.status(desktop["sandbox_id"])["state"] == "destroyed"
+
+
+def test_sandbox_lifecycle_start_stop_restart_uses_provider_state(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+    sandbox_id = manager.create(image="ubuntu:24.04", display=False)["sandbox_id"]
+
+    stopped = manager.stop(sandbox_id)
+    stopped_status = manager.status(sandbox_id)
+    start = manager.start(sandbox_id)
+    restart = manager.restart(sandbox_id)
+
+    assert stopped["ok"] is True
+    assert stopped["state"] == "stopped"
+    assert stopped_status["state"] == "stopped"
+    assert start["ok"] is True
+    assert start["state"] == "ready"
+    assert restart["ok"] is True
+    assert restart["state"] == "ready"
+    assert restart["generation"] > stopped["generation"]
+
+
+def test_sandbox_exec_is_guest_agent_only_and_template_gated(tmp_path):
+    manager = _manager(tmp_path, capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"})
+    sandbox_id = manager.create(image="ubuntu:24.04", display=False)["sandbox_id"]
+
+    executed = manager.exec(
+        sandbox_id,
+        {"argv": ["python", "--version"], "cwd": ".", "client_request_id": "exec-1"},
+    )
+    raw_command = manager.exec(
+        sandbox_id,
+        {"command": "python --version", "client_request_id": "exec-2"},
+    )
+
+    desktop_only = _manager(
+        tmp_path / "desktop-only",
+        capabilities={"sandbox.desktop", "sandbox.desktop_input", "sandbox.snapshot"},
+    )
+    desktop = desktop_only.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.linux_native",
+        access_owner_id="local-user",
+    )
+    denied = desktop_only.exec(
+        desktop["sandbox_id"],
+        {"argv": ["python", "--version"], "cwd": ".", "client_request_id": "exec-3"},
+    )
+
+    assert executed["ok"] is True
+    assert executed["argv"] == ["python", "--version"]
+    assert raw_command["ok"] is False
+    assert raw_command["code"] == "RAW_COMMAND_REJECTED"
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_OPERATION_NOT_ALLOWED"
+
+
+def test_sandbox_exec_enforces_template_secret_policy_before_guest_agent(tmp_path):
+    guest = FakeGuestAgent()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={"sandbox.exec", "sandbox.files", "sandbox.resource_limits"},
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    sandbox_id = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="tool.ephemeral",
+    )["sandbox_id"]
+
+    normal_env = manager.exec(
+        sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"PYTHONUNBUFFERED": "1"},
+            "client_request_id": "exec-env-1",
+        },
+    )
+    secret_env = manager.exec(
+        sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"OPENAI_API_KEY": "sk-test"},
+            "client_request_id": "exec-env-2",
+        },
+    )
+
+    coding_manager = _manager(
+        tmp_path / "coding",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    coding_sandbox_id = coding_manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="coding.python",
+    )["sandbox_id"]
+    approval_required = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-3",
+        },
+    )
+    forged_approval = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "approved": True,
+            "approved_secret_ids": ["GITHUB_TOKEN"],
+            "client_request_id": "exec-env-4",
+        },
+    )
+    wrong_grant = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-5",
+        },
+        approved_secret_ids=["OTHER_TOKEN"],
+    )
+    server_grant = coding_manager.exec(
+        coding_sandbox_id,
+        {
+            "argv": ["python", "--version"],
+            "cwd": ".",
+            "env": {"GITHUB_TOKEN": "ghp-test"},
+            "client_request_id": "exec-env-6",
+        },
+        approved_secret_ids=["GITHUB_TOKEN"],
+    )
+
+    assert normal_env["ok"] is True
+    assert secret_env["ok"] is False
+    assert secret_env["code"] == "SANDBOX_SECRET_ENV_DENIED"
+    assert secret_env["denied_env_keys"] == ["OPENAI_API_KEY"]
+    assert approval_required["ok"] is False
+    assert approval_required["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
+    assert approval_required["status_code"] == 409
+    assert forged_approval["ok"] is False
+    assert forged_approval["code"] == "SANDBOX_SECRET_ACCESS_REQUIRES_APPROVAL"
+    assert wrong_grant["ok"] is False
+    assert wrong_grant["denied_env_keys"] == ["GITHUB_TOKEN"]
+    assert wrong_grant["approved_env_keys"] == []
+    assert server_grant["ok"] is True
+    assert [request.client_request_id for request in guest.exec_requests] == ["exec-env-1"]
+
+
+def test_ai_desktop_input_rate_limit_is_actor_scoped(tmp_path):
+    manager = _manager(tmp_path)
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        assigned_agent_id="agent-1",
+        access_owner_id="local-user",
+    )
+    assert created["ok"] is True
+    seat_id = created["sandbox_id"]
+
+    last_ok = None
+    for index in range(30):
+        last_ok = manager.desktop_input(
+            seat_id,
+            {"action": "click", "client_action_id": f"ai-{index}", "x": 1, "y": 1},
+            actor="ai",
+            authenticated_agent_id="agent-1",
+        )
+    limited = manager.desktop_input(
+        seat_id,
+        {"action": "click", "client_action_id": "ai-limited", "x": 1, "y": 1},
+        actor="ai",
+        authenticated_agent_id="agent-1",
+    )
+    other_agent = manager.desktop_input(
+        seat_id,
+        {"action": "click", "client_action_id": "ai-other", "x": 1, "y": 1},
+        actor="ai",
+        authenticated_agent_id="agent-2",
+    )
+
+    assert last_ok is not None and last_ok["ok"] is True
+    assert limited["ok"] is False
+    assert limited["code"] == "DESKTOP_INPUT_RATE_LIMITED"
+    assert other_agent["ok"] is False
+    assert other_agent["code"] == "DESKTOP_AGENT_NOT_ASSIGNED"
+    audit_codes = [event["code"] for event in manager.read_desktop_audit_events(limit=4)]
+    assert "DESKTOP_INPUT_RATE_LIMITED" in audit_codes
+    assert "DESKTOP_AGENT_NOT_ASSIGNED" in audit_codes
+
+
+def test_sandbox_file_patch_and_port_contracts_fail_closed_until_guest_services_exist(tmp_path):
+    manager = _manager(
+        tmp_path,
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+    )
+    sandbox_id = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")["sandbox_id"]
+
+    file_patch = manager.apply_file_patch(sandbox_id, {"patch": []})
+    port = manager.expose_port(sandbox_id, {"port": 3000}, approved=True)
+
+    assert file_patch["ok"] is False
+    assert file_patch["code"] == "SANDBOX_FILES_NOT_READY"
+    assert file_patch["status_code"] == 501
+    assert port["ok"] is False
+    assert port["code"] == "SANDBOX_PORTS_NOT_READY"
+    assert port["status_code"] == 501
+
+
+def test_sandbox_file_patch_denies_read_only_workspace_before_guest_agent(tmp_path, monkeypatch):
+    _trusted_workspace(tmp_path, monkeypatch)
+
+    class PatchGuest(FakeGuestAgent):
+        def __init__(self):
+            super().__init__()
+            self.patch_requests = []
+
+        def apply_file_patch(self, sandbox_id, payload):
+            self.patch_requests.append((sandbox_id, dict(payload)))
+            return {"ok": True, "sandbox_id": sandbox_id, "files_written": 1}
+
+    guest = PatchGuest()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path / "state", provider_registry=registry)
+    created = manager.create(
+        display=False,
+        provider_id="fake-runtime",
+        template_id="coding.python",
+        workspace_id="workspace-1",
+        workspace_access="read_only",
+    )
+    assert created["ok"] is True
+
+    denied = manager.apply_file_patch(
+        created["sandbox_id"],
+        {"files": [{"path": "src/app.py", "content": "print('no write')\n"}]},
+    )
+
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_FILESYSTEM_READ_ONLY"
+    assert denied["status_code"] == 403
+    assert denied["workspace_binding"]["mode"] == "read_only"
+    assert guest.patch_requests == []
+
+
+def test_sandbox_port_expose_requires_network_policy_approval_before_guest_agent(tmp_path):
+    class PortGuest(FakeGuestAgent):
+        def __init__(self):
+            super().__init__()
+            self.port_requests = []
+
+        def expose_port(self, sandbox_id, payload):
+            self.port_requests.append((sandbox_id, dict(payload)))
+            return {"ok": True, "sandbox_id": sandbox_id, "port": int(payload["port"]), "url": "http://127.0.0.1:3000"}
+
+    guest = PortGuest()
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.overlay_workspace",
+            "sandbox.port_forward",
+            "sandbox.resource_limits",
+            "sandbox.network_policy",
+        },
+        guest_agent=guest,
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    created = manager.create(display=False, provider_id="fake-runtime", template_id="coding.python")
+    assert created["ok"] is True
+
+    denied = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"})
+    approved = manager.expose_port(created["sandbox_id"], {"port": 3000, "protocol": "http"}, approved=True)
+
+    assert denied["ok"] is False
+    assert denied["code"] == "SANDBOX_NETWORK_REQUIRES_APPROVAL"
+    assert denied["status_code"] == 409
+    assert approved["ok"] is True
+    assert guest.port_requests == [
+        (
+            created["sandbox_id"],
+            {
+                "port": 3000,
+                "protocol": "http",
+                "_network_policy_approved": True,
+            },
+        )
+    ]
+
+
+def test_desktop_resolution_is_bounded_before_provider_start(tmp_path):
+    manager = _manager(tmp_path)
+
+    created = manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        width=20_000,
+        height=20_000,
+        access_owner_id="local-user",
+    )
+
+    assert created["ok"] is False
+    assert created["code"] == "DESKTOP_RESOLUTION_LIMIT_EXCEEDED"
+    assert created["status_code"] == 400
+
+
+def test_persisted_desktop_resolution_is_sanitized_before_provider_reconcile(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "instances": {
+                    "seat-huge": {
+                        "sandbox_id": "seat-huge",
+                        "name": "Huge Desktop",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-huge",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "desktop_spec": {"enabled": True, "width": 20_000, "height": 20_000},
+                        "provider_opaque_state": {"width": 20_000, "height": 20_000},
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class CaptureReconcileProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.reconciled: list[ProviderInstance] = []
+
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            self.reconciled.append(persisted)
+            return ReconcileResult(instance=persisted, changed=False)
+
+    provider = CaptureReconcileProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-huge")
+
+    assert status["ok"] is True
+    assert status["desktop_spec"]["width"] == 1440
+    assert status["desktop_spec"]["height"] == 900
+    assert provider.reconciled[0].opaque_state["width"] == 1440
+    assert provider.reconciled[0].opaque_state["height"] == 900
+    assert provider.reconciled[0].opaque_state["desktop_spec"]["width"] == 1440
+
+
+def test_persisted_resource_limits_are_sanitized_before_provider_reconcile(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 5,
+                "instances": {
+                    "seat-huge-resources": {
+                        "sandbox_id": "seat-huge-resources",
+                        "name": "Huge Resources",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "template_id": "desktop.ubuntu",
+                        "provider_id": "fake-runtime",
+                        "provider_instance_id": "fake-seat-huge-resources",
+                        "runtime_id": "fake-runtime",
+                        "state": "ready",
+                        "created_at": 10,
+                        "updated_at": 11,
+                        "resource_limits": {
+                            "cpu_count": 9999,
+                            "memory_mb": 9_999_999,
+                            "pids": 9_999_999,
+                            "output_bytes": 9_999_999_999,
+                            "timeout_ms": 9_999_999_999,
+                        },
+                        "provider_opaque_state": {
+                            "cpu_count": 7777,
+                            "memory_mb": 7_777_777,
+                            "pids": 7_777_777,
+                            "output_bytes": 7_777_777_777,
+                            "timeout_ms": 7_777_777_777,
+                            "resource_limits": {
+                                "cpu_count": 8888,
+                                "memory_mb": 8_888_888,
+                                "pids": 8_888_888,
+                                "output_bytes": 8_888_888_888,
+                                "timeout_ms": 8_888_888_888,
+                            },
+                        },
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class CaptureReconcileProvider(FakeRuntimeProvider):
+        def __init__(self) -> None:
+            super().__init__(provider_id="fake-runtime")
+            self.reconciled: list[ProviderInstance] = []
+
+        def reconcile(self, persisted: ProviderInstance) -> ReconcileResult:
+            self.reconciled.append(persisted)
+            return ReconcileResult(instance=persisted, changed=False)
+
+    provider = CaptureReconcileProvider()
+    registry = ProviderRegistry()
+    registry.register(provider)
+
+    manager = SandboxManager(state_dir=tmp_path, provider_registry=registry)
+    status = manager.status("seat-huge-resources")
+    expected = {
+        "cpu_count": SANDBOX_MAX_CPU_COUNT,
+        "memory_mb": SANDBOX_MAX_MEMORY_MB,
+        "pids": SANDBOX_MAX_PIDS,
+        "output_bytes": SANDBOX_MAX_OUTPUT_BYTES,
+        "timeout_ms": SANDBOX_MAX_TIMEOUT_MS,
+    }
+
+    assert status["ok"] is True
+    assert status["resource_limits"] == expected
+    opaque_state = provider.reconciled[0].opaque_state
+    assert opaque_state["resource_limits"] == expected
+    assert opaque_state["cpu_count"] == SANDBOX_MAX_CPU_COUNT
+    assert opaque_state["memory_mb"] == SANDBOX_MAX_MEMORY_MB
+    assert opaque_state["pids"] == SANDBOX_MAX_PIDS
+    assert opaque_state["output_bytes"] == SANDBOX_MAX_OUTPUT_BYTES
+    assert opaque_state["timeout_ms"] == SANDBOX_MAX_TIMEOUT_MS
+
+
+def test_sandbox_screenshot_fails_closed_without_backend(tmp_path):
+    manager = _manager(tmp_path)
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
+
+    result = manager.screenshot(sandbox_id)
+
+    assert result["ok"] is False
+    assert result["code"] == "SANDBOX_BACKEND_UNAVAILABLE"
+    assert result["status_code"] == 503
+    assert result["sandbox_id"] == sandbox_id
+    assert result["status"] == "ready"
+    assert result["gui_backend"] is False
+    assert result["action"] == "screenshot"
+    assert "screenshot" in result["error"]
 
 
 def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
+    manager = _manager(tmp_path)
 
     missing = manager.screenshot("missing-sandbox")
     assert missing["ok"] is False
@@ -83,7 +925,7 @@ def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
     assert missing["sandbox_id"] == "missing-sandbox"
     assert "Sandbox not found" in missing["error"]
 
-    sandbox_id = manager.create()["sandbox_id"]
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
     manager.destroy(sandbox_id)
 
     screenshot = manager.screenshot(sandbox_id)
@@ -99,40 +941,37 @@ def test_sandbox_not_found_and_destroyed_errors_are_clear(tmp_path):
     assert click["code"] == "SANDBOX_NOT_RUNNING"
 
 
-def test_sandbox_destroy_marks_error_when_backend_teardown_fails(tmp_path):
+def test_sandbox_destroy_marks_failed_when_backend_teardown_fails(tmp_path):
     class Backend:
         def __init__(self):
             self.destroyed = []
-
-        def create_session(self, title):
-            return {"session_id": "backend-session-1"}
 
         def destroy_session(self, sandbox_id):
             self.destroyed.append(sandbox_id)
             return {"ok": False, "error": "teardown refused"}
 
     backend = Backend()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
-    sandbox_id = manager.create()["sandbox_id"]
+    manager = _manager(tmp_path, gui_backend=backend)
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.destroy(sandbox_id)
 
     assert result["ok"] is False
     assert result["destroyed"] is False
     assert result["code"] == "SANDBOX_BACKEND_DESTROY_FAILED"
-    assert result["status"] == "error"
+    assert result["status"] == "failed"
     assert result["error"] == "teardown refused"
     assert backend.destroyed == [sandbox_id]
 
-    persisted = SandboxManager(state_dir=tmp_path).status(sandbox_id)
-    assert persisted["status"] == "error"
+    persisted = _manager(tmp_path).status(sandbox_id)
+    assert persisted["status"] == "failed"
     assert persisted["destroyed_at"] is None
     assert persisted["last_error"] == "teardown refused"
 
 
 def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
-    manager = SandboxManager(state_dir=tmp_path)
-    sandbox_id = manager.create()["sandbox_id"]
+    manager = _manager(tmp_path)
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
     typed = manager.type_text(sandbox_id, "hello")
@@ -157,7 +996,6 @@ def test_sandbox_input_actions_fail_closed_without_backend(tmp_path):
     status = manager.status(sandbox_id)
     assert status["ok"] is True
     assert status["status"] == "ready"
-    assert status["last_activity_at"] is None
     assert status["last_error"] is None
 
 
@@ -179,8 +1017,8 @@ def test_sandbox_input_actions_route_to_backend_before_reporting_success(tmp_pat
             return {"ok": True, "backend_action": "scroll"}
 
     backend = Backend()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
-    sandbox_id = manager.create()["sandbox_id"]
+    manager = _manager(tmp_path, gui_backend=backend)
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     click = manager.click(sandbox_id, 10, 20)
     typed = manager.type_text(sandbox_id, "hello")
@@ -206,21 +1044,22 @@ def test_sandbox_input_actions_route_to_backend_before_reporting_success(tmp_pat
     assert manager.status(sandbox_id)["last_activity_at"] is not None
 
 
-def test_sandbox_manager_uses_gui_backend_session_for_input_actions(tmp_path):
+def test_sandbox_manager_uses_explicit_test_gui_backend_for_input_actions(tmp_path):
     backend = GUISandbox()
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=backend)
-    sandbox_id = manager.create()["sandbox_id"]
+    session = backend.create_session("test desktop")
+    manager = _manager(tmp_path, gui_backend=backend, sandbox_id_factory=lambda: session.session_id)
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.click(sandbox_id, 1, 2)
 
     assert result["ok"] is True
     assert result["clicked"] is True
     assert result["gui_backend"] is True
-    session = backend.get_session(sandbox_id)
-    assert session is not None
-    assert session.events[-1]["action"] == "click"
-    assert session.events[-1]["x"] == 1
-    assert session.events[-1]["y"] == 2
+    stored = backend.get_session(sandbox_id)
+    assert stored is session
+    assert stored.events[-1]["action"] == "click"
+    assert stored.events[-1]["x"] == 1
+    assert stored.events[-1]["y"] == 2
 
 
 def test_sandbox_input_backend_failures_do_not_gain_success_flags(tmp_path):
@@ -228,8 +1067,8 @@ def test_sandbox_input_backend_failures_do_not_gain_success_flags(tmp_path):
         def click(self, sandbox_id, x, y):
             return {"ok": False, "error": "window missing", "clicked": True, "recorded": True}
 
-    manager = SandboxManager(state_dir=tmp_path, gui_backend=Backend())
-    sandbox_id = manager.create()["sandbox_id"]
+    manager = _manager(tmp_path, gui_backend=Backend())
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     result = manager.click(sandbox_id, 10, 20)
 
@@ -249,11 +1088,44 @@ def test_sandbox_state_dir_env_override_is_used(monkeypatch, tmp_path):
     override = tmp_path / "local-state"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_SANDBOX_STATE_DIR", str(override))
 
-    manager = SandboxManager()
-    sandbox_id = manager.create()["sandbox_id"]
+    manager = SandboxManager(provider_registry=_registry())
+    sandbox_id = manager.create(access_owner_id="local-user")["sandbox_id"]
 
     registry_path = override / "sandboxes.json"
     assert manager.registry_path == registry_path
     payload = json.loads(registry_path.read_text(encoding="utf-8"))
     assert sandbox_id in payload["instances"]
-    assert SandboxManager().status(sandbox_id)["status"] == "ready"
+    assert SandboxManager(provider_registry=_registry()).status(sandbox_id)["status"] == "ready"
+
+
+def test_legacy_ready_registry_records_are_not_treated_as_live(tmp_path):
+    registry_path = tmp_path / "sandboxes.json"
+    registry_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "instances": {
+                    "legacy-seat": {
+                        "sandbox_id": "legacy-seat",
+                        "image": "ubuntu:22.04",
+                        "display": True,
+                        "status": "ready",
+                        "created_at": 10,
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = SandboxManager(state_dir=tmp_path)
+    status = manager.status("legacy-seat")
+    screenshot = manager.screenshot("legacy-seat")
+
+    assert status["ok"] is True
+    assert status["status"] == "stopped"
+    assert status["provider_id"] == "legacy_placeholder"
+    assert "fake-ready" in status["last_error"]
+    assert screenshot["ok"] is False
+    assert screenshot["code"] == "SANDBOX_NOT_RUNNING"
+    assert screenshot["status"] == "stopped"

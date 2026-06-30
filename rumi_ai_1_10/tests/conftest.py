@@ -393,6 +393,16 @@ _BIND_ONLY_MODULES = (
 )
 
 _ALIAS_MODULES = (
+    ("rumi_ai_1_10.core_runtime.authority", "core_runtime.authority"),
+    ("rumi_ai_1_10.core_runtime.authority.approval_attestation", "core_runtime.authority.approval_attestation"),
+    ("rumi_ai_1_10.core_runtime.authority.approval_challenge_store", "core_runtime.authority.approval_challenge_store"),
+    ("rumi_ai_1_10.core_runtime.authority.config_lattice", "core_runtime.authority.config_lattice"),
+    ("rumi_ai_1_10.core_runtime.authority.device_key_registry", "core_runtime.authority.device_key_registry"),
+    ("rumi_ai_1_10.core_runtime.authority.models", "core_runtime.authority.models"),
+    ("rumi_ai_1_10.core_runtime.authority.principal", "core_runtime.authority.principal"),
+    ("rumi_ai_1_10.core_runtime.authority.request_store", "core_runtime.authority.request_store"),
+    ("rumi_ai_1_10.core_runtime.authority.service", "core_runtime.authority.service"),
+    ("rumi_ai_1_10.core_runtime.authority.ui_operator", "core_runtime.authority.ui_operator"),
     ("rumi_ai_1_10.core_runtime.audit_logger", "core_runtime.audit_logger"),
     ("rumi_ai_1_10.core_runtime.network_grant_manager", "core_runtime.network_grant_manager"),
     ("rumi_ai_1_10.core_runtime.capability_proxy", "core_runtime.capability_proxy"),

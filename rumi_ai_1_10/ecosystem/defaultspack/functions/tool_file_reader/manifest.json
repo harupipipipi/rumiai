@@ -19,6 +19,22 @@
   ],
   "input_schema": {
     "type": "object",
+    "properties": {
+      "path": {"type": "string"},
+      "start_line": {"type": "integer", "minimum": 1},
+      "end_line": {"type": "integer", "minimum": 1},
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional output character budget for compact reads."
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional approximate output token budget for compact reads."
+      }
+    },
+    "required": ["path"],
     "additionalProperties": true
   },
   "output_schema": {

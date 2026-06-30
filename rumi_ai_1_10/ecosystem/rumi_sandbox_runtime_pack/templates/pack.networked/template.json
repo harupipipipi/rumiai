@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "kind": "rumi.sandbox.template",
+  "id": "pack.networked",
+  "version": "1.0.0",
+  "display_name": "Pack Networked",
+  "summary": "Approval-gated pack sandbox for tasks that need explicit outbound network access without ambient host credentials.",
+  "source_pack_id": "rumi_sandbox_runtime_pack",
+  "runtime": {
+    "os": "linux",
+    "provider": "auto",
+    "provider_requirements": [
+      "sandbox.exec",
+      "sandbox.files",
+      "sandbox.overlay_workspace",
+      "sandbox.network_policy",
+      "sandbox.resource_limits"
+    ],
+    "capabilities": [
+      "sandbox.exec",
+      "sandbox.files.read",
+      "sandbox.network.allowlist"
+    ],
+    "packages": []
+  },
+  "policy": {
+    "filesystem": {
+      "mode": "ephemeral_overlay",
+      "workspace": {
+        "access": "explicit",
+        "allowed_access": [
+          "none",
+          "read_only"
+        ],
+        "requires_user_selection": true
+      },
+      "host_mounts": [],
+      "arbitrary_host_mounts": false
+    },
+    "network": {
+      "mode": "approval_gated",
+      "allowlist": [],
+      "requires_approval": true
+    },
+    "secrets": {
+      "mode": "deny",
+      "ambient": false,
+      "mounts": []
+    },
+    "desktop": {
+      "enabled": false
+    },
+    "resources": {
+      "cpu": 1,
+      "memory_mb": 1024,
+      "timeout_seconds": 1800,
+      "max_output_bytes": 2097152
+    },
+    "lifecycle": {
+      "ttl_seconds": 1800,
+      "persistence": "ephemeral",
+      "destroy_on_idle": true
+    },
+    "approvals": {
+      "network_broaden": "required",
+      "package_install": "required",
+      "secret_mount": "deny",
+      "host_writeback": "deny",
+      "persistence": "deny"
+    }
+  },
+  "allowed_operations": [
+    "sandbox.exec.argv",
+    "sandbox.files.read",
+    "sandbox.network.request"
+  ],
+  "user_overrides": {
+    "narrow_only": true,
+    "allowed_fields": [
+      "name",
+      "ttl_seconds",
+      "workspace.read_only",
+      "network.allowlist"
+    ]
+  },
+  "contract": {
+    "no_backend_entrypoint": true,
+    "no_provider_command": true,
+    "no_arbitrary_host_mounts": true,
+    "no_privileged_mode": true,
+    "no_ambient_host_environment": true,
+    "public_exec_requires_argv": true
+  }
+}

@@ -160,20 +160,21 @@ def _context_has_verified_server_approval_token(context: dict[str, Any]) -> bool
         return False
     pack_id = str(context.get("_tool_server_approval_pack_id") or "").strip()
     conversation_id = str(context.get("_tool_server_approval_conversation_id") or "").strip()
-    try:
-        from ..safety import approval
-
-        verification = approval.verify_execution_token(
-            token,
-            operation,
-            args_hash,
-            consume=False,
-            pack_id=pack_id,
-            conversation_id=conversation_id,
-        )
-    except Exception:
-        return False
-    return bool(getattr(verification, "valid", False))
+    for approval in _approval_modules():
+        try:
+            verification = approval.verify_execution_token(
+                token,
+                operation,
+                args_hash,
+                consume=False,
+                pack_id=pack_id,
+                conversation_id=conversation_id,
+            )
+        except Exception:
+            continue
+        if bool(getattr(verification, "valid", False)):
+            return True
+    return False
 
 
 def _context_value(context: dict[str, Any] | None, *keys: str) -> str:
@@ -266,5 +267,29 @@ def _approval_module():
     return approval
 
 
+def _approval_modules() -> list[Any]:
+    modules: list[Any] = []
+    for import_name in (
+        "ecosystem.defaultspack.domain.safety.approval",
+        "domain.safety.approval",
+    ):
+        try:
+            module = __import__(import_name, fromlist=["approval"])
+        except Exception:
+            continue
+        if module not in modules:
+            modules.append(module)
+    if not modules:
+        try:
+            modules.append(_approval_module())
+        except Exception:
+            pass
+    return modules
+
+
 sys.modules.setdefault("domain.host_bridge.computer_router", sys.modules[__name__])
 sys.modules.setdefault("ecosystem.defaultspack.domain.host_bridge.computer_router", sys.modules[__name__])
+for _parent_name in ("domain.host_bridge", "ecosystem.defaultspack.domain.host_bridge"):
+    _parent = sys.modules.get(_parent_name)
+    if _parent is not None:
+        setattr(_parent, "computer_router", sys.modules[__name__])

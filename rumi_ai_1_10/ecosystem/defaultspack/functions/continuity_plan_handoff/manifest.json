@@ -1,0 +1,47 @@
+{
+  "function_id": "continuity_plan_handoff",
+  "description": "Plan a continuity handoff and run provider, credential, runtime, and destination preflight.",
+  "tags": [
+    "continuity",
+    "handoff"
+  ],
+  "risk": "medium",
+  "requires": [
+    "continuity.plan.handoff"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.plan_handoff",
+    "defaultspack.continuity.plan_handoff",
+    "defaults.continuity.plan.handoff",
+    "defaultspack.continuity.plan.handoff",
+    "continuity.plan_handoff"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "plan"
+      }
+    }
+  }
+}

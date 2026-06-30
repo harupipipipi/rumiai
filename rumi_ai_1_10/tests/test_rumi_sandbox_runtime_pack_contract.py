@@ -131,6 +131,7 @@ def test_setup_pack_manager_installs_pack_without_selection_dependencies(tmp_pat
 
 def test_sandbox_runtime_assets_have_real_semantics() -> None:
     boundary = yaml.safe_load((PACK_DIR / "specs/execution_boundary_matrix.yaml").read_text(encoding="utf-8"))
+    execution_policy = yaml.safe_load((PACK_DIR / "policies/sandbox_execution.policy.yaml").read_text(encoding="utf-8"))
     secret_mount = yaml.safe_load((PACK_DIR / "policies/secret_mount.policy.yaml").read_text(encoding="utf-8"))
     receipt = yaml.safe_load((PACK_DIR / "specs/runtime_receipt.schema.yaml").read_text(encoding="utf-8"))
     repro = yaml.safe_load((PACK_DIR / "checklists/reproducibility_checklist.yaml").read_text(encoding="utf-8"))
@@ -139,6 +140,10 @@ def test_sandbox_runtime_assets_have_real_semantics() -> None:
     assert {"local_read_only", "local_host_mutating", "container_ephemeral", "remote_ssh"} <= set(boundary["boundaries"])
     assert boundary["boundaries"]["local_host_mutating"]["approval"] == "explicit_user_confirmation_required"
     assert boundary["boundaries"]["remote_ssh"]["handoff"] == "rumi_devops_release_pack"
+    assert any(
+        rule["id"] == "destructive_lifecycle_requires_confirmation" and rule["decision"] == "require"
+        for rule in execution_policy["rules"]
+    )
     assert secret_mount["default_decision"] == "deny_secret_mount"
     assert secret_mount["secret_mount_classes"]["raw_secret_value"]["allowed"] is False
     assert receipt["redaction_policy"]["redact_secret_values"] is True

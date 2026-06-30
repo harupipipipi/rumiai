@@ -4,6 +4,7 @@ import { Hand, Loader2 } from "lucide-react";
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { AdaptiveRuntimePage } from "./adaptive";
 import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambientTriggerClient";
 import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
@@ -12,6 +13,7 @@ import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -23,10 +25,14 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
+import type { ConversationToolPreferences } from "./features/tools/types";
+import { useToolSelectionController } from "./features/tools/useToolSelectionController";
 import {
   AUTHORITY_WAITING_TEXT,
   authorityApprovalTitle,
@@ -54,6 +60,7 @@ import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upser
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion } from "./lib/uiShell";
 import { hasWorkspaceAttachment, workspaceFileToAttachment } from "./lib/workspaceAttachments";
+import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
@@ -65,7 +72,6 @@ type ComposerCandidateMenuState = {
   candidates: ModelCommandCandidate[];
 } | null;
 
-type WorkspacePanelMode = "composer" | "calendar";
 type BackendConnectionState = "online" | "degraded" | "offline";
 
 const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
@@ -116,6 +122,67 @@ type CalendarSettings = {
   timeSlotMinutes: 15 | 30 | 60;
   weekStart: "sunday" | "monday";
 };
+
+type SubmitOverride = {
+  input: string;
+  attachments: AttachedFile[];
+  droppedWidgets: DroppedWidget[];
+  toolSelectionRequest?: ToolSelectionRequest;
+  skipReview?: boolean;
+};
+
+function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
+  const ids: string[] = [];
+  for (const target of request.include ?? []) {
+    if (typeof target === "string") {
+      if (target.trim()) ids.push(target.trim());
+      continue;
+    }
+    const structured = target as ToolTarget;
+    if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
+  }
+  return [...new Set(ids)];
+}
+
+function parseConversationToolPreferences(metadata: unknown): ConversationToolPreferences {
+  const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).tool_preferences
+    : null;
+  const raw = source && typeof source === "object" && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : {};
+  const mode = typeof raw.mode === "string" && ["auto", "review", "manual", "none"].includes(raw.mode)
+    ? raw.mode as ConversationToolPreferences["mode"]
+    : undefined;
+  return {
+    mode,
+    include: normalizeConversationToolTargets(raw.include),
+    exclude: normalizeConversationToolTargets(raw.exclude),
+  };
+}
+
+function normalizeConversationToolTargets(value: unknown): ToolTarget[] {
+  if (!Array.isArray(value)) return [];
+  const targets: ToolTarget[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    let target: ToolTarget | null = null;
+    if (typeof item === "string" && item.trim()) {
+      target = { kind: "tool", id: item.trim() };
+    } else if (item && typeof item === "object") {
+      const raw = item as Record<string, unknown>;
+      const kind = raw.kind === "service" ? "service" : raw.kind === "tool" ? "tool" : null;
+      const id = typeof raw.id === "string" ? raw.id.trim() : "";
+      if (kind && id) target = { kind, id };
+    }
+    if (!target) continue;
+    const key = `${target.kind}:${target.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push(target);
+  }
+  return targets;
+}
 
 type CalendarCell = {
   col: number;
@@ -1366,6 +1433,9 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
   const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
   const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
+  const promptUsage = metadata.prompt_usage && typeof metadata.prompt_usage === "object" && !Array.isArray(metadata.prompt_usage)
+    ? metadata.prompt_usage as NonNullable<ChatUiMessage["metadata"]>["promptUsage"]
+    : undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
@@ -1398,6 +1468,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
             : undefined,
           pendingAuthorityApproval,
           ...displayMetadata,
+          promptUsage,
         },
   };
 }
@@ -2196,6 +2267,7 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
     createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
   ]);
@@ -2313,6 +2385,7 @@ function ChatApp() {
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
+  const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   useEffect(() => {
@@ -2327,6 +2400,10 @@ function ChatApp() {
       };
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
+  const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
+    ? latestActiveMetadata.prompt_usage as PromptUsageSummary
+    : null;
+  const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -2431,6 +2508,16 @@ function ChatApp() {
     .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const activeConversationToolPreferences = useMemo(
+    () => parseConversationToolPreferences(activeConversation?.metadata),
+    [activeConversation?.id, activeConversation?.metadata],
+  );
+  const toolSelectionController = useToolSelectionController({
+    settingsValues,
+    selectedToolIds,
+    setSelectedToolIds: setStoredSelectedToolIds,
+    conversationPreferences: activeConversationToolPreferences,
+  });
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
@@ -2439,10 +2526,10 @@ function ChatApp() {
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
-  const authorityApproval = !ultraYoloMode && rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
+  const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
     : null;
-  const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
+  const runtimeApproval = rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
@@ -2493,7 +2580,7 @@ function ChatApp() {
         {
           id: "ultra-yolo",
           name: "Ultra YOLO",
-          description: "Ultra YOLO が ON です。承認が必要な coding / browser 操作まで自動許可されます。",
+          description: "Ultra YOLO が ON です。高権限の実行方針を要求しますが、承認カードとサーバー側の安全ポリシーは維持されます。",
           svgMarkup: dangerShieldSvg,
           tone: "danger",
           action: {
@@ -2609,7 +2696,7 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -2702,8 +2789,12 @@ function ChatApp() {
     try {
       const result = await api.listCodingWorkspaces();
       setCodingWorkspaces(result.workspaces);
-      setSelectedCodingWorkspaceId((current) => current ?? result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null);
-      return result;
+      let selectedWorkspaceId = result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null;
+      setSelectedCodingWorkspaceId((current) => {
+        selectedWorkspaceId = current ?? selectedWorkspaceId;
+        return selectedWorkspaceId;
+      });
+      return { ...result, selected_workspace_id: selectedWorkspaceId };
     } catch {
       setCodingWorkspaces([]);
       return { workspaces: [], selected_workspace_id: null };
@@ -2722,8 +2813,8 @@ function ChatApp() {
     ?? undefined;
   const effectiveConsoleKey = `${effectiveGroupId ?? "ungrouped"}:${effectiveWorkspaceId ?? "no-workspace"}`;
 
-  const loadCodingContext = useCallback(async () => {
-    const workspaceId = effectiveWorkspaceId;
+  const loadCodingContext = useCallback(async (workspaceIdOverride?: string | null) => {
+    const workspaceId = workspaceIdOverride ?? effectiveWorkspaceId;
     try {
       const [result, branchInfo] = await Promise.all([
         api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
@@ -2793,7 +2884,7 @@ function ChatApp() {
 
   useEffect(() => {
     if (mode === "coding") {
-      void loadCodingWorkspaces().then(() => loadCodingContext());
+      void loadCodingWorkspaces().then((result) => loadCodingContext(result.selected_workspace_id ?? null));
     }
   }, [mode, loadCodingContext, loadCodingWorkspaces]);
 
@@ -3549,6 +3640,32 @@ function ChatApp() {
     setIsSettingsOpen(true);
   }, []);
 
+  const actionApprovalMode: ActionApprovalMode = ultraYoloMode ? "full" : yoloMode ? "agent" : "ask";
+
+  const handleActionApprovalModeChange = useCallback((nextMode: ActionApprovalMode) => {
+    if (nextMode === "custom") {
+      openSettingsSection("tools");
+      return;
+    }
+    if (nextMode === "full") {
+      const nextState = resolveUltraYoloModeState(
+        {
+          yoloMode,
+          ultraYoloMode,
+          restoreYoloMode: ultraYoloRestoreYoloMode,
+        },
+        true,
+      );
+      setYoloMode(nextState.yoloMode);
+      setUltraYoloMode(nextState.ultraYoloMode);
+      setUltraYoloRestoreYoloMode(nextState.restoreYoloMode);
+      return;
+    }
+    setUltraYoloMode(false);
+    setUltraYoloRestoreYoloMode(false);
+    setYoloMode(nextMode === "agent");
+  }, [openSettingsSection, setUltraYoloMode, setUltraYoloRestoreYoloMode, setYoloMode, ultraYoloMode, ultraYoloRestoreYoloMode, yoloMode]);
+
   const handleSwitchToVisionModel = useCallback(() => {
     if (preferredVisionCandidate) {
       handleModelProfileSelect(preferredVisionCandidate.profile_id);
@@ -3621,9 +3738,10 @@ function ChatApp() {
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
     if (disabledToolIdSet.has(item.id)) {
-      setError(`${item.label || item.id} は Settings > Tools で OFF です。`);
+      setError(`${item.label || item.id} は機能と接続の権限設定でブロックされています。`);
       return;
     }
+    toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (current.includes(item.id)) {
         return current.filter((selectedId) => selectedId !== item.id);
@@ -4020,15 +4138,14 @@ function ChatApp() {
     handleModeChange("coding");
     setSelectedCodingWorkspaceId(workspaceId);
     void api.selectCodingWorkspace(workspaceId)
-      .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then((selected) => loadCodingWorkspaces().then(() => loadCodingContext(selected.selected_workspace_id ?? workspaceId)))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace selection failed."));
   };
 
   const handleCodingWorkspaceTrust = (workspaceId: string) => {
     void api.trustCodingWorkspace(workspaceId)
       .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then(() => loadCodingContext(workspaceId))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace trust failed."));
   };
 
@@ -4043,7 +4160,7 @@ function ChatApp() {
       const selected = await api.selectCodingWorkspace(created.workspace.workspace_id);
       setSelectedCodingWorkspaceId(selected.selected_workspace_id);
       await loadCodingWorkspaces();
-      await loadCodingContext();
+      await loadCodingContext(selected.selected_workspace_id);
       return created.workspace;
     } catch (workspaceError) {
       setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed.");
@@ -4054,6 +4171,12 @@ function ChatApp() {
   const handleDirectorySelect = async () => {
     const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
     return selected.cancelled ? null : selected.path;
+  };
+
+  const handleCodingWorkspacePickCreate = async () => {
+    const selected = await handleDirectorySelect();
+    if (!selected) return null;
+    return handleCodingWorkspaceCreate(selected);
   };
 
   const handlePrepareChatGroupStorage = async (rootPath: string) => {
@@ -4077,6 +4200,7 @@ function ChatApp() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
+        toolSelectionController.setTurnMode("manual");
         setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
       }
     }
@@ -4099,6 +4223,7 @@ function ChatApp() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
+    toolSelectionController.setTurnMode("manual");
     setStoredSelectedToolIds((current) => {
       if (enabled) return [...new Set([...current, ...requestedIds])];
       const requestedIdSet = new Set(requestedIds);
@@ -4197,7 +4322,9 @@ function ChatApp() {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
@@ -4262,7 +4389,9 @@ function ChatApp() {
         tool_choice: "required",
         tool_policy: {
           ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           selected_tools: [runtimeApproval.toolName],
@@ -4407,6 +4536,30 @@ function ChatApp() {
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
   const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
+  const mimoCodingMaxToolCalls = () => {
+    const raw = settingsValues.mimo_coding_company?.max_tool_calls;
+    if (raw === null || raw === undefined || raw === "" || raw === false) return null;
+    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+  };
+  const mimoCodingMaxToolCallsPayload = () => {
+    const value = mimoCodingMaxToolCalls();
+    return value === null ? {} : { max_tool_calls: value };
+  };
+  const selectedCodingWorkspaceRecord = () => (
+    effectiveWorkspaceId
+      ? codingWorkspaces.find((workspace) => workspace.workspace_id === effectiveWorkspaceId) ?? null
+      : null
+  );
+  const mimoCodingWorkspacePayload = () => {
+    const workspace = selectedCodingWorkspaceRecord();
+    const workspaceId = workspace?.workspace_id ?? activeConversationWorkspaceContext.workspaceId ?? effectiveWorkspaceId;
+    if (!workspaceId) return {};
+    return {
+      workspace_id: workspaceId,
+      workspace_label: workspace?.label ?? activeConversationWorkspaceContext.workspaceLabel ?? null,
+      workspace_root: workspace?.root_path ?? activeConversationWorkspaceContext.workspaceRoot ?? null,
+    };
+  };
 
   const handleStartMimoCodingCompany = async () => {
     setMimoCodingBusy(true);
@@ -4417,12 +4570,14 @@ function ChatApp() {
         heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
         review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
         qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+        ...mimoCodingMaxToolCallsPayload(),
         model: preferredMimoCodingModel(),
         vision_model: preferredMimoVisionModel(),
         fast_model: preferredMimoFastModel(),
         qa_targets: mimoCodingTargets(),
         docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
         docker_personas: mimoCodingPersonas(),
+        ...mimoCodingWorkspacePayload(),
         run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
       });
       setMimoCodingStatus(status);
@@ -4441,13 +4596,13 @@ function ChatApp() {
       setMimoCodingStatus(refreshed);
       if (refreshed.conversation_id) {
         setError(null);
-        await loadConversation(refreshed.conversation_id);
+        handleHistoryClick(refreshed.conversation_id);
         return refreshed.conversation_id;
       }
       return null;
     }
     setError(null);
-    await loadConversation(mimoCodingStatus.conversation_id);
+    handleHistoryClick(mimoCodingStatus.conversation_id);
     return mimoCodingStatus.conversation_id;
   };
 
@@ -4534,12 +4689,14 @@ function ChatApp() {
           heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
           review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
           qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+          ...mimoCodingMaxToolCallsPayload(),
           model: preferredMimoCodingModel(),
           vision_model: preferredMimoVisionModel(),
           fast_model: preferredMimoFastModel(),
           qa_targets: mimoCodingTargets(),
           docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
           docker_personas: mimoCodingPersonas(),
+          ...mimoCodingWorkspacePayload(),
           run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
         });
         setMimoCodingStatus(result as MimoCodingCompanyStatus);
@@ -4562,21 +4719,53 @@ function ChatApp() {
     }
   };
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
+  const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
+    event?.preventDefault();
+    const inputForSubmit = override?.input ?? input;
+    const attachmentsForSubmit = override?.attachments ?? attachedFiles;
+    const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
+    if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
+    const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
       return;
     }
 
-    const trimmedInput = input.trim();
+    const trimmedInput = inputForSubmit.trim();
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
-    const submittedAttachments = attachedFiles;
+    const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
+    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
+      toolIds: selectedToolIds,
+      mentionedToolIds,
+    });
+    if (!override?.skipReview && toolSelectionRequest.mode === "review") {
+      setError(null);
+      try {
+        await toolSelectionController.previewReview({
+          conversationId: activeConversationId,
+          userText,
+          attachmentMetadata: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
+          toolSelection: toolSelectionRequest,
+          model: activeProfile?.profile_id ?? preferredModel ?? null,
+          draft: {
+            input: inputForSubmit,
+            attachments: submittedAttachments,
+            droppedWidgets: droppedWidgetsForSubmit,
+          },
+        });
+        setInput("");
+        setAttachedFiles([]);
+        setDroppedWidgets([]);
+      } catch (previewError) {
+        setError(previewError instanceof Error ? previewError.message : "機能の候補を取得できませんでした。");
+      }
+      return;
+    }
     setIsGenerating(true);
     setError(null);
     if (wasNewConversation) {
@@ -4586,15 +4775,14 @@ function ChatApp() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
-    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
-    const submittedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds])];
+    const requestedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
+    const submittedToolIds = toolSelectionRequest.mode === "none" ? [] : requestedToolIds;
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
     const composerSkillById = new Map(composerSkills.map((item) => [item.id, item]));
-    const droppedWidgetToolIds = new Set(activeDroppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const droppedWidgetToolIds = new Set(droppedWidgetsForSubmit.map((widget) => widget.sourceItemId || widget.id));
     const droppedWidgetSkillIds = new Set(
-      activeDroppedWidgets
+      droppedWidgetsForSubmit
         .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
         .map((widget) => widget.sourceItemId || widget.id),
     );
@@ -4609,7 +4797,7 @@ function ChatApp() {
       .filter((item): item is ComposerSkillItem => Boolean(item))
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
-    const submittedDroppedWidgets = [...activeDroppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -4655,6 +4843,13 @@ function ChatApp() {
       }
       const isOperationsMode = isOperationsConversation(conversation);
       const isMimoCodingMode = isMimoCodingConversation(conversation);
+      const workspaceIdForRuntime = workspaceIdForSubmit ?? (isMimoCodingMode ? selectedCodingWorkspaceId : null);
+      const workspaceRecordForRuntime = workspaceIdForRuntime
+        ? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForRuntime) ?? null
+        : null;
+      const workspaceLabelForRuntime = workspaceLabelForSubmit ?? workspaceRecordForRuntime?.label ?? null;
+      const workspaceRootForRuntime = workspaceRootForSubmit ?? workspaceRecordForRuntime?.root_path ?? null;
+      const shouldAttachWorkspaceToRuntime = isCodingWorkspaceSubmit || isMimoCodingMode;
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
@@ -4938,11 +5133,11 @@ function ChatApp() {
             terminal_actions_require_approval: false,
             normal_status_silent: true,
             max_concurrent_children: 6,
+            ...mimoCodingMaxToolCallsPayload(),
             ...(mimoCodingModelAllowlist.length ? { model_allowlist: mimoCodingModelAllowlist } : {}),
             ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
           }
         : {};
-      const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
       const templateRequestPayload = {
         params: templateAiInputParams,
         toolPolicy: {
@@ -4950,20 +5145,7 @@ function ChatApp() {
           ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
         },
       };
-      const toolSelectionRequest = shouldSendExplicitToolSelection
-        ? {
-            mode: "manual" as const,
-            include: submittedToolIds,
-            scope: "turn" as const,
-            must_use: false,
-          }
-        : {
-            mode: "auto" as const,
-            include: [],
-            exclude: [],
-            scope: "turn" as const,
-            must_use: false,
-          };
+      const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
         params: templateRequestPayload.params,
@@ -4972,10 +5154,12 @@ function ChatApp() {
         tool_selection: toolSelectionRequest,
         tool_policy: {
           ...templateRequestPayload.toolPolicy,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
-          ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? { workspace_id: workspaceIdForRuntime } : {}),
           ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
@@ -4997,10 +5181,10 @@ function ChatApp() {
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "mimo-coding-company",
           } : {}),
-          ...(isCodingWorkspaceSubmit ? {
-            workspace_id: workspaceIdForSubmit,
-            workspace_label: workspaceLabelForSubmit,
-            workspace_root: workspaceRootForSubmit,
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? {
+            workspace_id: workspaceIdForRuntime,
+            workspace_label: workspaceLabelForRuntime,
+            workspace_root: workspaceRootForRuntime,
           } : {}),
           ...templateRequestPayload.toolPolicy,
           attachments: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
@@ -5019,9 +5203,7 @@ function ChatApp() {
       });
       setAttachedFiles([]);
       setDroppedWidgets([]);
-      if (!shouldKeepSelectedToolsAfterSend) {
-        setStoredSelectedToolIds([]);
-      }
+      toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -5106,6 +5288,49 @@ function ChatApp() {
     }
   };
 
+  const handleToolReviewApprove = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.approveReview();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewNoTools = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.continueWithoutTools();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewCancel = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    toolSelectionController.cancelReview();
+    if (!pending) return;
+    setInput(pending.draft.input);
+    setAttachedFiles(pending.draft.attachments as AttachedFile[]);
+    setDroppedWidgets(pending.draft.droppedWidgets as DroppedWidget[]);
+  };
+
+  const handleToolReviewEdit = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    if (!pending) return;
+    const selectedIds = pending.decision.selected_tools.filter((toolId) => composerExtensions.some((tool) => tool.id === toolId));
+    setStoredSelectedToolIds(selectedIds);
+    toolSelectionController.setTurnMode("manual");
+  };
+
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
   const codingSidebarPanel = mode === "coding" ? (
     <CodingCockpit
@@ -5114,6 +5339,8 @@ function ChatApp() {
       selectedWorkspaceId={effectiveWorkspaceId}
       consoleScopeKey={effectiveConsoleKey}
       onWorkspaceSelect={handleCodingWorkspaceSelect}
+      onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+      onWorkspaceTrust={handleCodingWorkspaceTrust}
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
@@ -5163,6 +5390,15 @@ function ChatApp() {
     openKanbanScope();
   };
 
+  const handleDesktopsModeOpen = () => {
+    const existingDesktopsTab = workspaceTabs.find((tab) => tab.kind === "desktops");
+    if (existingDesktopsTab) {
+      activateWorkspaceTab(existingDesktopsTab);
+      return;
+    }
+    handleWorkspaceTabCreate("desktops");
+  };
+
   const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
     setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
       ? {
@@ -5176,6 +5412,18 @@ function ChatApp() {
 
   const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
     openKanbanScope({ type: "group", id: group.id }, group.title);
+  };
+
+  const openPromptStudio = (promptId?: string) => {
+    const url = new URL(window.location.href);
+    url.pathname = "/prompts";
+    url.search = "";
+    if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
+    if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
+    if (promptId) url.searchParams.set("prompt_id", promptId);
+    const modelProfileId = profileIdentity(activeProfile) || activeModelId;
+    if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
+    window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
@@ -5206,6 +5454,9 @@ function ChatApp() {
       attachedFiles={attachedFiles}
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
+      actionApprovalMode={actionApprovalMode}
+      toolSelectionTargets={toolSelectionController.state.overrideChips}
+      toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
@@ -5214,6 +5465,12 @@ function ChatApp() {
       suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
+      onActionApprovalModeChange={handleActionApprovalModeChange}
+      onToolSelectionTargetRemove={toolSelectionController.removeTarget}
+      onToolSelectionReviewApprove={handleToolReviewApprove}
+      onToolSelectionReviewEdit={handleToolReviewEdit}
+      onToolSelectionReviewNoTools={handleToolReviewNoTools}
+      onToolSelectionReviewCancel={handleToolReviewCancel}
       onSwitchToVisionModel={handleSwitchToVisionModel}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
@@ -5270,6 +5527,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -5298,6 +5557,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -5364,7 +5625,9 @@ function ChatApp() {
               </div>
             )}
 
-            {isKanbanMode ? (
+            {isDesktopsWorkspace ? (
+              <DesktopMonitorWorkspace />
+            ) : isKanbanMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <KanbanWorkspacePanel
                   activeConversationId={activeConversationId}
@@ -5403,6 +5666,8 @@ function ChatApp() {
                   selectedWorkspaceId={effectiveWorkspaceId}
                   consoleScopeKey={effectiveConsoleKey}
                   onWorkspaceSelect={handleCodingWorkspaceSelect}
+                  onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+                  onWorkspaceTrust={handleCodingWorkspaceTrust}
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
               </div>
@@ -5458,11 +5723,13 @@ function ChatApp() {
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
+                showPromptUsageInMessages={showPromptUsageInMessages}
                 onSuggestionClick={(text) => setInput(text)}
                 onOpenToolPreview={(previewId) => {
                   setActivePreviewId(previewId);
                   setShowPreview(true);
                 }}
+                onLoadPromptTrace={promptResources.getTraceUsage}
               />
             )}
 
@@ -5623,9 +5890,18 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            promptUsage={activePromptUsage}
+            promptProfileId={activePromptProfileId}
+            conversationId={activeConversationId}
+            showChatPromptUsage={showPromptUsageInMessages}
+            onLoadPromptActive={promptResources.getActiveSummary}
+            onTogglePromptEdge={promptResources.toggleEdge}
+            onToggleChatPromptUsage={setShowPromptUsageInMessages}
+            onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}
+            activeConversationId={activeConversationId}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenSettingsSection={openSettingsSection}
@@ -5748,6 +6024,9 @@ export default function App() {
   if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
   }
+  if (pathname === "/prompts") {
+    return <PromptStudio />;
+  }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
   }
@@ -5759,6 +6038,9 @@ export default function App() {
   }
   if (pathname === "/host-permissions") {
     return <HostPermissionsPage />;
+  }
+  if (pathname === "/adaptive" || pathname === "/operating-profile") {
+    return <AdaptiveRuntimePage />;
   }
   if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
     return <ChatApp />;

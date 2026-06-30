@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from domain.tool.security import is_sandbox_capability_tool
+
 from .models import ToolRisk
 
 
@@ -11,6 +13,8 @@ _FILE_DELETE_NAME_PARTS = ("delete",)
 
 def resolve_tool_risk(tool_def: Any, tool_name: str = "") -> str:
     if not isinstance(tool_def, dict):
+        return ToolRisk.READ_ONLY.value
+    if is_sandbox_capability_tool(tool_def):
         return ToolRisk.READ_ONLY.value
     values = {
         str(tool_def.get("category") or "").lower(),

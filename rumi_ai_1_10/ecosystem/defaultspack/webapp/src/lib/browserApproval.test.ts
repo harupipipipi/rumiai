@@ -236,6 +236,37 @@ test("returns pending runtime approval requests without browser tokens", () => {
   });
 });
 
+test("returns runtime approval requests from assistant metadata", () => {
+  const approval = pendingRuntimeApproval([
+    agentMessage({
+      metadata: {
+        pendingApproval: {
+          tool_name: "coding_file_write",
+          tool_call_id: "call_write",
+          action: "coding_file_write",
+          operation: "file.write",
+          payload: { path: "probe.txt", content: "ok" },
+          approval_required: true,
+          approval_request_id: "apr_write",
+          risk_level: "high",
+          display_summary: "Write probe.txt",
+        },
+      },
+    }),
+  ]);
+
+  assert.deepEqual(approval, {
+    action: "coding_file_write",
+    operation: "file.write",
+    payload: { path: "probe.txt", content: "ok" },
+    requestId: "apr_write",
+    riskLevel: "high",
+    summary: "Write probe.txt",
+    toolCallId: "call_write",
+    toolName: "coding_file_write",
+  });
+});
+
 test("returns generic browser tool approval requests when they use approval request ids", () => {
   const approval = pendingRuntimeApproval([
     agentMessage({

@@ -169,6 +169,29 @@ def test_tool_loading_defaults_to_vector_and_only_always_is_eager():
     assert [tool["tool_id"] for tool in vector] == ["web_search", "calculator"]
 
 
+def test_tool_search_is_eager_discovery_fallback():
+    from domain.tool.loading import tool_loading_mode
+    from domain.tool.registry import ToolRegistry
+
+    tool = ToolRegistry().get("tool_search")
+
+    assert tool is not None
+    assert tool_loading_mode(tool) == "always"
+
+
+def test_tool_discovery_fallback_prompt_points_to_names_and_search():
+    from domain.chat import run_request
+
+    prompt = run_request._tool_discovery_fallback_prompt([
+        {"tool_id": "tool_names"},
+        {"tool_id": "tool_search"},
+    ])
+
+    assert "tool_names" in prompt
+    assert "tool_search" in prompt
+    assert '"query":"coding"' in prompt
+
+
 def test_select_relevant_keeps_always_tools_when_vector_matches_are_empty(monkeypatch):
     from blocks.tool import select_relevant
 
@@ -384,59 +407,46 @@ def test_run_request_explicit_empty_selected_tools_blocks_inferred_computer_tool
 def test_run_request_metadata_selected_tools_disables_auto_recommendation(monkeypatch):
     from domain.chat import run_request
 
-    captured = {}
+    class FakeRegistry:
+        def list_tools(self):
+            return [{"tool_id": "web_search", "summary": "Search the web"}]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        captured["raw_tools"] = raw_tools
-        return [], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
-    run_request._available_tools(
+    raw_tools, _provider_tools, tool_context = run_request._available_tools(
         {},
         {"message": {"metadata": {"selected_tools": []}}},
         user_text="search the web",
     )
 
-    assert captured["raw_tools"] == []
+    assert raw_tools == []
+    assert tool_context["tool_selection"]["mode"] == "none"
 
 
 def test_run_request_tool_selection_auto_preserves_settings_driven_selection(monkeypatch):
     from domain.chat import run_request
 
-    captured = {}
+    class FakeRegistry:
+        def list_tools(self):
+            return [{"tool_id": "web_search", "name": "Web Search", "summary": "Search the web"}]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        captured["raw_tools"] = raw_tools
-        return [], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "_read_frontend_settings", lambda: {"tools": {"selection_strategy": "lexical"}})
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
-    run_request._available_tools(
+    raw_tools, _provider_tools, tool_context = run_request._available_tools(
         {},
         {"params": {"tool_selection": {"mode": "auto"}}},
         user_text="search the web",
     )
 
-    assert captured["raw_tools"] is None
+    assert [tool["tool_id"] for tool in raw_tools] == ["web_search"]
+    assert tool_context["tool_selection"]["mode"] == "auto"
 
 
 def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
@@ -449,23 +459,17 @@ def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
 
     assert updated["tools"] == ["computer_use", "browser_computer"]
 
-    calls = []
+    class FakeRegistry:
+        def list_tools(self):
+            return [
+                {"tool_id": "computer_use", "summary": "Computer control"},
+                {"tool_id": "browser_computer", "summary": "Browser computer control"},
+            ]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        calls.append(raw_tools)
-        if raw_tools is None:
-            return [{"tool_id": "tool_names"}], []
-        return [{"tool_id": item} for item in raw_tools], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "_read_frontend_settings", lambda: {"tools": {"selection_strategy": "all_schemas"}})
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
@@ -474,12 +478,7 @@ def test_run_request_tool_selection_auto_merges_inferred_tools(monkeypatch):
         user_text="open Chrome",
     )
 
-    assert calls == [None, ["computer_use", "browser_computer"]]
-    assert [tool["tool_id"] for tool in raw_tools] == [
-        "tool_names",
-        "computer_use",
-        "browser_computer",
-    ]
+    assert [tool["tool_id"] for tool in raw_tools] == ["computer_use", "browser_computer"]
 
 
 def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypatch):
@@ -492,30 +491,23 @@ def test_run_request_tool_selection_none_blocks_auto_and_inferred_tools(monkeypa
 
     assert "tools" not in updated
 
-    captured = {}
+    class FakeRegistry:
+        def list_tools(self):
+            return [{"tool_id": "computer_use", "summary": "Computer control"}]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        captured["raw_tools"] = raw_tools
-        return [], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
-    run_request._available_tools(
+    raw_tools, _provider_tools, tool_context = run_request._available_tools(
         {},
         {"params": {"tool_selection": {"mode": "none"}}},
         user_text="open Chrome",
     )
 
-    assert captured["raw_tools"] == []
+    assert raw_tools == []
+    assert tool_context["tool_selection"]["mode"] == "none"
 
 
 def test_run_request_tool_selection_manual_does_not_require_tool_choice(tmp_path, monkeypatch):
@@ -611,13 +603,9 @@ def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
             "params": {"tool_selection": tool_selection},
         }
 
-    assert "mode=review" in validate_chat_run_input(payload({"mode": "review"}))
-    assert "scope=conversation" in validate_chat_run_input(
-        payload({"mode": "auto", "scope": "conversation"})
-    )
-    assert "review is not implemented" in validate_chat_run_input(
-        payload({"mode": "auto", "review": True})
-    )
+    assert validate_chat_run_input(payload({"mode": "review"})) is None
+    assert validate_chat_run_input(payload({"mode": "auto", "scope": "conversation"})) is None
+    assert validate_chat_run_input(payload({"mode": "auto", "review": True})) is None
     assert "mode=none" in validate_chat_run_input(payload({"mode": "none", "must_use": True}))
     assert "mode=none" in validate_chat_run_input(
         payload({"mode": "manual", "include": [], "must_use": True})
@@ -631,21 +619,13 @@ def test_run_request_rejects_unimplemented_or_conflicting_tool_selection():
 def test_run_request_tool_selection_manual_empty_normalizes_to_none(monkeypatch):
     from domain.chat import run_request
 
-    captured = {}
+    class FakeRegistry:
+        def list_tools(self):
+            return [{"tool_id": "web_search", "summary": "Search the web"}]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        captured["raw_tools"] = raw_tools
-        return [], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     _raw_tools, _provider_tools, tool_context = run_request._available_tools(
@@ -654,27 +634,23 @@ def test_run_request_tool_selection_manual_empty_normalizes_to_none(monkeypatch)
         user_text="search",
     )
 
-    assert captured["raw_tools"] == []
+    assert _raw_tools == []
     assert tool_context["tool_selection"]["mode"] == "none"
 
 
 def test_run_request_tool_selection_exclude_wins_over_include(monkeypatch):
     from domain.chat import run_request
 
-    def fake_resolve(raw_tools, **_kwargs):
-        if raw_tools is None:
-            return [], []
-        return [{"tool_id": str(item)} for item in raw_tools], []
+    class FakeRegistry:
+        def list_tools(self):
+            return [
+                {"tool_id": "web_search", "summary": "Search the web"},
+                {"tool_id": "calculator", "summary": "Compute arithmetic"},
+            ]
 
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, tool_context = run_request._available_tools(
@@ -692,27 +668,22 @@ def test_run_request_tool_selection_exclude_wins_over_include(monkeypatch):
     )
 
     assert [tool["tool_id"] for tool in raw_tools] == ["calculator"]
-    assert tool_context["tool_selection"]["exclude"] == ["web_search"]
+    assert tool_context["tool_selection"]["exclude"] == [{"kind": "tool", "id": "web_search"}]
 
 
 def test_run_request_tool_selection_takes_priority_over_legacy_tools(monkeypatch):
     from domain.chat import run_request
 
-    captured = {}
+    class FakeRegistry:
+        def list_tools(self):
+            return [
+                {"tool_id": "web_search", "summary": "Search the web"},
+                {"tool_id": "calculator", "summary": "Compute arithmetic"},
+            ]
 
-    def fake_resolve(raw_tools, **_kwargs):
-        captured["raw_tools"] = raw_tools
-        return [{"tool_id": str(item)} for item in raw_tools], []
-
-    monkeypatch.setattr(run_request, "_resolve_selected_tools", fake_resolve)
-    monkeypatch.setattr(
-        run_request, "resolve_runtime_profile_context", lambda context: context or {}
-    )
-    monkeypatch.setattr(
-        run_request,
-        "filter_tool_definitions_for_runtime_profile",
-        lambda tools, *_args, **_kwargs: tools,
-    )
+    monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
+    monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
+    monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)
 
     raw_tools, _provider_tools, _tool_context = run_request._available_tools(
@@ -727,7 +698,6 @@ def test_run_request_tool_selection_takes_priority_over_legacy_tools(monkeypatch
         user_text="search",
     )
 
-    assert captured["raw_tools"] == ["calculator"]
     assert [tool["tool_id"] for tool in raw_tools] == ["calculator"]
 
 

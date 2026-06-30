@@ -272,6 +272,16 @@ export function pendingRuntimeApproval(messages: ChatUiMessage[], now = Date.now
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
     if (message.role !== "agent") continue;
+    const metadataApproval = message.metadata?.pendingApproval;
+    const metadataRuntimeApproval = runtimeApprovalFromCandidate(
+      metadataApproval,
+      String(metadataApproval?.tool_name ?? "tool"),
+      typeof metadataApproval?.tool_call_id === "string" ? metadataApproval.tool_call_id : undefined,
+      undefined,
+      metadataApproval?.timestamp,
+      now,
+    );
+    if (metadataRuntimeApproval) return metadataRuntimeApproval;
     for (const event of [...(message.events ?? [])].reverse()) {
       if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
       const approval = runtimeApprovalFromCandidate(

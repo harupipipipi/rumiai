@@ -1,6 +1,7 @@
 {
   "id": "tool_search",
   "description": "Search available tools by names, summaries, docs, schema keywords, and skill metadata.",
+  "loading": "always",
   "config": {
     "tool_id": "tool_search",
     "name": "Tool Search",
@@ -10,6 +11,7 @@
     "write_action": false,
     "requires_approval": false,
     "risk": "low",
+    "loading": "always",
     "tags": [
       "tool",
       "search",

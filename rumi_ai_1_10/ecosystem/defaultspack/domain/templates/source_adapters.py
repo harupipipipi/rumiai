@@ -221,6 +221,37 @@ class FlowRouteTemplateAdapter:
         return result
 
 
+class SandboxRuntimeTemplateAdapter:
+    source_kind = "sandbox_runtime_template"
+
+    def discover(self, root: Path) -> TemplateSourceAdapterResult:
+        result = TemplateSourceAdapterResult()
+        templates_root = root.parent / "rumi_sandbox_runtime_pack" / "templates"
+        if not templates_root.is_dir():
+            return result
+        for path in sorted(templates_root.glob("*/template.json")):
+            payload = _read_json(path, result, self.source_kind)
+            if payload is None:
+                continue
+            template_id = _first(payload, "id", "template_id", "name") or path.parent.name
+            metadata = _safe_metadata(payload)
+            metadata.setdefault("id", template_id)
+            metadata.setdefault("status", "active")
+            result.contributions.append(
+                TemplateSourceContribution(
+                    source_kind=self.source_kind,
+                    source_id=template_id,
+                    source_path=str(path),
+                    source_pack_id="rumi_sandbox_runtime_pack",
+                    trust_level="builtin",
+                    public_id=f"sandbox_template:{template_id}",
+                    bucket="sandbox_templates",
+                    metadata=metadata,
+                )
+            )
+        return result
+
+
 def default_source_adapters() -> list[TemplateSourceAdapter]:
     return [
         DomainComponentTemplateAdapter(),
@@ -228,6 +259,7 @@ def default_source_adapters() -> list[TemplateSourceAdapter]:
         LegacyCommandTemplateAdapter(),
         ExternalIoTemplateAdapter(),
         FlowRouteTemplateAdapter(),
+        SandboxRuntimeTemplateAdapter(),
     ]
 
 

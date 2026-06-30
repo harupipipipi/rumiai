@@ -8,7 +8,9 @@ import {
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
+  composerHelperCopy,
   composerModelControlWidth,
+  composerPlaceholderCopy,
   modelDropdownPlacementClassName,
   modelCandidateMenuKeyAction,
   modelCandidatePopupStyleForAnchor,
@@ -404,6 +406,57 @@ test("composer input template metadata changes safe input copy without replacing
   assert.doesNotMatch(html, /remote-module/);
 });
 
+test("composer renders action approval control and review card", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [{ id: "github.search_code", label: "コード検索", category: "tool" }],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      selectedToolIds: ["github.search_code"],
+      actionApprovalMode: "ask",
+      toolSelectionReview: {
+        previewId: "sel_1",
+        expiresAt: "2026-01-01T00:05:00Z",
+        userText: "GitHubを確認して",
+        request: { mode: "review", include: [], exclude: [], scope: "turn", must_use: false },
+        createdAt: 1,
+        draft: { input: "GitHubを確認して", attachments: [], droppedWidgets: [] },
+        decision: {
+          selected_tools: ["github.search_code"],
+          selected_services: [{ service_id: "github", label: "GitHub", tool_count: 1 }],
+          recommendations: [{ tool_id: "github.search_code", reason: "対象実装を確認するため" }],
+          permission_summary: { auto: 1, confirm: 0, block: 0 },
+        },
+      },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+      onToolSelectionReviewApprove: () => undefined,
+      onToolSelectionReviewEdit: () => undefined,
+      onToolSelectionReviewNoTools: () => undefined,
+      onToolSelectionReviewCancel: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-composer-widget="action-approval-control"/);
+  assert.match(html, /アクションの承認方法/);
+  assert.match(html, /承認/);
+  assert.match(html, /使用する機能を確認/);
+  assert.match(html, /この内容で続ける/);
+});
+
 test("new conversation composer input is not locked to one visual line", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {
@@ -433,8 +486,11 @@ test("new conversation composer input is not locked to one visual line", () => {
     }),
   );
 
-  assert.match(html, /rumi-composer-input-new-overlay/);
-  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[22px\]/);
+  assert.doesNotMatch(html, /rumi-composer-input-new-overlay/);
+  assert.match(html, /rumi-composer-input-new[^"]*min-h-\[24px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*max-h-\[150px\]/);
+  assert.match(html, /rumi-composer-input-new[^"]*text-zinc-100/);
+  assert.doesNotMatch(html, /rumi-composer-input-new[^"]*text-transparent/);
   assert.doesNotMatch(html, /rumi-composer-input-new[^"]*\sh-\[22px\]/);
   assert.match(html, /style="[^"]*flex:0 1 9ch;min-width:5.5rem;max-width:12rem/);
 });
@@ -524,9 +580,11 @@ test("composer uses the main input as steer while generating", () => {
     }),
   );
 
-  assert.match(html, /実行中のAIへステアを入力/);
-  assert.match(html, /Enterでステアを送信/);
-  assert.match(html, /title="ステアを送る"/);
+  assert.match(html, /追加の指示を入力/);
+  assert.match(html, /Enterで追加指示を送信/);
+  assert.match(html, /title="追加指示を送る"/);
+  assert.doesNotMatch(html, /実行中のAIへステアを入力/);
+  assert.doesNotMatch(html, /AI実行中/);
   assert.doesNotMatch(html, /textarea[^>]*disabled/);
   assert.doesNotMatch(html, /これがステア/);
   assert.doesNotMatch(html, /フォローアップの変更を求める/);
@@ -713,5 +771,28 @@ test("coding workspace picker renders selected workspace and trust affordance", 
   );
 
   assert.match(html, /Main Repo/);
-  assert.match(html, /Trust workspace/);
+  assert.match(html, /ShieldQuestion|text-amber-300/);
+  assert.match(html, /rumi-workspace-picker-action is-trust/);
+  assert.match(html, /aria-label="Main Repo を信頼"/);
+});
+
+test("composer copy resolver suppresses internal template implementation copy", () => {
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: false,
+    mode: "chat",
+    placeholder: "メッセージを入力...",
+    templatePlaceholder: "メッセージを入力... /context text で会話をTXT化",
+  }), "メッセージを入力...");
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: true,
+    mode: "chat",
+  }), "追加の指示を入力");
+  assert.equal(composerHelperCopy({
+    isSteerMode: false,
+    hasInput: false,
+    slashCommands: false,
+    atMentions: false,
+    fileAttachments: true,
+    templateHelp: "Template-composed composer: slash commands, mentions, files",
+  }), "Enterで送信 · ファイル添付対応");
 });

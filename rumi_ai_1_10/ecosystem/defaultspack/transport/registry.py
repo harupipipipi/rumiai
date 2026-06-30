@@ -23,9 +23,17 @@ class HttpRouteSpec:
     defaults: Dict[str, Any] = field(default_factory=dict)
     pre_auth: bool = False
     sensitive: bool = False
+    local_only: bool = False
     block_module: str = ""
     function_name: str = ""
     fallback_block_module: str = ""
+    permission_id: str = ""
+    owner_pack_id: str = ""
+    provider_id: str = ""
+    frontend_id: str = ""
+    audience: str = "kernel_api"
+    resource_template: Dict[str, Any] = field(default_factory=dict)
+    core_only: bool = False
 
     def __post_init__(self) -> None:
         resolved_function_id = str(self.function_id or self.function_name or "").strip()
@@ -49,6 +57,9 @@ class HttpRouteSpec:
             object.__setattr__(self, "fallback_block_module", resolved_legacy_block)
         object.__setattr__(self, "function_id", resolved_function_id)
         object.__setattr__(self, "legacy_block_module", resolved_legacy_block)
+        if str(self.pattern or "").startswith("/api/prompts"):
+            object.__setattr__(self, "sensitive", True)
+            object.__setattr__(self, "local_only", True)
 
 
 _ROUTE_PARAM_RE = re.compile(r"\{(\w+)\}")
@@ -211,6 +222,15 @@ def _component_route_specs() -> List[HttpRouteSpec]:
                     handler_name=handler_name,
                     path_inject=dict(path_inject) if isinstance(path_inject, dict) else {},
                     defaults=dict(defaults) if isinstance(defaults, dict) else {},
+                    permission_id=str(route.get("permission_id") or "").strip(),
+                    owner_pack_id=str(route.get("owner_pack_id") or source_pack_id).strip(),
+                    provider_id=str(route.get("provider_id") or "").strip(),
+                    frontend_id=str(route.get("frontend_id") or "").strip(),
+                    audience=str(route.get("audience") or "kernel_api").strip(),
+                    resource_template=dict(route.get("resource_template") or {})
+                    if isinstance(route.get("resource_template"), dict)
+                    else {},
+                    core_only=bool(route.get("core_only", False)),
                 )
             )
     return specs
@@ -255,6 +275,8 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
         pattern = str(item.get("path") or "").strip()
         if not function_id or not method or not pattern.startswith("/"):
             continue
+        sensitive = bool(item.get("sensitive")) or pattern.startswith("/api/prompts")
+        local_only = bool(item.get("local_only")) or pattern.startswith("/api/prompts")
         specs.append(
             HttpRouteSpec(
                 method,
@@ -262,9 +284,20 @@ def template_http_route_specs(defaultspack_root: str | Path | None = None) -> Li
                 function_id=function_id,
                 function_name=f"defaultspack:{function_id}",
                 block_module=str(item.get("block_module") or "").strip(),
+                path_inject=dict(item.get("path_inject") or {}),
                 defaults=dict(item.get("default_args") or {}),
                 pre_auth=bool(item.get("pre_auth")),
-                sensitive=bool(item.get("sensitive")),
+                sensitive=sensitive,
+                local_only=local_only,
+                permission_id=str(item.get("permission_id") or "").strip(),
+                owner_pack_id=str(item.get("owner_pack_id") or "defaultspack").strip(),
+                provider_id=str(item.get("provider_id") or "").strip(),
+                frontend_id=str(item.get("frontend_id") or "").strip(),
+                audience=str(item.get("audience") or "kernel_api").strip(),
+                resource_template=dict(item.get("resource_template") or {})
+                if isinstance(item.get("resource_template"), dict)
+                else {},
+                core_only=bool(item.get("core_only", False)),
             )
         )
     return specs
@@ -452,8 +485,9 @@ def canonical_http_route_specs(*, include_always_available: bool = True) -> list
     """
     flow_specs = flow_http_route_specs()
     fallback_specs = list(_FALLBACK_HTTP_ROUTE_SPECS)
+    adaptive_specs = list(_ADAPTIVE_HTTP_ROUTE_SPECS)
     template_specs = template_http_route_specs()
-    base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs])
+    base_specs = _dedupe_http_route_specs([flow_specs, template_specs, fallback_specs, adaptive_specs])
     existing = {(spec.method, spec.pattern) for spec in base_specs}
     component_specs = [
         spec for spec in _component_route_specs() if (spec.method, spec.pattern) not in existing
@@ -491,6 +525,98 @@ def flow_http_output_is_compatible(
             return True
         return False
     return True
+
+
+_PROMPT_HTTP_ROUTE_SPECS = [
+    HttpRouteSpec("GET", "/api/prompts", block_module="blocks.prompt.editor_load", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/active", block_module="blocks.prompt.active", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/traces", block_module="blocks.prompt.trace", sensitive=True),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/traces/{trace_id}",
+        block_module="blocks.prompt.trace",
+        path_inject={"trace_id": "trace_id"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/toggle", block_module="blocks.prompt.toggle", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/preview-toggle",
+        block_module="blocks.prompt.preview_toggle",
+        sensitive=True,
+    ),
+    HttpRouteSpec("GET", "/api/prompts/editor", block_module="blocks.prompt.editor_load", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/editor/save",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "save"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/override",
+        block_module="blocks.prompt.editor",
+        defaults={"action": "override"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/diff", block_module="blocks.prompt.diff", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/test", block_module="blocks.prompt.test", sensitive=True),
+    HttpRouteSpec(
+        "GET",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.versions",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/versions",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/prompts/{name}/versions/{version}",
+        block_module="blocks.prompt.advanced.version",
+        path_inject={"name": "name", "version": "version"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/rollback",
+        block_module="blocks.prompt.rollback",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("PUT", "/api/prompts/{name}", block_module="blocks.prompt.update", path_inject={"name": "name"}, sensitive=True),
+    HttpRouteSpec("DELETE", "/api/prompts/{name}", block_module="blocks.prompt.delete", path_inject={"name": "name"}, sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt", sensitive=True),
+    HttpRouteSpec("POST", "/api/prompts/build", block_module="blocks.prompt.advanced.build", sensitive=True),
+    HttpRouteSpec("GET", "/api/prompts/context-vars", block_module="blocks.prompt.advanced.context_vars", sensitive=True),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/conditional",
+        block_module="blocks.prompt.advanced.conditional",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/prompts/{name}/inherit",
+        block_module="blocks.prompt.advanced.inherit",
+        path_inject={"name": "name"},
+        sensitive=True,
+    ),
+    HttpRouteSpec("POST", "/api/prompts/preview", block_module="blocks.prompt.advanced.preview", sensitive=True),
+]
+
+
+def prompt_http_route_specs() -> List[HttpRouteSpec]:
+    return list(_PROMPT_HTTP_ROUTE_SPECS)
 
 
 _FALLBACK_HTTP_ROUTE_SPECS = [
@@ -613,6 +739,54 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "/api/chat/conversations/{id}/auto-compact",
         block_module="blocks.chat.auto_compact",
         path_inject={"id": "conversation_id"},
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/chat/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "GET"},
+        permission_id="chat.tool_preferences.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/chat/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "PUT"},
+        permission_id="chat.tool_preferences.write",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "GET",
+        "/api/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "GET"},
+        permission_id="chat.tool_preferences.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
+    ),
+    HttpRouteSpec(
+        "PUT",
+        "/api/conversations/{id}/tool-preferences",
+        block_module="blocks.chat.tool_preferences",
+        path_inject={"id": "conversation_id"},
+        defaults={"_method": "PUT"},
+        permission_id="chat.tool_preferences.write",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"conversation_id": "{path.id}"},
     ),
     HttpRouteSpec(
         "GET",
@@ -1560,9 +1734,19 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST",
         "/api/authority/requests/{request_id}/approve",
         handler_name="_handle_authority_approve",
+        permission_id="authority.request.approve",
     ),
     HttpRouteSpec(
-        "POST", "/api/authority/requests/{request_id}/deny", handler_name="_handle_authority_deny"
+        "POST",
+        "/api/authority/requests/{request_id}/challenge",
+        handler_name="_handle_authority_challenge",
+        permission_id="authority.request.approve",
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/authority/requests/{request_id}/deny",
+        handler_name="_handle_authority_deny",
+        permission_id="authority.request.deny",
     ),
     HttpRouteSpec("POST", "/api/coding/github/pr", block_module="blocks.coding.github_pr_read"),
     HttpRouteSpec(
@@ -1658,23 +1842,27 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         block_module="blocks.knowledge.delete",
         path_inject={"id": "id"},
     ),
-    HttpRouteSpec(
-        "PUT",
-        "/api/prompts/{name}",
-        block_module="blocks.prompt.update",
-        path_inject={"name": "name"},
-    ),
-    HttpRouteSpec(
-        "DELETE",
-        "/api/prompts/{name}",
-        block_module="blocks.prompt.delete",
-        path_inject={"name": "name"},
-    ),
-    HttpRouteSpec("POST", "/api/prompts/convert", block_module="blocks.prompt.convert"),
-    HttpRouteSpec("POST", "/api/prompts/lint", block_module="blocks.prompt.lint_prompt"),
-    HttpRouteSpec("POST", "/api/prompts/compact", block_module="blocks.prompt.compact_prompt"),
+    *_PROMPT_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/api/tools", block_module="blocks.tool.list"),
     HttpRouteSpec("GET", "/api/tools/names", block_module="blocks.tool.names"),
+    HttpRouteSpec("GET", "/api/tools/catalog", block_module="blocks.tool.catalog"),
+    HttpRouteSpec("POST", "/api/tools/selection/preview", block_module="blocks.tool.selection_preview"),
+    HttpRouteSpec(
+        "GET",
+        "/api/tools/selection/traces/{trace_id}",
+        block_module="blocks.tool.selection_trace",
+        path_inject={"trace_id": "trace_id"},
+        permission_id="tool_selection.trace.read",
+        owner_pack_id="defaultspack",
+        provider_id="rumi",
+        frontend_id="defaultspack.webapp",
+        resource_template={"trace_id": "{path.trace_id}"},
+    ),
+    HttpRouteSpec(
+        "POST",
+        "/api/tools/embedding-index/rebuild",
+        block_module="blocks.tool.embedding_index_rebuild",
+    ),
     HttpRouteSpec(
         "GET",
         "/api/defaultspack/modules",
@@ -1938,6 +2126,21 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ai/models/recommend", block_module="blocks.ai.recommend_model"),
     HttpRouteSpec("POST", "/api/ai/models/route", block_module="blocks.ai.route_model"),
     HttpRouteSpec("GET", "/api/ai/profiles", block_module="blocks.ai.profiles"),
+    HttpRouteSpec("GET", "/api/continuity/nodes", function_id="continuity_list_nodes", block_module="blocks.continuity.api", defaults={"_handler": "nodes_list"}),
+    HttpRouteSpec("POST", "/api/continuity/pairing/start", function_id="continuity_pairing_start", block_module="blocks.continuity.api", defaults={"_handler": "pairing_start"}),
+    HttpRouteSpec("POST", "/api/continuity/pairing/accept", function_id="continuity_pairing_accept", block_module="blocks.continuity.api", defaults={"_handler": "pairing_accept"}),
+    HttpRouteSpec("DELETE", "/api/continuity/nodes/{node_id}", function_id="continuity_remove_node", block_module="blocks.continuity.api", path_inject={"node_id": "node_id"}, defaults={"_handler": "node_delete"}),
+    HttpRouteSpec("POST", "/api/continuity/nodes/{node_id}/probe", function_id="continuity_probe_node", block_module="blocks.continuity.api", path_inject={"node_id": "node_id"}, defaults={"_handler": "node_probe"}),
+    HttpRouteSpec("POST", "/api/continuity/plans", function_id="continuity_plan_handoff", block_module="blocks.continuity.api", defaults={"_handler": "plan"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs", function_id="continuity_status", block_module="blocks.continuity.api", defaults={"_handler": "handoffs_list"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs/{operation_id}", function_id="continuity_status", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_get"}),
+    HttpRouteSpec("POST", "/api/continuity/handoffs/{operation_id}/cancel", function_id="continuity_cancel", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_cancel"}),
+    HttpRouteSpec("GET", "/api/continuity/handoffs/{operation_id}/events", function_id="continuity_status", block_module="blocks.continuity.api", path_inject={"operation_id": "operation_id"}, defaults={"_handler": "handoff_get"}),
+    HttpRouteSpec("GET", "/api/continuity/provider-routes", function_id="continuity_provider_routes", block_module="blocks.continuity.api", defaults={"_handler": "provider_routes"}),
+    HttpRouteSpec("POST", "/api/continuity/provider-routes/{route_id}/probe", function_id="continuity_probe_provider_route", block_module="blocks.continuity.api", path_inject={"route_id": "route_id"}, defaults={"_handler": "provider_route_probe"}),
+    HttpRouteSpec("POST", "/api/continuity/provider-routes/{route_id}/set-fallbacks", function_id="continuity_set_provider_fallbacks", block_module="blocks.continuity.api", path_inject={"route_id": "route_id"}, defaults={"_handler": "provider_route_set_fallbacks"}),
+    HttpRouteSpec("GET", "/api/continuity/provider-extensions", function_id="continuity_provider_extensions", block_module="blocks.continuity.api", defaults={"_handler": "provider_extensions"}),
+    HttpRouteSpec("POST", "/api/continuity/checkpoints", function_id="continuity_checkpoint", block_module="blocks.continuity.api", defaults={"_handler": "checkpoint"}),
     HttpRouteSpec(
         "POST", "/api/vision/describe-images", block_module="blocks.vision.describe_images"
     ),
@@ -1959,6 +2162,138 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ui/select-directory", block_module="blocks.ui.select_directory"),
 ]
 
+
+def _adaptive_http_route(method: str, pattern: str, function_id: str, **kwargs: Any) -> HttpRouteSpec:
+    return HttpRouteSpec(
+        method,
+        pattern,
+        function_id=function_id,
+        function_name=f"defaultspack:{function_id}",
+        **kwargs,
+    )
+
+
+_ADAPTIVE_HTTP_ROUTE_SPECS = [
+    _adaptive_http_route("GET", "/api/onboarding/status", "adaptive_onboarding_status"),
+    _adaptive_http_route("GET", "/api/onboarding/schema", "adaptive_onboarding_schema"),
+    _adaptive_http_route("POST", "/api/onboarding/answers/normalize", "adaptive_onboarding_normalize"),
+    _adaptive_http_route("POST", "/api/onboarding/compile", "adaptive_onboarding_compile"),
+    _adaptive_http_route("POST", "/api/onboarding/simulate", "adaptive_onboarding_simulate"),
+    _adaptive_http_route("POST", "/api/onboarding/apply", "adaptive_onboarding_apply", sensitive=True),
+    _adaptive_http_route("POST", "/api/onboarding/undo", "adaptive_onboarding_undo"),
+    _adaptive_http_route("GET", "/api/onboarding/history", "adaptive_onboarding_history"),
+    _adaptive_http_route("POST", "/api/onboarding/rediagnose", "adaptive_onboarding_rediagnose"),
+    _adaptive_http_route("GET", "/api/operating-profiles", "adaptive_operating_profiles_list"),
+    _adaptive_http_route(
+        "GET",
+        "/api/operating-profiles/{id}",
+        "adaptive_operating_profiles_get",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/operating-profiles", "adaptive_operating_profiles_create"),
+    _adaptive_http_route(
+        "PUT",
+        "/api/operating-profiles/{id}",
+        "adaptive_operating_profiles_update",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/operating-profiles/{id}/preview",
+        "adaptive_operating_profiles_preview",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/operating-profiles/{id}/activate",
+        "adaptive_operating_profiles_activate",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("GET", "/api/packs/onboarding-recommendations", "adaptive_pack_recommendations_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/packs/onboarding-recommendations/preview",
+        "adaptive_pack_recommendations_preview",
+    ),
+    _adaptive_http_route("GET", "/api/activity-center", "adaptive_activity_snapshot"),
+    _adaptive_http_route("POST", "/api/activity-center/freeze", "adaptive_freeze_set"),
+    _adaptive_http_route(
+        "PUT",
+        "/api/automations/{id}",
+        "adaptive_automation_update",
+        path_inject={"id": "automation_id"},
+    ),
+    _adaptive_http_route("POST", "/api/context/file-read", "adaptive_context_file_read"),
+    _adaptive_http_route("POST", "/api/context/code-search", "adaptive_context_code_search"),
+    _adaptive_http_route("GET", "/api/context/repository-map", "adaptive_context_repository_map"),
+    _adaptive_http_route("POST", "/api/context/evidence", "adaptive_context_evidence"),
+    _adaptive_http_route("POST", "/api/prepared-actions/prepare", "adaptive_prepared_action_prepare"),
+    _adaptive_http_route(
+        "POST",
+        "/api/prepared-actions/{id}/commit",
+        "adaptive_prepared_action_commit",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/prepared-actions/{id}/revoke",
+        "adaptive_prepared_action_revoke",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/events", "adaptive_event_append"),
+    _adaptive_http_route("GET", "/api/events", "adaptive_event_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/events/{id}/ack",
+        "adaptive_event_ack",
+        path_inject={"id": "event_id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/events/{id}/retry",
+        "adaptive_event_retry",
+        path_inject={"id": "event_id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/events/{id}/dlq",
+        "adaptive_event_dlq",
+        path_inject={"id": "event_id"},
+    ),
+    _adaptive_http_route("GET", "/api/events/outbox", "adaptive_event_outbox"),
+    _adaptive_http_route("POST", "/api/events/replay", "adaptive_event_replay"),
+    _adaptive_http_route("POST", "/api/events/subscriptions", "adaptive_event_subscribe"),
+    _adaptive_http_route("GET", "/api/events/subscriptions", "adaptive_event_subscription_list"),
+    _adaptive_http_route("POST", "/api/continuations/resume", "adaptive_continuation_resume"),
+    _adaptive_http_route("GET", "/api/skills/candidates", "adaptive_skill_candidates_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/skills/candidates/{id}/promote",
+        "adaptive_skill_candidate_promote",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route(
+        "POST",
+        "/api/skills/candidates/{id}/rollback",
+        "adaptive_skill_candidate_rollback",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("GET", "/api/memory/conflicts", "adaptive_memory_conflicts_list"),
+    _adaptive_http_route(
+        "POST",
+        "/api/memory/conflicts/{id}/resolve",
+        "adaptive_memory_conflict_resolve",
+        path_inject={"id": "id"},
+    ),
+    _adaptive_http_route("POST", "/api/orchestration/leases/acquire", "adaptive_lease_acquire"),
+    _adaptive_http_route(
+        "POST",
+        "/api/orchestration/leases/{id}/release",
+        "adaptive_lease_release",
+        path_inject={"id": "id"},
+    ),
+]
+
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
@@ -1969,12 +2304,15 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/pack/defaultspack", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/coding", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/approval", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/prompts", handler_name="_handle_static"),
     HttpRouteSpec("POST", "/api/authority/browser-ui-operator", handler_name="_handle_authority_browser_ui_operator"),
     HttpRouteSpec("GET", "/ambient", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/ambient-debug", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/finger-recording", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/console", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/host-permissions", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/adaptive", handler_name="_handle_static"),
+    HttpRouteSpec("GET", "/operating-profile", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 
@@ -2088,14 +2426,37 @@ def build_http_routes_from_specs(server: Any, specs: List[HttpRouteSpec]):
             handler = _handler
         else:
             handler = getattr(server, spec.handler_name)
-        try:
-            setattr(handler, "__rumi_route_pattern__", spec.pattern)
-            setattr(handler, "__rumi_route_sensitive__", bool(spec.sensitive))
-            setattr(handler, "__rumi_route_pre_auth__", bool(spec.pre_auth))
-        except Exception:
-            pass
+        _set_http_route_handler_metadata(handler, spec)
         routes.append((spec.method, compiled, handler, "fallback", dict(spec.path_inject)))
     return routes
+
+
+def _set_http_route_handler_metadata(handler: Any, spec: HttpRouteSpec) -> None:
+    target = getattr(handler, "__func__", handler)
+    try:
+        setattr(target, "__rumi_route_pattern__", spec.pattern)
+        setattr(target, "__rumi_route_sensitive__", bool(spec.sensitive))
+        setattr(target, "__rumi_route_pre_auth__", bool(spec.pre_auth))
+        setattr(target, "__rumi_route_local_only__", bool(spec.local_only))
+        setattr(target, "__rumi_route_authority__", http_route_authority_metadata(spec))
+    except Exception:
+        pass
+
+
+def http_route_authority_metadata(spec: HttpRouteSpec) -> dict[str, Any]:
+    metadata = {
+        "permission_id": str(spec.permission_id or "").strip(),
+        "owner_pack_id": str(spec.owner_pack_id or "").strip(),
+        "provider_id": str(spec.provider_id or "").strip(),
+        "frontend_id": str(spec.frontend_id or "").strip(),
+        "audience": str(spec.audience or "kernel_api").strip(),
+        "resource_template": dict(spec.resource_template or {}),
+    }
+    if spec.core_only:
+        metadata["core_only"] = True
+    if spec.function_id:
+        metadata["function_id"] = spec.function_id
+    return {key: value for key, value in metadata.items() if value not in ("", {}, None)}
 
 
 def build_always_available_http_routes(server: Any):

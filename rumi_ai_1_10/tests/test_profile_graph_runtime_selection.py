@@ -219,5 +219,5 @@ def test_profile_graph_selected_tools_are_applied_to_chat_runtime_context(monkey
     assert prepared.request_context["profile_policy"]["tool_allowlist"] == ["web_search"]
     assert prepared.request_context["active_startup_profile_id"] == "research-profile"
     assert prepared.conversation["system_prompt_id"] == "research.system"
-    assert [tool["function"]["name"] for tool in prepared.provider_tools] == ["web_search"]
+    assert [tool["function"]["name"] for tool in prepared.provider_tools] == ["web_search", "assistant_progress"]
     ChatStore._instance = None

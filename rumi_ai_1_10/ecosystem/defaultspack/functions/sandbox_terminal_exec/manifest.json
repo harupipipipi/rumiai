@@ -1,0 +1,100 @@
+{
+  "function_id": "sandbox_terminal_exec",
+  "description": "Execute a command inside a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "terminal"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.terminal.exec"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.terminal_exec",
+    "defaultspack.sandbox.terminal_exec",
+    "defaults.sandbox.terminal.exec",
+    "defaultspack.sandbox.terminal.exec"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "command": {
+        "type": "string"
+      },
+      "argv": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "cwd": {
+        "type": "string"
+      },
+      "timeout": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120
+      },
+      "timeout_seconds": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120
+      },
+      "max_diff_chars": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "network": {
+        "type": "boolean"
+      },
+      "network_enabled": {
+        "type": "boolean"
+      }
+    },
+    "anyOf": [
+      {
+        "required": [
+          "command"
+        ]
+      },
+      {
+        "required": [
+          "argv"
+        ]
+      }
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_terminal_exec",
+      "default_args": {}
+    }
+  }
+}

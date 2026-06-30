@@ -21,7 +21,17 @@
     "properties": {
       "path": {"type": "string"},
       "start_line": {"type": "integer", "minimum": 1},
-      "end_line": {"type": "integer", "minimum": 1}
+      "end_line": {"type": "integer", "minimum": 1},
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional output character budget. Use this when only a small excerpt is needed."
+      },
+      "max_tokens": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Optional approximate output token budget. The runtime converts this to a character budget."
+      }
     },
     "required": ["path"],
     "additionalProperties": true

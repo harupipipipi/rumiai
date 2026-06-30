@@ -8,9 +8,6 @@ from domain.ai_client.api_key_store import provider_has_api_key, provider_named_
 from domain.ai_client.oauth_store import provider_has_oauth_connection
 
 
-_AUTHORITY_FREE_PROVIDER_IDS = {"", "stub", "rumi"}
-
-
 def provider_api_key_configured(provider_id: str, api_id: str = "legacy") -> bool:
     provider_id = str(provider_id or "").strip()
     api_id = str(api_id or "").strip() or "legacy"
@@ -25,8 +22,10 @@ def provider_api_key_configured(provider_id: str, api_id: str = "legacy") -> boo
 
 def provider_requires_authority(provider_id: str, *, provider: Any = None, api_id: str = "legacy") -> bool:
     provider_id = str(provider_id or "").strip()
-    if provider_id in _AUTHORITY_FREE_PROVIDER_IDS:
+    if not provider_id:
         return False
+    if provider_id in {"stub", "rumi"}:
+        return True
     try:
         if provider_api_key_configured(provider_id, api_id):
             return True

@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _REQUEST_CONTEXT_KEYS = {
     "_tool_server_approved",
+    "_authenticated_principal",
+    "_authority_subject",
     "approval_id",
     "authority_principal_id",
     "conversation_id",
@@ -92,9 +94,40 @@ def _sanitized_request_context(context: dict[str, Any] | None) -> dict[str, Any]
             value = context[key]
             if isinstance(value, (str, int, float, bool)) or value is None:
                 sanitized[key] = value
+            elif key in {"_authenticated_principal", "_authority_subject"} and isinstance(value, dict):
+                sanitized[key] = _sanitized_principal_context(value)
     authority = _sanitized_authority_context(context.get("authority"))
     if authority:
         sanitized["authority"] = authority
+    return sanitized
+
+
+def _sanitized_principal_context(raw: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "auth_mode",
+        "token_id",
+        "profile_id",
+        "surface_id",
+        "device_id",
+        "role",
+        "issued_at",
+        "expires_at",
+        "core_role",
+        "principal_id",
+    }
+    sanitized: dict[str, Any] = {}
+    for key in allowed:
+        if key not in raw:
+            continue
+        value = raw.get(key)
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            sanitized[key] = value
+    audiences = raw.get("audiences")
+    if isinstance(audiences, list):
+        sanitized["audiences"] = [str(item) for item in audiences if str(item or "").strip()]
+    facets = raw.get("facet_principal_ids")
+    if isinstance(facets, list):
+        sanitized["facet_principal_ids"] = [str(item) for item in facets if str(item or "").strip()]
     return sanitized
 
 
@@ -144,6 +177,44 @@ def ensure_defaultspack_functions_registered(container: Any | None = None) -> in
                     registered += 1
             except Exception:
                 continue
+    try:
+        from core_runtime.function_registry import FunctionEntry
+
+        from .manifest_factory import FUNCTION_SPECS, manifest_for
+
+        runtime_dir = Path(__file__).resolve().parent
+        runner_path = runtime_dir / "template_runner.py"
+        for spec in FUNCTION_SPECS:
+            manifest = manifest_for(spec)
+            manifest["entrypoint"] = "template_runner.py:run"
+            if registry.register(
+                FunctionEntry(
+                    function_id=spec.function_id,
+                    pack_id="defaultspack",
+                    description=manifest.get("description", ""),
+                    requires=list(manifest.get("requires") or []),
+                    caller_requires=list(manifest.get("caller_requires") or []),
+                    host_execution=False,
+                    tags=list(manifest.get("tags") or []),
+                    input_schema=dict(manifest.get("input_schema") or {}),
+                    output_schema=dict(manifest.get("output_schema") or {}),
+                    function_dir=runtime_dir,
+                    main_py_path=runner_path,
+                    manifest=manifest,
+                    runtime="python",
+                    entrypoint="template_runner.py:run",
+                    risk=manifest.get("risk"),
+                    grant_config=manifest.get("grant_config"),
+                    vocab_aliases=list(manifest.get("vocab_aliases") or []),
+                    permission_id=manifest.get("permission_id"),
+                    is_builtin=False,
+                    grant_config_schema=manifest.get("grant_config_schema"),
+                    calling_convention="subprocess",
+                )
+            ):
+                registered += 1
+    except Exception:
+        pass
     return registered
 
 

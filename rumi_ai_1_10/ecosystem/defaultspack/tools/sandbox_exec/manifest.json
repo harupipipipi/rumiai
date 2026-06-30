@@ -1,10 +1,10 @@
 {
   "id": "sandbox_exec",
-  "description": "Execute an approved command in an isolated Docker container with only the artifact workspace mounted.",
+  "description": "Request approved command execution in the managed sandbox runtime; fail closed when no provider is ready.",
   "config": {
     "tool_id": "sandbox_exec",
     "name": "Sandbox Exec",
-    "summary": "Execute an approved command in an isolated Docker container with only the artifact workspace mounted.",
+    "summary": "Request approved command execution in the managed sandbox runtime; fail closed when no provider is ready.",
     "tool_category": "sandbox",
     "action_type": "execute",
     "write_action": true,
@@ -22,7 +22,7 @@
       "item_icon": "terminal",
       "widget_kind": "tool_toggle",
       "composer_label": "Sandbox Exec",
-      "composer_description": "Execute an approved command in an isolated Docker container with only the artifact workspace mounted.",
+      "composer_description": "Request approved command execution in the managed sandbox runtime; fail closed when no provider is ready.",
       "composer_icon": "terminal"
     },
     "schema": {
@@ -30,7 +30,16 @@
         "type": "object",
         "additionalProperties": true,
         "properties": {
-          "command": {},
+          "argv": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Preferred command argument vector. Public callers must use argv arrays, not shell strings."
+          },
+          "command": {
+            "description": "Legacy compatibility input. Strings are parsed without shell syntax; arrays are treated as argv."
+          },
           "cwd": {
             "type": "string"
           },
@@ -38,9 +47,7 @@
             "type": "integer"
           }
         },
-        "required": [
-          "command"
-        ]
+        "required": []
       }
     },
     "execution": {

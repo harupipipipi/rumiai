@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import React, { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { AUTHORITY_FOLLOWUP_TEXT, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
+import { AUTHORITY_FOLLOWUP_TEXT, ChatMessagesRenderer, compactLogPreviewText, formatMessageTimestamp, hasRunningToolActivityGroups, isAuthorityWaitingMessage, isCompactLogLikeMessageText, isHiddenAuthorityFollowupMessage, messageCopyText, sanitizeAssistantAuthorityBoilerplate, shouldRenderImageBlockInChat, shouldShowEmptyResponseWarning, streamedBrowserScreenshots, summarizePendingToolNames, summarizeToolActivityGroups, visibleChatMessages } from "./ChatMessagesRenderer";
 import type { ChatUiMessage } from "./types";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -83,7 +85,65 @@ test("pending tool summary shows two names and the remaining count", () => {
   assert.equal(summary.summary, "web_search、browser、その他 1 個が見込まれました");
 });
 
-test("completed tool activity summary uses elapsed work span", () => {
+test("inline pending tool activity renders above the message copy action", () => {
+  const html = renderToStaticMarkup(React.createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: true,
+    pendingStatus: "tool",
+    pendingToolNames: ["coding_file_list"],
+    pendingStartedAt: 10_000,
+    pendingToolStartedAt: { coding_file_list: 10_000 },
+    messages: [message({
+      id: "assistant-running",
+      role: "agent",
+      rawText: "",
+      content: [],
+      metadata: { thinkingLabel: "streaming" },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  const pendingIndex = html.indexOf("coding_file_list");
+  const copyIndex = html.indexOf('aria-label="コピー"');
+
+  assert.notEqual(pendingIndex, -1);
+  assert.notEqual(copyIndex, -1);
+  assert.ok(pendingIndex < copyIndex);
+});
+
+test("loading activity renders semantic track without bounce dots", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: true,
+    isNewConversation: false,
+    isGenerating: true,
+    pendingStatus: "応答を準備しています",
+    pendingToolNames: [],
+    pendingStartedAt: Date.now() - 2_000,
+    messages: [],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /aria-label="応答を準備しています"/);
+  assert.match(html, /rumi-loading-bars/);
+  assert.match(html, /aria-hidden="true" class="shrink-0 font-mono/);
+  assert.doesNotMatch(html, /animate-bounce/);
+});
+
+test("completed tool activity summary uses compact work count and elapsed span", () => {
   const summary = summarizeToolActivityGroups([
     {
       id: "files",
@@ -91,6 +151,7 @@ test("completed tool activity summary uses elapsed work span", () => {
       items: [
         {
           id: "item-1",
+          kind: "tool" as const,
           toolName: "coding_file_list",
           folder: "coding/files",
           folderLabel: "ファイル",
@@ -106,13 +167,13 @@ test("completed tool activity summary uses elapsed work span", () => {
     },
   ]);
 
-  assert.equal(summary.label, "3s作業しました");
+  assert.equal(summary.label, "✓ 1件の作業 · 3s");
   assert.equal(summary.itemCount, 1);
   assert.equal(summary.runningCount, 0);
   assert.equal(summary.failedCount, 0);
 });
 
-test("running tool activity summary remains openable as active work", () => {
+test("running tool activity summary exposes active work and next action", () => {
   const groups = [
     {
       id: "browser",
@@ -120,6 +181,7 @@ test("running tool activity summary remains openable as active work", () => {
       items: [
         {
           id: "item-1",
+          kind: "tool" as const,
           toolName: "browser_use",
           folder: "browser",
           folderLabel: "ブラウザ",
@@ -127,6 +189,7 @@ test("running tool activity summary remains openable as active work", () => {
           title: "ブラウザ / browser_use: 東京 今日の天気",
           detail: "使用中",
           durationLabel: "7s",
+          nextAction: "画面の変化を確認します",
           status: "running" as const,
           timestamp: 10_000,
           supported: true,
@@ -136,7 +199,10 @@ test("running tool activity summary remains openable as active work", () => {
   ];
 
   assert.equal(hasRunningToolActivityGroups(groups), true);
-  assert.equal(summarizeToolActivityGroups(groups).label, "7s作業中");
+  const summary = summarizeToolActivityGroups(groups);
+  assert.equal(summary.label, "作業中 · 1件 · 7s");
+  assert.equal(summary.visibleTitle, "ブラウザ / browser_use: 東京 今日の天気");
+  assert.equal(summary.nextAction, "画面の変化を確認します");
 });
 
 test("empty response warning waits until streaming draft is finalized", () => {
@@ -233,6 +299,43 @@ test("authority waiting message is not replaced by the settled assistant continu
   });
 
   assert.deepEqual(visibleChatMessages([waiting, followup, continuation]).map((item) => item.id), ["authority-waiting", "authority-continuation"]);
+});
+
+test("prompt usage disclosure can be hidden from chat messages", () => {
+  const promptMessage = message({
+    id: "assistant-with-prompts",
+    rawText: "done",
+    content: [{ type: "text", text: "done" }],
+    metadata: {
+      promptUsage: {
+        active_count: 1,
+        token_estimate: { total: 12 },
+        segments: [{ id: "prompt:default_chat", label: "default_chat", status: "active", tokens: 12 }],
+      },
+    },
+  });
+  const baseProps = {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [promptMessage],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  };
+
+  const visible = renderToStaticMarkup(createElement(ChatMessagesRenderer, baseProps));
+  const hidden = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    ...baseProps,
+    showPromptUsageInMessages: false,
+  }));
+
+  assert.match(visible, /Prompt used/);
+  assert.doesNotMatch(hidden, /Prompt used/);
 });
 
 test("long terminal-style output is detected for compact display", () => {

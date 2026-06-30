@@ -8,18 +8,24 @@ explicit DISPLAY environment for the virtual session.
 from __future__ import annotations
 
 import base64
+import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 
 REQUIRED_COMMANDS = ("Xvfb", "openbox", "xdotool", "import")
+DISPLAY_LOCK_ROOT = "rumi-x11-virtual-displays"
+DISPLAY_LOCK_METADATA = "owner.json"
+STALE_LOCK_GRACE_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -56,6 +62,20 @@ class X11VirtualSession:
     @property
     def session_dir(self) -> Path | None:
         return self._session_dir
+
+    def owned_session_metadata(self) -> dict[str, Any]:
+        return {
+            "display": self._display or "",
+            "display_number": self._display_number,
+            "session_dir": str(self._session_dir or ""),
+            "display_lock_dir": str(self._display_lock_dir or ""),
+            "boot_id": self._boot_id(),
+            "processes": {
+                name: {"pid": proc.pid}
+                for name, proc in self._processes.items()
+                if getattr(proc, "pid", None) is not None
+            },
+        }
 
     def is_available(self) -> bool:
         return sys.platform.startswith("linux") and not self.missing_commands()
@@ -118,6 +138,13 @@ class X11VirtualSession:
     def stop(self) -> dict[str, Any]:
         """Stop managed processes and remove session artifacts."""
 
+        for name in list(self._processes):
+            if name in {"openbox", "xvfb"}:
+                continue
+            proc = self._processes.pop(name, None)
+            if proc is not None:
+                self._terminate_process(proc)
+
         for name in ("openbox", "xvfb"):
             proc = self._processes.pop(name, None)
             if proc is not None:
@@ -126,10 +153,7 @@ class X11VirtualSession:
         if self._session_dir is not None:
             shutil.rmtree(self._session_dir, ignore_errors=True)
         if self._display_lock_dir is not None:
-            try:
-                self._display_lock_dir.rmdir()
-            except OSError:
-                pass
+            shutil.rmtree(self._display_lock_dir, ignore_errors=True)
 
         self._session_dir = None
         self._display_lock_dir = None
@@ -246,6 +270,48 @@ class X11VirtualSession:
         time.sleep(duration)
         return self._command_result(True, ["wait", str(duration)], data={"seconds": duration})
 
+    def launch(self, name: str, args: list[str], *, stdout_name: str | None = None) -> dict[str, Any]:
+        reason = self._ensure_started()
+        if reason:
+            return self._command_result(False, args, reason=reason)
+
+        process_key = f"launch-{_safe_process_name(name)}"
+        existing = self._processes.pop(process_key, None)
+        if existing is not None:
+            self._terminate_process(existing)
+
+        log_path: Path | None = None
+        log_handle = None
+        stdout_target: Any = subprocess.DEVNULL
+        if stdout_name and self._session_dir is not None:
+            log_path = self._session_dir / _safe_process_name(stdout_name)
+            try:
+                log_handle = log_path.open("a", encoding="utf-8")
+                stdout_target = log_handle
+            except OSError:
+                log_path = None
+                log_handle = None
+
+        command = [str(part) for part in args]
+        try:
+            proc = subprocess.Popen(
+                command,
+                env=self._session_env(),
+                stdout=stdout_target,
+                stderr=subprocess.STDOUT,
+            )
+        except OSError as exc:
+            return self._command_result(False, command, reason=str(exc))
+        finally:
+            if log_handle is not None:
+                log_handle.close()
+
+        self._processes[process_key] = proc
+        data: dict[str, Any] = {"pid": proc.pid, "process": process_key}
+        if log_path is not None:
+            data["log_path"] = str(log_path)
+        return self._command_result(True, command, data=data)
+
     def _run_xdotool(self, args: list[str], *, timeout: float = 5.0) -> dict[str, Any]:
         reason = self._ensure_started()
         if reason:
@@ -299,7 +365,7 @@ class X11VirtualSession:
         return False
 
     def _allocate_display_number(self) -> int | None:
-        lock_root = Path(tempfile.gettempdir()) / "rumi-x11-virtual-displays"
+        lock_root = Path(tempfile.gettempdir()) / DISPLAY_LOCK_ROOT
         lock_root.mkdir(parents=True, exist_ok=True)
         for number in range(int(self.config.display_min), int(self.config.display_max) + 1):
             if self._display_socket_exists(number):
@@ -308,23 +374,81 @@ class X11VirtualSession:
             try:
                 lock_dir.mkdir()
             except FileExistsError:
+                if not self._release_stale_display_lock(lock_dir, number):
+                    continue
+                try:
+                    lock_dir.mkdir()
+                except FileExistsError:
+                    continue
+            try:
+                self._write_display_lock_metadata(lock_dir, number)
+            except OSError:
+                shutil.rmtree(lock_dir, ignore_errors=True)
                 continue
             self._display_lock_dir = lock_dir
             return number
         return None
 
+    def _write_display_lock_metadata(self, lock_dir: Path, number: int) -> None:
+        metadata = {
+            "pid": os.getpid(),
+            "boot_id": self._boot_id(),
+            "display_number": number,
+            "created_at": time.time(),
+        }
+        (lock_dir / DISPLAY_LOCK_METADATA).write_text(json.dumps(metadata, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _release_stale_display_lock(self, lock_dir: Path, number: int) -> bool:
+        if self._display_socket_exists(number):
+            return False
+        metadata_path = lock_dir / DISPLAY_LOCK_METADATA
+        metadata: dict[str, Any] = {}
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            age = time.time() - _safe_mtime(lock_dir)
+            if age < STALE_LOCK_GRACE_SECONDS:
+                return False
+            shutil.rmtree(lock_dir, ignore_errors=True)
+            return not lock_dir.exists()
+
+        pid = _optional_int(metadata.get("pid"))
+        boot_id = str(metadata.get("boot_id") or "")
+        current_boot_id = self._boot_id()
+        if pid is not None and boot_id == current_boot_id and _process_alive(pid):
+            return False
+        shutil.rmtree(lock_dir, ignore_errors=True)
+        return not lock_dir.exists()
+
     @staticmethod
     def _display_socket_exists(number: int) -> bool:
         return (Path("/tmp/.X11-unix") / f"X{number}").exists()
 
+    @staticmethod
+    def _boot_id() -> str:
+        path = Path("/proc/sys/kernel/random/boot_id")
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return "unknown"
+
     def _session_env(self) -> dict[str, str]:
         if not self._display:
             raise RuntimeError("Cannot build X11 virtual env before DISPLAY allocation.")
-        env = dict(self._base_env)
+        env: dict[str, str] = {}
+        for key in ("PATH", "LANG", "LC_ALL", "LC_CTYPE"):
+            value = self._base_env.get(key)
+            if value:
+                env[key] = value
+        session_dir = self._session_dir or Path(tempfile.gettempdir())
+        runtime_dir = session_dir / "runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        env["HOME"] = str(session_dir)
+        env["TMPDIR"] = str(session_dir)
+        env["TEMP"] = str(session_dir)
+        env["TMP"] = str(session_dir)
+        env["XDG_RUNTIME_DIR"] = str(runtime_dir)
         env["DISPLAY"] = self._display
-        env.pop("WAYLAND_DISPLAY", None)
-        env.pop("MIR_SOCKET", None)
-        env.pop("XAUTHORITY", None)
         env["RUMI_X11_VIRTUAL"] = "1"
         return env
 
@@ -409,3 +533,150 @@ class X11VirtualSession:
                 proc.wait(timeout=2.0)
             except Exception:
                 pass
+
+
+def _optional_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def cleanup_owned_display(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {"cleaned": False, "terminated_pids": [], "removed_paths": [], "skipped_pids": []}
+
+    display = str(metadata.get("display") or "")
+    processes = metadata.get("processes")
+    terminated_pids: list[int] = []
+    skipped_pids: list[int] = []
+    removed_paths: list[str] = []
+
+    if isinstance(processes, Mapping):
+        for name, process in sorted(processes.items(), key=lambda item: _cleanup_process_rank(str(item[0]))):
+            pid = _process_pid(process)
+            if pid is None:
+                continue
+            if not _process_alive(pid):
+                continue
+            if not _process_matches_owned_display(pid, display):
+                skipped_pids.append(pid)
+                continue
+            if _terminate_pid(pid):
+                terminated_pids.append(pid)
+
+    for key in ("session_dir", "display_lock_dir"):
+        removed = _remove_owned_path(metadata.get(key), key=key)
+        if removed:
+            removed_paths.append(removed)
+
+    return {
+        "cleaned": bool(terminated_pids or removed_paths),
+        "terminated_pids": terminated_pids,
+        "removed_paths": removed_paths,
+        "skipped_pids": skipped_pids,
+    }
+
+
+def _process_pid(process: Any) -> int | None:
+    if isinstance(process, Mapping):
+        return _optional_int(process.get("pid"))
+    return _optional_int(process)
+
+
+def _cleanup_process_rank(name: str) -> tuple[int, str]:
+    if name == "xvfb":
+        return (2, name)
+    if name == "openbox":
+        return (1, name)
+    return (0, name)
+
+
+def _process_matches_owned_display(pid: int, display: str) -> bool:
+    if pid <= 1 or not display:
+        return False
+    environ = _process_environ(pid)
+    if not environ:
+        return False
+    entries = environ.split(b"\0")
+    return b"RUMI_X11_VIRTUAL=1" in entries and f"DISPLAY={display}".encode("utf-8") in entries
+
+
+def _process_environ(pid: int) -> bytes:
+    try:
+        return (Path("/proc") / str(pid) / "environ").read_bytes()
+    except OSError:
+        return b""
+
+
+def _terminate_pid(pid: int) -> bool:
+    if pid <= 1 or pid == os.getpid():
+        return False
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        except OSError:
+            return False
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            if not _process_alive(pid):
+                return True
+            time.sleep(0.05)
+    return not _process_alive(pid)
+
+
+def _remove_owned_path(value: Any, *, key: str) -> str:
+    path_text = str(value or "").strip()
+    if not path_text:
+        return ""
+    path = Path(path_text)
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    try:
+        resolved = path.resolve()
+    except OSError:
+        resolved = path
+    if key == "session_dir":
+        if not resolved.name.startswith("rumi-x11-virtual-"):
+            return ""
+    elif key == "display_lock_dir":
+        if resolved.parent.name != DISPLAY_LOCK_ROOT or not resolved.name.startswith("display-") or not resolved.name.endswith(".lock"):
+            return ""
+    try:
+        if temp_root not in resolved.parents and resolved != temp_root:
+            return ""
+    except RuntimeError:
+        return ""
+    existed = resolved.exists()
+    shutil.rmtree(resolved, ignore_errors=True)
+    return str(resolved) if existed and not resolved.exists() else ""
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _safe_process_name(value: str) -> str:
+    text = str(value or "").strip().lower()
+    safe = "".join(char if char.isalnum() or char in {"-", "_", "."} else "-" for char in text)
+    return safe.strip(".-_")[:80] or "process"
+
+
+def _process_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True

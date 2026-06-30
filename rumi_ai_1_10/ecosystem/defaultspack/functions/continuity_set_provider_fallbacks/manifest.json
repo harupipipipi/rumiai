@@ -1,0 +1,49 @@
+{
+  "function_id": "continuity_set_provider_fallbacks",
+  "description": "Set explicit continuity fallback route ordering.",
+  "tags": [
+    "continuity",
+    "provider",
+    "fallback"
+  ],
+  "risk": "medium",
+  "requires": [
+    "continuity.set.provider.fallbacks"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.continuity.set_provider_fallbacks",
+    "defaultspack.continuity.set_provider_fallbacks",
+    "defaults.continuity.set.provider.fallbacks",
+    "defaultspack.continuity.set.provider.fallbacks",
+    "defaults.continuity.provider_route.set_fallbacks",
+    "defaultspack.continuity.provider_route.set_fallbacks"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.continuity.api",
+      "default_args": {
+        "_handler": "provider_route_set_fallbacks"
+      }
+    }
+  }
+}

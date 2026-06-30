@@ -7,6 +7,29 @@ TRUSTED_TOOL_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
 SUPPORTED_AUTHORABLE_EXECUTION_TYPES = {"rumi_function", "capability", "mcp"}
 TRUSTED_LEGACY_EXECUTION_TYPES = {"local", "handler", "dynamic"}
 VALID_RISKS = {"low", "medium", "high"}
+SANDBOX_CAPABILITY_PREFIX = "sandbox."
+SANDBOX_TOOL_IDS = {
+    "sandbox_terminal_exec",
+    "sandbox_file_read",
+    "sandbox_file_write",
+    "sandbox_file_patch",
+    "sandbox_diff_preview",
+    "sandbox_artifact_export",
+}
+SANDBOX_FUNCTION_IDS = SANDBOX_TOOL_IDS
+HOST_CODING_FUNCTION_PREFIXES = (
+    "coding_",
+    "browser_",
+    "computer_",
+)
+HOST_CAPABILITY_PREFIXES = (
+    "terminal.",
+    "file.",
+    "git.",
+    "browser.",
+    "computer.",
+    "coding.",
+)
 
 _UNSAFE_ACTION_TYPES = {
     "create",
@@ -107,6 +130,109 @@ def unsupported_execution_reason(tool_def: dict[str, Any]) -> str | None:
     if legacy_execution_requires_trust(exec_type) and is_trusted_tool(tool_def):
         return None
     return "execution type '{}' is only allowed for trusted first-party tools".format(exec_type)
+
+
+def untrusted_tool_security_rejection(tool_def: dict[str, Any]) -> str | None:
+    """Reject untrusted tools that try to borrow host coding/browser/computer power."""
+    if not isinstance(tool_def, dict) or not is_explicitly_untrusted_tool(tool_def):
+        return None
+    if is_sandbox_capability_tool(tool_def):
+        return None
+
+    execution = tool_def.get("execution") if isinstance(tool_def.get("execution"), dict) else {}
+    exec_type = str(execution.get("type") or "").strip().lower()
+    grants = capability_grants(tool_def)
+    if any(_is_host_capability_grant(grant) for grant in grants):
+        return "untrusted tools may not request host capabilities; use sandbox.* capabilities"
+
+    if exec_type == "rumi_function":
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        pack_id, _, function_id = qualified_name.partition(":")
+        if pack_id in TRUSTED_TOOL_PACK_IDS and _is_host_coding_function(function_id):
+            return "untrusted tools may not borrow trusted host coding/browser/computer functions"
+    if exec_type == "capability":
+        permission_id = str(execution.get("permission_id") or "").strip()
+        if _is_host_capability_grant(permission_id):
+            return "untrusted tools may not invoke host capabilities"
+    if _looks_like_host_coding_tool(tool_def):
+        return "untrusted tools may not expose host coding/browser/computer actions"
+    return None
+
+
+def is_explicitly_untrusted_tool(tool_def: dict[str, Any]) -> bool:
+    if not isinstance(tool_def, dict):
+        return False
+    metadata = tool_def.get("metadata")
+    if isinstance(metadata, dict):
+        if metadata.get("trusted") is False:
+            return True
+        source_pack_id = str(metadata.get("source_pack_id") or "").strip()
+        if source_pack_id:
+            return not is_trusted_pack_id(source_pack_id)
+    source_pack_id = str(tool_def.get("source_pack_id") or "").strip()
+    if source_pack_id:
+        return not is_trusted_pack_id(source_pack_id)
+    return tool_def.get("trusted") is False
+
+
+def capability_grants(tool_def: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    for source in (
+        tool_def,
+        tool_def.get("metadata") if isinstance(tool_def.get("metadata"), dict) else {},
+        tool_def.get("config") if isinstance(tool_def.get("config"), dict) else {},
+    ):
+        raw = source.get("capability_grants") if isinstance(source, dict) else None
+        if isinstance(raw, list):
+            values.extend(str(item).strip() for item in raw if str(item).strip())
+        elif isinstance(raw, str) and raw.strip():
+            values.append(raw.strip())
+    return list(dict.fromkeys(values))
+
+
+def is_sandbox_capability_tool(tool_def: dict[str, Any]) -> bool:
+    if not isinstance(tool_def, dict):
+        return False
+    grants = capability_grants(tool_def)
+    if not grants or any(not grant.startswith(SANDBOX_CAPABILITY_PREFIX) for grant in grants):
+        return False
+    execution = tool_def.get("execution") if isinstance(tool_def.get("execution"), dict) else {}
+    exec_type = str(execution.get("type") or "").strip().lower()
+    if exec_type == "rumi_function":
+        qualified_name = str(execution.get("qualified_name") or "").strip()
+        pack_id, _, function_id = qualified_name.partition(":")
+        return pack_id == "defaultspack" and function_id in SANDBOX_FUNCTION_IDS
+    if exec_type == "capability":
+        permission_id = str(execution.get("permission_id") or "").strip()
+        return permission_id.startswith(SANDBOX_CAPABILITY_PREFIX)
+    return False
+
+
+def _is_host_capability_grant(value: str) -> bool:
+    grant = str(value or "").strip()
+    return bool(grant) and not grant.startswith(SANDBOX_CAPABILITY_PREFIX) and grant.startswith(HOST_CAPABILITY_PREFIXES)
+
+
+def _is_host_coding_function(function_id: str) -> bool:
+    name = str(function_id or "").strip()
+    return name.startswith(HOST_CODING_FUNCTION_PREFIXES) and name not in SANDBOX_FUNCTION_IDS
+
+
+def _looks_like_host_coding_tool(tool_def: dict[str, Any]) -> bool:
+    if is_sandbox_capability_tool(tool_def):
+        return False
+    name = " ".join(
+        str(value or "").strip().lower()
+        for value in (
+            tool_def.get("tool_id"),
+            tool_def.get("name"),
+            tool_def.get("summary"),
+            tool_def.get("description"),
+            _tool_value(tool_def, "category"),
+            _tool_value(tool_def, "action_type"),
+        )
+    )
+    return any(marker in name for marker in ("coding_", "terminal", "shell", "git", "browser", "computer"))
 
 
 def normalize_risk(raw_risk: Any, tool_def: dict[str, Any], trusted: bool) -> tuple[str, bool]:

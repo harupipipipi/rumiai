@@ -76,4 +76,22 @@ def merged_tool_policy(context: dict[str, Any] | None = None) -> dict[str, Any]:
         profile_policy = context.get("profile_policy")
         if isinstance(profile_policy, dict):
             policy = _deep_merge(policy, profile_policy)
+    if _authority_mode_is_off():
+        policy = _deep_merge(
+            policy,
+            {
+                "allow_shell": True,
+                "allow_network": True,
+                "allow_file_write": True,
+                "write_actions_require_approval": False,
+                "destructive_actions_require_approval": False,
+                "full_access": True,
+                "max_tool_calls": None,
+                "yolo_mode": True,
+            },
+        )
     return policy
+
+
+def _authority_mode_is_off() -> bool:
+    return str(os.environ.get("RUMI_AUTHORITY_MODE") or "").strip().lower() == "off"

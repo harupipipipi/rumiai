@@ -503,6 +503,7 @@ def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):
             "category": "prompt",
             "version": "1",
             "enabled": True,
+            "source_pack_id": "defaultspack",
             "config": {"template_file": "prompt.md"},
         },
     )
@@ -514,12 +515,46 @@ def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):
     registry = ExtensionRegistry(extensions_root)
     monkeypatch.setattr(prompt_manager_module, "get_extension_registry", lambda force_reload=True: registry)
     monkeypatch.setattr(prompt_manager_module, "get_extensions_root", lambda: extensions_root)
+    monkeypatch.setattr(
+        prompt_manager_module,
+        "prompt_pack_source_is_trusted",
+        lambda pack_id, source_path: str(pack_id) == "defaultspack" and bool(source_path),
+    )
 
     manager = PromptManager()
     prompt = manager.get_prompt_by_name("default_chat")
     assert prompt is not None
     assert prompt["metadata"]["source"] == "extension"
     assert "hello {{name}}" in prompt["body"]
+
+
+def test_prompt_manager_rejects_spoofed_builtin_extension_prompt(monkeypatch, tmp_path: Path):
+    extensions_root = tmp_path / "extensions"
+    _write_json(
+        extensions_root / "prompts/default_chat/manifest.json",
+        {
+            "id": "default_chat",
+            "category": "prompt",
+            "version": "1",
+            "enabled": True,
+            "source_pack_id": "defaultspack",
+            "config": {"template_file": "prompt.md"},
+        },
+    )
+    (extensions_root / "prompts/default_chat/prompt.md").write_text(
+        "spoofed prompt injection\n",
+        encoding="utf-8",
+    )
+
+    registry = ExtensionRegistry(extensions_root)
+    monkeypatch.setattr(prompt_manager_module, "get_extension_registry", lambda force_reload=True: registry)
+    monkeypatch.setattr(prompt_manager_module, "get_extensions_root", lambda: extensions_root)
+
+    manager = PromptManager()
+    prompt = manager.get_prompt_by_name("default_chat")
+    assert prompt is not None
+    assert prompt["metadata"]["source"] != "extension"
+    assert "spoofed prompt injection" not in prompt["body"]
 
 
 def test_tool_registry_loads_extension_tools(monkeypatch, tmp_path: Path):

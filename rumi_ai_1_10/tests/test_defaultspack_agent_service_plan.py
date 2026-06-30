@@ -1130,7 +1130,8 @@ def test_chat_stream_infers_computer_tools_when_tools_are_omitted(tmp_path, monk
 
     events = list(result["events"])
     assert events[-1]["type"] == "done"
-    assert captured["tools"] == ["computer_use", "browser_computer"]
+    assert captured["tools"][:2] == ["computer_use", "browser_computer"]
+    assert captured["tools"][2:] == ["assistant_progress"]
     ChatStore._instance = None
 
 
@@ -2021,8 +2022,9 @@ def test_chat_send_drops_unknown_selected_tool_ids(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert "missing_tool" not in captured["tools"]
-    assert [tool["function"]["name"] for tool in captured["tools"]] == ["coding_file_read"]
+    tool_names = [tool["function"]["name"] for tool in captured["tools"]]
+    assert "missing_tool" not in tool_names
+    assert tool_names == ["coding_file_read", "assistant_progress"]
     ChatStore._instance = None
     ToolRegistry._instance = None
 
@@ -2063,7 +2065,8 @@ def test_chat_send_preserves_dict_tool_definitions(tmp_path, monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert captured["tools"] == [tool_def]
+    assert captured["tools"][0] == tool_def
+    assert captured["tools"][1]["function"]["name"] == "assistant_progress"
     ChatStore._instance = None
 
 
@@ -5144,7 +5147,8 @@ def test_browser_open_url_can_target_vivaldi_foreground(monkeypatch):
     assert result["target_app"] == "Vivaldi"
     assert "browser_target" not in result
     assert "chrome_target" not in result
-    assert calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
+    open_calls = [call for call in calls if call[0] and call[0][0] == "open"]
+    assert open_calls[0][0] == ["open", "-a", "Vivaldi", "https://chatgpt.com"]
 
 
 def test_browser_open_url_approval_payload_target_app_runs_foreground(tmp_path, monkeypatch):
@@ -5548,7 +5552,7 @@ def test_computer_type_returns_post_action_screenshot_by_default(tmp_path, monke
     controller = BrowserComputerController(artifact_root=tmp_path)
     controller._session_path = tmp_path / "shared" / "browser_sessions.json"
     monkeypatch.setattr(browser_computer.subprocess, "run", fake_run)
-    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda action, payload: None)
+    monkeypatch.setattr(controller, "_try_computer_seat_action", lambda action, payload, **kwargs: None)
     monkeypatch.setattr(controller, "_focus_action_target", lambda payload: True)
     monkeypatch.setattr(
         controller,

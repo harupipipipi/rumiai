@@ -1,0 +1,40 @@
+{
+  "id": "sandbox_file_write",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Sandbox Write File",
+  "description": "Write a file inside the sandbox copy only. Host application requires a separate trusted patch.",
+  "enabled": true,
+  "config": {
+    "name": "sandbox_file_write",
+    "summary": "Write a sandbox file",
+    "tags": ["sandbox", "coding", "file", "write"],
+    "ui": {
+      "group_id": "sandbox/coding/files",
+      "group_label": "Sandbox Files",
+      "group_icon": "box",
+      "widget_kind": "tool_toggle"
+    },
+    "tool_category": "sandbox",
+    "action_type": "sandbox_write",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["sandbox.workspace.write"],
+    "write_action": false,
+    "requires_approval": false,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {"type": "string"},
+          "path": {"type": "string"},
+          "content": {"type": "string"},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["path", "content"]
+      }
+    },
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:sandbox_file_write"}
+  }
+}

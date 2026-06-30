@@ -1,6 +1,6 @@
 import type { FormEvent, MutableRefObject, ReactNode } from "react";
 
-import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, SettingsSection, SidebarAction, SidebarItem, TemplateComposerInput, ToolLogEntry, UICatalog } from "../lib/api";
+import type { ChatActivityEvent, ChatContentBlock, CodingContextEntry, CodingGitStatus, CodingWorkspaceRecord, ComposerWidgetAction, ConversationSteerItem, ModelCommandCandidate, ModelProfile, PromptUsageSummary, SettingsSection, SidebarAction, SidebarItem, TemplateComposerInput, ToolLogEntry, ToolTarget, UICatalog } from "../lib/api";
 import type { DesktopSystemInfo } from "../lib/desktopSystemInfo";
 import type { ComposerCommandItem } from "../lib/api";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "../components/HistoryBoard";
@@ -8,6 +8,8 @@ import type { ToolPreviewItem, ToolPreviewMode } from "../components/ToolPreview
 import type { LocaleSetting } from "../lib/i18n";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import type { WorkspaceTab, WorkspaceTabKind } from "../components/WorkspaceTabs";
+import type { ActionApprovalMode } from "../features/tools/ActionApprovalControl";
+import type { PendingToolReview, ToolSelectionChip } from "../features/tools/types";
 
 export type { ComposerCommandItem } from "../lib/api";
 
@@ -35,6 +37,7 @@ export type ChatUiMessage = {
       reason?: string;
       [key: string]: unknown;
     };
+    promptUsage?: PromptUsageSummary;
   };
   events?: ChatActivityEvent[];
   toolLogs?: ToolLogEntry[];
@@ -100,6 +103,8 @@ export type HistoryBoardRendererProps = {
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
+  onDesktopsOpen?: () => void;
+  isDesktopsActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -137,8 +142,10 @@ export type ChatMessagesRendererProps = {
   unknownBlockStrategy: string;
   showActivityInMessages: boolean;
   showWidgets: boolean;
+  showPromptUsageInMessages?: boolean;
   onSuggestionClick: (text: string) => void;
   onOpenToolPreview?: (previewId: string) => void;
+  onLoadPromptTrace?: (traceId: string, profileId?: string) => Promise<PromptUsageSummary>;
 };
 
 export type ComposerRendererProps = {
@@ -169,6 +176,9 @@ export type ComposerRendererProps = {
   attachedFiles?: AttachedFile[];
   droppedWidgets?: DroppedWidget[];
   selectedToolIds?: string[];
+  actionApprovalMode?: ActionApprovalMode;
+  toolSelectionTargets?: ToolSelectionChip[];
+  toolSelectionReview?: PendingToolReview | null;
   keyboardButtonNavigation?: boolean;
   steerStatus?: string | null;
   steerBusy?: boolean;
@@ -177,6 +187,12 @@ export type ComposerRendererProps = {
   suppressPopovers?: boolean;
   onOpenModelManager?: () => void;
   onOpenToolSettings?: () => void;
+  onActionApprovalModeChange?: (mode: ActionApprovalMode) => void;
+  onToolSelectionTargetRemove?: (target: ToolTarget) => void;
+  onToolSelectionReviewApprove?: () => void;
+  onToolSelectionReviewEdit?: () => void;
+  onToolSelectionReviewNoTools?: () => void;
+  onToolSelectionReviewCancel?: () => void;
   onSwitchToVisionModel?: () => void;
   onExtensionSelect?: (item: ComposerExtensionItem) => void;
   onCommandSelect?: (commandId: string, rawInput?: string) => void;
@@ -229,9 +245,14 @@ export type RightSidebarRendererProps = {
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  promptUsage?: PromptUsageSummary | null;
+  promptProfileId?: string;
+  conversationId?: string | null;
+  showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
+  activeConversationId?: string | null;
   onSettingChange: SettingChangeHandler;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
@@ -239,6 +260,10 @@ export type RightSidebarRendererProps = {
   onWorkspaceTabSelect?: (tabId: string) => void;
   onWorkspaceTabClose?: (tabId: string) => void;
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
+  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean }) => Promise<PromptUsageSummary>;
+  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean }) => Promise<PromptUsageSummary>;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
+  onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;

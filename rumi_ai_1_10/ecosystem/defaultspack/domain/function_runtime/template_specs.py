@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,6 +11,7 @@ from .manifest_factory import FunctionSpec, manifest_for
 
 TRUST_BUILTIN = "builtin"
 TEMPLATE_RUNTIME_ENTRYPOINT = "template_runner.py:run"
+logger = logging.getLogger(__name__)
 
 
 def _pack_root() -> Path:
@@ -22,20 +24,32 @@ def _runtime_dir() -> Path:
 
 def _template_catalog(defaultspack_root: str | None = None) -> dict[str, Any]:
     try:
-        catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        try:
+            catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        except ModuleNotFoundError:
+            catalog_runtime = importlib.import_module(
+                "ecosystem.defaultspack.domain.templates.catalog_runtime"
+            )
         catalog = catalog_runtime.get_template_catalog_snapshot(
             defaultspack_root=defaultspack_root or _pack_root()
         ).catalog
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to load function runtime template catalog.", exc_info=exc)
         return {}
     return catalog if isinstance(catalog, dict) else {}
 
 
 def _clear_template_catalog_cache() -> None:
     try:
-        catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        try:
+            catalog_runtime = importlib.import_module("domain.templates.catalog_runtime")
+        except ModuleNotFoundError:
+            catalog_runtime = importlib.import_module(
+                "ecosystem.defaultspack.domain.templates.catalog_runtime"
+            )
         catalog_runtime.invalidate_template_catalog()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Unable to clear function runtime template catalog cache.", exc_info=exc)
         pass
 
 
@@ -148,6 +162,7 @@ def template_route_items(defaultspack_root: str | Path | None = None) -> list[di
                 "path": route_path,
                 "block_module": block_module,
                 "default_args": _default_args(item),
+                "path_inject": _path_inject(item),
                 "pre_auth": bool(item.get("pre_auth")),
                 "sensitive": bool(item.get("sensitive")),
                 "template_id": item.get("template_id"),
@@ -251,6 +266,17 @@ def _block_module_from_item(item: dict[str, Any]) -> str | None:
 def _default_args(item: dict[str, Any]) -> dict[str, Any]:
     value = item.get("default_args")
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _path_inject(item: dict[str, Any]) -> dict[str, str]:
+    value = item.get("path_inject")
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): str(target)
+        for key, target in value.items()
+        if str(key or "").strip() and str(target or "").strip()
+    }
 
 
 def _risk(item: dict[str, Any], *, role: str) -> str:

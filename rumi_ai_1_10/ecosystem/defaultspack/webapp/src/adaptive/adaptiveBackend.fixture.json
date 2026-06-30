@@ -1,0 +1,311 @@
+{
+  "onboarding_status": {
+    "profile_id": "demo_profile",
+    "configured": true,
+    "current": null,
+    "operating_profile": {
+      "profile_id": "demo_profile",
+      "operating_profile_id": "Default local operator profile",
+      "preset_id": "balanced_local",
+      "source": {
+        "preset_id": "balanced_local"
+      },
+      "uses": [
+        {
+          "id": "uc_workspace_copilot",
+          "enabled": true
+        },
+        {
+          "id": "uc_routine_ops",
+          "enabled": true
+        },
+        {
+          "id": "uc_learning",
+          "enabled": false
+        }
+      ],
+      "role_context": {
+        "title": "Local runtime assistant"
+      },
+      "policy": {
+        "read_local": "allow",
+        "local_write": "ask",
+        "terminal": "ask",
+        "git_write": "ask",
+        "git_commit": "ask",
+        "git_push": "ask",
+        "git_merge": "ask",
+        "external_send": "ask",
+        "browser_control": "ask",
+        "computer_control": "deny",
+        "secrets_access": "deny"
+      },
+      "answers": {
+        "use_cases": {
+          "uc_workspace_copilot": true,
+          "uc_routine_ops": true,
+          "uc_learning": false
+        },
+        "skill_learning_enabled": true,
+        "skill_learning_review_required": true,
+        "pack_recommendations": [
+          "pack_coding",
+          "pack_evidence"
+        ]
+      },
+      "memory_policy": {
+        "mode": "project_summaries"
+      },
+      "skill_learning_policy": {
+        "enabled": true
+      },
+      "recommended_packs": [
+        "pack_coding",
+        "pack_evidence"
+      ],
+      "updated_at": null
+    },
+    "last_history_entry": null,
+    "freeze": {
+      "frozen": false,
+      "reason": null,
+      "updated_at": null
+    },
+    "prepared_actions": [],
+    "memory_conflicts": [],
+    "events": [],
+    "event_outbox": [],
+    "event_subscriptions": []
+  },
+  "activity_center": {
+    "profile_id": "demo_profile",
+    "created_at": "Today 09:31",
+    "onboarding_configured": true,
+    "freeze": {
+      "frozen": false,
+      "reason": null,
+      "updated_at": null
+    },
+    "prepared_actions": [
+      {
+        "id": "activity_release_notes",
+        "action_id": "activity_release_notes",
+        "operation": "Release notes draft",
+        "status": "running",
+        "created_at": "Today 09:24",
+        "evidence_refs": [
+          "diff",
+          "tests",
+          "review"
+        ]
+      },
+      {
+        "id": "activity_terminal_review",
+        "action_id": "activity_terminal_review",
+        "operation": "Terminal action waiting",
+        "status": "needs_review",
+        "created_at": "Today 09:18",
+        "evidence_refs": [
+          "plan"
+        ]
+      }
+    ],
+    "events": [
+      {
+        "id": "event_memory_boundary",
+        "event_id": "event_memory_boundary",
+        "type": "Memory retention boundary",
+        "event_type": "adaptive.memory.blocked",
+        "status": "blocked",
+        "created_at": "Yesterday 16:42",
+        "payload": {
+          "status": "blocked"
+        }
+      },
+      {
+        "id": "event_release_notes_done",
+        "event_id": "event_release_notes_done",
+        "type": "Release notes evidence captured",
+        "event_type": "adaptive.task.completed",
+        "status": "success",
+        "created_at": "Today 09:31",
+        "payload": {
+          "verified": true,
+          "status": "verified_success"
+        }
+      }
+    ],
+    "event_delivery_summary": {
+      "pending": 0,
+      "acked": 1,
+      "retry_pending": 0,
+      "dead_letter": 0,
+      "resumed": 0
+    },
+    "event_outbox": [],
+    "event_subscriptions": [],
+    "memory_conflicts": [
+      {
+        "id": "review_host_write",
+        "conflict_id": "review_host_write",
+        "resolution": "File write permission needs review",
+        "created_at": "6 min"
+      },
+      {
+        "id": "review_network",
+        "conflict_id": "review_network",
+        "resolution": "Network destination needs review",
+        "created_at": "14 min"
+      }
+    ],
+    "memory_conflict_summary": {
+      "total": 2,
+      "open": 2
+    },
+    "leases": {
+      "active": [],
+      "total": 0
+    },
+    "automations": [
+      {
+        "id": "automation_daily_context",
+        "name": "Daily context refresh",
+        "description": "Refresh repository map, stale tasks, and context budget before the workday starts.",
+        "trigger": "Weekday morning",
+        "schedule": "09:00 local time",
+        "enabled": true,
+        "risk": "low",
+        "last_run": "Today 09:00",
+        "steps": [
+          {
+            "id": "step_repository_map",
+            "label": "Refresh repository map",
+            "capability_label": "Repository index"
+          },
+          {
+            "id": "step_budget",
+            "label": "Estimate context budget",
+            "capability_label": "Context planner"
+          }
+        ]
+      },
+      {
+        "id": "automation_release_notes",
+        "name": "Release note assistant",
+        "description": "Draft release notes from approved git evidence and open review items.",
+        "trigger": "Manual",
+        "schedule": "On demand",
+        "enabled": false,
+        "risk": "medium",
+        "last_run": null,
+        "steps": [
+          {
+            "id": "step_git_summary",
+            "label": "Collect visible git changes",
+            "capability_label": "Git summary"
+          },
+          {
+            "id": "step_write_draft",
+            "label": "Prepare editable draft",
+            "capability_label": "Draft writer",
+            "requires_approval": true
+          }
+        ]
+      }
+    ],
+    "automation_templates": [
+      {
+        "id": "template_review_digest",
+        "name": "Review digest",
+        "description": "Collect pending approvals, blockers, and evidence into a short digest."
+      },
+      {
+        "id": "template_pack_health",
+        "name": "Pack health check",
+        "description": "Summarize local pack status without enabling network access."
+      }
+    ],
+    "automation_simulation": {
+      "scenario": "Update a dependency and write the migration note.",
+      "result": "Plan is safe to draft; terminal and file write remain approval-gated.",
+      "approvals": [
+        "Terminal command",
+        "File write"
+      ]
+    }
+  },
+  "context_evidence": {
+    "items": [
+      {
+        "path": "src/adaptive/OnboardingShell.tsx",
+        "lines": [
+          {
+            "line": 1,
+            "text": "controlled onboarding"
+          }
+        ]
+      },
+      {
+        "path": "src/lib/adaptiveApi.ts",
+        "lines": [
+          {
+            "line": 1,
+            "text": "adaptive response mapper"
+          },
+          {
+            "line": 2,
+            "text": "visible API errors"
+          }
+        ]
+      }
+    ]
+  },
+  "repository_map": {
+    "root": "defaultspack webapp",
+    "files": [
+      "src/adaptive/",
+      "src/lib/adaptiveApi.ts",
+      "src/App.tsx",
+      "src/components/WorkspaceTabs.tsx"
+    ],
+    "truncated": false
+  },
+  "context_budget": {
+    "used": 6840,
+    "limit": 12000,
+    "reserved": 1800,
+    "riskLevel": "medium",
+    "lastTrim": "Today 09:05",
+    "segments": [
+      {
+        "id": "segment_task",
+        "label": "Task brief",
+        "tokens": 1420,
+        "tone": "info"
+      },
+      {
+        "id": "segment_repo",
+        "label": "Repository map",
+        "tokens": 2180,
+        "tone": "good"
+      },
+      {
+        "id": "segment_evidence",
+        "label": "Evidence",
+        "tokens": 1960,
+        "tone": "warning"
+      },
+      {
+        "id": "segment_memory",
+        "label": "Memory guardrails",
+        "tokens": 1280,
+        "tone": "neutral"
+      }
+    ],
+    "compressionPlan": [
+      "Keep file paths and approval facts verbatim.",
+      "Summarize repeated activity rows after review.",
+      "Drop stale simulation output before expanding repository context."
+    ]
+  }
+}

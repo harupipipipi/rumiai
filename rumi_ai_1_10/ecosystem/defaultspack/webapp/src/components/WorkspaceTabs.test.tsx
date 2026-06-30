@@ -12,10 +12,11 @@ import {
 test("workspace tab options keep the extensible launch catalog", () => {
   assert.deepEqual(
     WORKSPACE_TAB_CREATE_OPTIONS.map((option) => option.kind),
-    ["chat", "coding", "calendar", "kanban", "canvas", "tools", "browser"],
+    ["chat", "coding", "calendar", "kanban", "desktops", "canvas", "tools", "browser"],
   );
   assert.equal(workspaceTabOption("browser").disabled, true);
   assert.equal(workspaceTabOption("kanban").label, "Kanban");
+  assert.equal(workspaceTabOption("desktops").label, "Desktops");
 });
 
 test("createWorkspaceTab uses option labels and supports deterministic overrides", () => {

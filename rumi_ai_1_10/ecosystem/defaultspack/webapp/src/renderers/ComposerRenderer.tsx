@@ -39,6 +39,9 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
+import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
+import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
+import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -75,10 +78,12 @@ type ComposerChromeWidth = {
 };
 
 type ComposerChromeSlot = "leading" | "trailing";
+type ComposerHomeSlot = "editor-leading" | "editor-trailing" | "toolbar-leading" | "toolbar-trailing";
 
 type ComposerChromeWidgetSpec = {
   id: string;
   slot: ComposerChromeSlot;
+  homeSlot?: ComposerHomeSlot;
   order: number;
   visible?: boolean;
   mobile?: "show" | "hide";
@@ -120,7 +125,7 @@ const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
 const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
 const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
 const NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT = 22;
-const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 72;
+const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 150;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
@@ -183,6 +188,54 @@ function templateComposerFeatureFlags(value: unknown): Record<string, boolean> {
     if (typeof flag === "boolean") flags[key] = flag;
   });
   return flags;
+}
+
+function looksLikeInternalComposerCopy(value: string): boolean {
+  return /template-composed composer|context txt materialization|slash commands, mentions, files|context text|会話をtxt化/i.test(value);
+}
+
+export function composerPlaceholderCopy({
+  isSteerMode,
+  mode,
+  placeholder,
+  templatePlaceholder,
+}: {
+  isSteerMode: boolean;
+  mode: AppMode;
+  placeholder?: string;
+  templatePlaceholder?: string;
+}): string {
+  if (isSteerMode) return "追加の指示を入力";
+  const templateCopy = templateComposerText(templatePlaceholder);
+  if (templateCopy && !looksLikeInternalComposerCopy(templateCopy)) return templateCopy;
+  if (mode === "coding") return "変更したい内容を入力...";
+  if (mode === "agent") return "タスクを入力...";
+  return placeholder || "メッセージを入力...";
+}
+
+export function composerHelperCopy({
+  isSteerMode,
+  hasInput,
+  slashCommands,
+  atMentions,
+  fileAttachments,
+  templateHelp,
+}: {
+  isSteerMode: boolean;
+  hasInput: boolean;
+  slashCommands: boolean;
+  atMentions: boolean;
+  fileAttachments: boolean;
+  templateHelp?: string;
+}): string {
+  if (isSteerMode) return hasInput ? "Enterで追加指示を送信" : "実行中の応答へ追加指示できます";
+  const help = templateComposerText(templateHelp, 120);
+  if (help && !looksLikeInternalComposerCopy(help)) return help;
+  const hints = ["Enterで送信"];
+  if (slashCommands) hints.push("/ でコマンド");
+  if (atMentions) hints.push("@ で候補");
+  else if (fileAttachments) hints.push("ファイル添付対応");
+  return hints.join(" · ");
 }
 
 function SendButtonIcon({ className = "" }: { className?: string }) {
@@ -369,94 +422,21 @@ function ModelStatusIndicatorButton({
   );
 }
 
-type ComposerMentionDescriptor = {
-  kind: "tool" | "skill" | "file";
-  label: string;
-};
-
-function humanizeMentionLabel(token: string, descriptor?: ComposerMentionDescriptor): string {
-  const source = descriptor?.label || token;
-  const clean = source.replace(/^@/, "").trim() || token;
-  const tail = clean.split("/").filter(Boolean).pop() ?? clean;
-  return `@${tail.replace(/[_-]+/g, " ")}`;
-}
-
-function renderComposerMentionText(
-  value: string,
-  mentionLookup: Map<string, ComposerMentionDescriptor>,
-  keyPrefix = "",
-): ReactNode[] {
-  const nodes: ReactNode[] = [];
-  const mentionPattern = /(^|\s)@([A-Za-z0-9_./:-]+)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = mentionPattern.exec(value))) {
-    const leading = match[1] ?? "";
-    const token = match[2] ?? "";
-    const mentionStart = match.index + leading.length;
-    const mentionEnd = mentionStart + token.length + 1;
-    const descriptor = mentionLookup.get(token.toLowerCase());
-
-    if (!descriptor) continue;
-    if (mentionStart > lastIndex) {
-      nodes.push(value.slice(lastIndex, mentionStart));
-    }
-
-    const Icon = descriptor.kind === "tool" ? Wrench : descriptor.kind === "skill" ? BrainCircuit : FileText;
-    nodes.push(
-      <span
-        key={`${keyPrefix}${mentionStart}-${token}`}
-        className="mx-[1px] inline-flex h-[20px] translate-y-[2px] items-center gap-1 rounded-full bg-sky-500/15 px-1.5 text-sky-200 ring-1 ring-sky-400/25"
-      >
-        <Icon size={11} className="flex-shrink-0 text-sky-300" />
-        <span>{humanizeMentionLabel(token, descriptor)}</span>
-      </span>,
-    );
-    lastIndex = mentionEnd;
-  }
-
-  if (lastIndex < value.length) {
-    nodes.push(value.slice(lastIndex));
-  }
-  return nodes;
-}
-
-function ComposerMentionOverlay({
-  value,
-  mentionLookup,
-  cursorPosition = value.length,
-  showCaret = false,
-  className = "",
-}: {
-  value: string;
-  mentionLookup: Map<string, ComposerMentionDescriptor>;
-  cursorPosition?: number;
-  showCaret?: boolean;
-  className?: string;
-}) {
-  if (!value) return null;
-  const caretIndex = Math.max(0, Math.min(cursorPosition, value.length));
-  const beforeCaret = value.slice(0, caretIndex);
-  const afterCaret = value.slice(caretIndex);
-  return (
-    <div
-      aria-hidden="true"
-      className={`rumi-composer-mention-overlay pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-zinc-100 ${className}`}
-    >
-      {renderComposerMentionText(beforeCaret, mentionLookup, "before-")}
-      {showCaret && <span className="rumi-composer-fake-caret" />}
-      {renderComposerMentionText(afterCaret, mentionLookup, "after-")}
-    </div>
-  );
-}
-
 function composerChromeWidgetsForSlot(
   widgets: ComposerChromeWidgetSpec[],
   slot: ComposerChromeSlot,
 ): ComposerChromeWidgetSpec[] {
   return widgets
     .filter((widget) => widget.slot === slot && widget.visible !== false)
+    .sort((left, right) => left.order - right.order);
+}
+
+function composerChromeWidgetsForHomeSlot(
+  widgets: ComposerChromeWidgetSpec[],
+  slot: ComposerHomeSlot,
+): ComposerChromeWidgetSpec[] {
+  return widgets
+    .filter((widget) => widget.visible !== false && widget.homeSlot === slot)
     .sort((left, right) => left.order - right.order);
 }
 
@@ -1430,6 +1410,9 @@ export function ComposerRenderer({
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
+  actionApprovalMode = "ask",
+  toolSelectionTargets = [],
+  toolSelectionReview = null,
   keyboardButtonNavigation = false,
   steerStatus = null,
   steerBusy = false,
@@ -1438,6 +1421,12 @@ export function ComposerRenderer({
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
+  onActionApprovalModeChange,
+  onToolSelectionTargetRemove,
+  onToolSelectionReviewApprove,
+  onToolSelectionReviewEdit,
+  onToolSelectionReviewNoTools,
+  onToolSelectionReviewCancel,
   onSwitchToVisionModel,
   onExtensionSelect,
   onCommandSelect,
@@ -1480,8 +1469,6 @@ export function ComposerRenderer({
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
-  const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
-  const [textareaFocused, setTextareaFocused] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1539,9 +1526,18 @@ export function ComposerRenderer({
     && (!templateHasModalityLimit || templateAcceptedModalities.some((item) => (
       item === "voice" || item === "speech" || item === "audio"
     )));
+  const templateAllowsAtMentions = templateFeatureFlags.at_mentions !== false
+    && templateFeatureFlags.mentions !== false;
 	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
 	  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
 	  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
+  const serviceLabelById = useMemo(() => new Map(toolGroups.map((group) => [group.id, group.label])), [toolGroups]);
+  const toolLabelById = useMemo(() => new Map(toolItems.map((item) => [item.id, item.label || item.id])), [toolItems]);
+  const labelForServiceId = useCallback((serviceId: string) => serviceLabelById.get(serviceId) ?? serviceId, [serviceLabelById]);
+  const labelForToolTarget = useCallback((target: { kind: string; id: string }) => (
+    target.kind === "tool" ? (toolLabelById.get(target.id) ?? target.id) : labelForServiceId(target.id)
+  ), [labelForServiceId, toolLabelById]);
   const computerUseSelected = selectedToolIds.some((toolId) => (
     toolId === "computer_use"
     || toolId === "browser_computer"
@@ -1576,14 +1572,24 @@ export function ComposerRenderer({
   ], [droppedWidgets, mentionPreviewWidgets]);
   const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
   const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
-  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
   const isSteerMode = isGenerating && !isNewConversation;
-  const effectiveComposerPlaceholder = isSteerMode
-    ? "実行中のAIへステアを入力..."
-    : templateComposerPlaceholder || (mode === "coding" ? "コーディング指示を入力... (@ でtool/ファイル)" : placeholder);
+  const effectiveComposerPlaceholder = composerPlaceholderCopy({
+    isSteerMode,
+    mode,
+    placeholder,
+    templatePlaceholder: templateComposerPlaceholder,
+  });
+  const effectiveComposerHelp = composerHelperCopy({
+    isSteerMode,
+    hasInput: Boolean(input.trim()),
+    slashCommands: templateAllowsSlashCommands,
+    atMentions: templateAllowsAtMentions,
+    fileAttachments: templateAllowsFileAttachments,
+    templateHelp: templateComposerHelp,
+  });
   const hasSlashCommandPrefix = templateAllowsSlashCommands && !isSteerMode && input.startsWith("/") && !isEscapedSlash;
   const slashText = hasSlashCommandPrefix ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
@@ -1651,40 +1657,6 @@ export function ComposerRenderer({
 	    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
 	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
 
-	  const composerMentionLookup = useMemo(() => {
-	    const lookup = new Map<string, ComposerMentionDescriptor>();
-	    const add = (token: string | undefined, descriptor: ComposerMentionDescriptor) => {
-	      const normalized = token?.trim().toLowerCase();
-	      if (normalized && !lookup.has(normalized)) lookup.set(normalized, descriptor);
-	    };
-
-	    for (const item of toolItems) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "tool",
-	        label: item.ui?.composer_label ?? item.label ?? item.id,
-	      };
-	      add(item.id, descriptor);
-	      add(item.id.split("/").pop(), descriptor);
-	    }
-	    for (const skill of skillExtensions) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "skill",
-	        label: skill.label || skill.id,
-	      };
-	      add(skill.id, descriptor);
-	      add(skill.id.split("/").pop(), descriptor);
-	    }
-	    for (const file of codingContext?.files ?? []) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "file",
-	        label: file.split("/").pop() || file,
-	      };
-	      add(file, descriptor);
-	      add(file.split("/").pop(), descriptor);
-	    }
-	    return lookup;
-	  }, [codingContext?.files, skillExtensions, toolItems]);
-
 	  const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
       profileNeedsApiKey(profile) && !locallyConfiguredProviders.has(profileProviderId(profile))
@@ -1698,24 +1670,6 @@ export function ComposerRenderer({
     const anchorRect = modelPickerNode?.getBoundingClientRect() ?? textareaRef.current?.getBoundingClientRect() ?? null;
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
-
-  const syncTextareaSelection = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    const next = {
-      start: textarea.selectionStart ?? input.length,
-      end: textarea.selectionEnd ?? textarea.selectionStart ?? input.length,
-    };
-    setTextareaSelection((current) => (
-      current.start === next.start && current.end === next.end ? current : next
-    ));
-  }, [input.length]);
-
-  const syncTextareaFocusAndSelection = useCallback(() => {
-    const textarea = textareaRef.current;
-    setTextareaFocused(Boolean(textarea && typeof document !== "undefined" && document.activeElement === textarea));
-    syncTextareaSelection();
-  }, [syncTextareaSelection]);
 
   const resizeNewConversationTextarea = useCallback(
     (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
@@ -1811,16 +1765,6 @@ export function ComposerRenderer({
     });
   }, [atMentionCandidates.length]);
 
-  useEffect(() => {
-    setTextareaSelection((current) => {
-      const nextStart = Math.min(current.start, input.length);
-      const nextEnd = Math.min(current.end, input.length);
-      return current.start === nextStart && current.end === nextEnd
-        ? current
-        : { start: nextStart, end: nextEnd };
-    });
-  }, [input.length]);
-
   useIsomorphicLayoutEffect(() => {
     resizeNewConversationTextarea();
   }, [input, resizeNewConversationTextarea]);
@@ -1877,35 +1821,6 @@ export function ComposerRenderer({
     }, 80);
     return () => window.clearTimeout(focusTimer);
   }, []);
-
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || typeof document === "undefined" || typeof window === "undefined") return;
-
-    const sync = () => syncTextareaFocusAndSelection();
-    const syncAfterBrowserUpdate = () => {
-      window.requestAnimationFrame(sync);
-    };
-
-    textarea.addEventListener("focus", sync);
-    textarea.addEventListener("blur", sync);
-    textarea.addEventListener("click", syncAfterBrowserUpdate);
-    textarea.addEventListener("input", syncAfterBrowserUpdate);
-    textarea.addEventListener("keyup", syncAfterBrowserUpdate);
-    textarea.addEventListener("select", syncAfterBrowserUpdate);
-    document.addEventListener("selectionchange", syncAfterBrowserUpdate);
-    syncAfterBrowserUpdate();
-
-    return () => {
-      textarea.removeEventListener("focus", sync);
-      textarea.removeEventListener("blur", sync);
-      textarea.removeEventListener("click", syncAfterBrowserUpdate);
-      textarea.removeEventListener("input", syncAfterBrowserUpdate);
-      textarea.removeEventListener("keyup", syncAfterBrowserUpdate);
-      textarea.removeEventListener("select", syncAfterBrowserUpdate);
-      document.removeEventListener("selectionchange", syncAfterBrowserUpdate);
-    };
-  }, [syncTextareaFocusAndSelection]);
 
   useEffect(() => {
     const handleDocumentSlashFocus = (event: KeyboardEvent) => {
@@ -1972,7 +1887,11 @@ export function ComposerRenderer({
   const updateAtMentionStateFromInput = useCallback(
     (value: string) => {
       const textarea = textareaRef.current;
-      if (!textarea || suppressPopovers) return;
+      if (!textarea || suppressPopovers || !templateAllowsAtMentions) {
+        setAtMentionOpen(false);
+        setAtMentionQuery("");
+        return;
+      }
       const cursorPos = textarea.selectionStart ?? value.length;
       const textBeforeCursor = value.slice(0, cursorPos);
       const atMatch = textBeforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
@@ -1987,7 +1906,7 @@ export function ComposerRenderer({
         setAtMentionQuery("");
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, toolItems.length, updateComposerPopoverAnchor],
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerPopoverAnchor],
   );
 
   useEffect(() => {
@@ -1997,14 +1916,13 @@ export function ComposerRenderer({
   const handleInputChange = useCallback(
     (value: string) => {
       onInputChange(value);
-      syncTextareaSelection();
       updateAtMentionStateFromInput(value);
 
       if (!templateAllowsSlashCommands || !value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, syncTextareaSelection, templateAllowsSlashCommands, updateAtMentionStateFromInput],
+    [onInputChange, templateAllowsSlashCommands, updateAtMentionStateFromInput],
   );
 
   const handleAtMentionSelect = useCallback(
@@ -2025,7 +1943,6 @@ export function ComposerRenderer({
       setTimeout(() => {
         textarea.setSelectionRange(next.cursor, next.cursor);
         textarea.focus();
-        setTextareaSelection({ start: next.cursor, end: next.cursor });
       }, 0);
     },
 	    [input, mode, onAtFileAttach, onInputChange],
@@ -2281,6 +2198,7 @@ export function ComposerRenderer({
     {
       id: "file-attach",
       slot: "leading",
+      homeSlot: "editor-leading",
       order: 20,
       visible: templateAllowsFileAttachments,
       width: COMPOSER_CHROME_WIDTHS.icon,
@@ -2304,6 +2222,7 @@ export function ComposerRenderer({
     {
       id: "voice-input",
       slot: "leading",
+      homeSlot: "editor-trailing",
       order: 30,
       visible: templateAllowsVoiceInput,
       mobile: "hide",
@@ -2326,6 +2245,7 @@ export function ComposerRenderer({
     {
       id: "mode",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 40,
       visible: false,
       width: COMPOSER_CHROME_WIDTHS.mode,
@@ -2377,7 +2297,8 @@ export function ComposerRenderer({
     {
       id: "yolo-status",
       slot: "leading",
-      order: 50,
+      homeSlot: "toolbar-leading",
+      order: 55,
       visible: yoloMode && visibleModelStatusIndicators.length === 0,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
@@ -2388,35 +2309,57 @@ export function ComposerRenderer({
       ),
     },
     {
+      id: "action-approval-control",
+      slot: "leading",
+      homeSlot: "toolbar-leading",
+      order: 50,
+      width: { basis: "auto", min: "4rem", max: "8.5rem", shrink: 1 },
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <ActionApprovalControl
+          mode={actionApprovalMode}
+          disabled={isGenerating}
+          surfaceClassName={COMPOSER_CONTROL_SURFACE_CLASSNAME}
+          tabIndex={chromeButtonTabIndex}
+          onModeChange={(nextMode) => onActionApprovalModeChange?.(nextMode)}
+          onOpenSettings={onOpenToolSettings}
+        />
+      ),
+    },
+    {
       id: "computer-use-status",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 60,
       visible: computerUseSelected,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+        <span aria-label="PC操作" title="PC操作" className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 max-[430px]:px-1.5">
           <MousePointerClick size={12} className="flex-shrink-0" />
-          <span className="truncate">Computer ON</span>
+          <span className="truncate max-[430px]:hidden">PC操作</span>
         </span>
       ),
     },
     {
       id: "vision-bridge-status",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 70,
       visible: imageBridgePlanned,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
-        <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
-          <span className="truncate">Vision Bridge</span>
+        <span aria-label="Vision Bridge" title="Vision Bridge" className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 max-[430px]:px-1.5">
+          <FileText size={12} className="flex-shrink-0" />
+          <span className="truncate max-[430px]:hidden">Vision Bridge</span>
         </span>
       ),
     },
     {
       id: "model-picker",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 10,
       mobile: "hide",
       width: modelControlWidth,
@@ -2463,6 +2406,7 @@ export function ComposerRenderer({
     {
       id: "thinking-control",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 20,
       visible: levels.length > 0,
       mobile: "hide",
@@ -2492,6 +2436,7 @@ export function ComposerRenderer({
     {
       id: "model-status",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 30,
       visible: visibleModelStatusIndicators.length > 0,
       mobile: "hide",
@@ -2516,6 +2461,7 @@ export function ComposerRenderer({
     {
       id: "send",
       slot: "trailing",
+      homeSlot: "editor-trailing",
       order: 40,
       width: isNewConversation ? COMPOSER_CHROME_WIDTHS.sendLarge : COMPOSER_CHROME_WIDTHS.send,
       render: () => (
@@ -2525,7 +2471,7 @@ export function ComposerRenderer({
           disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
           onPointerDown={handleSendButtonPointerDown}
           onClick={handleSendButtonClick}
-	          title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
+	          title={isGenerating ? (input.trim() ? "追加指示を送る" : "停止") : "送信"}
 	          className={`rumi-send-button ${
 	            isNewConversation ? "h-7 w-7" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
 	          } flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
@@ -2548,13 +2494,10 @@ export function ComposerRenderer({
 
   const leadingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "leading");
   const trailingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "trailing");
-  const newConversationInlineLeadingWidgets = leadingChromeWidgets.filter((widget) => widget.id === "file-attach");
-  const newConversationInlineActionWidgets = leadingChromeWidgets.filter((widget) => (
-    widget.id !== "file-attach" && widget.id !== "voice-input"
-  ));
-  const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
-  const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
-  const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
+  const newConversationInlineLeadingWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-leading");
+  const newConversationTopRightWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-trailing");
+  const newConversationInlineActionWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "toolbar-leading");
+  const newConversationTrailingWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "toolbar-trailing");
   const menuFolders = templateAllowsSlashCommands
     ? ([
         ["tools", "Tools", Wrench],
@@ -2886,77 +2829,77 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {toolSelectionReview && (
+            <ToolSelectionReviewCard
+              review={toolSelectionReview}
+              labelForService={labelForServiceId}
+              onApprove={() => onToolSelectionReviewApprove?.()}
+              onEdit={() => {
+                onToolSelectionReviewEdit?.();
+                setOpenFolder("tools");
+                setMenuOpen(true);
+              }}
+              onNoTools={() => onToolSelectionReviewNoTools?.()}
+              onCancel={() => onToolSelectionReviewCancel?.()}
+            />
+          )}
+
           {isNewConversation ? (
             <div className="grid gap-1.5">
-              <div className="rumi-composer-main-panel grid min-h-[46px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[1.4rem] border border-white/20 bg-[#242423] px-4 py-1">
-                <div className="self-center">
-                  {newConversationInlineLeadingWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-                <div className="relative min-w-0 self-center">
-                  <ComposerMentionOverlay
-                    value={input}
-                    mentionLookup={composerMentionLookup}
-                    cursorPosition={textareaSelection.start}
-                    showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
-                    className="rumi-composer-input-new-overlay text-[16px] font-medium leading-[22px]"
-                  />
-                  <textarea
-                    ref={textareaRef}
-                    autoFocus
-                    rows={1}
-                    value={input}
-                    data-template-composer-input={templateComposerInputId || undefined}
-                    onChange={(event) => {
-                      resizeNewConversationTextarea(event.currentTarget);
-                      handleInputChange(event.currentTarget.value);
-                    }}
-                    placeholder={effectiveComposerPlaceholder}
-                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
-                      input ? "caret-transparent" : "caret-zinc-100"
-                    }`}
-                    onFocus={() => {
-                      setTextareaFocused(true);
-                      syncTextareaSelection();
-                    }}
-                    onBlur={() => setTextareaFocused(false)}
-                    onClick={syncTextareaSelection}
-                    onKeyUp={syncTextareaSelection}
-                    onSelect={syncTextareaSelection}
-                    onKeyDownCapture={(event) => {
-                      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-                        event.stopPropagation();
-                      }
-                    }}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-2 self-center">
-                  {newConversationInlineActionWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationTopRightWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationSendWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-              </div>
-              {newConversationTrailingWidgets.length > 0 && (
-                <div className="rumi-composer-model-dock flex min-w-0 justify-end pr-5 max-[640px]:hidden">
-                  <div className="rumi-composer-dock-rail flex min-w-0 items-center justify-end gap-2">
-                    {newConversationTrailingWidgets.map((widget) => (
-                      <ComposerChromeWidget
-                        key={widget.id}
-                        widget={widget}
-                        onNodeChange={registerChromeWidgetNode}
-                      />
+              <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
+                <div className="rumi-composer-editor-row grid min-h-[32px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-end gap-x-3">
+                  <div className="flex items-center justify-center self-end">
+                    {newConversationInlineLeadingWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  <div className="rumi-composer-editor relative min-w-0 self-end">
+                    <textarea
+                      ref={textareaRef}
+                      autoFocus
+                      rows={1}
+                      value={input}
+                      data-template-composer-input={templateComposerInputId || undefined}
+                      onChange={(event) => {
+                        resizeNewConversationTextarea(event.currentTarget);
+                        handleInputChange(event.currentTarget.value);
+                      }}
+                      placeholder={effectiveComposerPlaceholder}
+                      className="rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[150px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] text-zinc-100 caret-zinc-100 outline-none placeholder:text-zinc-500/70"
+                      onKeyDownCapture={(event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                          event.stopPropagation();
+                        }
+                      }}
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 self-end">
+                    {newConversationTopRightWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
                     ))}
                   </div>
                 </div>
-              )}
+
+                <div className="rumi-composer-toolbar flex items-center justify-between border-t border-white/5 pt-2">
+                  <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                    {newConversationInlineActionWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  {newConversationTrailingWidgets.length > 0 && (
+                    <div className="rumi-composer-model-dock flex min-w-0 items-center justify-end gap-2 max-[640px]:hidden">
+                      {newConversationTrailingWidgets.map((widget) => (
+                        <ComposerChromeWidget
+                          key={widget.id}
+                          widget={widget}
+                          onNodeChange={registerChromeWidgetNode}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <textarea
@@ -2976,11 +2919,11 @@ export function ComposerRenderer({
             />
           )}
 
-          {!isSteerMode && (templateComposerHelp || templateComposerInfoItems.length > 0) && (
+          {!isSteerMode && (effectiveComposerHelp || templateComposerInfoItems.length > 0) && (
             <div className={`${isNewConversation ? "px-5 pt-1" : "px-5 pt-1 max-[640px]:px-3"} flex min-h-5 flex-wrap items-center gap-1.5 text-[10px] leading-none text-zinc-500`}>
-              {templateComposerHelp && (
-                <span className="min-w-0 flex-1 truncate" title={templateComposerHelp}>
-                  {templateComposerHelp}
+              {effectiveComposerHelp && (
+                <span className="min-w-0 flex-1 truncate" title={effectiveComposerHelp}>
+                  {effectiveComposerHelp}
                 </span>
               )}
               {templateComposerInfoItems.map((item) => (
@@ -2994,11 +2937,19 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {!isNewConversation && toolSelectionTargets.length > 0 && (
+            <ToolOverrideChips
+              targets={toolSelectionTargets}
+              labelForTarget={labelForToolTarget}
+              onRemove={(target) => onToolSelectionTargetRemove?.(target)}
+            />
+          )}
+
           {isSteerMode && (
             <div className="flex min-h-5 items-center gap-2 px-5 pt-1 text-[10px] leading-none text-zinc-500 max-[640px]:px-3">
               <CornerDownRight size={12} className="flex-shrink-0" />
               <span className="truncate">
-                {input.trim() ? "Enterでステアを送信" : "AI実行中。入力するとステアになります"}
+                {effectiveComposerHelp}
               </span>
               {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
               {steerQueuedCount > 0 && (

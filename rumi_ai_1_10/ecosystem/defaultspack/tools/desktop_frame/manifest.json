@@ -1,0 +1,47 @@
+{
+  "id": "desktop_frame",
+  "description": "Fetch the latest frame from a managed desktop seat as base64 image data.",
+  "metadata": {
+    "aliases": ["desktop.frame", "desktop screenshot", "computer use screenshot"],
+    "keywords": ["desktop", "frame", "screenshot", "computer use", "vision"]
+  },
+  "config": {
+    "tool_id": "desktop_frame",
+    "name": "Desktop Frame",
+    "summary": "Fetch a managed desktop screenshot frame.",
+    "tool_category": "desktop",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": ["desktop", "computer_use", "screenshot"],
+    "ui": {
+      "group_id": "desktop",
+      "group_label": "Desktop",
+      "group_icon": "monitor",
+      "item_icon": "image",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Desktop Frame",
+      "composer_description": "Fetch the latest managed desktop screenshot.",
+      "composer_icon": "image"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "seat_id": { "type": "string" },
+          "desktop_id": { "type": "string" },
+          "owner_id": { "type": "string" },
+          "access_key": { "type": "string" },
+          "after": { "type": "integer" }
+        },
+        "required": []
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.desktop_tools:desktop_frame"
+    }
+  }
+}

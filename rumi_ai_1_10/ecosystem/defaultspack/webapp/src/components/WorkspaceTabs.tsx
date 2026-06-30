@@ -8,6 +8,7 @@ import {
   KanbanSquare,
   LayoutGrid,
   MessageSquareText,
+  Monitor,
   Plus,
   X,
   type LucideIcon,
@@ -16,7 +17,7 @@ import {
 import type { KanbanBoardScope, SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "canvas" | "tools" | "browser";
+export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "desktops" | "canvas" | "tools" | "browser";
 
 export type WorkspaceTab = {
   id: string;
@@ -63,6 +64,12 @@ export const WORKSPACE_TAB_CREATE_OPTIONS: WorkspaceTabCreateOption[] = [
     label: "Kanban",
     description: "Task and agent board",
     icon: KanbanSquare,
+  },
+  {
+    kind: "desktops",
+    label: "Desktops",
+    description: "Managed seats",
+    icon: Monitor,
   },
   {
     kind: "canvas",

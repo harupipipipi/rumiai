@@ -220,8 +220,46 @@ provider を省略した場合、ai_client が既知のモデル名からプロ�
 }
 ```
 
+## 6. Tokenizer metadata と prompt token count
 
-## 6. プロファイルの設定方法
+Prompt Studio と右サイドバーの prompt widget は、選択中の LLM
+プロファイルに合わせて prompt token 数を再計算する。Studio は
+`model_profile_id` を明示的に選択でき、widget はチャット composer で現在選択されている
+モデルを使う。widget 側にはモデル選択 UI を置かない。
+
+Provider / model profile は任意で tokenizer metadata を持てる。
+
+```yaml
+metadata:
+  tokenizer:
+    kind: char_divisor
+    characters_per_token: 3.2
+    tokenizer_id: provider.model.approx
+```
+
+利用できる安全な形式:
+
+- `metadata.tokenizer.kind: whitespace`
+- `metadata.tokenizer.kind: char_divisor` と `characters_per_token`
+- `metadata.tokenizer.kind: byte_divisor` と `bytes_per_token`
+- `metadata.tokenizer.encoding` または `tokenizer_id`（ローカル tokenizer ライブラリがある場合）
+- `metadata.tokenizer_profile_id` / `metadata.tokenizer_model_profile_id`
+  による別プロファイル tokenizer の参照
+
+同じ model id を複数 provider が提供している場合、選択中プロファイルに tokenizer がなくても、
+同じ `same_model_across_providers_key` を持つ別 provider profile に tokenizer があればそちらを使う。
+この場合 API は `tokenizer.source: "same_model_provider"` を返す。
+
+見つからない場合は `defaultspack.approximate` を使い、
+`warning_code: "missing_tokenizer"` を返す。UI はモデル名の近くに警告を表示し、
+hover で「モデルの tokenizer が見つからないため、デフォルトの tokenizer を使用しています。
+大きくズレる可能性があります。」相当の説明を出す。
+
+Tokenizer は純粋なカウント用 metadata であり、権限・tool・provider routing・chat state を変更しない。
+prompt text から tool 実行や provider 呼び出しを許可してはいけない。
+
+
+## 7. プロファイルの設定方法
 
 プロファイルは `user_data/shared/ai_models/{provider_id}/profiles/{profile_name}/` に配置する。
 
@@ -284,7 +322,7 @@ user_data/shared/ai_models/
 `ui/events.ui.yaml` はストリーミング中のアニメーション Widget を定義する任意ファイルである。詳細は ai_client.md を参照。
 
 
-## 7. 対応機能マトリクス
+## 8. 対応機能マトリクス
 
 | 機能 | OpenAI | Anthropic | Google | stub | rumi |
 |---|---|---|---|---|---|

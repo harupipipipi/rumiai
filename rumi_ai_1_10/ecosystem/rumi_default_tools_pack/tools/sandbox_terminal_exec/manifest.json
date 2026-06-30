@@ -1,0 +1,48 @@
+{
+  "id": "sandbox_terminal_exec",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Sandbox Terminal",
+  "description": "Run a command inside a sandbox-only coding workspace. Host files are not modified.",
+  "enabled": true,
+  "config": {
+    "name": "sandbox_terminal_exec",
+    "summary": "Run a command in a sandbox",
+    "tags": ["sandbox", "coding", "terminal"],
+    "ui": {
+      "group_id": "sandbox/coding/terminal",
+      "group_label": "Sandbox",
+      "group_icon": "box",
+      "widget_kind": "tool_toggle",
+      "settings_fields": [
+        {"id": "default_timeout_seconds", "label": "Default Timeout Seconds", "type": "number", "default": 30, "min": 1, "max": 120}
+      ]
+    },
+    "tool_category": "sandbox",
+    "action_type": "sandbox_exec",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["sandbox.terminal.exec"],
+    "requires_approval": false,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {"type": "string"},
+          "command": {"type": "string"},
+          "argv": {"type": "array", "items": {"type": "string"}},
+          "cwd": {"type": "string"},
+          "timeout": {"type": "integer", "minimum": 1, "maximum": 120},
+          "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+          "max_diff_chars": {"type": "integer", "minimum": 1},
+          "network": {"type": "boolean"},
+          "network_enabled": {"type": "boolean"},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
+        },
+        "anyOf": [{"required": ["command"]}, {"required": ["argv"]}]
+      }
+    },
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:sandbox_terminal_exec"}
+  }
+}

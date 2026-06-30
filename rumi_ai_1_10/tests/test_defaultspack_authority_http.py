@@ -26,19 +26,21 @@ class _FakeAuthorityService:
         expires_in_seconds=None,
         related_permissions=None,
         ui_operator=None,
+        actor_principal=None,
     ):
         self.calls.append((request_id, scope, config, expires_in_seconds))
         self.approve_kwargs.append({
             "related_permissions": related_permissions,
             "ui_operator": ui_operator,
+            "actor_principal": actor_principal,
         })
         return self.result
 
-    def deny_request(self, request_id, *, reason="", persist=False, ui_operator=None):
+    def deny_request(self, request_id, *, reason="", persist=False, ui_operator=None, actor_principal=None):
         self.calls.append((request_id, reason, persist))
         return self.result
 
-    def list_requests(self, status="all"):
+    def list_requests(self, status="all", *, actor_principal=None):
         self.calls.append((status,))
         return self.result
 
@@ -105,6 +107,7 @@ def test_authority_http_transport_approve_passes_related_permissions_and_ui_oper
     assert service.approve_kwargs == [{
         "related_permissions": ["api_key.use", "123"],
         "ui_operator": ui_operator,
+        "actor_principal": None,
     }]
 
 

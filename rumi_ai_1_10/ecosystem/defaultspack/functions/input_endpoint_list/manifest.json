@@ -13,6 +13,8 @@
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
   "vocab_aliases": [
+    "defaults.input.endpoint_list",
+    "defaultspack.input.endpoint_list",
     "defaults.input.endpoint.list",
     "defaultspack.input.endpoint.list"
   ],

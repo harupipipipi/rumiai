@@ -34,6 +34,184 @@ export type ChatMessage = {
   model?: string | null;
 };
 
+export type TokenizerInfo = {
+  available?: boolean;
+  fallback?: boolean;
+  status?: string;
+  source?: string;
+  warning?: string;
+  warning_code?: string;
+  tokenizer_id?: string;
+  tokenizer_profile_id?: string;
+  tokenizer_provider_id?: string;
+  tokenizer_model?: string;
+  provider_id?: string;
+  model_profile_id?: string;
+  model?: string;
+};
+
+export type PromptUsageSegment = {
+  id: string;
+  edge_id?: string;
+  prompt_id?: string;
+  label?: string;
+  kind?: string;
+  port?: string;
+  status?: "active" | "disabled" | "gated" | "budget-dropped" | string;
+  enabled?: boolean;
+  source?: string;
+  source_type?: string;
+  source_chain?: Record<string, unknown>[];
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  reason?: string;
+  allow_disable?: boolean;
+  editable?: boolean;
+  readonly_reason?: string;
+  preview?: string;
+  text?: string;
+  explanation?: string;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptUsageSummary = {
+  trace_id?: string;
+  profile_id?: string;
+  conversation_id?: string;
+  run_id?: string;
+  active_count?: number;
+  disabled_count?: number;
+  token_estimate?: {
+    total?: number;
+    by_port?: Record<string, number>;
+    by_node?: Record<string, number>;
+    tokenizer?: TokenizerInfo;
+  };
+  segments?: PromptUsageSegment[];
+  active_segments?: PromptUsageSegment[];
+  disabled_segments?: PromptUsageSegment[];
+  source_counts?: Record<string, number>;
+};
+
+export type PromptStudioPrompt = {
+  id: string;
+  name: string;
+  prompt_id?: string;
+  description?: string;
+  body?: string;
+  content?: string;
+  body_hash?: string;
+  variables?: Record<string, unknown>[];
+  metadata?: Record<string, unknown>;
+  source_type?: string;
+  source?: string;
+  effective_source?: string;
+  effective_source_type?: string;
+  read_only?: boolean;
+  editable?: boolean;
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  preview?: string;
+  activation_state?: string;
+  active_edge_id?: string;
+  active_reason?: string;
+  allow_disable?: boolean;
+  override_allowed?: boolean;
+  source_chain?: Record<string, unknown>[];
+  validation?: Record<string, unknown>;
+  lint?: Record<string, unknown>;
+  versions?: PromptVersionRecord[];
+  safety?: Record<string, unknown>;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+};
+
+export type PromptVersionRecord = {
+  version_id: string;
+  profile_id?: string;
+  prompt_id?: string;
+  scope?: string;
+  created_at?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptStudioData = {
+  profile_id: string;
+  model_profile_id?: string;
+  model?: string;
+  tokenizer?: TokenizerInfo;
+  profile_workspace?: Record<string, string>;
+  prompts: PromptStudioPrompt[];
+  selected_prompt?: PromptStudioPrompt | null;
+  active_summary?: PromptUsageSummary;
+};
+
+export type PromptStudioTestResult = {
+  profile_id: string;
+  prompt_id?: string;
+  conversation_id?: string;
+  input?: {
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+  };
+  model_profile_id?: string;
+  model?: string;
+  summary?: PromptUsageSummary;
+  segments?: PromptUsageSegment[];
+  matched_skills?: Record<string, unknown>[];
+  skill_instructions?: string;
+  selected_tool_records?: Record<string, unknown>[];
+  selected_tool_segments?: PromptUsageSegment[];
+  candidate_tool_segments?: PromptUsageSegment[];
+  tool_candidates?: {
+    combined?: Record<string, unknown>[];
+    from_prompt?: Record<string, unknown>[];
+    from_input?: Record<string, unknown>[];
+  };
+  prompt_tool_analysis?: Record<string, unknown>;
+  template_tool_policy_resolution?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  verdicts?: Record<string, string>[];
+};
+
+export type PromptTraceSummary = {
+  trace_id?: string;
+  created_at?: number;
+  conversation_id?: string;
+  run_id?: string;
+  profile_id?: string;
+  token_estimate?: PromptUsageSummary["token_estimate"];
+  provider_payload_summary?: Record<string, unknown>;
+  blocked_count?: number;
+};
+
+export type PromptTraceDetail = {
+  profile_id: string;
+  trace: Record<string, unknown>;
+  prompt_usage: PromptUsageSummary;
+};
+
+export type PromptToggleResponse = {
+  profile_id: string;
+  edge_id: string;
+  enabled: boolean;
+  preview?: boolean;
+  ai_input?: Record<string, unknown>;
+  summary: PromptUsageSummary;
+};
+
 export type ChatAttachment = {
   name: string;
   content?: string;
@@ -820,8 +998,14 @@ export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
+  run_id?: string;
+  seq?: number;
   message?: string;
   phase?: string;
+  status?: string;
+  summary?: string;
+  next_action?: string;
+  nextAction?: string;
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
@@ -868,6 +1052,9 @@ export type ModelProfile = {
   recommended_roles?: string[];
   allowed_roles?: string[];
   availability?: Record<string, unknown>;
+  tokenizer?: Record<string, unknown>;
+  tokenizer_profile_id?: string;
+  tokenizer_model_profile_id?: string;
   metadata?: Record<string, unknown>;
   defaults?: Record<string, unknown>;
   pricing?: Record<string, unknown>;
@@ -1036,7 +1223,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -1047,6 +1234,109 @@ export type SidebarField = {
   configured_field?: string;
   advanced?: boolean;
   api_keys?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityNode = {
+  node_id: string;
+  display_name?: string;
+  destination_kind?: string;
+  platform?: string;
+  architecture?: string;
+  online?: boolean;
+  last_seen_at?: string;
+  app_version?: string;
+  runtime_providers?: string[];
+  sandbox_capabilities?: string[];
+  network_reachability_classes?: string[];
+  desktop_capacity?: number;
+  [key: string]: unknown;
+};
+
+export type ContinuityProviderRoute = {
+  route_id: string;
+  provider_id: string;
+  api_id: string;
+  model_id: string;
+  qualified_route?: string;
+  adapter_id?: string;
+  provider_extension_ref?: string | null;
+  base_url?: string | null;
+  auth_scheme?: string;
+  header_profile?: string | null;
+  allowed_models?: string[];
+  capability_hash?: string;
+  endpoint_class?: string;
+  credential_ref?: string;
+  fallback_routes?: string[];
+  portable?: boolean;
+  blocked_reason?: string | null;
+  [key: string]: unknown;
+};
+
+export type ContinuityPreflightResult = {
+  ok: boolean;
+  route?: ContinuityProviderRoute | Record<string, unknown> | null;
+  destination?: ContinuityNode | Record<string, unknown> | null;
+  checks?: Array<Record<string, unknown>>;
+  errors?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityHandoffPlan = {
+  plan_id: string;
+  mode: string;
+  sandbox_id: string;
+  destination_node_id: string;
+  provider_route_ref: ContinuityProviderRoute | Record<string, unknown>;
+  fallback_route_refs?: Array<ContinuityProviderRoute | Record<string, unknown>>;
+  credential_delegation?: Record<string, unknown>;
+  checkpoint_estimate?: Record<string, unknown>;
+  resource_preflight?: ContinuityPreflightResult | Record<string, unknown>;
+  cutover?: Record<string, unknown>;
+  status: string;
+  created_at?: string;
+  [key: string]: unknown;
+};
+
+export type ContinuityHandoffOperation = {
+  operation_id: string;
+  status: string;
+  mode?: string;
+  sandbox_id?: string;
+  destination_node_id?: string;
+  plan?: ContinuityHandoffPlan | Record<string, unknown>;
+  message?: string;
+  checkpoint_id?: string;
+  credential_envelope_id?: string | null;
+  destination_primary?: boolean;
+  source_primary?: boolean;
+  primary_lease?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  events?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type ContinuityPairingStartResponse = {
+  request_id: string;
+  code: string;
+  display_name?: string;
+  created_at?: string;
+};
+
+export type ContinuityHandoffRequest = {
+  sandbox_id?: string;
+  seat_id?: string;
+  destination_node_id?: string;
+  node_id?: string;
+  route_id?: string;
+  provider_id?: string;
+  api_id?: string;
+  model_id?: string;
+  provider_route?: Record<string, unknown>;
+  mode?: string;
+  credential_ttl_seconds?: number;
+  credential_max_requests?: number;
+  state?: Record<string, unknown>;
 };
 
 export type SidebarAction = {
@@ -1379,6 +1669,13 @@ export type UICatalog = {
   context_policies?: TemplateContextPolicy[];
   composer_widgets?: TemplateCatalogMetadataItem[];
   external_io_templates?: TemplateCatalogMetadataItem[];
+  templates?: TemplateCatalogMetadataItem[];
+  actions?: TemplateCatalogMetadataItem[];
+  data_sources?: TemplateCatalogMetadataItem[];
+  api_routes?: TemplateCatalogMetadataItem[];
+  permissions?: TemplateCatalogMetadataItem[];
+  shell_regions?: ShellRegion[];
+  shell_renderers?: ShellRenderer[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1472,12 +1769,62 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
+export type ToolSelectionScope = "turn" | "conversation";
+export type ToolSelectionStrategy = "hybrid" | "semantic" | "catalog_ai" | "all_with_hints" | "all_schemas" | "lexical";
+export type ToolTarget = { kind: "tool" | "service"; id: string };
+
 export type ToolSelectionRequest = {
-  mode?: "auto" | "manual" | "none";
-  include?: string[];
-  exclude?: string[];
-  scope?: "turn";
+  mode?: ToolSelectionMode;
+  strategy?: ToolSelectionStrategy | null;
+  include?: Array<string | ToolTarget>;
+  exclude?: Array<string | ToolTarget>;
+  scope?: ToolSelectionScope;
   must_use?: boolean;
+  preview_id?: string | null;
+};
+
+export type ToolCatalogService = {
+  service_id: string;
+  label: string;
+  summary?: string;
+  connection_status?: string;
+  tool_count?: number;
+  action_classes?: string[];
+};
+
+export type ToolCatalogTool = {
+  tool_id: string;
+  service_id: string;
+  service_label: string;
+  name: string;
+  summary?: string;
+  action_class: string;
+  risk?: string;
+  requires_explicit_intent?: boolean;
+  connection_status?: string;
+  minimum_permission?: string;
+  tags?: string[];
+  permission?: Record<string, unknown>;
+};
+
+export type ToolCatalogResponse = {
+  services: ToolCatalogService[];
+  tools: ToolCatalogTool[];
+  count: number;
+};
+
+export type ToolSelectionPreviewResponse = {
+  preview_id: string;
+  expires_at: string;
+  decision: {
+    selected_tools: string[];
+    selected_services: ToolCatalogService[];
+    recommendations: Array<{ tool_id: string; confidence?: number; reason?: string }>;
+    permission_summary: Record<string, number>;
+    fallbacks?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  };
 };
 
 type SendMessageOptions = {
@@ -1509,6 +1856,10 @@ export type ChatToolStreamEvent = ChatActivityEvent & {
     | "browser_screenshot"
     | "approval_requested"
     | "ai_retry_scheduled"
+    | "tool_selection_started"
+    | "tool_selection_completed"
+    | "tool_selection_fallback"
+    | "tool_selection_reviewed"
     | "task_failed";
 };
 
@@ -2064,6 +2415,119 @@ export const api = {
     });
   },
 
+  getPromptActive(params?: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) {
+    return request<{
+      profile_id: string;
+      conversation_id?: string;
+      summary: PromptUsageSummary;
+      segments?: PromptUsageSegment[];
+      active_segments?: PromptUsageSegment[];
+      disabled_segments?: PromptUsageSegment[];
+      token_estimate?: PromptUsageSummary["token_estimate"];
+    }>(withQuery("/api/prompts/active", params));
+  },
+
+  listPromptTraces(params?: { profile_id?: string; conversation_id?: string; limit?: number }) {
+    return request<{ profile_id: string; traces: PromptTraceSummary[]; count: number }>(
+      withQuery("/api/prompts/traces", params),
+    );
+  },
+
+  getPromptTrace(traceId: string, params?: { profile_id?: string; include_text?: boolean }) {
+    return request<PromptTraceDetail>(
+      withQuery(`/api/prompts/traces/${encodeURIComponent(traceId)}`, params),
+    );
+  },
+
+  getPromptStudio(params?: { profile_id?: string; prompt_id?: string; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptStudioData>(withQuery("/api/prompts/editor", params));
+  },
+
+  testPromptStudio(payload: {
+    profile_id?: string;
+    prompt_id?: string;
+    conversation_id?: string;
+    draft?: string;
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+    request_context?: Record<string, unknown>;
+    template_policy?: Record<string, unknown>;
+  }) {
+    return request<PromptStudioTestResult>("/api/prompts/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  savePrompt(payload: {
+    profile_id?: string;
+    prompt_id: string;
+    body: string;
+    description?: string;
+    variables?: Record<string, unknown>[];
+    metadata?: Record<string, unknown>;
+    create_override?: boolean;
+    expected_body_hash?: string;
+    expected_exists?: boolean;
+    reason?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/prompts/editor/save", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", ...payload }),
+    });
+  },
+
+  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; expected_body_hash?: string; expected_exists?: boolean; reason?: string }) {
+    return request<Record<string, unknown>>("/api/prompts/override", {
+      method: "POST",
+      body: JSON.stringify({ action: "override", ...payload }),
+    });
+  },
+
+  togglePromptEdge(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  previewPromptToggle(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/preview-toggle", {
+      method: "POST",
+      body: JSON.stringify({ preview: true, ...payload }),
+    });
+  },
+
+  diffPrompt(payload: { profile_id?: string; prompt_id: string; base?: string; draft?: string }) {
+    return request<{ profile_id: string; prompt_id: string; diff: string; changed: boolean }>("/api/prompts/diff", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  lintPrompt(payload: { prompt?: string; text?: string; body?: string; token_budget?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/lint", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  compactPrompt(payload: { prompt?: string; text?: string; body?: string; target_chars?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/compact", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string; expected_body_hash?: string; expected_exists?: boolean }) {
+    return request<Record<string, unknown>>(`/api/prompts/${encodeURIComponent(payload.prompt_id)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
   sendMessage(
     conversationId: string,
     text: string,
@@ -2159,6 +2623,45 @@ export const api = {
     return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
   },
 
+  toolCatalog() {
+    return request<ToolCatalogResponse>("/api/tools/catalog", { cache: "no-store" });
+  },
+
+  previewToolSelection(payload: {
+    conversation_id?: string | null;
+    user_text?: string;
+    text?: string;
+    attachment_metadata?: unknown[];
+    tool_selection?: ToolSelectionRequest;
+    model?: string | null;
+  }) {
+    return request<ToolSelectionPreviewResponse>("/api/tools/selection/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rebuildToolEmbeddingIndex(payload: { model?: string | null }) {
+    return request<Record<string, unknown>>("/api/tools/embedding-index/rebuild", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getConversationToolPreferences(conversationId: string) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { cache: "no-store" },
+    );
+  },
+
+  updateConversationToolPreferences(conversationId: string, preferences: Record<string, unknown>) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { method: "PUT", body: JSON.stringify({ preferences }) },
+    );
+  },
+
   executeUiCommand(payload: {
     command: string;
     args?: Record<string, unknown>;
@@ -2175,6 +2678,102 @@ export const api = {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  listContinuityNodes() {
+    return request<{ nodes: ContinuityNode[]; local_node: ContinuityNode }>("/api/continuity/nodes", { cache: "no-store" });
+  },
+
+  startContinuityPairing(payload?: { display_name?: string }) {
+    return request<ContinuityPairingStartResponse>("/api/continuity/pairing/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  acceptContinuityPairing(payload: {
+    request_id: string;
+    code: string;
+    display_name?: string;
+    descriptor?: Record<string, unknown>;
+    simulate_local_destination?: boolean;
+    destination_kind?: string;
+  }) {
+    return request<{ node: ContinuityNode }>("/api/continuity/pairing/accept", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  removeContinuityNode(nodeId: string) {
+    return request<{ removed: boolean; node_id: string }>(`/api/continuity/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  probeContinuityNode(nodeId: string, payload?: Record<string, unknown>) {
+    return request<{ node: ContinuityNode; checks: Array<Record<string, unknown>>; ok: boolean }>(
+      `/api/continuity/nodes/${encodeURIComponent(nodeId)}/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  },
+
+  listContinuityProviderRoutes() {
+    return request<{ routes: ContinuityProviderRoute[] }>("/api/continuity/provider-routes", { cache: "no-store" });
+  },
+
+  probeContinuityProviderRoute(routeId: string, payload?: { destination_node_id?: string; node_id?: string }) {
+    return request<ContinuityPreflightResult>(`/api/continuity/provider-routes/${encodeURIComponent(routeId)}/probe`, {
+      method: "POST",
+      body: JSON.stringify({ ...(payload ?? {}), route_id: routeId }),
+    });
+  },
+
+  setContinuityProviderFallbacks(routeId: string, fallbackRouteIds: string[]) {
+    return request<{ route_id: string; fallback_route_ids: string[] }>(
+      `/api/continuity/provider-routes/${encodeURIComponent(routeId)}/set-fallbacks`,
+      {
+        method: "POST",
+        body: JSON.stringify({ route_id: routeId, fallback_route_ids: fallbackRouteIds }),
+      },
+    );
+  },
+
+  listContinuityProviderExtensions() {
+    return request<{ extensions: Array<Record<string, unknown>> }>("/api/continuity/provider-extensions", { cache: "no-store" });
+  },
+
+  planContinuityHandoff(payload: ContinuityHandoffRequest) {
+    return request<{ plan: ContinuityHandoffPlan }>("/api/continuity/plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  listContinuityHandoffs() {
+    return request<{ operations: ContinuityHandoffOperation[] }>("/api/continuity/handoffs", { cache: "no-store" });
+  },
+
+  getContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}`, {
+      cache: "no-store",
+    });
+  },
+
+  cancelContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  createContinuityCheckpoint(payload: ContinuityHandoffRequest) {
+    return request<{ operation: ContinuityHandoffOperation; checkpoint: Record<string, unknown> }>("/api/continuity/checkpoints", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -2502,12 +3101,16 @@ export const api = {
     heartbeat_minutes?: number;
     review_interval_minutes?: number;
     qa_interval_minutes?: number;
+    max_tool_calls?: number;
     model?: string;
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
     docker_worker_count?: number;
     docker_personas?: string[];
+    workspace_id?: string | null;
+    workspace_label?: string | null;
+    workspace_root?: string | null;
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;

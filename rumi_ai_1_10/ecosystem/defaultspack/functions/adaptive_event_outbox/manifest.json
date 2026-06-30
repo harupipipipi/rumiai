@@ -1,0 +1,44 @@
+{
+  "function_id": "adaptive_event_outbox",
+  "description": "List pending adaptive event outbox work.",
+  "tags": [
+    "adaptive",
+    "event"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.event_outbox",
+    "defaultspack.adaptive.event_outbox",
+    "defaults.adaptive.event.outbox",
+    "defaultspack.adaptive.event.outbox"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "event_outbox"
+      }
+    }
+  }
+}

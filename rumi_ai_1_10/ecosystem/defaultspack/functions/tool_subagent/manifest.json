@@ -1,6 +1,6 @@
 {
   "function_id": "tool_subagent",
-  "description": "Run the default delegation tool.",
+  "description": "Run the default subagent tool.",
   "tags": [
     "tool",
     "agent"

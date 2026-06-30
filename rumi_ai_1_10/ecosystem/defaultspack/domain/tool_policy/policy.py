@@ -4,7 +4,7 @@ from typing import Any
 
 from domain.tool.autonomy import autonomous_tool_execution_allowed
 from domain.tool.schema_adapter import policy_from_context, tool_name_from_definition
-from domain.tool.security import is_safe_first_party_memo_tool
+from domain.tool.security import is_safe_first_party_memo_tool, is_sandbox_capability_tool, untrusted_tool_security_rejection
 
 from .models import PolicyDecision
 from .risk import resolve_tool_risk
@@ -35,6 +35,10 @@ def decide_tool_policy(
     policy = policy_from_context(context)
     name = tool_name or tool_name_from_definition(tool_def)
     risk = resolve_tool_risk(tool_def, name)
+    if isinstance(tool_def, dict):
+        security_rejection = untrusted_tool_security_rejection(tool_def)
+        if security_rejection is not None:
+            return PolicyDecision(False, risk, action="deny", reason=security_rejection, matched_by="tool_security")
 
     denylist = _list(policy.get("tool_denylist") or policy.get("disabled_tools") or policy.get("tool_blocklist"))
     if name in denylist:
@@ -76,6 +80,8 @@ def _requires_approval(tool_def: Any, policy: dict[str, Any], risk: str, name: s
     if _truthy(policy.get("yolo_mode")):
         return False
     if isinstance(tool_def, dict) and is_safe_first_party_memo_tool(tool_def):
+        return False
+    if isinstance(tool_def, dict) and is_sandbox_capability_tool(tool_def):
         return False
     if isinstance(tool_def, dict) and tool_def.get("requires_approval") is True:
         return True

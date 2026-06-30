@@ -25,10 +25,16 @@ def _computer_control_tool_def(tool_name: str) -> dict[str, object]:
     }
 
 
+def _computer_router_module():
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    return computer_router
+
+
 def test_run_computer_action_wraps_controller_approval_with_request_id(monkeypatch) -> None:
-    from domain.host_bridge import computer_router
     from domain.safety import approval
 
+    computer_router = _computer_router_module()
     approval.reset_approval_state_for_tests()
     monkeypatch.setenv("RUMI_COMPUTER_HOST_INTERNAL", "1")
 
@@ -76,7 +82,7 @@ def test_tool_executor_local_computer_use_uses_router(monkeypatch) -> None:
         captured["yolo_mode"] = yolo_mode
         return {"action": action, "routed": True}
 
-    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+    monkeypatch.setattr(_computer_router_module(), "run_computer_action", fake_router)
 
     result = ToolExecutor()._execute_local(
         "computer_use",
@@ -114,7 +120,7 @@ def test_tool_executor_local_computer_use_accepts_context_approval_token(monkeyp
         captured["tool_arguments"] = dict(tool_arguments or {})
         return {"action": action, "routed": True}
 
-    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+    monkeypatch.setattr(_computer_router_module(), "run_computer_action", fake_router)
 
     result = ToolExecutor()._execute_local(
         "computer_use",
@@ -147,7 +153,7 @@ def test_computer_use_pack_function_routes_original_arguments(monkeypatch) -> No
         captured["tool_arguments"] = dict(tool_arguments or {})
         return {"action": action, "tool_name": tool_name, "apps": [{"name": "Google Chrome"}]}
 
-    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+    monkeypatch.setattr(_computer_router_module(), "run_computer_action", fake_router)
 
     result = run(
         {"conversation_workspace_dir": "/tmp/conversation/workspace"},
