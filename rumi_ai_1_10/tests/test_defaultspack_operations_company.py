@@ -352,6 +352,41 @@ def test_mimo_coding_company_status_includes_runtime_workspace_counts(tmp_path, 
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_status_uses_persisted_bootstrap_state_without_org(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    state_path = tmp_path / "mimo" / "state.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(state_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "org_id": "mimo-coding-company-org",
+                "conversation_id": "conv_persisted",
+                "last_bootstrapped_at": "2026-06-30T00:00:00Z",
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    _reset_defaultspack_singletons()
+    status = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack").status()
+
+    assert status["bootstrapped"] is True
+    assert status["org"] is None
+    assert status["conversation_id"] == "conv_persisted"
+
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeypatch):
     from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import status as status_block
 

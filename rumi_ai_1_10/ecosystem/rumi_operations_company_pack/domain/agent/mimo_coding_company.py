@@ -513,6 +513,7 @@ class MimoCodingCompanyRuntime:
             company = CompanyService().get_company(COMPANY_ID) or company
         except Exception:
             pass
+        persisted_bootstrap_state = bool(state.get("last_bootstrapped_at") and state.get("conversation_id"))
         open_tasks = 0
         try:
             task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
@@ -535,7 +536,7 @@ class MimoCodingCompanyRuntime:
         )
         return {
             "profile_id": PROFILE_ID,
-            "bootstrapped": bool(org),
+            "bootstrapped": bool(org or persisted_bootstrap_state),
             "org_id": org_id,
             "company_id": COMPANY_ID,
             "conversation_id": state.get("conversation_id"),
