@@ -1420,6 +1420,200 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_observability_repairs_stale_scheduled_draft(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+            "desktops": [],
+        }),
+    )
+
+    chat_store = ChatStore()
+    parent = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        agent_id="client_manager",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    loop = chat_store.create_conversation(
+        model="stub/default",
+        system_prompt_id="mimo_coding_company",
+        parent_conversation_id=parent["id"],
+        conversation_kind="mimo_coding_company_loop",
+        agent_id="scheduler",
+        group_id="company:mimo-coding-company",
+        metadata={
+            "company_id": "mimo-coding-company",
+            "profile_id": "defaultspack.mimo_coding_company",
+            "parent_conversation_id": parent["id"],
+            "loop_key": "heartbeat",
+        },
+    )
+    user = chat_store.add_message(
+        loop["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Run scheduled MiMo heartbeat."}],
+            "metadata": {"source": "scheduler"},
+        },
+    )
+    draft = chat_store.add_message(
+        loop["id"],
+        {
+            "role": "assistant",
+            "parent_id": user["id"],
+            "content": [],
+            "raw_text": "",
+            "finish_reason": "streaming",
+            "metadata": {
+                "draft": True,
+                "streaming": True,
+                "thinking": {"state": "running"},
+            },
+        },
+    )
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
+    chat_store._conversations[loop["id"]]["messages"][-1]["created_at"] = old_timestamp
+    chat_store._conversations[loop["id"]]["messages"][-1]["updated_at"] = old_timestamp
+    chat_store._save_conversations()
+
+    scheduler = Scheduler()
+    run_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Scheduled heartbeat.",
+            "model": "stub/default",
+            "conversation_id": loop["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "scheduler",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": loop["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "heartbeat",
+            },
+        },
+        {"run_at": run_at},
+        name="MiMo Coding Company heartbeat",
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    summary = runtime._sync_company_observability(
+        {
+            "conversation_id": parent["id"],
+            "conversation_group_id": "company:mimo-coding-company",
+            "loop_conversation_ids": {"heartbeat": loop["id"]},
+            "schedule_ids": {"heartbeat": schedule["id"]},
+        }
+    )
+    loop_after = ChatStore().get_conversation(loop["id"])
+    repaired = loop_after["messages"][-1]
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=10, offset=0)
+
+    assert summary["scheduled_drafts"]["checked"] == 1
+    assert summary["scheduled_drafts"]["stale_count"] == 1
+    assert summary["scheduled_drafts"]["repaired"] == [draft["id"]]
+    assert repaired["id"] == draft["id"]
+    assert repaired["finish_reason"] == "error"
+    assert repaired["metadata"]["status"] == "error"
+    assert repaired["metadata"]["error_code"] == "SCHEDULED_MIMO_DRAFT_STALE"
+    assert "draft" not in repaired["metadata"]
+    assert "streaming" not in repaired["metadata"]
+    assert total == 1
+    assert messages[0]["metadata"]["sync_source"] == "mimo_scheduled_draft_monitor"
+    assert messages[0]["metadata"]["signal"] == "scheduled_draft_stale"
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_scheduled_draft_monitor_skips_running_schedule(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import save_schedule
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    chat_store = ChatStore()
+    parent = chat_store.create_conversation(model="stub/default", conversation_kind="mimo_coding_company")
+    loop = chat_store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="mimo_coding_company_loop",
+        metadata={"parent_conversation_id": parent["id"], "loop_key": "qa_loop"},
+    )
+    user = chat_store.add_message(loop["id"], {"role": "user", "content": [{"type": "text", "text": "Run QA."}]})
+    draft = chat_store.add_message(
+        loop["id"],
+        {
+            "role": "assistant",
+            "parent_id": user["id"],
+            "finish_reason": "streaming",
+            "metadata": {"draft": True, "streaming": True},
+        },
+    )
+    scheduler = Scheduler()
+    run_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run QA.",
+            "model": "stub/default",
+            "conversation_id": loop["id"],
+            "metadata": {"profile_id": "defaultspack.mimo_coding_company", "loop_key": "qa_loop"},
+        },
+        {"run_at": run_at},
+        name="MiMo Coding Company qa loop",
+    )
+    started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    schedule["running_execution"] = {"execution_id": "sexec_active", "started_at": started_at, "timeout_seconds": 1800}
+    save_schedule(schedule)
+    scheduler._schedules[schedule["id"]] = schedule
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    result = runtime._scheduled_draft_gaps(
+        {
+            "conversation_id": parent["id"],
+            "loop_conversation_ids": {"qa_loop": loop["id"]},
+            "schedule_ids": {"qa_loop": schedule["id"]},
+        },
+        scheduler,
+    )
+    loop_after = ChatStore().get_conversation(loop["id"])
+
+    assert result == {"checked": 0, "stale": [], "repaired": []}
+    assert loop_after["messages"][-1]["id"] == draft["id"]
+    assert loop_after["messages"][-1]["finish_reason"] == "streaming"
+
+    scheduler.delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import append_history

@@ -58,6 +58,7 @@ DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
 DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
+SCHEDULED_DRAFT_GAP_GRACE_SECONDS = SUBAGENT_GAP_GRACE_SECONDS
 MIMO_OBSERVABILITY_HISTORY_LIMIT = 5
 MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE = timedelta(hours=1)
 MIMO_CURRENT_OBSERVABILITY_MODELS = {DEFAULT_MAIN_MODEL, DEFAULT_VISION_MODEL}
@@ -1703,6 +1704,7 @@ class MimoCodingCompanyRuntime:
             "team_workspace": {"synced_messages": 0},
             "provider_health": self._provider_health_baseline(state),
             "schedule_history": {"checked": 0, "latest": [], "signals": []},
+            "scheduled_drafts": {"checked": 0, "repaired": [], "stale_count": 0, "stale": []},
             "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": [], "failed_count": 0, "failed": []},
             "desktop_monitoring": {
                 "surface": "desktops",
@@ -1772,6 +1774,31 @@ class MimoCodingCompanyRuntime:
                     known_sync_keys.add(sync_key)
                     synced += 1
 
+            scheduled_drafts = self._scheduled_draft_gaps(state, scheduler)
+            summary["scheduled_drafts"]["checked"] = scheduled_drafts.get("checked", 0)
+            summary["scheduled_drafts"]["repaired"] = scheduled_drafts.get("repaired", [])
+            summary["scheduled_drafts"]["stale"] = scheduled_drafts.get("stale", [])
+            summary["scheduled_drafts"]["stale_count"] = len(summary["scheduled_drafts"]["stale"])
+            for item in summary["scheduled_drafts"]["stale"]:
+                sync_key = "scheduled_draft:" + str(item.get("message_id") or "")
+                if sync_key in known_sync_keys:
+                    continue
+                runtime_store.add_message(
+                    COMPANY_ID,
+                    channel_id="ops-company",
+                    sender_id="scheduler",
+                    content=self._scheduled_draft_gap_message(item),
+                    metadata={
+                        "sync_source": "mimo_scheduled_draft_monitor",
+                        "sync_key": sync_key,
+                        "conversation_id": item.get("conversation_id"),
+                        "message_id": item.get("message_id"),
+                        "signal": "scheduled_draft_stale",
+                    },
+                )
+                known_sync_keys.add(sync_key)
+                synced += 1
+
             subagent_gaps = self._subagent_reply_gaps(state)
             summary["subagents"]["checked"] = len(subagent_gaps.get("checked_ids", []))
             summary["subagents"]["repaired"] = subagent_gaps.get("repaired", [])
@@ -1836,6 +1863,7 @@ class MimoCodingCompanyRuntime:
             summary["schedule_history"]["latest"] = summary["schedule_history"]["latest"][-12:]
             summary["schedule_history"]["signals"] = summary["schedule_history"]["signals"][-12:]
             summary["provider_health"]["signals"] = summary["provider_health"]["signals"][-12:]
+            summary["scheduled_drafts"]["stale"] = summary["scheduled_drafts"]["stale"][:10]
             summary["subagents"]["unanswered"] = summary["subagents"]["unanswered"][:10]
             summary["subagents"]["failed"] = summary["subagents"]["failed"][:10]
             return summary
@@ -2303,6 +2331,133 @@ class MimoCodingCompanyRuntime:
         except Exception:
             return {"checked_ids": [], "unanswered": [], "failed": [], "repaired": []}
 
+    def _scheduled_draft_gaps(self, state: dict[str, Any], scheduler: Scheduler | None = None) -> dict[str, Any]:
+        conversation_id = str(state.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return {"checked": 0, "stale": [], "repaired": []}
+        try:
+            from domain.chat.store import ChatStore
+
+            scheduler = scheduler or Scheduler()
+            store = ChatStore()
+            parent = store.get_conversation(conversation_id) or {}
+            parent_ids = self._subagent_scan_parent_conversation_ids(store, parent, conversation_id, state)
+            running_conversation_ids = self._running_schedule_conversation_ids(state, scheduler)
+            checked = 0
+            stale: list[dict[str, Any]] = []
+            repaired: list[str] = []
+            for parent_id in parent_ids:
+                if parent_id in running_conversation_ids:
+                    continue
+                conversation = parent if parent_id == conversation_id else (store.get_conversation(parent_id) or {})
+                if str(conversation.get("conversation_kind") or "") not in {"mimo_coding_company_loop", CONVERSATION_KIND}:
+                    continue
+                messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+                for message in messages:
+                    if not self._is_stale_scheduled_assistant_draft(message):
+                        continue
+                    checked += 1
+                    age_seconds = self._message_age_seconds(message)
+                    if age_seconds is not None and age_seconds < SCHEDULED_DRAFT_GAP_GRACE_SECONDS:
+                        continue
+                    repaired_message = self._mark_scheduled_draft_failed(store, parent_id, message)
+                    item = {
+                        "conversation_id": parent_id,
+                        "message_id": str(message.get("id") or ""),
+                        "title": str(conversation.get("title") or "MiMo scheduled loop"),
+                        "age_seconds": age_seconds,
+                        "parent_id": message.get("parent_id"),
+                    }
+                    if repaired_message is not None:
+                        repaired.append(str(repaired_message.get("id") or message.get("id") or ""))
+                        item["repaired"] = True
+                    stale.append(item)
+            return {"checked": checked, "stale": stale, "repaired": repaired}
+        except Exception:
+            return {"checked": 0, "stale": [], "repaired": []}
+
+    @staticmethod
+    def _running_schedule_conversation_ids(state: dict[str, Any], scheduler: Scheduler) -> set[str]:
+        running: set[str] = set()
+        schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        for raw_schedule_id in schedule_ids.values():
+            schedule_id = str(raw_schedule_id or "").strip()
+            if not schedule_id:
+                continue
+            try:
+                schedule = scheduler.get_schedule(schedule_id) or {}
+            except Exception:
+                continue
+            if not isinstance(schedule, dict) or not schedule.get("running_execution"):
+                continue
+            task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+            task_conversation_id = str(task.get("conversation_id") or "").strip()
+            if task_conversation_id:
+                running.add(task_conversation_id)
+        return running
+
+    @staticmethod
+    def _is_stale_scheduled_assistant_draft(message: Any) -> bool:
+        if not isinstance(message, dict) or str(message.get("role") or "") != "assistant":
+            return False
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        if metadata.get("subagent_child_durable_draft") is True:
+            return False
+        finish_reason = str(message.get("finish_reason") or "").strip().lower()
+        status = str(metadata.get("status") or "").strip().lower()
+        if status in {"error", "failed", "cancelled", "canceled", "completed"}:
+            return False
+        return (
+            finish_reason in {"streaming", "running"}
+            or metadata.get("streaming") is True
+            or metadata.get("draft") is True
+        )
+
+    @staticmethod
+    def _message_age_seconds(message: dict[str, Any]) -> float | None:
+        candidates = [message.get("updated_at"), message.get("created_at")]
+        newest: float | None = None
+        for candidate in candidates:
+            timestamp_seconds = MimoCodingCompanyRuntime._coerce_epoch_seconds(candidate)
+            if timestamp_seconds is None:
+                continue
+            newest = timestamp_seconds if newest is None else max(newest, timestamp_seconds)
+        if newest is None:
+            return None
+        return max(0.0, datetime.now(timezone.utc).timestamp() - newest)
+
+    @staticmethod
+    def _mark_scheduled_draft_failed(store: Any, conversation_id: str, message: dict[str, Any]) -> dict[str, Any] | None:
+        message_id = str(message.get("id") or "").strip()
+        if not message_id:
+            return None
+        metadata = dict(message.get("metadata") if isinstance(message.get("metadata"), dict) else {})
+        metadata.pop("streaming", None)
+        metadata.pop("draft", None)
+        thinking = metadata.get("thinking") if isinstance(metadata.get("thinking"), dict) else {}
+        metadata["thinking"] = {**thinking, "state": "failed"}
+        metadata["status"] = "error"
+        metadata["error_code"] = "SCHEDULED_MIMO_DRAFT_STALE"
+        metadata["repaired_at"] = timestamp()
+        text = (
+            "Scheduled MiMo loop did not finish this assistant draft. "
+            "The monitor marked it failed so later scheduler ticks can continue visibly."
+        )
+        return store.update_message(
+            conversation_id,
+            message_id,
+            {
+                "content": [{"type": "text", "text": text}],
+                "raw_text": text,
+                "finish_reason": "error",
+                "usage": message.get("usage") if isinstance(message.get("usage"), dict) else {},
+                "metadata": metadata,
+                "events": message.get("events") if isinstance(message.get("events"), list) else [],
+                "tool_logs": message.get("tool_logs") if isinstance(message.get("tool_logs"), list) else [],
+                "model": message.get("model"),
+            },
+        )
+
     @staticmethod
     def _subagent_scan_parent_conversation_ids(
         store: Any,
@@ -2571,6 +2726,19 @@ class MimoCodingCompanyRuntime:
                 f"- Child conversation: `{child_conversation_id}`",
                 "- Previous signal: `subagent_unanswered`",
                 "- Resolution: an assistant reply or repair marker is now present.",
+            ]
+        )
+
+    @staticmethod
+    def _scheduled_draft_gap_message(item: dict[str, Any]) -> str:
+        return "\n".join(
+            [
+                "**MiMo scheduled draft repaired**",
+                f"- Conversation: `{item.get('conversation_id') or ''}`",
+                f"- Message: `{item.get('message_id') or ''}`",
+                f"- Title: `{item.get('title') or 'MiMo scheduled loop'}`",
+                "",
+                "A stale streaming assistant draft was marked failed so the loop is visible and future ticks can continue.",
             ]
         )
 
