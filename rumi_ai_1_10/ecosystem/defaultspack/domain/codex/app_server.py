@@ -41,6 +41,7 @@ _DEFAULT_CONFIG = {
     "shared_secret_file": "",
     "tool_source_enabled": False,
     "automation_endpoint_enabled": False,
+    "url_secret_rejected": False,
 }
 
 
@@ -97,6 +98,16 @@ def _normalize_url(value: Any, *, allowed_schemes: set[str]) -> str:
     if parsed.scheme.lower() not in allowed_schemes or not parsed.netloc:
         return ""
     return text
+
+
+def _url_has_query(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return False
+    try:
+        return bool(urlsplit(text).query)
+    except ValueError:
+        return False
 
 
 def _hostname_is_loopback(hostname: str) -> bool:
@@ -157,11 +168,14 @@ def _infer_transport(payload: dict[str, Any], *, base_url: str, websocket_url: s
 
 
 def _normalize_config(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_base_url = payload.get("base_url") or payload.get("server_url")
+    raw_websocket_url = payload.get("websocket_url")
+    url_secret_rejected = _bool(payload.get("url_secret_rejected")) or _url_has_query(raw_base_url) or _url_has_query(raw_websocket_url)
     base_url = _normalize_url(
-        payload.get("base_url") or payload.get("server_url"),
+        raw_base_url,
         allowed_schemes={"http", "https"},
-    )
-    websocket_url = _normalize_url(payload.get("websocket_url"), allowed_schemes={"ws", "wss"})
+    ) if not url_secret_rejected else ""
+    websocket_url = _normalize_url(raw_websocket_url, allowed_schemes={"ws", "wss"}) if not url_secret_rejected else ""
     unix_socket_path = _normalize_path(payload.get("unix_socket_path") or payload.get("socket_path"))
     transport = _infer_transport(
         payload,
@@ -180,6 +194,7 @@ def _normalize_config(payload: dict[str, Any]) -> dict[str, Any]:
         "shared_secret_file": _normalize_path(payload.get("shared_secret_file")),
         "tool_source_enabled": _bool(payload.get("tool_source_enabled")),
         "automation_endpoint_enabled": _bool(payload.get("automation_endpoint_enabled")),
+        "url_secret_rejected": url_secret_rejected,
     }
 
 
@@ -303,6 +318,8 @@ def _config_is_loopback(config: dict[str, Any]) -> bool:
 def _config_is_configured(config: dict[str, Any]) -> bool:
     if not config.get("enabled") or config.get("transport") == "off":
         return False
+    if config.get("url_secret_rejected"):
+        return False
     if _transport_url_mismatch_reason(config):
         return False
     transport = str(config.get("transport") or "off")
@@ -333,6 +350,8 @@ def codex_app_server_auth_headers(
 def build_codex_app_server_command(config: dict[str, Any]) -> list[str]:
     normalized = _normalize_config(config if isinstance(config, dict) else {})
     if not normalized.get("enabled") or normalized.get("transport") == "off":
+        return []
+    if normalized.get("url_secret_rejected"):
         return []
     if _transport_url_mismatch_reason(normalized):
         return []
@@ -389,14 +408,23 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     auth_required = _endpoint_requires_auth(config)
     auth = _codex_app_server_auth(config, pack_root=pack_root)
     auth_configured = bool(auth.get("value"))
+    url_secret_rejected = bool(config.get("url_secret_rejected"))
     transport_url_mismatch_reason = _transport_url_mismatch_reason(config)
     auth_blocked_reason = (
         "Configure a Codex App Server WS token or shared secret before using a non-loopback endpoint."
         if auth_required and not auth_configured
         else ""
     )
-    blocked_reason = transport_url_mismatch_reason or auth_blocked_reason
-    if transport_url_mismatch_reason:
+    url_secret_blocked_reason = (
+        "Codex App Server base_url/websocket_url cannot contain query strings."
+        if url_secret_rejected
+        else ""
+    )
+    blocked_reason = url_secret_blocked_reason or transport_url_mismatch_reason or auth_blocked_reason
+    if url_secret_rejected:
+        connection_status = "url_secret_rejected"
+        status_label = "URL secret rejected"
+    elif transport_url_mismatch_reason:
         connection_status = "transport_url_mismatch"
         status_label = "Transport mismatch"
     elif auth_blocked_reason:
@@ -416,6 +444,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "connection_status": connection_status,
         "status_label": status_label,
         "blocked_reason": blocked_reason,
+        "url_secret_rejected": url_secret_rejected,
         "transport_url_mismatch": bool(transport_url_mismatch_reason),
         "transport_url_mismatch_reason": transport_url_mismatch_reason,
         "base_url": base_url,
@@ -437,7 +466,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "tool_source": {
             "enabled": bool(config.get("tool_source_enabled")),
             "status": connection_status
-            if connection_status in {"blocked_auth_required", "transport_url_mismatch"}
+            if connection_status in {"blocked_auth_required", "transport_url_mismatch", "url_secret_rejected"}
             else "configured"
             if config.get("tool_source_enabled") and configured
             else "disabled",
@@ -445,7 +474,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "automation_endpoint": {
             "enabled": bool(config.get("automation_endpoint_enabled")),
             "status": connection_status
-            if connection_status in {"blocked_auth_required", "transport_url_mismatch"}
+            if connection_status in {"blocked_auth_required", "transport_url_mismatch", "url_secret_rejected"}
             else "configured"
             if config.get("automation_endpoint_enabled") and configured
             else "disabled",
@@ -456,6 +485,8 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
 
 def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.0) -> dict[str, Any]:
     status = codex_app_server_status(pack_root=pack_root)
+    if status.get("connection_status") == "url_secret_rejected":
+        return {"success": False, "provider_id": "codex", "probe": {"status": "url_secret_rejected"}}
     if status.get("connection_status") == "transport_url_mismatch":
         return {"success": False, "provider_id": "codex", "probe": {"status": "transport_url_mismatch"}}
     if status.get("connection_status") == "blocked_auth_required":

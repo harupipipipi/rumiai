@@ -2914,6 +2914,26 @@ export const api = {
     });
   },
 
+  importConnectionBundle(credentialBundle: string | Record<string, unknown>, providerId?: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/connections/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
   importProviderConnection(providerId: string, credentialBundle: string) {
     return request<{
       provider_id: string;
@@ -2921,12 +2941,13 @@ export const api = {
       credential_ref?: Record<string, string>;
       scopes?: string[];
       capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
       expires_at?: string;
       status?: string;
-    }>("/api/ai/oauth", {
+    }>("/api/connections/import", {
       method: "POST",
       body: JSON.stringify({
-        action: "import",
         provider_id: providerId,
         credential_bundle: credentialBundle,
       }),

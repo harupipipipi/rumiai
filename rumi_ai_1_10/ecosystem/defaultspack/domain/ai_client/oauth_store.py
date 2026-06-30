@@ -96,6 +96,16 @@ _ID_TOKEN_SECRET_KEYS = {
     "google": "RUMIOAUTH_GOOGLE_ID_TOKEN",
     "cloudflare": "RUMIOAUTH_CLOUDFLARE_ID_TOKEN",
 }
+_PROVIDER_OAUTH_ENV_ALIASES = {
+    ("cloudflare", "ACCESS_TOKEN"): ["CLOUDFLARE_API_TOKEN", "CF_API_TOKEN"],
+    ("cloudflare", "SCOPES"): ["CLOUDFLARE_OAUTH_SCOPES", "CLOUDFLARE_API_TOKEN_SCOPES"],
+    ("cloudflare", "REQUESTED_CAPABILITIES"): [
+        "CLOUDFLARE_REQUESTED_CAPABILITIES",
+        "CLOUDFLARE_API_TOKEN_REQUESTED_CAPABILITIES",
+    ],
+    ("cloudflare", "ACCOUNT_ID"): ["RUMI_CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_ACCOUNT_ID"],
+    ("cloudflare", "ZONE_ID"): ["RUMI_CLOUDFLARE_ZONE_ID", "CLOUDFLARE_ZONE_ID"],
+}
 
 _OAUTH_CLIENT_MATERIAL_TYPE = "oauth2_client_config"
 _OAUTH_TOKEN_MATERIAL_TYPE = "oauth2_token"
@@ -233,10 +243,12 @@ def _provider_oauth_env_names(provider_id: str, suffix: str) -> list[str]:
     suffix = str(suffix or "").strip().upper()
     if not prefix or not suffix:
         return []
-    return [
+    names = [
         f"RUMI_DEFAULTSPACK_{prefix}_OAUTH_{suffix}",
         f"RUMI_{prefix}_OAUTH_{suffix}",
     ]
+    names.extend(_PROVIDER_OAUTH_ENV_ALIASES.get((str(provider_id or "").strip().lower(), suffix), []))
+    return names
 
 
 def _normalize_scope_list(value: Any) -> list[str]:
@@ -258,6 +270,22 @@ def _normalize_scope_list(value: Any) -> list[str]:
 def _scopes_from_env(provider_id: str, *, pack_root: Path | None = None) -> list[str]:
     raw = _first_env_value(_provider_oauth_env_names(provider_id, "SCOPES"), pack_root=pack_root)
     return _normalize_scope_list(raw)
+
+
+def _requested_capabilities_from_env(provider_id: str, *, pack_root: Path | None = None) -> list[str]:
+    raw = _first_env_value(_provider_oauth_env_names(provider_id, "REQUESTED_CAPABILITIES"), pack_root=pack_root)
+    return _normalize_scope_list(raw)
+
+
+def _provider_context_from_env(provider_id: str, *, pack_root: Path | None = None) -> dict[str, str]:
+    context: dict[str, str] = {}
+    account_id = _first_env_value(_provider_oauth_env_names(provider_id, "ACCOUNT_ID"), pack_root=pack_root)
+    zone_id = _first_env_value(_provider_oauth_env_names(provider_id, "ZONE_ID"), pack_root=pack_root)
+    if account_id:
+        context["account_id"] = account_id
+    if zone_id:
+        context["zone_id"] = zone_id
+    return context
 
 
 def _secrets_dir(pack_root: Path | None = None) -> Path:
@@ -428,6 +456,15 @@ def _resolve_connection_capabilities(provider_id: str, token_metadata: dict[str,
     from domain.connections.store import resolve_capabilities_for_provider
 
     return resolve_capabilities_for_provider(provider_id, token_metadata, pack_root=pack_root)
+
+
+def _provider_granted_capabilities(provider_id: str, token_metadata: dict[str, Any], *, pack_root: Path | None = None) -> list[str]:
+    from core_runtime.connections.permission_resolver import provider_granted_capabilities
+
+    provider = _connection_provider(provider_id, pack_root=pack_root)
+    if provider is None:
+        return []
+    return provider_granted_capabilities(provider, token_metadata)
 
 
 def _read_provider_oauth_bundle_value(provider_id: str, suffix: str, *, pack_root: Path | None = None) -> str:
@@ -830,8 +867,15 @@ def save_provider_oauth_connection(
         "sub": str(profile.get("sub") or existing.get("sub") or "").strip(),
         "has_refresh_token": bool(refresh_token or existing.get("has_refresh_token")),
     }
-    resolved = _resolve_connection_capabilities(provider_id, {**metadata, "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE}, pack_root=pack_root)
+    capability_metadata = {**metadata, "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE}
+    requested_capabilities = _provider_granted_capabilities(provider_id, capability_metadata, pack_root=pack_root)
+    if requested_capabilities:
+        capability_metadata["requested_capabilities"] = requested_capabilities
+    resolved = _resolve_connection_capabilities(provider_id, capability_metadata, pack_root=pack_root)
     metadata["capabilities"] = list(resolved.get("capabilities") or [])
+    metadata["approval_required_capabilities"] = list(resolved.get("approval_required_capabilities") or [])
+    metadata["rejected_capabilities"] = list(resolved.get("rejected_capabilities") or [])
+    metadata["requested_capabilities"] = requested_capabilities
     saved = _save_connection_credential(
         provider_id,
         _OAUTH_TOKEN_MATERIAL_TYPE,
@@ -848,6 +892,9 @@ def save_provider_oauth_connection(
             "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE,
             "scopes": list(resolved.get("scopes") or scopes),
             "capabilities": metadata["capabilities"],
+            "approval_required_capabilities": metadata["approval_required_capabilities"],
+            "rejected_capabilities": metadata["rejected_capabilities"],
+            "requested_capabilities": requested_capabilities,
             "status": "connected",
             "account_label": str(metadata.get("email") or metadata.get("display_name") or provider_id),
         },
@@ -868,6 +915,8 @@ def save_provider_oauth_connection(
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
         "credential_ref": saved.get("credential_ref", {}),
         "capabilities": metadata["capabilities"],
+        "approval_required_capabilities": metadata["approval_required_capabilities"],
+        "rejected_capabilities": metadata["rejected_capabilities"],
     }
 
 
@@ -1243,15 +1292,15 @@ def _provider_config_hint(provider_id: str, connection_status: str, *, client_co
     if provider_id != "cloudflare":
         return ""
     if connection_status == "missing_self_host_config":
-        return "Import or paste a Cloudflare OAuth client JSON with explicit least-privilege scopes before connecting."
+        return "Import a Cloudflare credential JSON, paste a token, or set CLOUDFLARE_API_TOKEN / RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN in .env."
     if connection_status == "missing_scope_config":
         if not client_configured:
-            return "Import a Cloudflare OAuth client JSON with scopes before connecting."
-        return "Add Cloudflare scopes to the saved client JSON before connecting."
+            return "Set RUMI_CLOUDFLARE_OAUTH_SCOPES for browser OAuth, or import a least-privilege Cloudflare token."
+        return "Add Cloudflare scopes to the saved client JSON before connecting, or import a token directly."
     if connection_status == "not_connected":
         return "Cloudflare OAuth is ready. Click Connect in browser to finish consent."
     if connection_status == "connected":
-        return "Cloudflare OAuth token is available."
+        return "Cloudflare token is available. Add requested capabilities in the token import or .env only when deploy access is needed."
     return ""
 
 
@@ -1261,6 +1310,11 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
     supported = provider_supports_oauth(provider_id)
     client = load_provider_client_config(provider_id, pack_root=pack_root) if supported else None
     metadata = _provider_metadata(provider_id, pack_root=pack_root) if supported else {}
+    if supported:
+        metadata = {**_provider_context_from_env(provider_id, pack_root=pack_root), **metadata}
+        env_requested_capabilities = _requested_capabilities_from_env(provider_id, pack_root=pack_root)
+        if env_requested_capabilities and not metadata.get("requested_capabilities"):
+            metadata["requested_capabilities"] = env_requested_capabilities
     connected = provider_has_oauth_connection(provider_id, pack_root=pack_root) if supported else False
     default_scopes = _default_scopes(provider_id, pack_root=pack_root) if supported else list(provider.oauth.default_scopes if provider and provider.oauth else [])
     if connected:
@@ -1300,16 +1354,25 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         status_scopes = list(metadata.get("scopes") or default_scopes)
     credential_ref = _connection_credential_ref(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root) if supported else {}
     client_credential_ref = _connection_credential_ref(provider_id, _OAUTH_CLIENT_MATERIAL_TYPE, pack_root=pack_root) if supported else {}
+    capability_metadata = {
+        **metadata,
+        "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE if credential_ref or connected else str(metadata.get("credential_kind") or ""),
+        "scopes": status_scopes,
+    }
+    if metadata.get("requested_capabilities"):
+        capability_metadata["requested_capabilities"] = _normalize_scope_list(metadata.get("requested_capabilities"))
     resolved = _resolve_connection_capabilities(
         provider_id,
-        {
-            **metadata,
-            "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE if credential_ref else str(metadata.get("credential_kind") or ""),
-            "scopes": status_scopes,
-        },
+        capability_metadata,
         pack_root=pack_root,
-    ) if supported else {"capabilities": [], "scopes": status_scopes}
+    ) if supported else {"capabilities": [], "scopes": status_scopes, "approval_required_capabilities": [], "rejected_capabilities": []}
     capabilities = list(metadata.get("capabilities") or resolved.get("capabilities") or [])
+    approval_required_capabilities = list(
+        metadata.get("approval_required_capabilities")
+        or resolved.get("approval_required_capabilities")
+        or []
+    )
+    rejected_capabilities = list(metadata.get("rejected_capabilities") or resolved.get("rejected_capabilities") or [])
     cloudflare_sdk = {}
     if provider_id == "cloudflare":
         try:
@@ -1346,6 +1409,8 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "picture_url": str(metadata.get("picture_url") or "").strip(),
         "scopes": status_scopes,
         "capabilities": capabilities,
+        "approval_required_capabilities": approval_required_capabilities,
+        "rejected_capabilities": rejected_capabilities,
         "default_scopes": default_scopes,
         "scope_mode": scope_mode,
         "scope_modes": _google_scope_mode_rows(pack_root=pack_root) if provider_id == "google" else [],
@@ -1354,6 +1419,8 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "provisioning": {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {},
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
+        "account_id_configured": bool(metadata.get("account_id")),
+        "zone_id_configured": bool(metadata.get("zone_id")),
         "credential_ref": credential_ref,
         "redirect_path": f"/api/ai/oauth/{provider_id}/callback" if supported else "",
         "config_hint": _provider_config_hint(provider_id, connection_status, client_configured=client is not None),

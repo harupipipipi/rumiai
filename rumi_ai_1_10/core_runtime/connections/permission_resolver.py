@@ -11,6 +11,7 @@ from .models import ConnectionProvider
 class ResolvedConnectionPermissions:
     scopes: list[str]
     capabilities: list[str]
+    approval_required_capabilities: list[str]
     rejected_capabilities: list[str]
     status: str
 
@@ -18,6 +19,7 @@ class ResolvedConnectionPermissions:
         return {
             "scopes": list(self.scopes),
             "capabilities": list(self.capabilities),
+            "approval_required_capabilities": list(self.approval_required_capabilities),
             "rejected_capabilities": list(self.rejected_capabilities),
             "status": self.status,
         }
@@ -26,11 +28,91 @@ class ResolvedConnectionPermissions:
 def resolve_connection_permissions(provider: ConnectionProvider, token_metadata: Mapping[str, Any] | None = None) -> ResolvedConnectionPermissions:
     metadata = dict(token_metadata or {})
     scopes = _normalize_scopes(metadata.get("scopes") or metadata.get("scope"))
-    manifest_capabilities = {capability.id for capability in provider.capabilities}
-    resolved: set[str] = set()
+    manifest_capabilities = {capability.id: capability for capability in provider.capabilities}
+    manifest_allowed = set(manifest_capabilities)
     rejected: set[str] = set(_normalize_string_list(metadata.get("capabilities") or metadata.get("capabilities_granted")))
     credential_kind = str(metadata.get("credential_kind") or metadata.get("material_type") or "").strip()
+    provider_granted, mapping_rejected = _provider_granted_capability_sets(
+        provider,
+        scopes=scopes,
+        credential_kind=credential_kind,
+    )
+    rejected.update(mapping_rejected)
 
+    requested = _requested_capabilities(metadata)
+    if requested:
+        requested_set = set(requested)
+    else:
+        requested_set = {
+            capability_id
+            for capability_id in provider_granted
+            if _capability_risk(manifest_capabilities[capability_id]) in {"none", "low"}
+        }
+
+    enabled: set[str] = set()
+    approval_required: set[str] = set()
+    for capability in requested_set:
+        if capability not in manifest_allowed:
+            rejected.add(capability)
+            continue
+        if capability not in provider_granted:
+            rejected.add(capability)
+            continue
+        if _capability_risk(manifest_capabilities[capability]) == "high":
+            approval_required.add(capability)
+            continue
+        enabled.add(capability)
+
+    # Non-OAuth credentials often have no scopes.  They are still resolved from
+    # explicit manifest rules keyed by credential kind, never from imported JSON.
+    rejected.difference_update(enabled)
+    rejected.difference_update(approval_required)
+    return ResolvedConnectionPermissions(
+        scopes=scopes,
+        capabilities=sorted(enabled),
+        approval_required_capabilities=sorted(approval_required),
+        rejected_capabilities=sorted(rejected),
+        status="resolved",
+    )
+
+
+def provider_granted_capabilities(provider: ConnectionProvider, token_metadata: Mapping[str, Any] | None = None) -> list[str]:
+    metadata = dict(token_metadata or {})
+    scopes = _normalize_scopes(metadata.get("scopes") or metadata.get("scope"))
+    credential_kind = str(metadata.get("credential_kind") or metadata.get("material_type") or "").strip()
+    granted, _rejected = _provider_granted_capability_sets(
+        provider,
+        scopes=scopes,
+        credential_kind=credential_kind,
+    )
+    return sorted(granted)
+
+
+def _requested_capabilities(metadata: Mapping[str, Any]) -> list[str]:
+    return list(
+        dict.fromkeys(
+            _normalize_string_list(
+                metadata.get("requested_capabilities")
+                or metadata.get("requestedCapabilities")
+                or metadata.get("requested")
+            )
+        )
+    )
+
+
+def _capability_risk(capability: Any) -> str:
+    return str(getattr(capability, "risk", "") or "none").strip().lower() or "none"
+
+
+def _provider_granted_capability_sets(
+    provider: ConnectionProvider,
+    *,
+    scopes: list[str],
+    credential_kind: str,
+) -> tuple[set[str], set[str]]:
+    manifest_allowed = {capability.id for capability in provider.capabilities}
+    granted: set[str] = set()
+    rejected: set[str] = set()
     for mapping in provider.scope_to_capability:
         if not isinstance(mapping, Mapping):
             continue
@@ -38,23 +120,13 @@ def resolve_connection_permissions(provider: ConnectionProvider, token_metadata:
         if not capabilities:
             continue
         if not _mapping_matches(mapping, scopes=scopes, credential_kind=credential_kind):
-            rejected.update(capabilities)
             continue
         for capability in capabilities:
-            if capability in manifest_capabilities:
-                resolved.add(capability)
+            if capability in manifest_allowed:
+                granted.add(capability)
             else:
                 rejected.add(capability)
-
-    # Non-OAuth credentials often have no scopes.  They are still resolved from
-    # explicit manifest rules keyed by credential kind, never from imported JSON.
-    rejected.difference_update(resolved)
-    return ResolvedConnectionPermissions(
-        scopes=scopes,
-        capabilities=sorted(resolved),
-        rejected_capabilities=sorted(rejected),
-        status="resolved",
-    )
+    return granted, rejected
 
 
 def _mapping_matches(mapping: Mapping[str, Any], *, scopes: list[str], credential_kind: str) -> bool:

@@ -1340,6 +1340,7 @@ _SENSITIVE_INTEGRATION_PATHS = {
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
     "/api/connections/codex": {"POST"},
+    "/api/connections/import": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
     "/api/external/templates": {"POST", "PUT", "DELETE"},
@@ -1360,6 +1361,7 @@ _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
     "/api/connections/codex": {"POST"},
+    "/api/connections/import": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
     "/api/onboarding/apply": {"POST"},

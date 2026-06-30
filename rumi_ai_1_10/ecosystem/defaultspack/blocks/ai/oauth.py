@@ -162,9 +162,9 @@ def run(input_data, context):
         if action == "import":
             raw_bundle = (input_data or {}).get("connection") or (input_data or {}).get("credential_bundle") or (input_data or {}).get("bundle")
             if isinstance(raw_bundle, str):
-                result = import_connection_bundle(raw_bundle)
+                result = import_connection_bundle(raw_bundle, provider_id=provider_id)
             elif isinstance(raw_bundle, dict):
-                result = import_connection_bundle(raw_bundle)
+                result = import_connection_bundle(raw_bundle, provider_id=provider_id)
             else:
                 result = {"success": False, "provider_id": provider_id, "error": "credential bundle JSON is required"}
         elif action == "save_client":

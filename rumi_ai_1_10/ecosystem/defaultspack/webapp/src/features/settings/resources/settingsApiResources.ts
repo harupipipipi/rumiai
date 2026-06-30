@@ -35,6 +35,10 @@ export const settingsApiResources = {
     return api.importProviderConnection(providerId, credentialBundle);
   },
 
+  importConnectionBundle(credentialBundle: string | Record<string, unknown>, providerId?: string) {
+    return api.importConnectionBundle(credentialBundle, providerId);
+  },
+
   getCodexConnectionStatus() {
     return api.getCodexConnectionStatus();
   },

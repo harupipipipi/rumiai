@@ -60,6 +60,44 @@ test("startProviderOAuth posts scope mode and requested services", async () => {
   });
 });
 
+test("importProviderConnection posts credential imports to connections route", async () => {
+  const rawToken = ["cloudflare", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "cloudflare",
+        connection_id: "default",
+        credential_ref: { provider_id: "cloudflare" },
+        capabilities: ["cloudflare.account.read"],
+        approval_required_capabilities: [],
+        rejected_capabilities: [],
+        status: "connected",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.importProviderConnection>> | null = null;
+  try {
+    result = await api.importProviderConnection("cloudflare", `CLOUDFLARE_API_TOKEN=${rawToken}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/import");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    provider_id: "cloudflare",
+    credential_bundle: `CLOUDFLARE_API_TOKEN=${rawToken}`,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
 test("saveCodexAccessToken posts to Codex connection route and redacts response", async () => {
   const rawToken = ["codex", "api", "token"].join("-");
   let requestUrl = "";

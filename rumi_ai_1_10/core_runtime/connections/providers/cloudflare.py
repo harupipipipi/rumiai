@@ -41,6 +41,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
         {"id": "account_read", "label": "Read account metadata", "scopes": ["account:read", "user:read"]},
     ],
     scope_to_capability=[
+        {"credential_kinds": ["oauth2_token"], "capabilities": ["cloudflare.account.read"]},
         {"scopes": ["account:read"], "capabilities": ["cloudflare.account.read"]},
         {
             "scopes": [
@@ -70,6 +71,14 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
         "direct_token_env": [
             "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",
             "RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN",
+            "CLOUDFLARE_API_TOKEN",
+            "CF_API_TOKEN",
+        ],
+        "optional_context_env": [
+            "RUMI_CLOUDFLARE_ACCOUNT_ID",
+            "CLOUDFLARE_ACCOUNT_ID",
+            "RUMI_CLOUDFLARE_ZONE_ID",
+            "CLOUDFLARE_ZONE_ID",
         ],
     },
 )

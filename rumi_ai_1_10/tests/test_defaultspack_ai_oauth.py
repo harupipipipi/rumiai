@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -229,7 +230,7 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             pack_root = Path(tmpdir)
             (pack_root / ".env").write_text(
-                "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN=cloudflare-oauth-access\n",
+                "CLOUDFLARE_API_TOKEN=cloudflare-oauth-access\n",
                 encoding="utf-8",
             )
             with patch.dict(os.environ, {}, clear=True):
@@ -239,6 +240,7 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertTrue(status["supported"])
         self.assertTrue(status["connected"])
         self.assertEqual(status["connection_status"], "connected")
+        self.assertEqual(status["capabilities"], ["cloudflare.account.read"])
         self.assertEqual(access_token, "cloudflare-oauth-access")
 
     def test_cloudflare_oauth_finish_uses_cloudflare_token_and_userinfo_endpoints(self):
@@ -328,12 +330,123 @@ class TestDefaultspackAiOauth(unittest.TestCase):
 
         self.assertTrue(imported["success"], imported)
         self.assertEqual(imported["capabilities"], ["github.user.read"])
+        self.assertEqual(imported["approval_required_capabilities"], [])
+        self.assertIn("github.repo.write", imported["rejected_capabilities"])
         self.assertNotIn("github.repo.write", imported["capabilities"])
         self.assertNotIn(raw_token, str(imported))
         self.assertTrue(status["connected"])
         self.assertEqual(status["credential_ref"]["provider_id"], "github")
         self.assertEqual(status["capabilities"], ["github.user.read"])
         self.assertEqual(access_token, raw_token)
+
+    def test_connection_import_broad_github_repo_scope_does_not_grant_write_when_read_only_requested(self):
+        from domain.connections.store import import_connection_bundle
+
+        raw_token = "github-read-only-secret-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                imported = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "github",
+                        "material_type": "oauth2_token",
+                        "credentials": {"access_token": raw_token},
+                        "scopes": ["repo"],
+                        "requested_capabilities": ["github.repo.read"],
+                        "token_metadata": {"capabilities": ["unknown.capability"]},
+                    },
+                    pack_root=pack_root,
+                )
+
+        self.assertTrue(imported["success"], imported)
+        self.assertEqual(imported["capabilities"], ["github.repo.read"])
+        self.assertNotIn("github.repo.write", imported["capabilities"])
+        self.assertEqual(imported["approval_required_capabilities"], [])
+        self.assertIn("unknown.capability", imported["rejected_capabilities"])
+        self.assertNotIn(raw_token, str(imported))
+
+    def test_connection_import_high_risk_capability_requires_approval(self):
+        from domain.connections.store import import_connection_bundle
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                imported = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "github",
+                        "material_type": "oauth2_token",
+                        "credentials": {"access_token": "github-write-secret-token"},
+                        "scopes": ["repo"],
+                        "requested_capabilities": ["github.repo.write"],
+                    },
+                    pack_root=pack_root,
+                )
+
+        self.assertTrue(imported["success"], imported)
+        self.assertEqual(imported["capabilities"], [])
+        self.assertEqual(imported["approval_required_capabilities"], ["github.repo.write"])
+        self.assertNotIn("github.repo.write", imported["rejected_capabilities"])
+
+    def test_connection_import_route_accepts_env_token_without_returning_token(self):
+        from blocks.connections import import_bundle as import_block
+
+        raw_token = "cloudflare-route-secret-token"
+        with patch.object(
+            import_block,
+            "import_connection_bundle",
+            return_value={
+                "success": True,
+                "provider_id": "cloudflare",
+                "connection_id": "default",
+                "access_token": raw_token,
+                "credential_ref": {"provider_id": "cloudflare"},
+                "scopes": [],
+                "capabilities": ["cloudflare.account.read"],
+                "approval_required_capabilities": [],
+                "rejected_capabilities": [],
+                "status": "connected",
+            },
+        ) as imported:
+            result = import_block.run(
+                {
+                    "_method": "POST",
+                    "provider_id": "cloudflare",
+                    "credential_bundle": f"CLOUDFLARE_API_TOKEN={raw_token}",
+                },
+                {},
+            )
+
+        imported.assert_called_once()
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn(raw_token, json.dumps(result, ensure_ascii=False))
+
+    def test_connection_import_from_env_token_keeps_settings_json_secret_free(self):
+        from domain.connections.store import import_connection_bundle
+        from domain.frontend.registry import FrontendRegistry
+
+        raw_token = "cloudflare-settings-secret-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True), patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                imported = import_connection_bundle(
+                    f"CLOUDFLARE_API_TOKEN={raw_token}\nCLOUDFLARE_ACCOUNT_ID=account-id",
+                    provider_id="cloudflare",
+                    pack_root=pack_root,
+                )
+                settings = FrontendRegistry(pack_root=pack_root).get_settings()
+
+        self.assertTrue(imported["success"], imported)
+        self.assertEqual(imported["capabilities"], ["cloudflare.account.read"])
+        self.assertNotIn(raw_token, json.dumps(settings, ensure_ascii=False))
 
     def test_oauth_connection_persists_token_bundle_under_connection_credential_ref(self):
         from domain.ai_client.oauth_store import provider_oauth_status, save_provider_oauth_connection

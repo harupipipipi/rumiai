@@ -43,6 +43,8 @@ class ConnectionImportService:
             **token_metadata,
             "scopes": list(resolved.scopes),
             "capabilities": list(resolved.capabilities),
+            "approval_required_capabilities": list(resolved.approval_required_capabilities),
+            "rejected_capabilities": list(resolved.rejected_capabilities),
         }
         envelope = self.credential_store.put(
             provider.provider_id,
@@ -56,6 +58,8 @@ class ConnectionImportService:
             token_metadata=token_metadata,
             scopes=resolved.scopes,
             capabilities=resolved.capabilities,
+            approval_required_capabilities=resolved.approval_required_capabilities,
+            rejected_capabilities=resolved.rejected_capabilities,
         )
 
 
@@ -66,6 +70,8 @@ def safe_import_result(
     token_metadata: Mapping[str, Any],
     scopes: list[str],
     capabilities: list[str],
+    approval_required_capabilities: list[str],
+    rejected_capabilities: list[str],
 ) -> dict[str, Any]:
     return {
         "success": True,
@@ -79,6 +85,8 @@ def safe_import_result(
         },
         "scopes": list(scopes),
         "capabilities": list(capabilities),
+        "approval_required_capabilities": list(approval_required_capabilities),
+        "rejected_capabilities": list(rejected_capabilities),
         "expires_at": str(token_metadata.get("expires_at") or ""),
         "status": str(token_metadata.get("status") or "connected"),
         "account_label": str(token_metadata.get("account_label") or provider.provider_id),

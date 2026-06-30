@@ -60,6 +60,7 @@ class CredentialBundle:
     credentials: dict[str, Any]
     token_metadata: dict[str, Any] = field(default_factory=dict)
     scopes: list[str] = field(default_factory=list)
+    requested_capabilities: list[str] = field(default_factory=list)
     expires_at: str = ""
     raw: dict[str, Any] = field(default_factory=dict)
 
@@ -76,6 +77,12 @@ class CredentialBundle:
         token_metadata = _dict_value(payload.get("token_metadata") or payload.get("metadata"))
         credentials = _extract_credentials(payload)
         scopes = _normalize_scopes(payload.get("scopes") or payload.get("scope") or token_metadata.get("scopes") or token_metadata.get("scope"))
+        requested_capabilities = _normalize_scopes(
+            payload.get("requested_capabilities")
+            or payload.get("requestedCapabilities")
+            or token_metadata.get("requested_capabilities")
+            or token_metadata.get("requestedCapabilities")
+        )
         expires_at = str(payload.get("expires_at") or token_metadata.get("expires_at") or "").strip()
         expires_at = expires_at or _expires_at_from_seconds(payload.get("expires_in") or token_metadata.get("expires_in"))
         material_type = str(
@@ -92,6 +99,7 @@ class CredentialBundle:
             credentials=credentials,
             token_metadata=token_metadata,
             scopes=scopes,
+            requested_capabilities=requested_capabilities,
             expires_at=expires_at,
             raw=payload,
         )
@@ -109,6 +117,7 @@ class CredentialBundle:
             "credentials": dict(self.credentials),
             "token_metadata": dict(self.token_metadata),
             "scopes": list(self.scopes),
+            "requested_capabilities": list(self.requested_capabilities),
             "expires_at": self.expires_at,
         }
 
@@ -122,6 +131,7 @@ class CredentialBundle:
             "account_label": self.account_label,
             "material_type": self.material_type,
             "scopes": list(self.scopes),
+            "requested_capabilities": list(self.requested_capabilities),
             "expires_at": self.expires_at,
             "token_metadata": metadata,
         }

@@ -178,6 +178,54 @@ def test_codex_app_server_rejects_transport_url_mismatch_even_with_app_server_au
     assert "non-loopback" in remote_status["blocked_reason"]
 
 
+def test_codex_app_server_rejects_query_secret_urls_without_echoing_secret():
+    from domain.codex.app_server import (
+        build_codex_app_server_command,
+        codex_app_server_probe,
+        codex_app_server_status,
+        save_codex_app_server_config,
+    )
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        secrets_dir = pack_root / "user_data" / "secrets"
+        raw_secret = _fresh_token()
+        env = {
+            "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+            "RUMI_CODEX_APP_SERVER_WS_TOKEN": _fresh_token(),
+            "RUMI_CODEX_APP_SERVER_SHARED_SECRET": "",
+        }
+        config = {
+            "enabled": True,
+            "transport": "websocket_loopback",
+            "base_url": f"http://127.0.0.1:7331?access_token={raw_secret}",
+            "websocket_url": f"ws://127.0.0.1:7331/ws?token={raw_secret}",
+            "tool_source_enabled": True,
+            "automation_endpoint_enabled": True,
+        }
+        with patch.dict(os.environ, env, clear=False):
+            saved = save_codex_app_server_config(config, pack_root=pack_root)
+            status = codex_app_server_status(pack_root=pack_root)
+            probe = codex_app_server_probe(pack_root=pack_root)
+
+    assert build_codex_app_server_command(config) == []
+    assert saved["success"] is True
+    assert saved["app_server"]["connection_status"] == "url_secret_rejected"
+    assert status["configured"] is False
+    assert status["connection_status"] == "url_secret_rejected"
+    assert status["status_label"] == "URL secret rejected"
+    assert status["url_secret_rejected"] is True
+    assert status["base_url"] == ""
+    assert status["websocket_url"] == ""
+    assert status["command"] == []
+    assert status["tool_source"]["status"] == "url_secret_rejected"
+    assert status["automation_endpoint"]["status"] == "url_secret_rejected"
+    assert probe["probe"]["status"] == "url_secret_rejected"
+    assert raw_secret not in _text(saved)
+    assert raw_secret not in _text(status)
+    assert raw_secret not in _text(probe)
+
+
 def test_codex_app_server_probe_never_uses_codex_access_token_for_app_server_auth():
     from domain.codex.app_server import codex_app_server_probe, save_codex_app_server_config
     from domain.codex.connection_store import save_codex_access_token

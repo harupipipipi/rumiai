@@ -46,6 +46,7 @@ class GenericConnectionAdapter:
             "material_type": material_type,
             "credential_kind": str(metadata.get("credential_kind") or material_type),
             "scopes": scopes,
+            "requested_capabilities": list(credential_bundle.requested_capabilities),
             "expires_at": expires_at,
             "status": "connected" if credentials else "not_connected",
             "has_refresh_token": bool(credentials.get("refresh_token")),
