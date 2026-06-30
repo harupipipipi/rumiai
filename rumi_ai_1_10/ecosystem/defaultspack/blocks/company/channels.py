@@ -1,4 +1,5 @@
 from blocks._common import ok, error
+from domain.company.mimo_sync import sync_mimo_company_workspace
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 
@@ -36,6 +37,7 @@ def run(input_data, context):
     runtime_store = CompanyRuntimeStore()
     try:
         if action == "list":
+            sync_mimo_company_workspace(company_id)
             channels = store.list_channels(company_id)
             if channels is None:
                 return missing_company(company_id)
@@ -50,6 +52,7 @@ def run(input_data, context):
             channel_id = input_data.get("channel_id") or input_data.get("id")
             if not channel_id:
                 return invalid("channel_id is required")
+            sync_mimo_company_workspace(company_id)
             if store.get_company(company_id) is None:
                 return missing_company(company_id)
             channel = store.get_channel(company_id, str(channel_id))

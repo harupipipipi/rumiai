@@ -537,8 +537,20 @@ def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeyp
     calls = []
 
     class FakeRuntime:
-        def status(self, *, recover_scheduled_approvals=False):
-            calls.append(recover_scheduled_approvals)
+        def status(
+            self,
+            *,
+            recover_scheduled_approvals=False,
+            sync_observability=False,
+            include_desktop_monitoring=False,
+        ):
+            calls.append(
+                {
+                    "recover_scheduled_approvals": recover_scheduled_approvals,
+                    "sync_observability": sync_observability,
+                    "include_desktop_monitoring": include_desktop_monitoring,
+                }
+            )
             return {"bootstrapped": True}
 
     monkeypatch.setattr(status_block, "MimoCodingCompanyRuntime", FakeRuntime)
@@ -548,7 +560,18 @@ def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeyp
 
     assert default_result["status"] == "ok"
     assert explicit_result["status"] == "ok"
-    assert calls == [False, True]
+    assert calls == [
+        {
+            "recover_scheduled_approvals": False,
+            "sync_observability": True,
+            "include_desktop_monitoring": False,
+        },
+        {
+            "recover_scheduled_approvals": True,
+            "sync_observability": True,
+            "include_desktop_monitoring": False,
+        },
+    ]
 
 
 def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, monkeypatch):
@@ -1624,6 +1647,124 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
 
     for schedule in observed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_company_workspace_channels_sync_schedule_history(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        DEFAULT_FAST_MODEL,
+        DEFAULT_MAIN_MODEL,
+        DEFAULT_VISION_MODEL,
+        MimoCodingCompanyRuntime,
+    )
+    from blocks.company import channels, messages
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company import mimo_sync
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setattr(mimo_sync, "_last_sync_at", 0.0)
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 1,
+        }),
+    )
+
+    parent = ChatStore().create_conversation(
+        model=DEFAULT_MAIN_MODEL,
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        agent_id="client_manager",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    scheduler = Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run MiMo heartbeat.",
+            "model": DEFAULT_MAIN_MODEL,
+            "conversation_id": parent["id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "scheduler",
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "loop_key": "heartbeat",
+            },
+        },
+        {"run_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat().replace("+00:00", "Z")},
+        name="MiMo Coding Company heartbeat",
+    )
+    state_path = tmp_path / "mimo" / "state.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "conversation_id": parent["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "main_model": DEFAULT_MAIN_MODEL,
+                "vision_model": DEFAULT_VISION_MODEL,
+                "fast_model": DEFAULT_FAST_MODEL,
+                "schedule_ids": {"heartbeat": schedule["id"]},
+                "loop_conversation_ids": {"heartbeat": parent["id"]},
+            }
+        ),
+        encoding="utf-8",
+    )
+    for index in range(6):
+        append_history(
+            schedule["id"],
+            {
+                "schedule_id": schedule["id"],
+                "execution_id": f"exec_after_workspace_stale_{index}",
+                "trigger": "scheduled",
+                "status": "completed",
+                "started_at": f"2026-06-30T17:{10 + index:02d}:00Z",
+                "completed_at": f"2026-06-30T17:{11 + index:02d}:00Z",
+                "result": "MiMo schedule continued after the Team Workspace count last refreshed.",
+            },
+        )
+
+    _existing, total_before = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=5, offset=0)
+    listed = channels.run({"company_id": "mimo-coding-company"}, {})
+    listed_messages = messages.run({"company_id": "mimo-coding-company", "order": "desc"}, {})
+
+    assert total_before == 0
+    assert listed["status"] == "ok"
+    ops_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "ops-company")
+    assert ops_channel["message_count"] == 6
+    assert ops_channel["last_message_at"]
+    assert listed_messages["data"]["total"] == 6
+    synced_execution_ids = {
+        message["metadata"]["execution_id"]
+        for message in listed_messages["data"]["messages"]
+        if isinstance(message.get("metadata"), dict)
+    }
+    assert synced_execution_ids == {f"exec_after_workspace_stale_{index}" for index in range(6)}
+    assert {
+        message["metadata"]["sync_source"]
+        for message in listed_messages["data"]["messages"]
+        if isinstance(message.get("metadata"), dict)
+    } == {"mimo_schedule_history"}
+
+    scheduler.delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
 
 

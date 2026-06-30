@@ -95,6 +95,31 @@ def test_company_runtime_store_can_page_latest_messages(tmp_path):
     assert [message["content"] for message in latest_alias] == ["message 5", "message 4"]
 
 
+def test_company_runtime_store_dedupes_sync_key_messages(tmp_path):
+    from domain.company.runtime_store import CompanyRuntimeStore
+
+    store = CompanyRuntimeStore(tmp_path / "company_runtime.db")
+    first = store.add_message(
+        "acme",
+        sender_id="scheduler",
+        content="first sync",
+        metadata={"sync_key": "schedule:exec_1", "sync_source": "mimo_schedule_history"},
+    )
+    second = store.add_message(
+        "acme",
+        sender_id="scheduler",
+        content="duplicate sync",
+        metadata={"sync_key": "schedule:exec_1", "sync_source": "mimo_schedule_history"},
+    )
+
+    messages, total = store.list_messages("acme")
+
+    assert total == 1
+    assert first["message_id"] == second["message_id"]
+    assert first["thread_id"] == second["thread_id"]
+    assert messages[0]["content"] == "first sync"
+
+
 def test_task_assignment_index_tracks_create_and_update(tmp_path):
     from domain.company.runtime_store import CompanyRuntimeStore
 

@@ -1,5 +1,6 @@
 from blocks._common import ok, error
 from domain.company.message_router import CompanySlackRuntime
+from domain.company.mimo_sync import sync_mimo_company_workspace
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 
@@ -33,6 +34,7 @@ def run(input_data, context):
     try:
         if action == "list":
             limit, offset = limit_offset(input_data)
+            sync_mimo_company_workspace(company_id)
             if store.get_company(company_id) is None:
                 return missing_company(company_id)
             if _bool_param(input_data.get("tail")) or _bool_param(input_data.get("latest")):

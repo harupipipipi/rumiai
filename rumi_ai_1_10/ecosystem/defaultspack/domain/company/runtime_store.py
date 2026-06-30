@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -69,6 +70,14 @@ def _clean_agent_ids(agent_ids: Any) -> list[str]:
             seen.add(agent_id)
             result.append(agent_id)
     return result
+
+
+def _stable_sync_id(prefix: str, metadata: dict[str, Any] | None) -> str | None:
+    sync_key = str((metadata or {}).get("sync_key") or "").strip()
+    if not sync_key:
+        return None
+    digest = hashlib.sha256(sync_key.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return f"{prefix}{digest}"
 
 
 class CompanyRuntimeStore:
@@ -345,21 +354,23 @@ class CompanyRuntimeStore:
         task_ids: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        metadata_dict = metadata or {}
+        message_id = _stable_sync_id("msg_sync_", metadata_dict) or gen_id("msg_")
+        resolved_thread_id = thread_id or _stable_sync_id("thread_sync_", metadata_dict)
         title = str(content or "").strip().splitlines()[0][:120] if str(content or "").strip() else "Company message"
         thread = self.ensure_thread(
             company_id,
             channel_id=channel_id,
-            thread_id=thread_id,
+            thread_id=resolved_thread_id,
             title=title,
-            metadata={"source": "message", **(metadata or {})},
+            metadata={"source": "message", **metadata_dict},
         )
         tid = str(thread["thread_id"])
         now = utc_now()
-        message_id = gen_id("msg_")
         with self.conn:
             self.conn.execute(
                 """
-                INSERT INTO company_messages(
+                INSERT OR IGNORE INTO company_messages(
                   message_id, company_id, channel_id, thread_id, sender_id, content,
                   mentions_json, task_ids_json, metadata_json, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -373,7 +384,7 @@ class CompanyRuntimeStore:
                     str(content),
                     json_dumps(list(mentions or [])),
                     json_dumps(list(task_ids or [])),
-                    json_dumps(metadata or {}),
+                    json_dumps(metadata_dict),
                     now,
                     now,
                 ),
