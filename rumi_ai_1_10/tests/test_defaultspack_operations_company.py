@@ -357,7 +357,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "GET /api/health" in heartbeat_auto_approve
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "short read-only heartbeat" in heartbeat_schedule["task"]["message"]
-    assert "at most one or two rumi_api GET/status checks" in heartbeat_schedule["task"]["message"]
+    assert "at most one or two rumi_api GET checks against allowlisted /api paths" in heartbeat_schedule["task"]["message"]
+    assert "never request bare /status" in heartbeat_schedule["task"]["message"]
     assert "Do not call todo or subagent tools" in heartbeat_schedule["task"]["message"]
     assert "do not enumerate routes" in heartbeat_schedule["task"]["message"]
     assert "do not make fixes or create issues" in heartbeat_schedule["task"]["message"]

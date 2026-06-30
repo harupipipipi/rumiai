@@ -3782,7 +3782,8 @@ class MimoCodingCompanyRuntime:
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
         return (
-            "Run a short read-only heartbeat for the MiMo Coding Company. Use at most one or two rumi_api GET/status checks. "
+            "Run a short read-only heartbeat for the MiMo Coding Company. Use at most one or two rumi_api GET checks "
+            "against allowlisted /api paths such as /api/company/status or /api/health; never request bare /status. "
             "Do not call todo or subagent tools, do not enumerate routes, and do not make fixes or create issues. "
             "Check pending tasks, recent failures, QA bugs, and blocked work only from status evidence. "
             + (monitoring_summary + " " if monitoring_summary else "")
