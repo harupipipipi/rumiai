@@ -64,6 +64,20 @@ export function companyIdFromGroupHint(value: unknown): string | null {
   return null;
 }
 
+export function companyIdFromConversationTitle(value: unknown): string | null {
+  const text = textValue(value).toLowerCase();
+  if (!text) return null;
+  const withoutGroupPrefix = text.startsWith("company:") ? text.slice("company:".length).trim() : text;
+  const normalized = withoutGroupPrefix.startsWith("[stale] ") ? withoutGroupPrefix.slice("[stale] ".length).trim() : withoutGroupPrefix;
+  if (normalized === "mimo coding company" || normalized.startsWith("mimo coding company:")) {
+    return MIMO_CODING_COMPANY_ID;
+  }
+  if (normalized === "operations company" || normalized.startsWith("operations company:")) {
+    return OPERATIONS_COMPANY_ID;
+  }
+  return null;
+}
+
 export function resolveCompanyWorkspaceHint({
   companyId,
   groupId,
@@ -169,6 +183,8 @@ export function resolveSelectedCompanyId({
 }): string | null {
   const normalizedHint = companyIdFromHint(hintedCompanyId);
   if (normalizedHint) return normalizedHint;
+  const statusCompanyTitleHint = companyIdFromConversationTitle(statusCompany?.name);
+  if (statusCompanyTitleHint) return statusCompanyTitleHint;
   if (activeConversationId) return statusCompany?.id ?? null;
   return activeCompanyId ?? companies[0]?.id ?? statusCompany?.id ?? null;
 }
@@ -249,7 +265,11 @@ export function CompanyWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const hasActiveConversation = Boolean(activeConversationId);
   const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
-  const normalizedActiveCompanyIdHint = companyIdFromHint(activeCompanyIdHint);
+  const titleCompanyIdHint = companyIdFromConversationTitle(activeCompanyIdHint) ?? companyIdFromConversationTitle(activeConversationTitle);
+  const normalizedActiveCompanyIdHint = (
+    titleCompanyIdHint
+    ?? companyIdFromHint(activeCompanyIdHint)
+  );
 
   const effectiveCompanies = useMemo(() => resolveEffectiveCompanies({
     activeConversationId,
@@ -298,16 +318,6 @@ export function CompanyWorkspacePanel({
       }
       if (!statusCompany && selectedId) {
         statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? null;
-      }
-      if (selectedId === MIMO_CODING_COMPANY_ID) {
-        try {
-          const mimoStatus = await companyResources.getMimoCodingCompanyStatus();
-          if (mimoStatus.company) {
-            statusCompany = mimoStatus.company;
-          }
-        } catch {
-          // Keep the generic company workspace usable if the MiMo pack is unavailable.
-        }
       }
       setCompanies(listedCompanies);
       setActiveCompanyId(selectedId);
@@ -375,6 +385,12 @@ export function CompanyWorkspacePanel({
     setActiveCompanyId(normalizedActiveCompanyIdHint);
     void loadCompany(normalizedActiveCompanyIdHint);
   }, [activeConversationId, normalizedActiveCompanyIdHint]);
+
+  useEffect(() => {
+    if (!titleCompanyIdHint || activeCompanyId === titleCompanyIdHint) return;
+    setActiveCompanyId(titleCompanyIdHint);
+    void loadCompany(titleCompanyIdHint);
+  }, [activeCompanyId, loadCompany, titleCompanyIdHint]);
 
   useEffect(() => {
     if (!activeCompanyId) return undefined;

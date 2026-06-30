@@ -10,6 +10,7 @@ import { CompanyTree } from "../components/company/CompanyTree";
 import {
   CompanyWorkspacePanel,
   MIMO_CODING_COMPANY_ID,
+  companyIdFromConversationTitle,
   resolveActiveChannelId,
   resolveCompanyMessageListOptions,
   resolveCompanyWorkspaceHint,
@@ -235,6 +236,30 @@ test("company workspace keeps global companies visible for conversation-scoped g
   ]);
 });
 
+test("company workspace prefers global MiMo company over empty conversation-scoped MiMo status", () => {
+  const selectedId = resolveSelectedCompanyId({
+    activeConversationId: "chat-1",
+    activeCompanyId: null,
+    hintedCompanyId: null,
+    statusCompany: {
+      id: "employee",
+      name: "MiMo Coding Company: kickoff review",
+      agent_count: 0,
+      task_count: 0,
+    },
+    companies: [
+      {
+        id: MIMO_CODING_COMPANY_ID,
+        name: "MiMo Coding Company",
+        agent_count: 7,
+        task_count: 6,
+      },
+    ],
+  });
+
+  assert.equal(selectedId, MIMO_CODING_COMPANY_ID);
+});
+
 test("company workspace resolves MiMo company hints from group and profile context", () => {
   assert.equal(resolveCompanyWorkspaceHint({
     groupId: "company:mimo-coding-company",
@@ -251,6 +276,15 @@ test("company workspace resolves MiMo company hints from group and profile conte
   assert.equal(resolveCompanyWorkspaceHint({
     tags: ["company", "mimo-coding-company"],
   }), "mimo-coding-company");
+});
+
+test("company workspace resolves global company hints from active conversation titles", () => {
+  assert.equal(companyIdFromConversationTitle("MiMo Coding Company: kickoff review"), MIMO_CODING_COMPANY_ID);
+  assert.equal(companyIdFromConversationTitle("company:MiMo Coding Company: kickoff review"), MIMO_CODING_COMPANY_ID);
+  assert.equal(companyIdFromConversationTitle("company:[stale] MiMo Coding Company"), MIMO_CODING_COMPANY_ID);
+  assert.equal(companyIdFromConversationTitle("[stale] MiMo Coding Company"), MIMO_CODING_COMPANY_ID);
+  assert.equal(companyIdFromConversationTitle("Operations Company: heartbeat"), "operations-company");
+  assert.equal(companyIdFromConversationTitle("Repo Discovery"), null);
 });
 
 test("company workspace resolves selected history company groups", () => {
