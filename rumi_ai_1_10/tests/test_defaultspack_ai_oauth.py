@@ -393,6 +393,33 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(imported["approval_required_capabilities"], ["github.repo.write"])
         self.assertNotIn("github.repo.write", imported["rejected_capabilities"])
 
+    def test_credential_bundle_safe_metadata_drops_secret_fields(self):
+        from core_runtime.connections.templates import CredentialBundle
+
+        metadata = CredentialBundle.from_dict(
+            {
+                "schema": "rumi.connection.credential_bundle.v1",
+                "provider_id": "cloudflare",
+                "credentials": {"access_token": "stored-secret"},
+                "token_metadata": {
+                    "access_token": "metadata-access-secret",
+                    "refresh_token": "metadata-refresh-secret",
+                    "client_secret": "metadata-client-secret",
+                    "ws_token": "metadata-ws-secret",
+                    "account_label": "Cloudflare User",
+                    "capabilities": ["cloudflare.runner.deploy"],
+                },
+            }
+        ).safe_metadata()
+
+        token_metadata = metadata["token_metadata"]
+        self.assertEqual(token_metadata["account_label"], "Cloudflare User")
+        self.assertNotIn("access_token", token_metadata)
+        self.assertNotIn("refresh_token", token_metadata)
+        self.assertNotIn("client_secret", token_metadata)
+        self.assertNotIn("ws_token", token_metadata)
+        self.assertNotIn("capabilities", token_metadata)
+
     def test_connection_import_route_accepts_env_token_without_returning_token(self):
         from blocks.connections import import_bundle as import_block
 

@@ -123,6 +123,8 @@ class CredentialBundle:
 
     def safe_metadata(self) -> dict[str, Any]:
         metadata = dict(self.token_metadata)
+        for key in _SECRET_FIELDS:
+            metadata.pop(key, None)
         metadata.pop("capabilities", None)
         metadata.pop("capabilities_granted", None)
         return {
