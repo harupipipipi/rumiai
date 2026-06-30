@@ -72,6 +72,115 @@ def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, mon
     assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
 
 
+def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_idempotently(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        DEFAULT_MAIN_MODEL,
+        LEGACY_PROVIDER_EXPIRED_SIGNAL,
+        MimoCodingCompanyRuntime,
+    )
+    from domain.chat.store import ChatStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    state_path = tmp_path / "mimo" / "state.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(state_path))
+    monkeypatch.setattr(
+        MimoCodingCompanyRuntime,
+        "_desktop_monitoring_observation",
+        staticmethod(lambda: {
+            "surface": "desktops",
+            "expected_api": "GET /api/desktops",
+            "status": "ok",
+            "desktop_count": 0,
+            "desktops": [],
+        }),
+    )
+
+    chat_store = ChatStore()
+    active = chat_store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    legacy_xiaomi = chat_store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    legacy_opencode_go = chat_store.create_conversation(
+        model="opencode-go/mimo-v2.5",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    )
+    wrong_profile = chat_store.create_conversation(
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        system_prompt_id="mimo_coding_company",
+        conversation_kind="mimo_coding_company",
+        group_id="company:mimo-coding-company",
+        metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.other"},
+    )
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "conversation_id": active["id"],
+                "conversation_group_id": "company:mimo-coding-company",
+                "main_model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "last_bootstrapped_at": "2026-06-30T00:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.status()
+    second = runtime.status()
+
+    assert len(first["harness"]["observability"]["legacy_provider_conversations"]["superseded"]) == 2
+    assert second["harness"]["observability"]["legacy_provider_conversations"]["superseded"] == []
+    for conversation_id, legacy_model in (
+        (legacy_xiaomi["id"], "xiaomi-token-plan-sgp/mimo-v2.5-pro"),
+        (legacy_opencode_go["id"], "opencode-go/mimo-v2.5"),
+    ):
+        conversation = ChatStore().get_conversation(conversation_id)
+        metadata = conversation["metadata"]
+        markers = [
+            message
+            for message in conversation["messages"]
+            if message.get("role") == "assistant"
+            and isinstance(message.get("metadata"), dict)
+            and message["metadata"].get("signal") == LEGACY_PROVIDER_EXPIRED_SIGNAL
+        ]
+        assert conversation["model"] == DEFAULT_MAIN_MODEL
+        assert metadata["superseded"] is True
+        assert metadata["superseded_reason"] == LEGACY_PROVIDER_EXPIRED_SIGNAL
+        assert metadata["legacy_provider_expired"] is True
+        assert metadata["legacy_provider_model"] == legacy_model
+        assert metadata["active_conversation_id"] == active["id"]
+        assert len(markers) == 1
+        assert markers[0]["metadata"]["source"] == "codex"
+        assert markers[0]["metadata"]["attributed_to"] == "Codex"
+        assert active["id"] in markers[0]["raw_text"]
+
+    active_conversation = ChatStore().get_conversation(active["id"])
+    skipped_wrong_profile = ChatStore().get_conversation(wrong_profile["id"])
+    assert active_conversation["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert active_conversation["messages"] == []
+    assert skipped_wrong_profile["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert skipped_wrong_profile["messages"] == []
+    _reset_defaultspack_singletons()
+
+
 def test_operations_company_bootstrap_creates_org_conversation_and_heartbeat(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.operations_company import OperationsCompanyRuntime
     from domain.agent.scheduler import Scheduler
@@ -636,6 +745,12 @@ def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_target
                             "starter": "browser_url",
                             "browser_url": "http://127.0.0.1:18766/chat?chat=qa-loop-123",
                         },
+                        "frame": {
+                            "frame_seq": 3,
+                            "width": 1280,
+                            "height": 800,
+                            "captured_at": datetime.now(timezone.utc).timestamp(),
+                        },
                     },
                     {
                         "seat_id": "seat_old_stopped",
@@ -682,6 +797,106 @@ def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_target
         "seat_old_destroyed",
         "seat_old_failed",
     ]
+
+
+def test_mimo_coding_company_desktop_monitor_refreshes_missing_running_frame(monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from blocks.sandbox import api as sandbox_api
+
+    calls = []
+
+    def fake_desktop_api(payload, context):
+        calls.append((payload, context))
+        if payload == {"_handler": "desktops_list"}:
+            return {
+                "status": "ok",
+                "data": {
+                    "desktops": [
+                        {
+                            "seat_id": "seat_running_browser",
+                            "name": "MiMo browser QA",
+                            "status": "running",
+                            "template_id": "desktop.browser",
+                            "assigned_agent": "browser_qa",
+                            "startup": {
+                                "starter": "browser_url",
+                                "browser_url": "http://127.0.0.1:18766/chat?chat=qa-loop",
+                            },
+                            "frame": None,
+                        }
+                    ]
+                },
+            }
+        if payload == {"_handler": "desktop_frame", "seat_id": "seat_running_browser"}:
+            assert context["source"] == "defaultspack_local_ui"
+            return {
+                "_binary": True,
+                "status_code": 200,
+                "headers": {
+                    "X-Rumi-Frame-Seq": "7",
+                    "X-Rumi-Frame-Width": "1280",
+                    "X-Rumi-Frame-Height": "800",
+                    "X-Rumi-Captured-At": "2026-06-30T00:00:00Z",
+                },
+            }
+        raise AssertionError(f"unexpected sandbox API call: {payload!r}")
+
+    monkeypatch.setattr(sandbox_api, "run", fake_desktop_api)
+
+    observation = MimoCodingCompanyRuntime._desktop_monitoring_observation()
+    message = MimoCodingCompanyRuntime._desktop_monitoring_message(observation)
+
+    assert observation["status"] == "ok"
+    assert observation["signal"] == "desktop_frame_refreshed"
+    assert observation["desktops"][0]["assigned_agent"] == "browser_qa"
+    assert observation["desktops"][0]["frame"]["frame_seq"] == "7"
+    assert observation["frame_refreshes"][0]["reason"] == "missing"
+    assert "live snapshot" in message
+    assert ("seat_running_browser" in message)
+    assert calls[1] == (
+        {"_handler": "desktop_frame", "seat_id": "seat_running_browser"},
+        {"source": "defaultspack_local_ui"},
+    )
+
+
+def test_mimo_coding_company_desktop_monitor_flags_missing_running_frame_when_refresh_fails(monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from blocks.sandbox import api as sandbox_api
+
+    def fake_desktop_api(payload, context):
+        if payload == {"_handler": "desktops_list"}:
+            return {
+                "status": "ok",
+                "data": {
+                    "desktops": [
+                        {
+                            "seat_id": "seat_running_browser",
+                            "status": "running",
+                            "template_id": "desktop.browser",
+                            "assigned_agent": "browser_qa",
+                            "startup": {
+                                "starter": "browser_url",
+                                "browser_url": "http://127.0.0.1:18766/chat?chat=qa-loop",
+                            },
+                        }
+                    ]
+                },
+            }
+        if payload == {"_handler": "desktop_frame", "seat_id": "seat_running_browser"}:
+            return {"status_code": 403, "error": {"message": "Desktop access denied"}}
+        raise AssertionError(f"unexpected sandbox API call: {payload!r}")
+
+    monkeypatch.setattr(sandbox_api, "run", fake_desktop_api)
+
+    observation = MimoCodingCompanyRuntime._desktop_monitoring_observation()
+    message = MimoCodingCompanyRuntime._desktop_monitoring_message(observation)
+
+    assert observation["status"] == "degraded"
+    assert observation["signal"] == "desktop_frame_missing"
+    assert observation["frame_issues"][0]["seat_id"] == "seat_running_browser"
+    assert observation["frame_issues"][0]["assigned_agent"] == "browser_qa"
+    assert "live snapshot is missing or stale" in observation["blocker"]
+    assert "seat_running_browser" in message
 
 
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):

@@ -55,6 +55,7 @@ LONG_RUNNING_LOOP_SCHEDULE_TIMEOUT_SECONDS = 30 * 24 * 60 * 60
 IMPROVEMENT_LOOP_SCHEDULE_TIMEOUT_SECONDS = LONG_RUNNING_LOOP_SCHEDULE_TIMEOUT_SECONDS
 QA_LOOP_SCHEDULE_TIMEOUT_SECONDS = LONG_RUNNING_LOOP_SCHEDULE_TIMEOUT_SECONDS
 DEFAULT_ONCE_SCHEDULE_TIMEOUT_SECONDS = 900
+DESKTOP_FRAME_STALE_SECONDS = 300
 DEFAULT_DOCKER_WORKER_COUNT = 3
 MAX_TOOL_CALLS_LIMIT = 200
 SUBAGENT_GAP_GRACE_SECONDS = 300
@@ -66,6 +67,11 @@ MIMO_PROVIDER_ID = "opencode-zen"
 MIMO_PROVIDER_DISPLAY = "OpenCode Zen"
 PROVIDER_HEALTH_BLOCKER_SIGNAL = "provider_health_blocker"
 PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY = "provider_health_only"
+LEGACY_PROVIDER_EXPIRED_SIGNAL = "legacy_provider_expired"
+LEGACY_PROVIDER_EXPIRED_MODELS = (
+    "xiaomi-token-plan-",
+    "opencode-go/mimo-v2.5",
+)
 PROVIDER_HEALTH_BLOCKER_PATTERNS = (
     ("credits_error", ("creditserror", "credits error")),
     (
@@ -1712,6 +1718,7 @@ class MimoCodingCompanyRuntime:
             "schedule_history": {"checked": 0, "latest": [], "signals": []},
             "scheduled_drafts": {"checked": 0, "repaired": [], "stale_count": 0, "stale": []},
             "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": [], "failed_count": 0, "failed": []},
+            "legacy_provider_conversations": {"checked": 0, "superseded": []},
             "desktop_monitoring": {
                 "surface": "desktops",
                 "expected_api": "GET /api/desktops",
@@ -1719,6 +1726,7 @@ class MimoCodingCompanyRuntime:
             },
         }
         try:
+            summary["legacy_provider_conversations"] = self._supersede_legacy_provider_conversations(state)
             runtime_store = CompanyRuntimeStore()
             known_sync_keys = self._company_runtime_sync_keys(runtime_store)
             synced = 0
@@ -1896,6 +1904,133 @@ class MimoCodingCompanyRuntime:
             summary["status"] = "error"
             summary["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
             return summary
+
+    def _supersede_legacy_provider_conversations(self, state: dict[str, Any]) -> dict[str, Any]:
+        from domain.chat.store import ChatStore
+
+        active_conversation_id = str(state.get("conversation_id") or "").strip()
+        if not active_conversation_id:
+            return {"checked": 0, "superseded": []}
+        current_main_model = self._current_main_model_for_legacy_migration(state)
+        store = ChatStore()
+        checked = 0
+        superseded: list[dict[str, Any]] = []
+        offset = 0
+        page_size = 100
+        while True:
+            conversations, total = store.list_conversations(
+                limit=page_size,
+                offset=offset,
+                company_id=COMPANY_ID,
+            )
+            if not conversations:
+                break
+            for summary in conversations:
+                conversation_id = str(summary.get("id") or "").strip()
+                if not conversation_id or conversation_id == active_conversation_id:
+                    continue
+                checked += 1
+                metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+                if str(metadata.get("profile_id") or "").strip() != PROFILE_ID:
+                    continue
+                model = str(summary.get("model") or metadata.get("model") or metadata.get("main_model") or "").strip()
+                if not self._is_legacy_provider_expired_model(model):
+                    continue
+                conversation = store.get_conversation(conversation_id) or summary
+                full_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+                marker_exists = self._legacy_provider_marker_exists(conversation)
+                store.update_conversation(
+                    conversation_id,
+                    {
+                        "title": "[stale] MiMo Coding Company",
+                        "model": current_main_model,
+                        "metadata": {
+                            **full_metadata,
+                            "profile_id": PROFILE_ID,
+                            "company_id": COMPANY_ID,
+                            "superseded": True,
+                            "superseded_reason": LEGACY_PROVIDER_EXPIRED_SIGNAL,
+                            "legacy_provider_expired": True,
+                            "legacy_provider_model": model,
+                            "active_conversation_id": active_conversation_id,
+                            "stale_notice": (
+                                "This legacy MiMo Coding Company conversation used an expired provider and "
+                                f"has moved to active conversation {active_conversation_id}."
+                            ),
+                        },
+                    },
+                )
+                if not marker_exists:
+                    marker_text = (
+                        "Codex management marker: this legacy MiMo Coding Company harness used an "
+                        f"expired provider model (`{model}`) and has been superseded. The active "
+                        f"harness moved to conversation `{active_conversation_id}`. Use the current "
+                        "MiMo Coding Company conversation instead of this stale thread."
+                    )
+                    store.add_message(
+                        conversation_id,
+                        {
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": marker_text,
+                                }
+                            ],
+                            "raw_text": marker_text,
+                            "finish_reason": "stop",
+                            "model": current_main_model,
+                            "metadata": {
+                                "source": "codex",
+                                "attributed_to": "Codex",
+                                "signal": LEGACY_PROVIDER_EXPIRED_SIGNAL,
+                                "sync_key": LEGACY_PROVIDER_EXPIRED_SIGNAL,
+                                "active_conversation_id": active_conversation_id,
+                                "legacy_provider_model": model,
+                            },
+                        },
+                    )
+                superseded.append(
+                    {
+                        "conversation_id": conversation_id,
+                        "legacy_provider_model": model,
+                        "model": current_main_model,
+                        "marker_added": not marker_exists,
+                    }
+                )
+            offset += page_size
+            if offset >= int(total or 0):
+                break
+        return {"checked": checked, "superseded": superseded}
+
+    @staticmethod
+    def _is_legacy_provider_expired_model(model: str) -> bool:
+        value = str(model or "").strip()
+        return any(value.startswith(prefix) for prefix in LEGACY_PROVIDER_EXPIRED_MODELS)
+
+    @staticmethod
+    def _current_main_model_for_legacy_migration(state: dict[str, Any]) -> str:
+        model = str(state.get("main_model") or DEFAULT_MAIN_MODEL).strip() or DEFAULT_MAIN_MODEL
+        if MimoCodingCompanyRuntime._is_legacy_provider_expired_model(model):
+            return DEFAULT_MAIN_MODEL
+        if model not in current_model_allowlist():
+            return DEFAULT_MAIN_MODEL
+        return model
+
+    @staticmethod
+    def _legacy_provider_marker_exists(conversation: dict[str, Any]) -> bool:
+        messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            if (
+                str(message.get("role") or "") == "assistant"
+                and str(metadata.get("source") or "").lower() == "codex"
+                and str(metadata.get("signal") or "") == LEGACY_PROVIDER_EXPIRED_SIGNAL
+            ):
+                return True
+        return False
 
     def _mimo_company_observability_schedules(self, state: dict[str, Any], scheduler: Scheduler) -> list[dict[str, Any]]:
         schedules: list[dict[str, Any]] = []
@@ -2658,20 +2793,44 @@ class MimoCodingCompanyRuntime:
             desktops = data.get("desktops") if isinstance(data.get("desktops"), list) else []
             compact: list[dict[str, Any]] = []
             missing_chat_targets: list[dict[str, Any]] = []
+            frame_issues: list[dict[str, Any]] = []
+            frame_refreshes: list[dict[str, Any]] = []
             for desktop in desktops[:10]:
                 if not isinstance(desktop, dict):
                     continue
                 browser_urls = MimoCodingCompanyRuntime._desktop_browser_url_candidates(desktop)
+                seat_id = desktop.get("seat_id") or desktop.get("id")
+                assigned_agent = desktop.get("assigned_agent") or desktop.get("assigned_agent_id")
+                frame_metadata = MimoCodingCompanyRuntime._desktop_frame_metadata(desktop)
                 compact_item = {
-                    "seat_id": desktop.get("seat_id") or desktop.get("id"),
+                    "seat_id": seat_id,
                     "name": desktop.get("name"),
                     "status": desktop.get("status"),
                     "template_id": desktop.get("template_id"),
-                    "assigned_agent_id": desktop.get("assigned_agent_id"),
+                    "assigned_agent": assigned_agent,
                 }
                 if browser_urls:
                     compact_item["browser_urls"] = browser_urls[:3]
+                if frame_metadata:
+                    compact_item["frame"] = frame_metadata
                 compact.append(compact_item)
+                frame_issue = MimoCodingCompanyRuntime._desktop_frame_issue(desktop, frame_metadata)
+                if frame_issue:
+                    refreshed_frame = MimoCodingCompanyRuntime._refresh_desktop_frame_metadata(
+                        sandbox_api_run,
+                        str(seat_id or ""),
+                    )
+                    if refreshed_frame:
+                        compact_item["frame"] = refreshed_frame
+                        frame_refreshes.append(
+                            {
+                                "seat_id": seat_id,
+                                "reason": frame_issue.get("reason"),
+                                "frame": refreshed_frame,
+                            }
+                        )
+                    else:
+                        frame_issues.append(frame_issue)
                 if MimoCodingCompanyRuntime._desktop_can_block_missing_chat_target(desktop):
                     for browser_url in browser_urls:
                         if MimoCodingCompanyRuntime._defaultspack_chat_url_missing_query(browser_url):
@@ -2695,6 +2854,22 @@ class MimoCodingCompanyRuntime:
                     "Chrome can restore a stale conversation instead of the active MiMo QA loop."
                 )
                 summary["missing_chat_targets"] = missing_chat_targets[:5]
+            elif frame_issues:
+                summary["status"] = "degraded"
+                summary["signal"] = (
+                    "desktop_frame_missing"
+                    if any(item.get("reason") == "missing" for item in frame_issues)
+                    else "desktop_frame_stale"
+                )
+                summary["blocker"] = (
+                    "A running managed desktop is visible, but its live snapshot is missing or stale. "
+                    "The Desktops UI can look empty until a frame is captured."
+                )
+                summary["frame_issues"] = frame_issues[:5]
+            elif frame_refreshes:
+                summary["status"] = "ok"
+                summary["signal"] = "desktop_frame_refreshed"
+                summary["frame_refreshes"] = frame_refreshes[:5]
             else:
                 summary["status"] = "ok"
             return summary
@@ -2703,6 +2878,74 @@ class MimoCodingCompanyRuntime:
             summary["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
             summary["signal"] = "desktops_probe_error"
             return summary
+
+    @staticmethod
+    def _desktop_frame_metadata(desktop: dict[str, Any]) -> dict[str, Any] | None:
+        frame = desktop.get("frame") if isinstance(desktop.get("frame"), dict) else None
+        if not frame:
+            return None
+        captured_at = MimoCodingCompanyRuntime._coerce_epoch_seconds(frame.get("captured_at"))
+        metadata: dict[str, Any] = {
+            "frame_seq": frame.get("frame_seq"),
+            "width": frame.get("width"),
+            "height": frame.get("height"),
+            "captured_at": frame.get("captured_at"),
+        }
+        if captured_at is not None:
+            metadata["age_seconds"] = max(0.0, datetime.now(timezone.utc).timestamp() - captured_at)
+        return metadata
+
+    @staticmethod
+    def _desktop_frame_issue(desktop: dict[str, Any], frame: dict[str, Any] | None) -> dict[str, Any] | None:
+        status = str(desktop.get("status") or desktop.get("state") or "").strip().lower()
+        if status not in {"running", "ready", "busy"}:
+            return None
+        template_id = str(desktop.get("template_id") or "").strip()
+        assigned_agent = str(desktop.get("assigned_agent") or desktop.get("assigned_agent_id") or "").strip()
+        if template_id != "desktop.browser" and assigned_agent != "browser_qa":
+            return None
+        seat_id = desktop.get("seat_id") or desktop.get("id")
+        if not frame:
+            return {"seat_id": seat_id, "status": status, "assigned_agent": assigned_agent, "reason": "missing"}
+        age = frame.get("age_seconds")
+        if isinstance(age, (int, float)) and float(age) > DESKTOP_FRAME_STALE_SECONDS:
+            return {
+                "seat_id": seat_id,
+                "status": status,
+                "assigned_agent": assigned_agent,
+                "reason": "stale",
+                "age_seconds": float(age),
+            }
+        return None
+
+    @staticmethod
+    def _refresh_desktop_frame_metadata(sandbox_api_run: Any, seat_id: str) -> dict[str, Any] | None:
+        if not str(seat_id or "").strip():
+            return None
+        try:
+            result = sandbox_api_run(
+                {"_handler": "desktop_frame", "seat_id": str(seat_id)},
+                {"source": "defaultspack_local_ui"},
+            )
+        except Exception:
+            return None
+        if not isinstance(result, dict):
+            return None
+        status_code = int(result.get("status_code") or 0)
+        if status_code not in {200, 204}:
+            return None
+        headers = result.get("headers") if isinstance(result.get("headers"), dict) else {}
+        captured_at = MimoCodingCompanyRuntime._coerce_epoch_seconds(headers.get("X-Rumi-Captured-At"))
+        metadata: dict[str, Any] = {
+            "frame_seq": headers.get("X-Rumi-Frame-Seq"),
+            "width": headers.get("X-Rumi-Frame-Width"),
+            "height": headers.get("X-Rumi-Frame-Height"),
+            "captured_at": headers.get("X-Rumi-Captured-At"),
+            "refreshed": True,
+        }
+        if captured_at is not None:
+            metadata["age_seconds"] = max(0.0, datetime.now(timezone.utc).timestamp() - captured_at)
+        return metadata
 
     @staticmethod
     def _message_text(message: dict[str, Any]) -> str:
@@ -2795,6 +3038,30 @@ class MimoCodingCompanyRuntime:
                     "- Seat `{seat}` uses `{url}`".format(
                         seat=str(item.get("seat_id") or ""),
                         url=str(item.get("browser_url") or "")[:240],
+                    )
+                )
+        elif status == "degraded" and observation.get("blocker"):
+            lines.extend(["", "Blocker:", str(observation.get("blocker"))[:600]])
+            frame_issues = observation.get("frame_issues") if isinstance(observation.get("frame_issues"), list) else []
+            for item in frame_issues[:5]:
+                if not isinstance(item, dict):
+                    continue
+                detail = f"- Seat `{item.get('seat_id') or ''}` frame `{item.get('reason') or 'unknown'}`"
+                if item.get("age_seconds") is not None:
+                    detail += f" ({float(item.get('age_seconds') or 0):.0f}s old)"
+                lines.append(detail)
+        elif observation.get("signal") == "desktop_frame_refreshed":
+            refreshes = observation.get("frame_refreshes") if isinstance(observation.get("frame_refreshes"), list) else []
+            lines.append("")
+            lines.append("Refreshed missing/stale desktop frames so the Desktops UI has a live snapshot.")
+            for item in refreshes[:5]:
+                if not isinstance(item, dict):
+                    continue
+                frame = item.get("frame") if isinstance(item.get("frame"), dict) else {}
+                lines.append(
+                    "- Seat `{seat}` frame seq `{seq}`".format(
+                        seat=str(item.get("seat_id") or ""),
+                        seq=str(frame.get("frame_seq") or ""),
                     )
                 )
         elif observation.get("error"):
