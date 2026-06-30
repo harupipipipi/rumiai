@@ -224,6 +224,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert qa_schedule["task"]["tool_policy"]["schedule_failure_external_issue_policy"] == "blocked_only"
     assert qa_schedule["task"]["tool_policy"]["provider_health_external_issue_policy"] == "provider_health_only"
     assert qa_schedule["task"]["tool_policy"]["provider_health_blocker_signal"] == "provider_health_blocker"
+    assert qa_schedule["task"]["tool_policy"]["schedule_auto_approve_expires_in_seconds"] == 24 * 60 * 60
     assert "conversation_running" in qa_schedule["task"]["tool_policy"]["schedule_suppress_external_issue_on"]
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]

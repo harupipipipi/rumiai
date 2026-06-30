@@ -2555,6 +2555,7 @@ class MimoCodingCompanyRuntime:
                 "desktop_input",
             ],
             "schedule_auto_approve_max_followups": "unlimited",
+            "schedule_auto_approve_expires_in_seconds": 24 * 60 * 60,
             "schedule_failure_external_issue_policy": "blocked_only",
             "schedule_suppress_external_issue_on": sorted(SCHEDULE_NOISE_SUPPRESSION_REASONS),
             "provider_health_external_issue_policy": PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY,
