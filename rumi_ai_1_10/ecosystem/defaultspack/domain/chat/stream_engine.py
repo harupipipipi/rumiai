@@ -1437,25 +1437,6 @@ class ChatRunEngine:
                 data={"message": prepared.user_message},
                 message="user message committed",
             )
-            tool_selection = prepared.request_context.get("tool_selection") if isinstance(prepared.request_context, dict) else None
-            if isinstance(tool_selection, dict) and tool_selection.get("selection_id"):
-                yield self._emit(
-                    "tool_selection_started",
-                    data={
-                        "selection_id": tool_selection.get("selection_id"),
-                        "mode": tool_selection.get("mode"),
-                        "strategy": tool_selection.get("strategy"),
-                    },
-                    message="機能を選定しています",
-                    phase="tool_selection",
-                )
-                yield self._emit(
-                    "tool_selection_completed",
-                    data=tool_selection,
-                    message=_tool_selection_activity_message(tool_selection),
-                    phase="tool_selection",
-                )
-
             assistant_seq = int(prepared.user_message.get("sequence_number", 1) or 1) + 1
             durable_subagent_draft = (
                 not stream_mode
@@ -1484,6 +1465,25 @@ class ChatRunEngine:
                         data={"message": draft.message},
                         message="assistant draft created",
                     )
+
+            tool_selection = prepared.request_context.get("tool_selection") if isinstance(prepared.request_context, dict) else None
+            if isinstance(tool_selection, dict) and tool_selection.get("selection_id"):
+                yield self._emit(
+                    "tool_selection_started",
+                    data={
+                        "selection_id": tool_selection.get("selection_id"),
+                        "mode": tool_selection.get("mode"),
+                        "strategy": tool_selection.get("strategy"),
+                    },
+                    message="機能を選定しています",
+                    phase="tool_selection",
+                )
+                yield self._emit(
+                    "tool_selection_completed",
+                    data=tool_selection,
+                    message=_tool_selection_activity_message(tool_selection),
+                    phase="tool_selection",
+                )
 
             visible_provider_tools = _external_provider_tools(prepared.provider_tools)
             if visible_provider_tools:

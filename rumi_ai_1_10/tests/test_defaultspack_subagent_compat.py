@@ -865,6 +865,100 @@ def test_non_stream_subagent_child_creates_durable_assistant_draft_before_model(
         events.close()
 
 
+def test_non_stream_subagent_child_starts_draft_before_tool_selection_events(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "probe", "source": "subagent_tool"},
+        },
+    )
+    user = store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "do the child work"}],
+        },
+    )
+
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+
+    def fake_prepare(input_data, context):
+        del input_data, context
+        conversation = ChatStore().get_conversation(child["id"])
+        return PreparedChatRun(
+            conversation_id=child["id"],
+            conversation=conversation,
+            input_data={},
+            request_id="req-subagent-draft-order",
+            content=[{"type": "text", "text": "do the child work"}],
+            metadata={},
+            user_message=user,
+            model="stub/default",
+            params={},
+            request_context={
+                "tool_selection": {
+                    "selection_id": "select-1",
+                    "mode": "connected",
+                    "strategy": "deterministic",
+                    "selected_tool_ids": [],
+                    "selected_services": [],
+                }
+            },
+            tool_context={},
+            standard_messages=[],
+            user_text="do the child work",
+            system_prompt="",
+            enrich_info={},
+            raw_tools=[],
+            provider_tools=[],
+            tools_called=[],
+            connected_tool_names=set(),
+            call_handler=None,
+            model_routing={},
+        )
+
+    def fake_execute(self, prepared, draft):
+        del self, prepared, draft
+        if False:
+            yield {}
+        return {
+            "content": [{"type": "text", "text": "child complete"}],
+            "finish_reason": "stop",
+            "usage": {},
+            "metadata": {},
+        }
+
+    monkeypatch.setattr("domain.chat.stream_engine.prepare_chat_run", fake_prepare)
+    monkeypatch.setattr("domain.chat.stream_engine.ChatRunEngine._execute", fake_execute)
+
+    events = list(
+        ChatRunEngine().stream(
+            {
+                "conversation_id": child["id"],
+                "message": {"role": "user", "content": "do the child work"},
+                "params": {},
+                "tools": [],
+            },
+            {"chat_history_mode": "current_turn", "subagent_child_durable_draft": True},
+            stream_mode=False,
+        )
+    )
+
+    event_types = [event.get("type") for event in events]
+    assert event_types.index("assistant_message_started") < event_types.index("tool_selection_started")
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assert child_after["messages"][-1]["raw_text"] == "child complete"
+
+
 def test_non_stream_subagent_child_success_finalizes_without_draft_metadata(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None

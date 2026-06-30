@@ -2071,6 +2071,37 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
+export async function loadConversationForRefresh({
+  preferredId,
+  activeConversationId,
+  locationChatId,
+  listedConversations,
+  loadConversation,
+}: {
+  preferredId?: string | null;
+  activeConversationId?: string | null;
+  locationChatId?: string | null;
+  listedConversations: Array<Pick<Conversation, "id">>;
+  loadConversation: (conversationId: string | null) => Promise<void>;
+}): Promise<void> {
+  const targetId = preferredId ?? activeConversationId ?? locationChatId ?? listedConversations[0]?.id ?? null;
+  if (!targetId) {
+    await loadConversation(null);
+    return;
+  }
+
+  if (listedConversations.some((conversation) => conversation.id === targetId)) {
+    await loadConversation(targetId);
+    return;
+  }
+
+  try {
+    await loadConversation(targetId);
+  } catch {
+    await loadConversation(listedConversations[0]?.id ?? null);
+  }
+}
+
 function commandNames(command: ComposerCommandItem): string[] {
   return [command.id, command.name, ...(command.aliases ?? [])]
     .map((value) => value.trim().toLowerCase())
@@ -3120,21 +3151,13 @@ function ChatApp() {
   async function refreshConversations(preferredId?: string | null) {
     const result = await api.listConversations();
     setConversations(result.conversations);
-
-    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
-    if (!targetId) {
-      setActiveConversationId(null);
-      setActiveConversation(null);
-      void refreshPreview(null);
-      return;
-    }
-
-    if (!result.conversations.some((conversation) => conversation.id === targetId)) {
-      await loadConversation(result.conversations[0]?.id ?? null);
-      return;
-    }
-
-    await loadConversation(targetId);
+    await loadConversationForRefresh({
+      preferredId,
+      activeConversationId,
+      locationChatId: chatIdFromLocation(),
+      listedConversations: result.conversations,
+      loadConversation,
+    });
   }
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
