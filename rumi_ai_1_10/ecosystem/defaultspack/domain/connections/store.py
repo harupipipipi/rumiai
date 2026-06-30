@@ -19,6 +19,33 @@ def _pack_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _connection_manifest_root(pack_root: Path | None = None) -> Path:
+    candidate = (pack_root or _pack_root()) / "config" / "settings_control_center" / "providers"
+    if candidate.exists():
+        return candidate
+    return _pack_root() / "config" / "settings_control_center" / "providers"
+
+
+def _connection_registry(pack_root: Path | None = None):
+    from core_runtime.connections.registry import ConnectionsRegistry
+
+    registry = ConnectionsRegistry()
+    root = _connection_manifest_root(pack_root)
+    if root.exists():
+        registry.load_manifest_dir(root)
+    return registry
+
+
+def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
+    provider_id = str(provider_id or "").strip()
+    if not provider_id:
+        return None
+    try:
+        return _connection_registry(pack_root).get(provider_id)
+    except KeyError:
+        return None
+
+
 def _secrets_dir(pack_root: Path | None = None) -> Path:
     override = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
     if override:
@@ -216,8 +243,6 @@ def connection_credential_ref(
 
 
 def import_connection_bundle(raw_bundle: str | dict[str, Any], *, pack_root: Path | None = None) -> dict[str, Any]:
-    from domain.ai_client.oauth_store import _connection_registry
-
     registry = _connection_registry(pack_root)
     result = ConnectionImportService(
         registry,
@@ -227,8 +252,6 @@ def import_connection_bundle(raw_bundle: str | dict[str, Any], *, pack_root: Pat
 
 
 def resolve_capabilities_for_provider(provider_id: str, token_metadata: dict[str, Any], *, pack_root: Path | None = None) -> dict[str, Any]:
-    from domain.ai_client.oauth_store import _connection_provider
-
     provider = _connection_provider(provider_id, pack_root=pack_root)
     if provider is None:
         return {"scopes": [], "capabilities": []}

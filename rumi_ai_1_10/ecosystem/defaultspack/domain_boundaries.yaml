@@ -23,6 +23,7 @@ domains:
     may_import:
     - domain/chat
     - domain/components
+    - domain/connections
     - domain/extensions
     - domain/human_operator
     - domain/temporal_context
@@ -89,6 +90,9 @@ domains:
   components:
     may_import: []
     path: domain/components
+  connections:
+    may_import: []
+    path: domain/connections
   context:
     may_import:
     - domain/chat
@@ -102,7 +106,8 @@ domains:
     may_import: []
     path: domain/context_engine
   codex:
-    may_import: []
+    may_import:
+    - domain/connections
     path: domain/codex
   dev:
     may_import: []
