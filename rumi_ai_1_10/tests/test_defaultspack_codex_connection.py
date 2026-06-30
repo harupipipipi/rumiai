@@ -256,6 +256,7 @@ def test_codex_app_server_probe_never_uses_codex_access_token_for_app_server_aut
         def fake_urlopen(request, timeout):
             del timeout
             captured_headers.update(dict(request.header_items()))
+            assert request.full_url == "https://codex-app.example.test/readyz"
             return FakeResponse()
 
         with patch.dict(os.environ, env, clear=False):
@@ -304,9 +305,10 @@ def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_p
     assert command == [
         "codex",
         "app-server",
-        "unix",
-        "--socket",
-        "/tmp/rumi-codex.sock",
+        "--listen",
+        "unix:///tmp/rumi-codex.sock",
+        "--ws-auth",
+        "capability-token",
         "--ws-token-file",
         str(token_file),
     ]
@@ -327,7 +329,164 @@ def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_p
     assert saved["success"] is True
     assert status["transport"] == "stdio"
     assert status["connection_status"] == "configured"
-    assert status["command"] == ["codex", "app-server", "stdio"]
+    assert status["command"] == ["codex", "app-server", "--listen", "stdio://"]
+
+
+def test_codex_app_server_stdio_smoke_runs_thread_turn_and_streams_events(monkeypatch):
+    from domain.codex import app_server
+
+    token = _fresh_token()
+    created: dict[str, object] = {}
+
+    class FakeStdout:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def push(self, payload: dict[str, object]) -> None:
+            self.lines.append(json.dumps(payload) + "\n")
+
+        def readline(self) -> str:
+            return self.lines.pop(0) if self.lines else ""
+
+    class FakeStdin:
+        def __init__(self, stdout: FakeStdout) -> None:
+            self.stdout = stdout
+            self.messages: list[dict[str, object]] = []
+
+        def write(self, text: str) -> int:
+            payload = json.loads(text)
+            self.messages.append(payload)
+            if payload.get("method") == "initialize":
+                self.stdout.push({"id": 0, "result": {"platformFamily": "macos"}})
+            if payload.get("method") == "thread/start":
+                self.stdout.push({"id": 1, "result": {"thread": {"id": "thr_smoke"}}})
+            if payload.get("method") == "turn/start":
+                self.stdout.push({"id": 2, "result": {"turn": {"id": "turn_smoke"}}})
+                self.stdout.push(
+                    {
+                        "method": "item/agentMessage/delta",
+                        "params": {
+                            "threadId": "thr_smoke",
+                            "turnId": "turn_smoke",
+                            "itemId": "item_1",
+                            "delta": f"rumi-codex-smoke-ok {token}",
+                        },
+                    }
+                )
+                self.stdout.push(
+                    {
+                        "method": "turn/completed",
+                        "params": {"threadId": "thr_smoke", "turn": {"id": "turn_smoke"}},
+                    }
+                )
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, command: list[str], **_kwargs: object) -> None:
+            created["command"] = command
+            self.stdout = FakeStdout()
+            self.stdin = FakeStdin(self.stdout)
+            self.stderr = None
+            created["process"] = self
+
+        def terminate(self) -> None:
+            created["terminated"] = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            created["wait_timeout"] = timeout
+            return 0
+
+        def kill(self) -> None:
+            created["killed"] = True
+
+    monkeypatch.setattr(app_server.subprocess, "Popen", FakeProcess)
+    with patch.dict(os.environ, {"RUMI_CODEX_ACCESS_TOKEN": token}, clear=False):
+        result = app_server.codex_app_server_stdio_smoke(
+            prompt="Hello. Return exactly: rumi-codex-smoke-ok",
+            cwd=str(ROOT),
+            model="gpt-5.4",
+            timeout=2,
+        )
+
+    process = created["process"]
+    assert result["success"] is True
+    assert result["command"] == ["codex", "app-server", "--listen", "stdio://"]
+    assert result["thread_id"] == "thr_smoke"
+    assert result["turn_id"] == "turn_smoke"
+    assert "rumi-codex-smoke-ok" in result["final_output"]
+    assert token not in _text(result)
+    assert result["sent_methods"] == ["initialize", "initialized", "thread/start", "turn/start"]
+    sent_messages = process.stdin.messages
+    assert sent_messages[0]["params"]["clientInfo"]["name"] == "rumi_defaultspack"
+    assert sent_messages[2]["params"] == {"model": "gpt-5.4", "cwd": str(ROOT)}
+    assert sent_messages[3]["params"]["threadId"] == "thr_smoke"
+    assert sent_messages[3]["params"]["input"] == [
+        {"type": "text", "text": "Hello. Return exactly: rumi-codex-smoke-ok"}
+    ]
+    assert created["terminated"] is True
+
+
+def test_codex_app_server_stdio_smoke_surfaces_approval_requests(monkeypatch):
+    from domain.codex import app_server
+
+    class FakeStdout:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def push(self, payload: dict[str, object]) -> None:
+            self.lines.append(json.dumps(payload) + "\n")
+
+        def readline(self) -> str:
+            return self.lines.pop(0) if self.lines else ""
+
+    class FakeStdin:
+        def __init__(self, stdout: FakeStdout) -> None:
+            self.stdout = stdout
+
+        def write(self, text: str) -> int:
+            payload = json.loads(text)
+            if payload.get("method") == "thread/start":
+                self.stdout.push({"id": 1, "result": {"thread": {"id": "thr_smoke"}}})
+            if payload.get("method") == "turn/start":
+                self.stdout.push({"id": 2, "result": {"turn": {"id": "turn_smoke"}}})
+                self.stdout.push(
+                    {
+                        "method": "file-change/requestApproval",
+                        "params": {"threadId": "thr_smoke", "turnId": "turn_smoke"},
+                    }
+                )
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            self.stdout = FakeStdout()
+            self.stdin = FakeStdin(self.stdout)
+            self.stderr = None
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    monkeypatch.setattr(app_server.subprocess, "Popen", FakeProcess)
+
+    result = app_server.codex_app_server_stdio_smoke(prompt="write a file", timeout=0.2)
+
+    assert result["success"] is False
+    assert result["approval_required"] is True
+    assert result["approval_requests"][0]["method"] == "file-change/requestApproval"
+    assert result["error"] == "turn_not_completed"
 
 
 def test_frontend_registry_drops_client_supplied_codex_secret_payloads():

@@ -243,6 +243,44 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(status["capabilities"], ["cloudflare.account.read"])
         self.assertEqual(access_token, "cloudflare-oauth-access")
 
+    def test_cloudflare_env_access_token_can_request_pages_capabilities(self):
+        from domain.ai_client.oauth_store import provider_oauth_status
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            (pack_root / ".env").write_text(
+                "\n".join(
+                    [
+                        "CLOUDFLARE_API_TOKEN=cloudflare-oauth-access",
+                        "CLOUDFLARE_API_TOKEN_SCOPES=account:read pages:write",
+                        (
+                            "CLOUDFLARE_API_TOKEN_REQUESTED_CAPABILITIES="
+                            "cloudflare.account.read "
+                            "cloudflare.pages.project.write "
+                            "cloudflare.pages.deployment.write "
+                            "cloudflare.runner.deploy"
+                        ),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                status = provider_oauth_status("cloudflare", pack_root=pack_root)
+
+        self.assertTrue(status["connected"])
+        self.assertEqual(
+            status["capabilities"],
+            [
+                "cloudflare.account.read",
+                "cloudflare.pages.deployment.write",
+                "cloudflare.pages.project.write",
+                "cloudflare.runner.deploy",
+            ],
+        )
+        self.assertEqual(status["approval_required_capabilities"], [])
+        self.assertEqual(status["rejected_capabilities"], [])
+        self.assertNotIn("cloudflare-oauth-access", json.dumps(status, ensure_ascii=False))
+
     def test_cloudflare_oauth_finish_uses_cloudflare_token_and_userinfo_endpoints(self):
         from domain.ai_client.oauth_store import finish_provider_oauth, start_provider_oauth
 
@@ -392,6 +430,164 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(imported["capabilities"], [])
         self.assertEqual(imported["approval_required_capabilities"], ["github.repo.write"])
         self.assertNotIn("github.repo.write", imported["rejected_capabilities"])
+
+    def test_connection_import_cloudflare_pages_scopes_grant_requested_pages_capabilities(self):
+        from domain.connections.store import import_connection_bundle
+
+        raw_token = "cloudflare-pages-secret-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                imported = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "cloudflare",
+                        "material_type": "oauth2_token",
+                        "credentials": {"access_token": raw_token},
+                        "scopes": ["account:read", "pages:write"],
+                        "requested_capabilities": [
+                            "cloudflare.account.read",
+                            "cloudflare.pages.project.write",
+                            "cloudflare.pages.deployment.write",
+                            "cloudflare.runner.deploy",
+                        ],
+                    },
+                    pack_root=pack_root,
+                )
+
+        self.assertTrue(imported["success"], imported)
+        self.assertEqual(
+            imported["capabilities"],
+            [
+                "cloudflare.account.read",
+                "cloudflare.pages.deployment.write",
+                "cloudflare.pages.project.write",
+                "cloudflare.runner.deploy",
+            ],
+        )
+        self.assertEqual(imported["approval_required_capabilities"], [])
+        self.assertEqual(imported["rejected_capabilities"], [])
+        self.assertNotIn(raw_token, json.dumps(imported, ensure_ascii=False))
+
+    def test_connection_provider_manifest_extensibility_with_dummy_provider(self):
+        from domain.ai_client.oauth_store import provider_oauth_statuses
+        from domain.connections.store import import_connection_bundle, resolve_capabilities_for_provider
+        from domain.frontend.registry import FrontendRegistry
+
+        manifest = {
+            "schema": "rumi.connection.provider.v1",
+            "provider_id": "dummy",
+            "display_name": {"en": "Dummy Provider", "ja": "Dummy Provider"},
+            "description": {"en": "Test provider for Settings Control Center extensibility."},
+            "icon": "plug",
+            "service_kind": "custom",
+            "auth": {
+                "type": "api_key",
+                "template": "credential_bundle",
+                "token_import_supported": True,
+                "official_broker_supported": False,
+                "self_host_client_supported": True,
+            },
+            "capabilities": [
+                {
+                    "id": "dummy.read",
+                    "displayName": {"en": "Read dummy data"},
+                    "description": {"en": "Read dummy data."},
+                    "risk": "low",
+                },
+                {
+                    "id": "dummy.write",
+                    "displayName": {"en": "Write dummy data"},
+                    "description": {"en": "Write dummy data."},
+                    "risk": "high",
+                },
+            ],
+            "scope_to_capability": [
+                {
+                    "credential_kind": "access_token",
+                    "capabilities": ["dummy.read", "dummy.write"],
+                }
+            ],
+            "settings": {"section": "accounts_connections", "priority": 70, "recommended": False},
+        }
+        raw_token = "dummy-secret-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            providers_dir = pack_root / "config" / "settings_control_center" / "providers"
+            providers_dir.mkdir(parents=True)
+            manifest_path = providers_dir / "dummy.connection.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True), patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                statuses = provider_oauth_statuses(pack_root=pack_root)
+                settings = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+                imported_read = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "dummy",
+                        "connection_id": "dummy:test",
+                        "account_label": "Dummy test",
+                        "material_type": "access_token",
+                        "credentials": {"access_token": raw_token},
+                        "requested_capabilities": ["dummy.read"],
+                    },
+                    pack_root=pack_root,
+                )
+                imported_high = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "dummy",
+                        "connection_id": "dummy:write",
+                        "material_type": "access_token",
+                        "credentials": {"access_token": "dummy-write-secret"},
+                        "requested_capabilities": ["dummy.write"],
+                    },
+                    pack_root=pack_root,
+                )
+                imported_unknown = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "dummy",
+                        "connection_id": "dummy:unknown",
+                        "material_type": "access_token",
+                        "credentials": {"access_token": "dummy-unknown-secret"},
+                        "requested_capabilities": ["dummy.admin.everything"],
+                    },
+                    pack_root=pack_root,
+                )
+                manifest_path.unlink()
+                statuses_after_delete = provider_oauth_statuses(pack_root=pack_root)
+                settings_after_delete = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+                resolved_after_delete = resolve_capabilities_for_provider(
+                    "dummy",
+                    {
+                        "credential_kind": "access_token",
+                        "requested_capabilities": ["dummy.read"],
+                    },
+                    pack_root=pack_root,
+                )
+
+        self.assertIn("dummy", statuses)
+        self.assertEqual(settings["accounts_connections"]["providers"]["dummy"]["display_name"], "Dummy Provider")
+        self.assertTrue(imported_read["success"], imported_read)
+        self.assertEqual(imported_read["capabilities"], ["dummy.read"])
+        self.assertEqual(imported_read["approval_required_capabilities"], [])
+        self.assertEqual(imported_read["rejected_capabilities"], [])
+        self.assertIn("credential_id", imported_read["credential_ref"])
+        self.assertEqual(imported_high["capabilities"], [])
+        self.assertEqual(imported_high["approval_required_capabilities"], ["dummy.write"])
+        self.assertEqual(imported_unknown["capabilities"], [])
+        self.assertEqual(imported_unknown["approval_required_capabilities"], [])
+        self.assertEqual(imported_unknown["rejected_capabilities"], ["dummy.admin.everything"])
+        self.assertNotIn(raw_token, json.dumps([imported_read, imported_high, imported_unknown], ensure_ascii=False))
+        self.assertNotIn(raw_token, json.dumps(settings, ensure_ascii=False))
+        self.assertNotIn("dummy", statuses_after_delete)
+        self.assertNotIn("dummy", settings_after_delete["accounts_connections"]["providers"])
+        self.assertEqual(resolved_after_delete["capabilities"], [])
 
     def test_credential_bundle_safe_metadata_drops_secret_fields(self):
         from core_runtime.connections.templates import CredentialBundle

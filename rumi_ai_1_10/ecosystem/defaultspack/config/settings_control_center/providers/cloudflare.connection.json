@@ -49,6 +49,174 @@
       "risk": "low"
     },
     {
+      "id": "cloudflare.pages.project.read",
+      "displayName": {
+        "en": "Read Pages projects",
+        "ja": "Pages projectを読む"
+      },
+      "description": {
+        "en": "List and inspect Cloudflare Pages projects.",
+        "ja": "Cloudflare Pages projectを一覧・確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.pages.project.write",
+      "displayName": {
+        "en": "Write Pages projects",
+        "ja": "Pages projectを書き込む"
+      },
+      "description": {
+        "en": "Create, update, and delete Cloudflare Pages projects.",
+        "ja": "Cloudflare Pages projectを作成・更新・削除します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.pages.deployment.read",
+      "displayName": {
+        "en": "Read Pages deployments",
+        "ja": "Pages deploymentを読む"
+      },
+      "description": {
+        "en": "List and inspect Cloudflare Pages deployments.",
+        "ja": "Cloudflare Pages deploymentを一覧・確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.pages.deployment.write",
+      "displayName": {
+        "en": "Write Pages deployments",
+        "ja": "Pages deploymentを書き込む"
+      },
+      "description": {
+        "en": "Create and delete Cloudflare Pages deployments.",
+        "ja": "Cloudflare Pages deploymentを作成・削除します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.worker.read",
+      "displayName": {
+        "en": "Read Workers",
+        "ja": "Workersを読む"
+      },
+      "description": {
+        "en": "Inspect Cloudflare Worker resources.",
+        "ja": "Cloudflare Workerリソースを確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.worker.write",
+      "displayName": {
+        "en": "Write Workers",
+        "ja": "Workersを書き込む"
+      },
+      "description": {
+        "en": "Create or update Cloudflare Worker resources.",
+        "ja": "Cloudflare Workerリソースを作成・更新します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.r2.read",
+      "displayName": {
+        "en": "Read R2",
+        "ja": "R2を読む"
+      },
+      "description": {
+        "en": "Inspect Cloudflare R2 resources.",
+        "ja": "Cloudflare R2リソースを確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.r2.write",
+      "displayName": {
+        "en": "Write R2",
+        "ja": "R2を書き込む"
+      },
+      "description": {
+        "en": "Create or update Cloudflare R2 resources.",
+        "ja": "Cloudflare R2リソースを作成・更新します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.d1.read",
+      "displayName": {
+        "en": "Read D1",
+        "ja": "D1を読む"
+      },
+      "description": {
+        "en": "Inspect Cloudflare D1 resources.",
+        "ja": "Cloudflare D1リソースを確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.d1.write",
+      "displayName": {
+        "en": "Write D1",
+        "ja": "D1を書き込む"
+      },
+      "description": {
+        "en": "Create or update Cloudflare D1 resources.",
+        "ja": "Cloudflare D1リソースを作成・更新します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.queue.read",
+      "displayName": {
+        "en": "Read Queues",
+        "ja": "Queuesを読む"
+      },
+      "description": {
+        "en": "Inspect Cloudflare Queues resources.",
+        "ja": "Cloudflare Queuesリソースを確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.queue.write",
+      "displayName": {
+        "en": "Write Queues",
+        "ja": "Queuesを書き込む"
+      },
+      "description": {
+        "en": "Create or update Cloudflare Queues resources.",
+        "ja": "Cloudflare Queuesリソースを作成・更新します。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "cloudflare.workflow.read",
+      "displayName": {
+        "en": "Read Workflows",
+        "ja": "Workflowsを読む"
+      },
+      "description": {
+        "en": "Inspect Cloudflare Workflows resources.",
+        "ja": "Cloudflare Workflowsリソースを確認します。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "cloudflare.workflow.write",
+      "displayName": {
+        "en": "Write Workflows",
+        "ja": "Workflowsを書き込む"
+      },
+      "description": {
+        "en": "Create or update Cloudflare Workflows resources.",
+        "ja": "Cloudflare Workflowsリソースを作成・更新します。"
+      },
+      "risk": "medium"
+    },
+    {
       "id": "cloudflare.runner.deploy",
       "displayName": {
         "en": "Deploy Rumi runner",
@@ -71,9 +239,64 @@
       "capabilities": ["cloudflare.account.read"]
     },
     {
+      "scopes": ["pages:read"],
+      "capabilities": ["cloudflare.pages.project.read", "cloudflare.pages.deployment.read"]
+    },
+    {
+      "scopes": ["pages:write"],
+      "capabilities": [
+        "cloudflare.pages.project.read",
+        "cloudflare.pages.project.write",
+        "cloudflare.pages.deployment.read",
+        "cloudflare.pages.deployment.write",
+        "cloudflare.runner.deploy"
+      ]
+    },
+    {
+      "scopes": ["workers:read", "workers_scripts:read"],
+      "capabilities": ["cloudflare.worker.read"]
+    },
+    {
+      "scopes": ["workers:write", "workers_scripts:edit"],
+      "capabilities": ["cloudflare.worker.read", "cloudflare.worker.write", "cloudflare.runner.deploy"]
+    },
+    {
+      "scopes": ["d1:read"],
+      "capabilities": ["cloudflare.d1.read"]
+    },
+    {
+      "scopes": ["d1:write"],
+      "capabilities": ["cloudflare.d1.read", "cloudflare.d1.write", "cloudflare.runner.deploy"]
+    },
+    {
+      "scopes": ["r2:read"],
+      "capabilities": ["cloudflare.r2.read"]
+    },
+    {
+      "scopes": ["r2:write"],
+      "capabilities": ["cloudflare.r2.read", "cloudflare.r2.write", "cloudflare.runner.deploy"]
+    },
+    {
+      "scopes": ["queues:read"],
+      "capabilities": ["cloudflare.queue.read"]
+    },
+    {
+      "scopes": ["queues:write"],
+      "capabilities": ["cloudflare.queue.read", "cloudflare.queue.write", "cloudflare.runner.deploy"]
+    },
+    {
+      "scopes": ["workflows:read"],
+      "capabilities": ["cloudflare.workflow.read"]
+    },
+    {
+      "scopes": ["workflows:write"],
+      "capabilities": ["cloudflare.workflow.read", "cloudflare.workflow.write", "cloudflare.runner.deploy"]
+    },
+    {
       "scopes": [
         "workers:write",
         "workers_scripts:edit",
+        "pages:write",
         "d1:write",
         "r2:write",
         "queues:write",

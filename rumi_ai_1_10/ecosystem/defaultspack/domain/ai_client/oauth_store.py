@@ -1304,9 +1304,25 @@ def _provider_config_hint(provider_id: str, connection_status: str, *, client_co
     return ""
 
 
+def _localized_provider_label(value: Any, fallback: str) -> str:
+    if isinstance(value, dict):
+        for key in ("en", "ja"):
+            candidate = str(value.get(key) or "").strip()
+            if candidate:
+                return candidate
+        for candidate in value.values():
+            label = str(candidate or "").strip()
+            if label:
+                return label
+        return fallback
+    label = str(value or "").strip()
+    return label or fallback
+
+
 def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     provider = _connection_provider(provider_id, pack_root=pack_root)
+    provider_label = _localized_provider_label(provider.display_name, provider_id) if provider else provider_id
     supported = provider_supports_oauth(provider_id)
     client = load_provider_client_config(provider_id, pack_root=pack_root) if supported else None
     metadata = _provider_metadata(provider_id, pack_root=pack_root) if supported else {}
@@ -1390,7 +1406,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "supported": supported,
         "backend_supported": provider_id in _OAUTH_RUNTIME_PROVIDER_IDS,
         "provider_id": provider_id,
-        "display_label": str(provider.display_name if provider else provider_id),
+        "display_label": provider_label,
         "service_kind": str(provider.service_kind if provider else ""),
         "auth_type": str(provider.auth_type if provider else ""),
         "client_configured": client is not None,
@@ -1404,7 +1420,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "status": connection_status,
         "status_label": status_label,
         "disabled_reason": disabled_reason,
-        "display_name": str(metadata.get("display_name") or "").strip(),
+        "display_name": str(metadata.get("display_name") or provider_label).strip(),
         "email": str(metadata.get("email") or "").strip(),
         "picture_url": str(metadata.get("picture_url") or "").strip(),
         "scopes": status_scopes,

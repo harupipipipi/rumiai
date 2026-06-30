@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import os
 import ipaddress
+import select
+import subprocess
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -98,6 +101,21 @@ def _normalize_url(value: Any, *, allowed_schemes: set[str]) -> str:
     if parsed.scheme.lower() not in allowed_schemes or not parsed.netloc:
         return ""
     return text
+
+
+def _websocket_listen_url(config: dict[str, Any]) -> str:
+    websocket_url = str(config.get("websocket_url") or "").strip()
+    if websocket_url:
+        return websocket_url
+    base_url = str(config.get("base_url") or "").strip()
+    if not base_url:
+        return ""
+    parsed = urlsplit(base_url)
+    scheme = {"http": "ws", "https": "wss"}.get(parsed.scheme.lower(), "")
+    if not scheme or not parsed.netloc:
+        return ""
+    path = parsed.path or ""
+    return f"{scheme}://{parsed.netloc}{path}"
 
 
 def _url_has_query(value: Any) -> bool:
@@ -357,24 +375,28 @@ def build_codex_app_server_command(config: dict[str, Any]) -> list[str]:
         return []
     transport = str(normalized.get("transport") or "off")
     if transport == "stdio":
-        command = ["codex", "app-server", "stdio"]
+        command = ["codex", "app-server", "--listen", "stdio://"]
     elif transport == "unix":
-        command = ["codex", "app-server", "unix"]
+        unix_socket_path = str(normalized.get("unix_socket_path") or "").strip()
+        command = ["codex", "app-server", "--listen", f"unix://{unix_socket_path}" if unix_socket_path else "unix://"]
     elif transport == "websocket_loopback":
-        command = ["codex", "app-server", "websocket"]
+        listen_url = _websocket_listen_url(normalized)
+        if not listen_url:
+            return []
+        command = ["codex", "app-server", "--listen", listen_url]
     else:
         return []
-    if transport == "unix" and normalized.get("unix_socket_path"):
-        command.extend(["--socket", str(normalized["unix_socket_path"])])
-    if transport == "websocket_loopback":
-        if normalized.get("websocket_url"):
-            command.extend(["--websocket-url", str(normalized["websocket_url"])])
-        elif normalized.get("base_url"):
-            command.extend(["--base-url", str(normalized["base_url"])])
     if normalized.get("ws_token_file"):
-        command.extend(["--ws-token-file", str(normalized["ws_token_file"])])
-    if normalized.get("shared_secret_file"):
-        command.extend(["--shared-secret-file", str(normalized["shared_secret_file"])])
+        command.extend(["--ws-auth", "capability-token", "--ws-token-file", str(normalized["ws_token_file"])])
+    elif normalized.get("shared_secret_file"):
+        command.extend(
+            [
+                "--ws-auth",
+                "signed-bearer-token",
+                "--ws-shared-secret-file",
+                str(normalized["shared_secret_file"]),
+            ]
+        )
     return command
 
 
@@ -494,24 +516,251 @@ def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.
     base_url = str(status.get("base_url") or "").rstrip("/")
     if not base_url:
         return {"success": False, "provider_id": "codex", "probe": {"status": "not_configured"}}
-    request = urllib.request.Request(f"{base_url}/status", method="GET")
-    for header, value in codex_app_server_auth_headers(pack_root=pack_root).items():
-        request.add_header(header, value)
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return {
-                "success": True,
-                "provider_id": "codex",
-                "probe": {
-                    "status": "ok" if response.status < 400 else "error",
-                    "http_status": int(response.status),
-                },
-            }
-    except urllib.error.HTTPError as exc:
+    auth_headers = codex_app_server_auth_headers(pack_root=pack_root)
+    last_http_error: urllib.error.HTTPError | None = None
+    for endpoint in ("readyz", "healthz"):
+        request = urllib.request.Request(f"{base_url}/{endpoint}", method="GET")
+        for header, value in auth_headers.items():
+            request.add_header(header, value)
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return {
+                    "success": True,
+                    "provider_id": "codex",
+                    "probe": {
+                        "status": "ok" if response.status < 400 else "error",
+                        "http_status": int(response.status),
+                        "endpoint": f"/{endpoint}",
+                    },
+                }
+        except urllib.error.HTTPError as exc:
+            last_http_error = exc
+            if exc.code not in {404, 405}:
+                break
+        except OSError:
+            return {"success": False, "provider_id": "codex", "probe": {"status": "unreachable"}}
+    if last_http_error is not None:
         return {
             "success": False,
             "provider_id": "codex",
-            "probe": {"status": "http_error", "http_status": int(exc.code)},
+            "probe": {"status": "http_error", "http_status": int(last_http_error.code)},
         }
-    except OSError:
-        return {"success": False, "provider_id": "codex", "probe": {"status": "unreachable"}}
+    return {"success": False, "provider_id": "codex", "probe": {"status": "unreachable"}}
+
+
+def codex_app_server_stdio_smoke(
+    *,
+    prompt: str,
+    cwd: str | None = None,
+    model: str | None = None,
+    timeout: float = 60.0,
+    command: list[str] | None = None,
+) -> dict[str, Any]:
+    command = command or build_codex_app_server_command({"enabled": True, "transport": "stdio"})
+    if not command:
+        return {"success": False, "provider_id": "codex", "error": "stdio_not_configured"}
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    messages: list[dict[str, Any]] = []
+    sent: list[dict[str, Any]] = []
+    final_parts: list[str] = []
+    approval_requests: list[dict[str, Any]] = []
+    thread_id = ""
+    turn_id = ""
+    completed = False
+
+    def send(message: dict[str, Any]) -> None:
+        if proc.stdin is None:
+            raise RuntimeError("codex app-server stdin is unavailable")
+        sent.append(message)
+        proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+        proc.stdin.flush()
+
+    deadline = time.monotonic() + max(float(timeout), 0.1)
+    try:
+        send(
+            {
+                "method": "initialize",
+                "id": 0,
+                "params": {
+                    "clientInfo": {
+                        "name": "rumi_defaultspack",
+                        "title": "Rumi Defaultspack",
+                        "version": "0.1.0",
+                    }
+                },
+            }
+        )
+        send({"method": "initialized", "params": {}})
+        thread_params = _compact_dict({"model": model, "cwd": cwd})
+        send({"method": "thread/start", "id": 1, "params": thread_params})
+
+        while time.monotonic() < deadline:
+            line = _readline_before_deadline(proc.stdout, deadline)
+            if not line:
+                break
+            message = _parse_json_line(line)
+            if not message:
+                continue
+            messages.append(_safe_codex_message(message))
+            if message.get("id") == 1:
+                if message.get("error"):
+                    return _stdio_smoke_result(
+                        success=False,
+                        command=command,
+                        sent=sent,
+                        messages=messages,
+                        error=message.get("error"),
+                    )
+                thread_id = str(_nested(message, "result", "thread", "id") or "")
+                if thread_id:
+                    turn_params = _compact_dict(
+                        {
+                            "threadId": thread_id,
+                            "cwd": cwd,
+                            "model": model,
+                            "input": [{"type": "text", "text": prompt}],
+                        }
+                    )
+                    send({"method": "turn/start", "id": 2, "params": turn_params})
+            elif message.get("id") == 2:
+                if message.get("error"):
+                    return _stdio_smoke_result(
+                        success=False,
+                        command=command,
+                        sent=sent,
+                        messages=messages,
+                        thread_id=thread_id,
+                        error=message.get("error"),
+                    )
+                turn_id = str(_nested(message, "result", "turn", "id") or "")
+            else:
+                method = str(message.get("method") or "")
+                params = message.get("params") if isinstance(message.get("params"), dict) else {}
+                if method == "item/agentMessage/delta":
+                    final_parts.append(_redact_known_secrets(str(params.get("delta") or "")))
+                    turn_id = turn_id or str(params.get("turnId") or "")
+                elif method == "turn/started":
+                    turn_id = turn_id or str(_nested(params, "turn", "id") or "")
+                elif method == "turn/completed":
+                    completed = True
+                    turn_id = turn_id or str(_nested(params, "turn", "id") or "")
+                    break
+                elif "approval" in method.lower():
+                    approval_requests.append(_safe_codex_message(message))
+        return _stdio_smoke_result(
+            success=bool(thread_id and turn_id and completed),
+            command=command,
+            sent=sent,
+            messages=messages,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            final_output="".join(final_parts),
+            approval_requests=approval_requests,
+            error="" if completed else "turn_not_completed",
+        )
+    finally:
+        _terminate_process(proc)
+
+
+def _stdio_smoke_result(
+    *,
+    success: bool,
+    command: list[str],
+    sent: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    thread_id: str = "",
+    turn_id: str = "",
+    final_output: str = "",
+    approval_requests: list[dict[str, Any]] | None = None,
+    error: Any = "",
+) -> dict[str, Any]:
+    return {
+        "success": success,
+        "provider_id": "codex",
+        "transport": "stdio",
+        "command": list(command),
+        "thread_id": thread_id,
+        "turn_id": turn_id,
+        "final_output": final_output,
+        "approval_required": bool(approval_requests),
+        "approval_requests": approval_requests or [],
+        "sent_methods": [str(item.get("method") or "") for item in sent],
+        "messages": messages,
+        "error": error,
+    }
+
+
+def _readline_before_deadline(stream: Any, deadline: float) -> str:
+    if stream is None:
+        return ""
+    remaining = max(deadline - time.monotonic(), 0)
+    if remaining <= 0:
+        return ""
+    try:
+        readable, _writable, _errors = select.select([stream], [], [], remaining)
+    except Exception:
+        return str(stream.readline() or "")
+    if not readable:
+        return ""
+    return str(stream.readline() or "")
+
+
+def _parse_json_line(line: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(line)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _compact_dict(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if value not in (None, "")}
+
+
+def _nested(payload: Any, *keys: str) -> Any:
+    current = payload
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _safe_codex_message(message: dict[str, Any]) -> dict[str, Any]:
+    text = _redact_known_secrets(json.dumps(message, ensure_ascii=False))
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        return {"message": "[unserializable]"}
+    return payload if isinstance(payload, dict) else {"message": payload}
+
+
+def _redact_known_secrets(text: str) -> str:
+    for key in (
+        "RUMI_CODEX_ACCESS_TOKEN",
+        "CODEX_ACCESS_TOKEN",
+        "RUMI_CODEX_APP_SERVER_WS_TOKEN",
+        "RUMI_CODEX_APP_SERVER_SHARED_SECRET",
+    ):
+        value = os.environ.get(key, "").strip()
+        if value:
+            text = text.replace(value, "[redacted]")
+    return text
+
+
+def _terminate_process(proc: subprocess.Popen[str]) -> None:
+    try:
+        proc.terminate()
+        proc.wait(timeout=2)
+    except Exception:
+        try:
+            proc.kill()
+        except Exception:
+            pass
