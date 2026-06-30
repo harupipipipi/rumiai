@@ -118,6 +118,30 @@ test("requestDesktopAccess lets the backend derive requester identity", async ()
   assert.match(body.request_id, /^desktop-access-/);
 });
 
+test("listDesktops unwraps standard desktop list envelopes", async () => {
+  let requestUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestUrl = String(input);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        desktops: [desktopResponse("running")],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.listDesktops();
+    assert.equal(requestUrl, "/api/desktops");
+    assert.equal(result.desktops.length, 1);
+    assert.equal(result.desktops[0].seat_id, "seat-1");
+    assert.equal(result.desktops[0].status, "running");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("listDesktops normalizes unknown provisioning status to the explicit fallback", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -256,7 +280,24 @@ test("listDesktops reports desktop records with no usable id", async () => {
   }
 });
 
-test("listDesktops reports malformed desktop payloads clearly", async () => {
+test("listDesktops reports malformed standard desktop list envelopes clearly", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    status: "ok",
+    data: { desktops: "not-an-array" },
+  }), { status: 200, headers: { "Content-Type": "application/json" } })) as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => sandboxesApi.listDesktops(),
+      /desktops array/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("listDesktops reports missing desktop arrays clearly", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async () => new Response(JSON.stringify({
     status: "ok",

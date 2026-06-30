@@ -161,6 +161,17 @@ function normalizeDesktopListPayload(payload: DesktopListPayload): { desktops: D
   return { desktops };
 }
 
+function unwrapDesktopListPayload(payload: unknown): DesktopListPayload {
+  const envelope = payload as Partial<ApiEnvelope<DesktopListPayload>>;
+  const data = envelope.status === "ok" && "data" in envelope
+    ? envelope.data
+    : payload;
+  if (!data || typeof data !== "object" || !Array.isArray((data as DesktopListPayload).desktops)) {
+    throw new Error("Desktop list response did not include a desktops array.");
+  }
+  return data as DesktopListPayload;
+}
+
 async function requestDesktopList(): Promise<{ desktops: DesktopInstance[] }> {
   const response = await defaultspackApiFetch("/api/desktops", { cache: "no-store" });
   let payload: unknown;
@@ -177,13 +188,7 @@ async function requestDesktopList(): Promise<{ desktops: DesktopInstance[] }> {
       response.statusText,
     ));
   }
-  const data = envelope.status === "ok" && "data" in envelope
-    ? envelope.data
-    : payload;
-  if (!data || typeof data !== "object" || !Array.isArray((data as DesktopListPayload).desktops)) {
-    throw new Error("Desktop list response did not include a desktops array.");
-  }
-  return normalizeDesktopListPayload(data as DesktopListPayload);
+  return normalizeDesktopListPayload(unwrapDesktopListPayload(payload));
 }
 
 function normalizeLeaseExpiresAt(value: unknown): string {
