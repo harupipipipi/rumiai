@@ -511,14 +511,26 @@ class MimoCodingCompanyRuntime:
             "roles": deepcopy(ROLE_DEFINITIONS),
         }
 
-    def status(self, *, recover_scheduled_approvals: bool = False) -> dict[str, Any]:
+    def status(
+        self,
+        *,
+        recover_scheduled_approvals: bool = False,
+        sync_observability: bool = False,
+        include_desktop_monitoring: bool = False,
+    ) -> dict[str, Any]:
         state = self._load_state()
         org_id = state.get("org_id")
         org = OrgManager().get_org(org_id) if org_id else None
-        observability = self._sync_company_observability(
-            state,
-            recover_scheduled_approvals=recover_scheduled_approvals,
-        )
+        if sync_observability:
+            observability = self._sync_company_observability(
+                state,
+                recover_scheduled_approvals=recover_scheduled_approvals,
+                include_desktop_monitoring=include_desktop_monitoring,
+            )
+        else:
+            observability = self._observability_baseline(state)
+            observability["status"] = "skipped"
+            observability["reason"] = "observability sync is opt-in so status remains nonblocking"
         company = self._sync_company_record({**state, "observability": observability})
         try:
             company = CompanyService().get_company(COMPANY_ID) or company
@@ -802,7 +814,7 @@ class MimoCodingCompanyRuntime:
                     Scheduler().trigger_now(kickoff_id)
                 except Exception:
                     pass
-        return self.status()
+        return self.status(sync_observability=False, include_desktop_monitoring=False)
 
     def _resolve_state_path(self) -> Path:
         override = os.environ.get("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", "").strip()
@@ -1383,7 +1395,9 @@ class MimoCodingCompanyRuntime:
             metadata = conversation.get("metadata") if isinstance(conversation, dict) else {}
             if not isinstance(metadata, dict):
                 metadata = {}
-            store.update_conversation(
+            self._update_conversation_if_changed(
+                store,
+                conversation if isinstance(conversation, dict) else {},
                 conversation_id,
                 {
                     "group_id": self._conversation_group_id(),
@@ -1411,8 +1425,24 @@ class MimoCodingCompanyRuntime:
                 **workspace_metadata,
             },
         )
-        store.update_conversation(conversation["id"], {"title": "MiMo Coding Company"})
+        self._update_conversation_if_changed(
+            store,
+            conversation,
+            str(conversation["id"]),
+            {"title": "MiMo Coding Company"},
+        )
         return str(conversation["id"])
+
+    @staticmethod
+    def _update_conversation_if_changed(
+        store: Any,
+        conversation: dict[str, Any],
+        conversation_id: str,
+        updates: dict[str, Any],
+    ) -> None:
+        if all(conversation.get(key) == value for key, value in updates.items()):
+            return
+        store.update_conversation(conversation_id, updates)
 
     def _ensure_loop_conversation(
         self,
@@ -1455,7 +1485,9 @@ class MimoCodingCompanyRuntime:
         if existing_id and store.get_conversation(existing_id):
             conversation = store.get_conversation(existing_id) or {}
             current_metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
-            store.update_conversation(
+            self._update_conversation_if_changed(
+                store,
+                conversation,
                 existing_id,
                 {
                     "title": title,
@@ -1482,7 +1514,9 @@ class MimoCodingCompanyRuntime:
                 and str(child_metadata.get("company_id") or "") == COMPANY_ID
             ):
                 loop_conversation_ids[key] = str(child_id)
-                store.update_conversation(
+                self._update_conversation_if_changed(
+                    store,
+                    child,
                     str(child_id),
                     {
                         "title": title,
@@ -1506,7 +1540,7 @@ class MimoCodingCompanyRuntime:
             metadata=metadata,
         )
         conversation_id = str(conversation["id"])
-        store.update_conversation(conversation_id, {"title": title})
+        self._update_conversation_if_changed(store, conversation, conversation_id, {"title": title})
         loop_conversation_ids[key] = conversation_id
         return conversation_id
 
@@ -1703,13 +1737,8 @@ class MimoCodingCompanyRuntime:
             "signals": [],
         }
 
-    def _sync_company_observability(
-        self,
-        state: dict[str, Any],
-        *,
-        recover_scheduled_approvals: bool = False,
-    ) -> dict[str, Any]:
-        summary: dict[str, Any] = {
+    def _observability_baseline(self, state: dict[str, Any]) -> dict[str, Any]:
+        return {
             "status": "ok",
             "company_id": COMPANY_ID,
             "channel_id": "ops-company",
@@ -1725,6 +1754,15 @@ class MimoCodingCompanyRuntime:
                 "status": "unknown",
             },
         }
+
+    def _sync_company_observability(
+        self,
+        state: dict[str, Any],
+        *,
+        recover_scheduled_approvals: bool = False,
+        include_desktop_monitoring: bool = False,
+    ) -> dict[str, Any]:
+        summary = self._observability_baseline(state)
         try:
             summary["legacy_provider_conversations"] = self._supersede_legacy_provider_conversations(state)
             runtime_store = CompanyRuntimeStore()
@@ -1863,27 +1901,35 @@ class MimoCodingCompanyRuntime:
                 known_sync_keys.add(sync_key)
                 synced += 1
 
-            desktop_monitoring = self._desktop_monitoring_observation()
-            summary["desktop_monitoring"] = desktop_monitoring
-            desktop_signal = str(desktop_monitoring.get("signal") or "").strip()
-            if desktop_signal:
-                sync_key = "desktop_monitor:" + desktop_signal + ":" + str(desktop_monitoring.get("desktop_count") or 0)
-                if sync_key not in known_sync_keys:
-                    runtime_store.add_message(
-                        COMPANY_ID,
-                        channel_id="ops-company",
-                        sender_id="scheduler",
-                        content=self._desktop_monitoring_message(desktop_monitoring),
-                        metadata={
-                            "sync_source": "mimo_desktop_monitor",
-                            "sync_key": sync_key,
-                            "signal": desktop_signal,
-                            "surface": "desktops",
-                            "desktop_count": desktop_monitoring.get("desktop_count"),
-                        },
-                    )
-                    known_sync_keys.add(sync_key)
-                    synced += 1
+            if include_desktop_monitoring:
+                desktop_monitoring = self._desktop_monitoring_observation()
+                summary["desktop_monitoring"] = desktop_monitoring
+                desktop_signal = str(desktop_monitoring.get("signal") or "").strip()
+                if desktop_signal:
+                    sync_key = "desktop_monitor:" + desktop_signal + ":" + str(desktop_monitoring.get("desktop_count") or 0)
+                    if sync_key not in known_sync_keys:
+                        runtime_store.add_message(
+                            COMPANY_ID,
+                            channel_id="ops-company",
+                            sender_id="scheduler",
+                            content=self._desktop_monitoring_message(desktop_monitoring),
+                            metadata={
+                                "sync_source": "mimo_desktop_monitor",
+                                "sync_key": sync_key,
+                                "signal": desktop_signal,
+                                "surface": "desktops",
+                                "desktop_count": desktop_monitoring.get("desktop_count"),
+                            },
+                        )
+                        known_sync_keys.add(sync_key)
+                        synced += 1
+            else:
+                summary["desktop_monitoring"] = {
+                    "surface": "desktops",
+                    "expected_api": "GET /api/desktops",
+                    "status": "skipped",
+                    "reason": "desktop monitoring is available through explicit UI or scheduled QA checks",
+                }
 
             stats = runtime_store.stats(COMPANY_ID)
             summary["team_workspace"] = {
@@ -2816,21 +2862,7 @@ class MimoCodingCompanyRuntime:
                 compact.append(compact_item)
                 frame_issue = MimoCodingCompanyRuntime._desktop_frame_issue(desktop, frame_metadata)
                 if frame_issue:
-                    refreshed_frame = MimoCodingCompanyRuntime._refresh_desktop_frame_metadata(
-                        sandbox_api_run,
-                        str(seat_id or ""),
-                    )
-                    if refreshed_frame:
-                        compact_item["frame"] = refreshed_frame
-                        frame_refreshes.append(
-                            {
-                                "seat_id": seat_id,
-                                "reason": frame_issue.get("reason"),
-                                "frame": refreshed_frame,
-                            }
-                        )
-                    else:
-                        frame_issues.append(frame_issue)
+                    frame_issues.append(frame_issue)
                 if MimoCodingCompanyRuntime._desktop_can_block_missing_chat_target(desktop):
                     for browser_url in browser_urls:
                         if MimoCodingCompanyRuntime._defaultspack_chat_url_missing_query(browser_url):

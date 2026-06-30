@@ -143,8 +143,8 @@ def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_ide
     )
 
     runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
-    first = runtime.status()
-    second = runtime.status()
+    first = runtime.status(sync_observability=True)
+    second = runtime.status(sync_observability=True)
 
     assert len(first["harness"]["observability"]["legacy_provider_conversations"]["superseded"]) == 2
     assert second["harness"]["observability"]["legacy_provider_conversations"]["superseded"] == []
@@ -799,7 +799,7 @@ def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_target
     ]
 
 
-def test_mimo_coding_company_desktop_monitor_refreshes_missing_running_frame(monkeypatch):
+def test_mimo_coding_company_desktop_monitor_reports_missing_running_frame_without_refresh(monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from blocks.sandbox import api as sandbox_api
 
@@ -827,18 +827,6 @@ def test_mimo_coding_company_desktop_monitor_refreshes_missing_running_frame(mon
                     ]
                 },
             }
-        if payload == {"_handler": "desktop_frame", "seat_id": "seat_running_browser"}:
-            assert context["source"] == "defaultspack_local_ui"
-            return {
-                "_binary": True,
-                "status_code": 200,
-                "headers": {
-                    "X-Rumi-Frame-Seq": "7",
-                    "X-Rumi-Frame-Width": "1280",
-                    "X-Rumi-Frame-Height": "800",
-                    "X-Rumi-Captured-At": "2026-06-30T00:00:00Z",
-                },
-            }
         raise AssertionError(f"unexpected sandbox API call: {payload!r}")
 
     monkeypatch.setattr(sandbox_api, "run", fake_desktop_api)
@@ -846,17 +834,14 @@ def test_mimo_coding_company_desktop_monitor_refreshes_missing_running_frame(mon
     observation = MimoCodingCompanyRuntime._desktop_monitoring_observation()
     message = MimoCodingCompanyRuntime._desktop_monitoring_message(observation)
 
-    assert observation["status"] == "ok"
-    assert observation["signal"] == "desktop_frame_refreshed"
+    assert observation["status"] == "degraded"
+    assert observation["signal"] == "desktop_frame_missing"
     assert observation["desktops"][0]["assigned_agent"] == "browser_qa"
-    assert observation["desktops"][0]["frame"]["frame_seq"] == "7"
-    assert observation["frame_refreshes"][0]["reason"] == "missing"
-    assert "live snapshot" in message
+    assert "frame" not in observation["desktops"][0]
+    assert observation["frame_issues"][0]["reason"] == "missing"
+    assert "live snapshot is missing or stale" in message
     assert ("seat_running_browser" in message)
-    assert calls[1] == (
-        {"_handler": "desktop_frame", "seat_id": "seat_running_browser"},
-        {"source": "defaultspack_local_ui"},
-    )
+    assert calls == [({"_handler": "desktops_list"}, {"source": "mimo_observability"})]
 
 
 def test_mimo_coding_company_desktop_monitor_flags_missing_running_frame_when_refresh_fails(monkeypatch):
@@ -1475,13 +1460,13 @@ def test_mimo_coding_company_status_does_not_recover_schedule_approvals_by_defau
         seed_knowledge=False,
         run_initial_review_now=False,
     )
-    observed = runtime.status()
+    observed = runtime.status(include_desktop_monitoring=True)
 
     assert bootstrapped["schedules"]
     assert observed["schedules"]
     assert recovery_calls == []
 
-    runtime.status(recover_scheduled_approvals=True)
+    runtime.status(sync_observability=True, recover_scheduled_approvals=True)
     assert recovery_calls
 
     for schedule in observed["schedules"]:
@@ -1595,7 +1580,7 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         },
     )
 
-    observed = runtime.status()
+    observed = runtime.status(sync_observability=True, include_desktop_monitoring=True)
     observability = observed["harness"]["observability"]
     messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
 
@@ -1633,7 +1618,7 @@ def test_mimo_coding_company_status_syncs_observability_to_team_workspace(tmp_pa
         "mimo_subagent_monitor",
     }
 
-    runtime.status()
+    runtime.status(sync_observability=True, include_desktop_monitoring=True)
     _messages_again, total_again = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
     assert total_again == total
 
