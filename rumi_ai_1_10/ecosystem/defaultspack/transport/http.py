@@ -323,7 +323,21 @@ class DefaultsHttpServer:
             m = compiled.match(path)
             if m is not None:
                 return handler, m.groupdict(), source, path_inject, pattern
+        if self._is_spa_shell_fallback_route(method, path):
+            return self._handle_static, {}, "fallback", {}, ""
         return None, None, None, None, None
+
+    @staticmethod
+    def _is_spa_shell_fallback_route(method, path):
+        if str(method or "").upper() != "GET":
+            return False
+        request_path = str(path or "")
+        if not request_path.startswith("/"):
+            return False
+        if request_path == "/" or request_path.startswith(("/api", "/static/")):
+            return False
+        leaf = request_path.rsplit("/", 1)[-1]
+        return "." not in leaf
 
     def _active_profile_policy(self):
         try:
