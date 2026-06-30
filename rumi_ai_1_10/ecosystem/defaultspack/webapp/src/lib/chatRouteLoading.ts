@@ -11,7 +11,7 @@ export async function loadConversationForRefresh({
   listedConversations: Array<{ id: string }>;
   loadConversation: (conversationId: string | null) => Promise<void>;
 }): Promise<void> {
-  const targetId = preferredId ?? activeConversationId ?? locationChatId ?? listedConversations[0]?.id ?? null;
+  const targetId = preferredId ?? locationChatId ?? activeConversationId ?? listedConversations[0]?.id ?? null;
   if (!targetId) {
     await loadConversation(null);
     return;

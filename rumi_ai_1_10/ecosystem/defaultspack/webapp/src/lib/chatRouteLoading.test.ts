@@ -44,6 +44,22 @@ test("refresh conversation loading falls back when direct URL chat load fails", 
   assert.deepEqual(loaded, ["missing-chat", "recent-chat"]);
 });
 
+test("refresh conversation loading prefers an explicit URL chat over existing active state", async () => {
+  const loaded: Array<string | null> = [];
+
+  await loadConversationForRefresh({
+    preferredId: null,
+    activeConversationId: "active-chat",
+    locationChatId: "url-chat",
+    listedConversations: [{ id: "active-chat" }, { id: "url-chat" }],
+    loadConversation: async (conversationId) => {
+      loaded.push(conversationId);
+    },
+  });
+
+  assert.deepEqual(loaded, ["url-chat"]);
+});
+
 test("workspace routing opens desktops route as the desktops workspace", () => {
   const tabs = initialWorkspaceTabsForPathname("/desktops", 1234);
 
