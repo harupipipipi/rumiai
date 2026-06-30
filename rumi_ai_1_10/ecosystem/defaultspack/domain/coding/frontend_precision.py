@@ -15,6 +15,7 @@ FRONTEND_KEYWORDS = {
     "ux",
     "page",
     "screen",
+    "app",
     "component",
     "components",
     "dashboard",
@@ -35,6 +36,29 @@ FRONTEND_KEYWORDS = {
     "next.js",
     "chat app",
     "ai chat",
+}
+TOKEN_BOUNDARY_KEYWORDS = {
+    "ui",
+    "ux",
+    "page",
+    "screen",
+    "app",
+    "component",
+    "components",
+    "dashboard",
+    "form",
+    "inbox",
+    "mobile",
+    "responsive",
+    "layout",
+    "tsx",
+    "jsx",
+    "css",
+    "scss",
+    "tailwind",
+    "webapp",
+    "react",
+    "vite",
 }
 FRONTEND_PATH_MARKERS = {
     "webapp",
@@ -192,7 +216,7 @@ def detect_frontend_request(
 
     lowered = text.lower()
     for keyword in sorted(FRONTEND_KEYWORDS, key=len, reverse=True):
-        if keyword in lowered:
+        if _keyword_matches(lowered, keyword):
             reasons.append(f"prompt keyword: {keyword}")
             break
 
@@ -217,7 +241,7 @@ def promote_coding_session_input(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     data = deepcopy(input_data if isinstance(input_data, dict) else {})
     files = _request_files(data)
-    detection = detect_frontend_request(data.get("task"), files=files)
+    detection = detect_frontend_request(data.get("task"), files=files, command=_request_command(data))
     if not detection.enabled:
         return data, {
             "enabled": False,
@@ -281,6 +305,8 @@ def tool_arguments_for_precision(
             "scenarios": ["default", "long", "empty", "loading", "error"],
             "textScales": [1, 1.25],
             "browserRender": mode in {"strict", "refine"},
+            "strictProduction": bool(precision.get("productionStrict")),
+            "applyToProject": True,
             "runBuild": mode != "audit",
             "frontendPrecisionMode": mode,
         },
@@ -364,6 +390,7 @@ def precision_metadata(
     return {
         "enabled": True,
         "mode": detection.mode,
+        "command": detection.command,
         "strict": detection.mode in {"strict", "build"},
         "auditOnly": detection.mode == "audit",
         "refine": detection.mode == "refine",
@@ -457,6 +484,14 @@ def _request_files(data: dict[str, Any]) -> list[str]:
     return [str(item) for item in values if str(item or "").strip()]
 
 
+def _request_command(data: dict[str, Any]) -> str:
+    for key in ("command", "slash_command", "slashCommand"):
+        value = str(data.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _frontend_path_reason(path: str) -> str:
     lowered = str(path or "").replace("\\", "/").lower()
     suffixes = {Path(lowered).suffix}
@@ -466,10 +501,29 @@ def _frontend_path_reason(path: str) -> str:
         suffixes.add(".module.scss")
     if suffixes & FRONTEND_EXTENSIONS:
         return f"frontend file extension: {path}"
+    parts = [part for part in lowered.split("/") if part]
     for marker in FRONTEND_PATH_MARKERS:
+        clean_marker = marker.rstrip("/")
+        if marker.endswith("/") and clean_marker in parts:
+            return f"frontend path marker: {path}"
+        if clean_marker in {"style", "styles", "component", "components", "webapp", "frontend", "tailwind"}:
+            if clean_marker in parts:
+                return f"frontend path marker: {path}"
+            continue
         if marker in lowered:
             return f"frontend path marker: {path}"
     return ""
+
+
+def _keyword_matches(text: str, keyword: str) -> bool:
+    keyword = str(keyword or "").lower().strip()
+    if not keyword:
+        return False
+    if keyword in TOKEN_BOUNDARY_KEYWORDS:
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+    if all(char.isalnum() or char in {"-", "_", "."} for char in keyword):
+        return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
+    return keyword in text
 
 
 def _slash_command(value: str | None) -> list[str]:

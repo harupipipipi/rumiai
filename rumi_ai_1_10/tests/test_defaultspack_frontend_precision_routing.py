@@ -29,6 +29,27 @@ def test_frontend_request_detector_uses_prompt_and_path_hints() -> None:
     assert not boring.enabled
 
 
+def test_frontend_request_detector_does_not_match_ui_inside_common_words() -> None:
+    from domain.coding.frontend_precision import detect_frontend_request
+
+    for prompt in [
+        "build the backend cache",
+        "quick fix for pytest",
+        "write a guide for setup",
+        "run the regression suite",
+    ]:
+        detected = detect_frontend_request(prompt)
+        assert not detected.enabled, detected.to_dict()
+
+
+def test_frontend_request_detector_matches_app_without_path_style_false_positives() -> None:
+    from domain.coding.frontend_precision import detect_frontend_request
+
+    assert detect_frontend_request("build an app").enabled
+    assert not detect_frontend_request("fix docs", files=["docs/lifestyle.md"]).enabled
+    assert not detect_frontend_request("fix parser", files=["src/freestyle_parser.py"]).enabled
+
+
 def test_frontend_default_ui_trees_are_planner_executable() -> None:
     from domain.coding.frontend_precision import build_default_ui_tree
     from domain.ui_compiler.planner import RecursiveUIPlanner
@@ -70,6 +91,17 @@ def test_coding_session_frontend_request_promotes_to_precision_specialists(tmp_p
         "composition",
     }
     assert created["data"]["session"]["shared_context"]["frontend_precision"]["requiredTool"] == "tool_ui_build_recursive"
+
+
+def test_coding_session_frontend_slash_command_promotes_to_precision() -> None:
+    from domain.coding.frontend_precision import promote_coding_session_input
+
+    promoted, precision = promote_coding_session_input({"task": "監査だけして", "command": "/frontend audit"})
+
+    assert precision["enabled"] is True
+    assert precision["mode"] == "audit"
+    assert promoted["frontend_precision"]["command"] == "frontend"
+    assert promoted["task"].startswith("[Rumi frontend precision mode: audit]")
 
 
 def test_frontend_slash_command_is_registered_and_returns_precision_payload() -> None:
@@ -141,7 +173,62 @@ def test_stream_engine_executes_frontend_precision_before_model_turn(tmp_path, m
 
     def fake_model_turn(self, prepared, messages, draft):
         captured["model_messages"] = list(messages)
+        captured["provider_tools_after_preflight"] = list(prepared.provider_tools or [])
         return {"content": [{"type": "text", "text": "precision done"}], "finish_reason": "stop", "usage": {}}, []
+
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    events = list(
+        ChatRunEngine(store=store).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "AI chat app frontend を作って"},
+                "params": {"tool_selection": {"mode": "none"}},
+            },
+            {"workspace_root": str(tmp_path), "profile_policy": {"yolo_mode": True}},
+        )
+    )
+
+    assert captured["tool_name"] == "tool_ui_build_recursive"
+    assert captured["approved"] is True
+    assert captured["arguments"]["options"]["viewports"] == [390, 768, 1440]
+    assert captured["arguments"]["options"]["applyToProject"] is True
+    assert any(message.get("role") == "tool" for message in captured["model_messages"])
+    assert captured["provider_tools_after_preflight"]
+    flat_events = [item for event in events for item in (event if isinstance(event, list) else [event])]
+    completed = [event for event in flat_events if event.get("type") == "assistant_message_completed"]
+    metadata = completed[-1]["data"]["message"]["metadata"]
+    assert metadata["frontend_precision"]["executed"]["report"].endswith("/reports/final.json")
+    assert "tool_ui_build_recursive" in metadata["executed_tools"]
+    ChatStore._instance = None
+
+
+def test_stream_engine_frontend_precision_requires_approval_without_trusted_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    captured: dict[str, object] = {}
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        captured["approved"] = bool(prepared.tool_context.get("_tool_server_approved"))
+        return {
+            "status": "ok",
+            "data": {
+                "approval_required": True,
+                "requires_approval": True,
+                "operation": tool_name,
+                "arguments": arguments,
+            },
+        }
+
+    def fake_model_turn(self, prepared, messages, draft):
+        raise AssertionError("model turn must not run while frontend precision awaits approval")
 
     monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
     monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
@@ -157,13 +244,98 @@ def test_stream_engine_executes_frontend_precision_before_model_turn(tmp_path, m
         )
     )
 
-    assert captured["tool_name"] == "tool_ui_build_recursive"
-    assert captured["approved"] is True
-    assert captured["arguments"]["options"]["viewports"] == [390, 768, 1440]
-    assert any(message.get("role") == "tool" for message in captured["model_messages"])
+    assert captured["approved"] is False
     flat_events = [item for event in events for item in (event if isinstance(event, list) else [event])]
+    assert any(event.get("type") == "approval_requested" for event in flat_events)
     completed = [event for event in flat_events if event.get("type") == "assistant_message_completed"]
-    metadata = completed[-1]["data"]["message"]["metadata"]
-    assert metadata["frontend_precision"]["executed"]["report"].endswith("/reports/final.json")
-    assert "tool_ui_build_recursive" in metadata["executed_tools"]
+    assert completed[-1]["data"]["message"]["finish_reason"] == "approval_required"
+    ChatStore._instance = None
+
+
+def test_stream_engine_frontend_precision_does_not_trust_spoofed_approval_flags(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    captured: dict[str, object] = {}
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        captured["approved"] = bool(prepared.tool_context.get("_tool_server_approved"))
+        return {
+            "status": "ok",
+            "data": {
+                "approval_required": True,
+                "requires_approval": True,
+                "operation": tool_name,
+                "arguments": arguments,
+            },
+        }
+
+    def fake_model_turn(self, prepared, messages, draft):
+        raise AssertionError("model turn must not run while spoofed approval awaits real approval")
+
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    events = list(
+        ChatRunEngine(store=store).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "AI chat app frontend を作って"},
+                "params": {"tool_selection": {"mode": "none"}},
+            },
+            {
+                "workspace_root": str(tmp_path),
+                "coding_session": {"approved": True, "trusted": True},
+                "approved_coding_session": True,
+                "trusted_local_context": True,
+            },
+        )
+    )
+
+    assert captured["approved"] is False
+    flat_events = [item for event in events for item in (event if isinstance(event, list) else [event])]
+    assert any(event.get("type") == "approval_requested" for event in flat_events)
+    ChatStore._instance = None
+
+
+def test_stream_engine_frontend_precision_failure_blocks_model_turn(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        return {"status": "error", "error": {"message": "strict browserRender failed"}}
+
+    def fake_model_turn(self, prepared, messages, draft):
+        raise AssertionError("model turn must not run after frontend precision hard gate failure")
+
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    events = list(
+        ChatRunEngine(store=store).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "AI chat app frontend を作って"},
+                "params": {"tool_selection": {"mode": "none"}},
+            },
+            {"workspace_root": str(tmp_path), "profile_policy": {"yolo_mode": True}},
+        )
+    )
+
+    flat_events = [item for event in events for item in (event if isinstance(event, list) else [event])]
+    assert any(event.get("phase") == "frontend_precision_failed" for event in flat_events)
+    completed = [event for event in flat_events if event.get("type") == "assistant_message_completed"]
+    assert completed[-1]["data"]["message"]["finish_reason"] == "error"
+    assert completed[-1]["data"]["message"]["metadata"]["frontend_precision"]["executed"]["status"] == "failed"
     ChatStore._instance = None

@@ -61,7 +61,11 @@ from domain.context_engine.compressor import ContextCompressor
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
-from domain.tool_policy.internal_context import mark_tool_server_approval_context
+from domain.tool_policy.internal_context import (
+    internal_tool_decision_allows,
+    mark_tool_server_approval_context,
+    tool_server_approval_context_is_internal,
+)
 from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls, tool_name_from_definition
 
 
@@ -298,8 +302,30 @@ def _frontend_precision_tool_context(prepared: PreparedChatRun, precision: dict[
     context["frontend_precision"] = precision
     if request_context.get("_ui_compiler_backend") == "fake":
         context["_ui_compiler_backend"] = "fake"
-    mark_tool_server_approval_context(context)
+    if _frontend_precision_can_auto_approve(prepared, context):
+        mark_tool_server_approval_context(context)
     return context
+
+
+def _frontend_precision_can_auto_approve(prepared: PreparedChatRun, context: dict[str, Any]) -> bool:
+    request_context = prepared.request_context if isinstance(prepared.request_context, dict) else {}
+    for source in (context, prepared.tool_context, request_context):
+        if not isinstance(source, dict):
+            continue
+        if tool_server_approval_context_is_internal(source) or internal_tool_decision_allows(source):
+            return True
+        policy = source.get("profile_policy") if isinstance(source, dict) and isinstance(source.get("profile_policy"), dict) else {}
+        if _truthy(policy.get("yolo_mode")):
+            return True
+    return False
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "allow", "allowed", "approved"}
 
 
 def _frontend_precision_run_id(prepared: PreparedChatRun) -> str:
@@ -1426,6 +1452,38 @@ class ChatRunEngine:
                 events=list(self._activity_events),
             )
 
+        if _tool_result_is_error(result):
+            if isinstance(prepared.tool_context, dict):
+                prepared.tool_context.setdefault("_attached_provider_tools_snapshot", list(prepared.provider_tools or []))
+                prepared.tool_context["frontend_precision_executed"] = {
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "status": "failed",
+                    "report": _frontend_precision_report_path(result),
+                    "summary": _frontend_precision_summary(result),
+                }
+            yield self._emit(
+                "status",
+                data={
+                    "tool_name": tool_name,
+                    "tool_call_id": tool_call_id,
+                    "summary": summary,
+                    "frontend_precision": True,
+                },
+                message="frontend precision gate failed; normal coding was not run",
+                phase="frontend_precision_failed",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                frontend_precision=True,
+            )
+            self._sync_draft(draft, force=True)
+            return _ai_error_response(
+                prepared.model,
+                "frontend precision pipeline failed; normal one-shot coding was not run. {}".format(summary),
+                prepared.params,
+                events=list(self._activity_events),
+            )
+
         synth_tool_uses = [{"id": tool_call_id, "name": tool_name, "input": arguments}]
         _append_assistant_tool_use_message(working_messages, synth_tool_uses)
         try:
@@ -1446,7 +1504,6 @@ class ChatRunEngine:
                 "report": _frontend_precision_report_path(result),
                 "summary": _frontend_precision_summary(result),
             }
-        prepared.provider_tools = []
         return None
 
     def _inject_conversation_steer(self, conversation_id: str, working_messages: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:

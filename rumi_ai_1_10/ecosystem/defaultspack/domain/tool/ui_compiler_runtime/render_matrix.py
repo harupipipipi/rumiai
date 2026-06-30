@@ -131,6 +131,11 @@ class RenderMatrixRunner:
                     ):
                         pass
                     else:
+                        metrics["renderer"] = "synthetic"
+                        metrics["browserRenderRequested"] = bool(browser_render)
+                        if browser_render:
+                            metrics["browserRenderFallback"] = True
+                            metrics["browserRenderFallbackReason"] = "browser renderer unavailable or capture failed"
                         _write_png(image_path, width=min(max(viewport, 120), 720), height=180, seed=subject_id + candidate_id)
                         write_json(
                             dom_path,
@@ -346,6 +351,9 @@ def _capture_with_browser(
         write_json(console_path, {"renderer": "playwright", "errors": [str(exc)]})
         return False
     browser_metrics = dict(metrics)
+    browser_metrics["renderer"] = "playwright"
+    browser_metrics["browserRenderRequested"] = True
+    browser_metrics["browserRenderFallback"] = False
     document = dom.get("document") if isinstance(dom, dict) and isinstance(dom.get("document"), dict) else {}
     browser_metrics["scrollWidth"] = int(document.get("scrollWidth") or browser_metrics.get("scrollWidth") or 0)
     browser_metrics["contentWidth"] = int(document.get("clientWidth") or browser_metrics.get("contentWidth") or 0)

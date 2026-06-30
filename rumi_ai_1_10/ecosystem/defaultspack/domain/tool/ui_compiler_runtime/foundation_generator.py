@@ -58,10 +58,11 @@ class FoundationGenerator:
         for index in range(max(1, count)):
             candidate_id = f"foundation-{index + 1}"
             output_dir = run_root / "foundation" / "candidates" / candidate_id
-            specialist_tasks = self._write_specialist_task_manifests(
+            specialist_tasks = self._run_specialist_tasks(
                 run_id=run_id,
                 candidate_id=candidate_id,
                 output_dir=output_dir,
+                context=context,
             )
             task = UIAgentTask(
                 task_id=f"{run_id}-foundation-{index + 1}",
@@ -107,12 +108,13 @@ class FoundationGenerator:
             candidates.append(candidate)
         return candidates
 
-    def _write_specialist_task_manifests(
+    def _run_specialist_tasks(
         self,
         *,
         run_id: str,
         candidate_id: str,
         output_dir: Path,
+        context: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
         manifests: list[dict[str, Any]] = []
         base_dir = output_dir.parent.parent / "specialist-tasks" / candidate_id
@@ -131,9 +133,20 @@ class FoundationGenerator:
                 metadata={"role": role["id"], "stage": "foundation"},
             )
             self.store.save_agent_task(run_id=run_id, task_id=task_id, task=task.to_dict())
+            result = self.backend.run_task(task, context)
             manifest = task.to_dict()
             write_json(role_dir / "task.json", manifest)
-            manifests.append({"role": role["id"], "taskId": task_id, "outputDir": str(role_dir)})
+            write_json(role_dir / "result.json", result.to_dict())
+            if not result.ok:
+                raise RuntimeError(f"foundation specialist task failed: {role['id']}")
+            manifests.append(
+                {
+                    "role": role["id"],
+                    "taskId": task_id,
+                    "outputDir": str(role_dir),
+                    "result": result.to_dict(),
+                }
+            )
         return manifests
 
 

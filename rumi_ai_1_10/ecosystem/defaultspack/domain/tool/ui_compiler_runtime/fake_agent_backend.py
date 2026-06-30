@@ -8,6 +8,21 @@ from domain.ui_compiler import UIAgentResult, UIAgentTask
 from .project_writer import list_relative_files, write_json, write_text
 
 
+SPECIALIST_TASK_KINDS = {
+    "intent",
+    "topology",
+    "semantic-region",
+    "state-audit",
+    "responsive",
+    "accessibility",
+    "text-pressure-audit",
+    "compression-audit",
+    "candidate-selector",
+    "composition",
+    "refinement-selector",
+}
+
+
 class FakeUIAgentBackend:
     """Deterministic backend used by tests and dogfood runs."""
 
@@ -23,6 +38,8 @@ class FakeUIAgentBackend:
         output_dir.mkdir(parents=True, exist_ok=True)
         if task.kind == "foundation":
             self._write_foundation(task, output_dir)
+        elif task.kind.startswith("foundation-") or task.kind in SPECIALIST_TASK_KINDS:
+            self._write_specialist_result(task, output_dir)
         else:
             self._write_component(task, output_dir)
         return UIAgentResult(
@@ -33,6 +50,25 @@ class FakeUIAgentBackend:
             files=list_relative_files(output_dir),
             metadata={"backend": "fake"},
         )
+
+    def _write_specialist_result(self, task: UIAgentTask, output_dir: Path) -> None:
+        role = str(task.metadata.get("role") or task.kind)
+        write_json(
+            output_dir / "specialist-output.json",
+            {
+                "role": role,
+                "kind": task.kind,
+                "taskId": task.task_id,
+                "status": "pass",
+                "summary": f"{role} specialist completed deterministic planning.",
+                "decisions": {
+                    "productMode": "utility",
+                    "density": "compact",
+                    "avoid": ["generic-gradient", "card-abuse", "tiny-font-escape"],
+                },
+            },
+        )
+        write_json(output_dir / "report.json", {"status": "pass", "role": role})
 
     def _write_foundation(self, task: UIAgentTask, output_dir: Path) -> None:
         candidate_id = task.candidate_id

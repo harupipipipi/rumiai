@@ -8,10 +8,11 @@ from tests.ui_compiler_test_utils import build_args, fake_context, fixture_tree,
 from domain.tool.executor import ToolExecutor
 from domain.tool.registry import ToolRegistry
 from domain.tool.ui_compiler_tools import ui_build_recursive
-from domain.tool.ui_compiler_runtime import run_recursive_build
+from domain.tool.ui_compiler_runtime import RecursiveUIBuildOrchestrator, run_recursive_build
 from domain.tool.ui_compiler_runtime.audit_orchestrator import UIQualityAuditOrchestrator
+from domain.tool.ui_compiler_runtime.fake_agent_backend import FakeUIAgentBackend
 from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
-from domain.ui_compiler import RenderMatrix, RenderSnapshot, UIAgentTask
+from domain.ui_compiler import RenderMatrix, RenderSnapshot, UIAgentResult, UIAgentTask
 from domain.ui_compiler.planner import RecursiveUIPlanner
 from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
@@ -125,6 +126,9 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
     assert final["verification"]["lint"] == "passed"
     assert final["verification"]["test"] == "passed"
     assert final["verification"]["build"] == "passed"
+    assert final["applyToProject"]["status"] == "applied"
+    assert (tmp_path / "project" / "src" / "rumi-generated" / "report-run" / "manifest.json").is_file()
+    assert final["generatedFilesSummary"]["appliedProject"]["entryHint"].endswith("App.tsx")
     assert (run_root / "intent.json").is_file()
     assert (run_root / "topology.json").is_file()
     assert (run_root / "split-manifest.json").is_file()
@@ -144,6 +148,114 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
     } <= task_files
     pipeline_tasks = final["generatedFilesSummary"]["plan"].get("pipelineTasks") or []
     assert len(pipeline_tasks) >= 11
+
+
+def test_recursive_build_runs_specialist_tasks_through_backend(tmp_path: Path) -> None:
+    class RecordingBackend(FakeUIAgentBackend):
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def run_task(self, task, context=None):
+            self.calls.append((task.kind, str(task.metadata.get("role") or "")))
+            return super().run_task(task, context)
+
+    backend = RecordingBackend()
+    write_pass_package(tmp_path / "project")
+
+    result = RecursiveUIBuildOrchestrator(agent_backend=backend).run(
+        build_args("specialist-call-run"),
+        workspace_root=tmp_path,
+        authorized=True,
+        context=fake_context(tmp_path),
+    )
+
+    assert result["status"] == "ok"
+    call_keys = {role or kind for kind, role in backend.calls}
+    assert {
+        "product-intent",
+        "typography",
+        "color-system",
+        "spacing-density",
+        "surface-policy",
+        "motion-state",
+        "text-pressure-auditor",
+        "responsive-auditor",
+    } <= call_keys
+
+
+def test_recursive_build_fails_when_pipeline_specialist_fails(tmp_path: Path) -> None:
+    class FailingBackend(FakeUIAgentBackend):
+        def run_task(self, task, context=None):
+            if task.kind == "intent":
+                return UIAgentResult(status="error", task_id=task.task_id, output_dir=task.output_dir, message="intent failed")
+            return super().run_task(task, context)
+
+    write_pass_package(tmp_path / "project")
+
+    result = RecursiveUIBuildOrchestrator(agent_backend=FailingBackend()).run(
+        build_args("specialist-fail-run"),
+        workspace_root=tmp_path,
+        authorized=True,
+        context=fake_context(tmp_path),
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "UI_RECURSIVE_BUILD_FAILED"
+    assert "pipeline specialist task failed" in result["error"]["message"]
+
+
+def test_browser_render_synthetic_fallback_is_reported_as_warning(tmp_path: Path, monkeypatch) -> None:
+    from domain.tool.ui_compiler_runtime import render_matrix as render_module
+
+    monkeypatch.setattr(render_module, "_browser_executable_path", lambda: "")
+    write_pass_package(tmp_path / "project")
+    args = build_args("browser-fallback-warn")
+    args["options"]["browserRender"] = True
+
+    result = ui_build_recursive(args, fake_context(tmp_path))
+    final = json.loads((tmp_path / ".rumi" / "ui" / "runs" / "browser-fallback-warn" / "reports" / "final.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "ok"
+    assert final["browserRender"]["status"] == "warn"
+    assert final["browserRender"]["fallbackCount"] > 0
+
+
+def test_production_strict_browser_render_fallback_fails_build(tmp_path: Path, monkeypatch) -> None:
+    from domain.tool.ui_compiler_runtime import render_matrix as render_module
+
+    monkeypatch.setattr(render_module, "_browser_executable_path", lambda: "")
+    write_pass_package(tmp_path / "project")
+    args = build_args("browser-fallback-fail")
+    args["options"]["browserRender"] = True
+    args["options"]["strictProduction"] = True
+
+    result = ui_build_recursive(args, fake_context(tmp_path))
+    final = json.loads((tmp_path / ".rumi" / "ui" / "runs" / "browser-fallback-fail" / "reports" / "final.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "UI_RECURSIVE_BUILD_FAILED"
+    assert final["browserRender"]["status"] == "fail"
+    assert final["applyToProject"]["status"] == "skipped"
+    assert not (tmp_path / "project" / "src" / "rumi-generated" / "browser-fallback-fail" / "manifest.json").exists()
+
+
+def test_render_matrix_stage_strict_browser_fallback_fails_before_selection(tmp_path: Path, monkeypatch) -> None:
+    from domain.tool.ui_compiler_runtime import render_matrix as render_module
+
+    monkeypatch.setattr(render_module, "_browser_executable_path", lambda: "")
+    write_pass_package(tmp_path / "project")
+    args = build_args("browser-fallback-stage-fail")
+    args["options"]["browserRender"] = True
+    args["options"]["strictProduction"] = True
+    args["options"]["stopAfter"] = "renderMatrix"
+
+    result = ui_build_recursive(args, fake_context(tmp_path))
+    final = json.loads((tmp_path / ".rumi" / "ui" / "runs" / "browser-fallback-stage-fail" / "reports" / "final.json").read_text(encoding="utf-8"))
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "UI_RECURSIVE_BUILD_FAILED"
+    assert final["browserRender"]["status"] == "fail"
+    assert final["browserRender"]["fallbackCount"] > 0
 
 
 def test_quality_audit_fails_text_overload_as_first_class_section() -> None:

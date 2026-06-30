@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -116,7 +117,14 @@ class RecursiveUIBuildOrchestrator:
             store.ensure_run_dirs(plan.run_id)
             artifacts = {
                 **artifacts,
-                **_write_layer_artifacts(store=store, plan=plan, run_root=run_root, ui_tree=root_payload),
+                **_write_layer_artifacts(
+                    store=store,
+                    backend=self.agent_backend,
+                    plan=plan,
+                    run_root=run_root,
+                    ui_tree=root_payload,
+                    context=context,
+                ),
             }
             target_workspace = _target_workspace(workspace, data.get("target"))
             foundation_generator = FoundationGenerator(backend=self.agent_backend, store=store)
@@ -174,7 +182,39 @@ class RecursiveUIBuildOrchestrator:
                     )
                     render_matrices[bundle.candidate_id] = matrix
                 render_matrices_by_node[contract.id] = render_matrices
+            candidate_browser_render_report = _browser_render_report(
+                candidate_matrices=render_matrices_by_node,
+                browser_render_requested=options["browserRender"],
+                strict_production=options["strictProduction"],
+            )
             if options["stopAfter"] == "renderMatrix":
+                render_matrix_extra = {
+                    "browserRender": candidate_browser_render_report,
+                    "renderMatrices": {
+                        node_id: {
+                            candidate_id: matrix.to_dict()
+                            for candidate_id, matrix in matrices.items()
+                        }
+                        for node_id, matrices in render_matrices_by_node.items()
+                    },
+                }
+                if candidate_browser_render_report.get("status") == "fail":
+                    final = _final_report(
+                        plan=plan,
+                        artifacts=artifacts,
+                        status="error",
+                        summary=_summary(plan, foundations, candidate_map, {}, compression_failures=0, build_status="stage-render-matrix"),
+                        accepted_foundation=accepted_foundation.to_dict(),
+                        browser_render=candidate_browser_render_report,
+                    )
+                    final["stage"] = "renderMatrix"
+                    final.update(render_matrix_extra)
+                    report_path = store.save_final_report(run_id=plan.run_id, report=final)
+                    return _error(
+                        "browserRender strict mode failed during candidate render matrix",
+                        "UI_RECURSIVE_BUILD_FAILED",
+                        data={"runId": plan.run_id, "report": report_path, "browserRender": candidate_browser_render_report},
+                    )
                 return _stage_ok(
                     store=store,
                     plan=plan,
@@ -182,15 +222,7 @@ class RecursiveUIBuildOrchestrator:
                     stage="renderMatrix",
                     summary=_summary(plan, foundations, candidate_map, {}, compression_failures=0, build_status="stage-render-matrix"),
                     accepted_foundation=accepted_foundation.to_dict(),
-                    extra={
-                        "renderMatrices": {
-                            node_id: {
-                                candidate_id: matrix.to_dict()
-                                for candidate_id, matrix in matrices.items()
-                            }
-                            for node_id, matrices in render_matrices_by_node.items()
-                        }
-                    },
+                    extra=render_matrix_extra,
                 )
             for contract in plan.contracts():
                 inspections = {}
@@ -350,6 +382,7 @@ class RecursiveUIBuildOrchestrator:
                     accepted_foundation=accepted_foundation.to_dict(),
                     accepted={node_id: decision.to_dict() for node_id, decision in accepted.items()},
                     composition=composition.to_dict(),
+                    apply_report={"status": "skipped", "reason": "stopped before final verification gates"},
                     inspections=inspections_by_node,
                 )
             page_manifest = composition.to_dict()
@@ -374,11 +407,21 @@ class RecursiveUIBuildOrchestrator:
                 page_compression=page_compression,
                 accepted_count=len(accepted),
             )
+            browser_render_report = _browser_render_report(
+                page_matrix=page_matrix,
+                candidate_matrices=render_matrices_by_node,
+                browser_render_requested=options["browserRender"],
+                strict_production=options["strictProduction"],
+            )
             verification_compression = dict(page_compression)
             if quality_audit.get("status") != "pass":
                 verification_compression["status"] = "fail"
                 verification_compression["qualityAuditStatus"] = quality_audit.get("status")
                 verification_compression["failedAudits"] = quality_audit.get("failedAudits", [])
+            if browser_render_report.get("status") == "fail":
+                verification_compression["status"] = "fail"
+                verification_compression["browserRenderStatus"] = "fail"
+                verification_compression["browserRender"] = browser_render_report
             verification = self.verifier.verify(
                 workspace=target_workspace,
                 render_matrix=page_matrix,
@@ -386,6 +429,17 @@ class RecursiveUIBuildOrchestrator:
                 run_build=options["runBuild"],
             )
             status = "ok" if verification.passed else "error"
+            verification_payload = verification.to_dict()
+            apply_report = {"status": "skipped", "reason": "applyToProject disabled"}
+            if options["applyToProject"]:
+                if verification.passed:
+                    apply_report = _apply_to_project(run_id=plan.run_id, run_root=run_root, target_workspace=target_workspace)
+                    if apply_report.get("status") != "applied":
+                        status = "error"
+                        verification_payload["applyToProject"] = "failed"
+                        verification_payload["applyToProjectReport"] = apply_report
+                else:
+                    apply_report = {"status": "skipped", "reason": "verification failed before project apply"}
             final = _final_report(
                 plan=plan,
                 artifacts=artifacts,
@@ -406,9 +460,11 @@ class RecursiveUIBuildOrchestrator:
                 accepted_foundation=accepted_foundation.to_dict(),
                 accepted={node_id: decision.to_dict() for node_id, decision in accepted.items()},
                 composition=composition.to_dict(),
+                apply_report=apply_report,
                 page_compression=page_compression,
+                browser_render=browser_render_report,
                 quality_audit=quality_audit,
-                verification=verification.to_dict(),
+                verification=verification_payload,
                 inspections=inspections_by_node,
             )
             report_path = store.save_final_report(run_id=plan.run_id, report=final)
@@ -416,7 +472,7 @@ class RecursiveUIBuildOrchestrator:
                 return _error(
                     "recursive UI build verification failed",
                     "UI_RECURSIVE_BUILD_FAILED",
-                    data={"runId": plan.run_id, "report": report_path, "verification": verification.to_dict()},
+                    data={"runId": plan.run_id, "report": report_path, "verification": verification_payload},
                 )
             return {
                 "status": "ok",
@@ -458,6 +514,7 @@ _ALLOWED_KEYS = {
     "idempotency_key",
     "idempotencyKey",
     "options",
+    "config",
 }
 
 
@@ -486,6 +543,8 @@ def _options(value: Any) -> dict[str, Any]:
         "scenarios": _str_list(data.get("scenarios"), DEFAULT_SCENARIOS, 8),
         "textScales": _float_list(data.get("textScales"), DEFAULT_TEXT_SCALES, 6),
         "runBuild": bool(data.get("runBuild", True)),
+        "applyToProject": bool(data.get("applyToProject", True)),
+        "strictProduction": bool(data.get("strictProduction", False)),
         "stopAfter": _stage_name(data.get("stopAfter") or data.get("stop_after")),
         "browserRender": bool(data.get("browserRender") or data.get("browser_render")),
     }
@@ -545,7 +604,9 @@ def _final_report(
     accepted_foundation: dict[str, Any] | None = None,
     accepted: dict[str, Any] | None = None,
     composition: dict[str, Any] | None = None,
+    apply_report: dict[str, Any] | None = None,
     page_compression: dict[str, Any] | None = None,
+    browser_render: dict[str, Any] | None = None,
     quality_audit: dict[str, Any] | None = None,
     verification: dict[str, Any] | None = None,
     inspections: dict[str, Any] | None = None,
@@ -554,6 +615,7 @@ def _final_report(
     audits = quality_audit if isinstance(quality_audit, dict) else {}
     accepted_payload = accepted or {}
     verification_payload = verification or {}
+    apply_payload = apply_report if isinstance(apply_report, dict) else {}
     return {
         "status": status,
         "runId": plan.run_id,
@@ -573,7 +635,9 @@ def _final_report(
         "accepted": accepted or {},
         "acceptedSelection": accepted_payload,
         "composition": composition or {},
+        "applyToProject": apply_payload,
         "pageCompression": page_compression or {},
+        "browserRender": browser_render or {},
         "compression": audits.get("compression", page_compression or {}),
         "textPressure": audits.get("textPressure", {}),
         "typography": audits.get("typography", {}),
@@ -587,6 +651,7 @@ def _final_report(
             plan=plan,
             artifacts=artifacts,
             composition=composition or {},
+            apply_report=apply_payload,
             verification=verification_payload,
         ),
         "recursiveSplitSummary": _recursive_split_summary(plan),
@@ -609,9 +674,11 @@ def _final_report(
 def _write_layer_artifacts(
     *,
     store: UICompilerArtifactStore,
+    backend: UIAgentBackend,
     plan: UIPlan,
     run_root: Path,
     ui_tree: dict[str, Any],
+    context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     run_prefix = f".rumi/ui/runs/{plan.run_id}"
     intent = _intent_artifact(plan)
@@ -620,7 +687,13 @@ def _write_layer_artifacts(
     write_json(run_root / "intent.json", intent)
     write_json(run_root / "topology.json", topology)
     write_json(run_root / "split-manifest.json", split)
-    pipeline_tasks = _save_pipeline_specialist_tasks(store=store, plan=plan, run_root=run_root)
+    pipeline_tasks = _save_pipeline_specialist_tasks(
+        store=store,
+        backend=backend,
+        plan=plan,
+        run_root=run_root,
+        context=context,
+    )
     return {
         "intent": f"{run_prefix}/intent.json",
         "topology": f"{run_prefix}/topology.json",
@@ -647,8 +720,10 @@ PIPELINE_SPECIALIST_TASKS = [
 def _save_pipeline_specialist_tasks(
     *,
     store: UICompilerArtifactStore,
+    backend: UIAgentBackend,
     plan: UIPlan,
     run_root: Path,
+    context: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = []
     for role_id, kind, prompt in PIPELINE_SPECIALIST_TASKS:
@@ -667,13 +742,18 @@ def _save_pipeline_specialist_tasks(
         )
         payload = task.to_dict()
         store.save_agent_task(run_id=plan.run_id, task_id=task_id, task=payload)
+        result = backend.run_task(task, context)
         write_json(output_dir / "task.json", payload)
+        write_json(output_dir / "result.json", result.to_dict())
+        if not result.ok:
+            raise RuntimeError(f"pipeline specialist task failed: {role_id}")
         tasks.append(
             {
                 "role": role_id,
                 "kind": kind,
                 "taskId": task_id,
                 "outputDir": f".rumi/ui/runs/{plan.run_id}/pipeline-tasks/{role_id}",
+                "result": result.to_dict(),
             }
         )
     return tasks
@@ -784,6 +864,7 @@ def _generated_files_summary(
     plan: UIPlan,
     artifacts: dict[str, Any],
     composition: dict[str, Any],
+    apply_report: dict[str, Any],
     verification: dict[str, Any],
 ) -> dict[str, Any]:
     return {
@@ -803,6 +884,7 @@ def _generated_files_summary(
             "imports": len(composition.get("imports") if isinstance(composition.get("imports"), list) else []),
             "slotMappings": len(composition.get("slotMappings") if isinstance(composition.get("slotMappings"), list) else []),
         },
+        "appliedProject": apply_report,
         "finalReport": f".rumi/ui/runs/{plan.run_id}/reports/final.json",
         "npm": {
             "lint": verification.get("lint"),
@@ -914,6 +996,97 @@ def _failed_retried_candidate_summary(accepted: dict[str, Any]) -> dict[str, Any
     }
 
 
+def _browser_render_report(
+    *,
+    page_matrix: Any | None = None,
+    candidate_matrices: dict[str, dict[str, Any]] | None = None,
+    browser_render_requested: bool,
+    strict_production: bool,
+) -> dict[str, Any]:
+    snapshots: list[dict[str, Any]] = []
+    if page_matrix is not None:
+        snapshots.extend(_snapshot_payloads(page_matrix, source="page"))
+    for node_id, matrices in (candidate_matrices or {}).items():
+        if not isinstance(matrices, dict):
+            continue
+        for candidate_id, matrix in matrices.items():
+            snapshots.extend(_snapshot_payloads(matrix, source="candidate", node_id=node_id, candidate_id=candidate_id))
+    fallback = [snapshot for snapshot in snapshots if bool(snapshot.get("metrics", {}).get("browserRenderFallback"))]
+    renderers = sorted({
+        str(snapshot.get("metrics", {}).get("renderer") or "unknown")
+        for snapshot in snapshots
+    })
+    if not browser_render_requested:
+        status = "skipped"
+    elif fallback and strict_production:
+        status = "fail"
+    elif fallback:
+        status = "warn"
+    else:
+        status = "pass"
+    return {
+        "status": status,
+        "browserRenderRequested": bool(browser_render_requested),
+        "strictProduction": bool(strict_production),
+        "renderers": renderers,
+        "fallbackCount": len(fallback),
+        "fallbackPolicy": "fail" if strict_production else "warn",
+        "issues": [
+            {
+                "severity": "blocker" if strict_production else "warning",
+                "message": "browserRender requested but synthetic fallback was used",
+                "evidence": {
+                    "snapshotCount": len(fallback),
+                    "firstSnapshot": fallback[0] if fallback else None,
+                },
+            }
+        ] if fallback else [],
+    }
+
+
+def _snapshot_payloads(matrix: Any, *, source: str, node_id: str = "", candidate_id: str = "") -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for snapshot in list(getattr(matrix, "snapshots", []) or []):
+        payload = snapshot.to_dict()
+        payload["source"] = source
+        if node_id:
+            payload["nodeId"] = node_id
+        if candidate_id:
+            payload["candidateId"] = candidate_id
+        payloads.append(payload)
+    return payloads
+
+
+def _apply_to_project(*, run_id: str, run_root: Path, target_workspace: Path) -> dict[str, Any]:
+    source_root = run_root / "composition" / "source"
+    accepted_root = run_root / "accepted"
+    if not source_root.is_dir() or not accepted_root.is_dir():
+        return {
+            "status": "skipped",
+            "reason": "composition or accepted bundles missing",
+        }
+    destination = target_workspace / "src" / "rumi-generated" / run_id
+    if destination.exists():
+        shutil.rmtree(destination)
+    (destination / "composition").mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_root, destination / "composition" / "source")
+    shutil.copytree(accepted_root, destination / "accepted")
+    manifest = {
+        "status": "applied",
+        "runId": run_id,
+        "compositionSource": str((destination / "composition" / "source").relative_to(target_workspace)),
+        "acceptedBundles": str((destination / "accepted").relative_to(target_workspace)),
+        "entryHint": str((destination / "composition" / "source" / "App.tsx").relative_to(target_workspace)),
+        "leafSourceEdited": False,
+    }
+    write_json(destination / "manifest.json", manifest)
+    return {
+        **manifest,
+        "targetRoot": str(target_workspace),
+        "appliedPath": str(destination.relative_to(target_workspace)),
+    }
+
+
 def _positive_int(value: Any, default: int, min_value: int, max_value: int) -> int:
     try:
         parsed = int(value)
@@ -989,6 +1162,7 @@ def _stage_ok(
     accepted_foundation: dict[str, Any] | None = None,
     accepted: dict[str, Any] | None = None,
     composition: dict[str, Any] | None = None,
+    apply_report: dict[str, Any] | None = None,
     inspections: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -1000,6 +1174,7 @@ def _stage_ok(
         accepted_foundation=accepted_foundation,
         accepted=accepted,
         composition=composition,
+        apply_report=apply_report,
         inspections=inspections,
     )
     final["stage"] = stage
@@ -1019,6 +1194,8 @@ def _stage_ok(
         data["accepted"] = accepted
     if composition:
         data["composition"] = composition
+    if apply_report:
+        data["applyToProject"] = apply_report
     return {
         "status": "ok",
         "data": data,
