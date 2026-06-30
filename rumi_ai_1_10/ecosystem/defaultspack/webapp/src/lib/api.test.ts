@@ -120,9 +120,13 @@ test("saveCodexAppServerConfig serializes safe endpoint config", async () => {
 
   try {
     await api.saveCodexAppServerConfig({
+      transport: "websocket_loopback",
       enabled: true,
       baseUrl: "http://127.0.0.1:7331",
       websocketUrl: "ws://127.0.0.1:7331/ws",
+      unixSocketPath: "",
+      wsTokenFile: "/Users/haru/.config/rumi/codex-app-server.token",
+      sharedSecretFile: "",
       toolSourceEnabled: true,
       automationEndpointEnabled: false,
     });
@@ -134,9 +138,13 @@ test("saveCodexAppServerConfig serializes safe endpoint config", async () => {
   assert.deepEqual(requestBody, {
     action: "save_app_server",
     app_server: {
+      transport: "websocket_loopback",
       enabled: true,
       base_url: "http://127.0.0.1:7331",
       websocket_url: "ws://127.0.0.1:7331/ws",
+      unix_socket_path: "",
+      ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+      shared_secret_file: "",
       tool_source_enabled: true,
       automation_endpoint_enabled: false,
     },

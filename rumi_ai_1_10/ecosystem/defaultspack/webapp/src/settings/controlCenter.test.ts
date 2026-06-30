@@ -223,14 +223,20 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
       codex_app_server: {
         configured: true,
         enabled: true,
+        transport: "websocket_remote",
         connection_status: "blocked_auth_required",
         status_label: "Auth required",
-        blocked_reason: "Save Codex access token before using a non-loopback websocket.",
+        blocked_reason: "Configure a Codex App Server WS token or shared secret before using a non-loopback endpoint.",
         base_url: "https://codex-app.example.test",
         websocket_url: "wss://codex-app.example.test/ws",
+        unix_socket_path: "",
         loopback: false,
         auth_required: true,
         auth_configured: false,
+        auth_source: "missing",
+        auth_kind: "",
+        ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+        shared_secret_file: "",
         tool_source: { status: "blocked_auth_required" },
         automation_endpoint: { status: "disabled" },
       },
@@ -239,10 +245,13 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
 
   assert.equal(prelude.configured, true);
   assert.equal(prelude.enabled, true);
+  assert.equal(prelude.transport, "websocket_remote");
   assert.equal(prelude.status, "blocked_auth_required");
   assert.equal(prelude.statusLabel, "Auth required");
   assert.equal(prelude.loopback, false);
   assert.equal(prelude.authRequired, true);
+  assert.equal(prelude.authSource, "missing");
+  assert.equal(prelude.wsTokenFile, "/Users/haru/.config/rumi/codex-app-server.token");
   assert.equal(prelude.authConfigured, false);
   assert.equal(prelude.toolSourceStatus, "blocked_auth_required");
   assert.equal(prelude.automationEndpointStatus, "disabled");

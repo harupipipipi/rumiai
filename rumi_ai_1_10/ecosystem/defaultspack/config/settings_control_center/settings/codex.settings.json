@@ -10,14 +10,14 @@
         "ja": "Codex access token"
       },
       "description": {
-        "en": "Credential for Codex local and programmatic workflows. This is not a Platform API key or Workspace Agent token.",
-        "ja": "Codex local/programmatic workflow 用の credential。Platform API key や Workspace Agent token ではありません。"
+        "en": "Credential for Codex local and programmatic workflows. This is not a Platform API key, Workspace Agent token, or Codex App Server auth secret.",
+        "ja": "Codex local/programmatic workflow 用の credential。Platform API key、Workspace Agent token、Codex App Server auth secret ではありません。"
       },
       "section": "accounts_connections",
       "priority": 50,
       "frequency": "weekly",
       "audience": "normal",
-      "risk": "medium",
+      "risk": "high",
       "component": "AccountsConnectionsPanel.CodexTokenCard",
       "requires": [
         "provider.codex"
@@ -29,7 +29,12 @@
         "credential",
         "local workflow",
         "programmatic workflow"
-      ]
+      ],
+      "metadata": {
+        "credential_kind": "codex_access_token",
+        "separate_from": "codex_app_server_auth",
+        "risk_reason": "A configured Codex token can enable local/programmatic coding workflows and must not be reused as App Server auth."
+      }
     },
     {
       "id": "codex.tools.app_server",
@@ -39,14 +44,14 @@
         "ja": "Codex App Server"
       },
       "description": {
-        "en": "Configure Codex App Server as a Tools & MCP tool source and automation endpoint.",
-        "ja": "Codex App Server を Tools & MCP の tool source / automation endpoint として設定します。"
+        "en": "Configure Codex App Server as a Tools & MCP tool source and automation endpoint. Remote endpoints require separate App Server auth.",
+        "ja": "Codex App Server を Tools & MCP の tool source / automation endpoint として設定します。remote endpoint には別の App Server auth が必要です。"
       },
       "section": "tools_mcp",
       "priority": 45,
       "frequency": "weekly",
       "audience": "normal",
-      "risk": "medium",
+      "risk": "high",
       "component": "ToolsMcpPanel.CodexAppServerCard",
       "requires": [
         "connection.codex"
@@ -58,8 +63,18 @@
         "mcp",
         "tool source",
         "automation endpoint",
-        "websocket"
-      ]
+        "websocket",
+        "stdio",
+        "unix",
+        "shared secret"
+      ],
+      "metadata": {
+        "tool_source_kind": "codex_app_server",
+        "automation_endpoint": true,
+        "auth_secret_kind": "codex_app_server_secret",
+        "transport_modes": ["off", "stdio", "unix", "websocket_loopback", "websocket_remote"],
+        "risk_reason": "Codex App Server can enable high-impact automation through approval and execution capabilities."
+      }
     }
   ]
 }

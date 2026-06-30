@@ -1069,13 +1069,19 @@ test("settings tools prelude renders Codex App Server status and controls", () =
           codex_app_server: {
             configured: true,
             enabled: true,
+            transport: "websocket_loopback",
             connection_status: "configured",
             status_label: "Configured",
             base_url: "http://127.0.0.1:7331",
             websocket_url: "ws://127.0.0.1:7331/ws",
+            unix_socket_path: "",
             loopback: true,
             auth_required: false,
             auth_configured: true,
+            auth_source: "file",
+            auth_kind: "ws_token",
+            ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+            shared_secret_file: "",
             tool_source: { status: "configured" },
             automation_endpoint: { status: "configured" },
           },
@@ -1091,6 +1097,8 @@ test("settings tools prelude renders Codex App Server status and controls", () =
   assert.match(html, /Tool source: configured; automation endpoint: configured/);
   assert.match(html, /http:\/\/127\.0\.0\.1:7331/);
   assert.match(html, /ws:\/\/127\.0\.0\.1:7331\/ws/);
+  assert.match(html, /websocket_loopback/);
+  assert.match(html, /ws_token via file/);
   assert.match(html, /Save config/);
   assert.match(html, /Probe/);
   assert.doesNotMatch(html, new RegExp(rawToken));

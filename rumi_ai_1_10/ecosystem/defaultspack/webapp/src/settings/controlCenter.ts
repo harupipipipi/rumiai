@@ -80,14 +80,20 @@ export type AccountConnectionPreludeCard = {
 export type CodexAppServerPrelude = {
   configured: boolean;
   enabled: boolean;
+  transport: "off" | "stdio" | "unix" | "websocket_loopback" | "websocket_remote";
   statusLabel: string;
   status: string;
   blockedReason: string;
   baseUrl: string;
   websocketUrl: string;
+  unixSocketPath: string;
   loopback: boolean;
   authRequired: boolean;
   authConfigured: boolean;
+  authSource: string;
+  authKind: string;
+  wsTokenFile: string;
+  sharedSecretFile: string;
   toolSourceStatus: string;
   automationEndpointStatus: string;
 };
@@ -612,17 +618,30 @@ export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}):
   const configured = Boolean(appServer.configured);
   const enabled = Boolean(appServer.enabled);
   const status = String(appServer.connection_status || (configured ? "configured" : "not_configured"));
+  const transport = String(appServer.transport || "off");
+  const normalizedTransport: CodexAppServerPrelude["transport"] = (
+    transport === "stdio"
+    || transport === "unix"
+    || transport === "websocket_loopback"
+    || transport === "websocket_remote"
+  ) ? transport : "off";
   return {
     configured,
     enabled,
+    transport: normalizedTransport,
     statusLabel: String(appServer.status_label || (configured ? "Configured" : "Not configured")),
     status,
     blockedReason: String(appServer.blocked_reason || ""),
     baseUrl: String(appServer.base_url || ""),
     websocketUrl: String(appServer.websocket_url || ""),
+    unixSocketPath: String(appServer.unix_socket_path || ""),
     loopback: appServer.loopback !== false,
     authRequired: Boolean(appServer.auth_required),
     authConfigured: Boolean(appServer.auth_configured),
+    authSource: String(appServer.auth_source || "missing"),
+    authKind: String(appServer.auth_kind || ""),
+    wsTokenFile: String(appServer.ws_token_file || ""),
+    sharedSecretFile: String(appServer.shared_secret_file || ""),
     toolSourceStatus: String(toolSource.status || "disabled"),
     automationEndpointStatus: String(automationEndpoint.status || "disabled"),
   };

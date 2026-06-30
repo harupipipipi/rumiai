@@ -74,6 +74,16 @@ DELETE /api/connections/:connection_id
 - Credential records use `credential_ref`, not raw values.
 - Scope/capability display uses metadata, not token introspection text.
 
+## Codex credential boundary
+
+Codex has two separate settings concepts:
+
+- **Codex access token** is an `accounts_connections` credential for local and programmatic Codex workflows. It is read from `RUMI_CODEX_ACCESS_TOKEN`, `CODEX_ACCESS_TOKEN`, or the local secret store and must never be sent to Codex App Server endpoints.
+- **Codex App Server** is a `tools_mcp` tool source and automation endpoint. It can expose coding-thread, event-stream, approval, and execution capabilities through transports such as `stdio`, `unix`, `websocket_loopback`, and `websocket_remote`.
+- **Codex App Server auth secret** is separate from the Codex access token. Remote or otherwise non-loopback App Server endpoints require `RUMI_CODEX_APP_SERVER_WS_TOKEN`, `RUMI_CODEX_APP_SERVER_SHARED_SECRET`, or matching `*_FILE` paths.
+- **Codex action approvals** belong to Tools & MCP permission policy, not Accounts & Connections login state.
+- **Codex automation readiness** belongs in the Computer & Automation summary because it describes whether high-impact automation can actually run.
+
 ## Cloudflare
 
 Use cases:

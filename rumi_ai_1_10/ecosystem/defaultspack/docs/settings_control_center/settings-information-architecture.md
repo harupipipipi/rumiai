@@ -27,13 +27,19 @@ Model roles, provider API keys, routing, fallback, token policy.
 
 OAuth/API-key connections: Cloudflare, Google, Gmail, Drive, GitHub, Slack, Notion, custom providers.
 
+Codex access token is an Accounts & Connections credential for Codex local/programmatic workflows. It is not Codex App Server auth.
+
 ### Tools & MCP
 
 Tool providers, MCP servers, discovered tool list, tool enable/disable, tool approval policy.
 
+Codex App Server lives here as a tool source and automation endpoint. Its auth secret is separate from the Codex access token, and non-loopback endpoints must show `blocked_auth_required` until App Server-specific auth is configured. Codex action approvals, including approval responses and execution grants, are Tools & MCP permission policy.
+
 ### Computer & Automation
 
 Screen observation, clicking/typing/scrolling, browser automation, cloud continuation, checkpoint/resume, local permissions.
+
+Codex automation readiness is summarized here because it answers whether approval-aware coding automation can run, not whether an account token exists.
 
 ### Workspace & UI
 
@@ -74,3 +80,4 @@ Logs, health checks, debug JSON, migration diagnostics.
 - Debug flags in normal-user top-level.
 - Visual-only settings above functional settings.
 - MCP server and OAuth account represented as the same thing.
+- Codex access token reused or displayed as Codex App Server auth.

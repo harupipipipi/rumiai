@@ -55,7 +55,7 @@ def test_codex_token_status_and_route_responses_redact_raw_token():
                     assert token not in path.read_text(encoding="utf-8", errors="ignore")
 
 
-def test_codex_app_server_rejects_non_loopback_websocket_without_token():
+def test_codex_app_server_remote_endpoint_requires_app_server_auth_not_codex_token():
     from domain.codex.app_server import codex_app_server_status, save_codex_app_server_config
     from domain.codex.connection_store import save_codex_access_token
 
@@ -63,26 +63,31 @@ def test_codex_app_server_rejects_non_loopback_websocket_without_token():
         pack_root = Path(tmpdir)
         secrets_dir = pack_root / "user_data" / "secrets"
         token = _fresh_token()
+        app_secret = _fresh_token()
         env = {
             "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
             "RUMI_CODEX_ACCESS_TOKEN": "",
             "CODEX_ACCESS_TOKEN": "",
+            "RUMI_CODEX_APP_SERVER_WS_TOKEN": "",
+            "RUMI_CODEX_APP_SERVER_SHARED_SECRET": "",
         }
         with patch.dict(os.environ, env, clear=False):
-            rejected = save_codex_app_server_config(
+            saved_without_app_auth = save_codex_app_server_config(
                 {
                     "enabled": True,
                     "base_url": "https://codex-app.example.test",
-                    "websocket_url": "wss://codex-app.example.test/ws",
                     "tool_source_enabled": True,
                     "automation_endpoint_enabled": True,
                 },
                 pack_root=pack_root,
             )
             save_codex_access_token(token, pack_root=pack_root)
-            accepted = save_codex_app_server_config(
+            status_with_only_codex_token = codex_app_server_status(pack_root=pack_root)
+        with patch.dict(os.environ, {**env, "RUMI_CODEX_APP_SERVER_WS_TOKEN": app_secret}, clear=False):
+            saved_with_app_auth = save_codex_app_server_config(
                 {
                     "enabled": True,
+                    "transport": "websocket_remote",
                     "base_url": "https://codex-app.example.test",
                     "websocket_url": "wss://codex-app.example.test/ws",
                     "tool_source_enabled": True,
@@ -92,13 +97,123 @@ def test_codex_app_server_rejects_non_loopback_websocket_without_token():
             )
             status = codex_app_server_status(pack_root=pack_root)
 
-    assert rejected["success"] is False
-    assert rejected["code"] == "AUTH_REQUIRED_FOR_NON_LOOPBACK_WEBSOCKET"
-    assert accepted["success"] is True
+    assert saved_without_app_auth["success"] is True
+    assert saved_without_app_auth["app_server"]["connection_status"] == "blocked_auth_required"
+    assert status_with_only_codex_token["connection_status"] == "blocked_auth_required"
+    assert status_with_only_codex_token["auth_configured"] is False
+    assert saved_with_app_auth["success"] is True
     assert status["auth_required"] is True
     assert status["auth_configured"] is True
-    assert token not in _text(accepted)
+    assert status["auth_source"] == "environment"
+    assert status["auth_kind"] == "ws_token"
+    assert token not in _text(saved_with_app_auth)
     assert token not in _text(status)
+    assert app_secret not in _text(saved_with_app_auth)
+    assert app_secret not in _text(status)
+
+
+def test_codex_app_server_probe_never_uses_codex_access_token_for_app_server_auth():
+    from domain.codex.app_server import codex_app_server_probe, save_codex_app_server_config
+    from domain.codex.connection_store import save_codex_access_token
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        secrets_dir = pack_root / "user_data" / "secrets"
+        codex_token = _fresh_token()
+        app_secret = _fresh_token()
+        captured_headers: dict[str, str] = {}
+        env = {
+            "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+            "RUMI_CODEX_ACCESS_TOKEN": "",
+            "CODEX_ACCESS_TOKEN": "",
+            "RUMI_CODEX_APP_SERVER_WS_TOKEN": "",
+            "RUMI_CODEX_APP_SERVER_SHARED_SECRET": "",
+        }
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            captured_headers.update(dict(request.header_items()))
+            return FakeResponse()
+
+        with patch.dict(os.environ, env, clear=False):
+            save_codex_access_token(codex_token, pack_root=pack_root)
+            save_codex_app_server_config(
+                {
+                    "enabled": True,
+                    "transport": "websocket_remote",
+                    "base_url": "https://codex-app.example.test",
+                    "websocket_url": "wss://codex-app.example.test/ws",
+                },
+                pack_root=pack_root,
+            )
+            blocked = codex_app_server_probe(pack_root=pack_root)
+
+        with patch.dict(os.environ, {**env, "RUMI_CODEX_APP_SERVER_WS_TOKEN": app_secret}, clear=False):
+            with patch("urllib.request.urlopen", fake_urlopen):
+                probed = codex_app_server_probe(pack_root=pack_root)
+
+    assert blocked["probe"]["status"] == "blocked_auth_required"
+    assert probed["probe"]["status"] == "ok"
+    assert captured_headers["Authorization"] == f"Bearer {app_secret}"
+    assert codex_token not in _text(captured_headers)
+    assert app_secret not in _text(probed)
+
+
+def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_path):
+    from domain.codex.app_server import build_codex_app_server_command, codex_app_server_status, save_codex_app_server_config
+
+    app_secret = _fresh_token()
+    token_file = tmp_path / "codex-app-server.token"
+    token_file.write_text(app_secret, encoding="utf-8")
+
+    assert build_codex_app_server_command({}) == []
+
+    command = build_codex_app_server_command(
+        {
+            "enabled": True,
+            "transport": "unix",
+            "unix_socket_path": "/tmp/rumi-codex.sock",
+            "ws_token_file": str(token_file),
+            "ws_token": app_secret,
+        }
+    )
+
+    assert command == [
+        "codex",
+        "app-server",
+        "unix",
+        "--socket",
+        "/tmp/rumi-codex.sock",
+        "--ws-token-file",
+        str(token_file),
+    ]
+    assert app_secret not in _text(command)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        saved = save_codex_app_server_config(
+            {
+                "enabled": True,
+                "transport": "stdio",
+                "tool_source_enabled": True,
+            },
+            pack_root=pack_root,
+        )
+        status = codex_app_server_status(pack_root=pack_root)
+
+    assert saved["success"] is True
+    assert status["transport"] == "stdio"
+    assert status["connection_status"] == "configured"
+    assert status["command"] == ["codex", "app-server", "stdio"]
 
 
 def test_frontend_registry_drops_client_supplied_codex_secret_payloads():

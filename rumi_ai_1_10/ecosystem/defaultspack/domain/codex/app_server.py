@@ -1,20 +1,42 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
-from typing import Any
-from urllib.parse import urlsplit
+import os
 import ipaddress
 import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Any
+from urllib.parse import urlsplit
 
-from .connection_store import codex_connection_status, read_codex_access_token
 
-
+TRANSPORTS = {"off", "stdio", "unix", "websocket_loopback", "websocket_remote"}
+_APP_SERVER_WS_TOKEN_KEY = "RUMICODEX_APP_SERVER_WS_TOKEN"
+_APP_SERVER_SHARED_SECRET_KEY = "RUMICODEX_APP_SERVER_SHARED_SECRET"
+_APP_SERVER_AUTH_ENV = (
+    (
+        "ws_token",
+        "RUMI_CODEX_APP_SERVER_WS_TOKEN",
+        "RUMI_CODEX_APP_SERVER_WS_TOKEN_FILE",
+        "ws_token_file",
+        _APP_SERVER_WS_TOKEN_KEY,
+    ),
+    (
+        "shared_secret",
+        "RUMI_CODEX_APP_SERVER_SHARED_SECRET",
+        "RUMI_CODEX_APP_SERVER_SHARED_SECRET_FILE",
+        "shared_secret_file",
+        _APP_SERVER_SHARED_SECRET_KEY,
+    ),
+)
 _DEFAULT_CONFIG = {
+    "transport": "off",
     "enabled": False,
     "base_url": "",
     "websocket_url": "",
+    "unix_socket_path": "",
+    "ws_token_file": "",
+    "shared_secret_file": "",
     "tool_source_enabled": False,
     "automation_endpoint_enabled": False,
 }
@@ -26,6 +48,19 @@ def _pack_root() -> Path:
 
 def _config_path(pack_root: Path | None = None) -> Path:
     return (pack_root or _pack_root()) / "user_data" / "settings" / "codex_app_server.json"
+
+
+def _secrets_dir(pack_root: Path | None = None) -> Path:
+    override = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
+    if override:
+        return Path(override)
+    return (pack_root or _pack_root()) / "user_data" / "secrets"
+
+
+def _get_store(pack_root: Path | None = None):
+    from core_runtime.secrets_store import SecretsStore
+
+    return SecretsStore(str(_secrets_dir(pack_root)))
 
 
 def _read_config(pack_root: Path | None = None) -> dict[str, Any]:
@@ -77,34 +112,171 @@ def _url_is_loopback(url: str) -> bool:
     return _hostname_is_loopback(parsed.hostname or "")
 
 
+def _normalize_path(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _infer_transport(payload: dict[str, Any], *, base_url: str, websocket_url: str, unix_socket_path: str) -> str:
+    explicit = str(payload.get("transport") or payload.get("mode") or "").strip().lower()
+    if explicit in TRANSPORTS:
+        return explicit
+    enabled = _bool(payload.get("enabled"))
+    if not enabled:
+        return "off"
+    if websocket_url:
+        return "websocket_loopback" if _url_is_loopback(websocket_url) else "websocket_remote"
+    if base_url:
+        return "websocket_loopback" if _url_is_loopback(base_url) else "websocket_remote"
+    if unix_socket_path:
+        return "unix"
+    return "off"
+
+
 def _normalize_config(payload: dict[str, Any]) -> dict[str, Any]:
-    base_url = _normalize_url(payload.get("base_url"), allowed_schemes={"http", "https"})
+    base_url = _normalize_url(
+        payload.get("base_url") or payload.get("server_url"),
+        allowed_schemes={"http", "https"},
+    )
     websocket_url = _normalize_url(payload.get("websocket_url"), allowed_schemes={"ws", "wss"})
+    unix_socket_path = _normalize_path(payload.get("unix_socket_path") or payload.get("socket_path"))
+    transport = _infer_transport(
+        payload,
+        base_url=base_url,
+        websocket_url=websocket_url,
+        unix_socket_path=unix_socket_path,
+    )
+    enabled = False if transport == "off" else _bool(payload.get("enabled"))
     return {
-        "enabled": _bool(payload.get("enabled")),
+        "transport": transport,
+        "enabled": enabled,
         "base_url": base_url,
         "websocket_url": websocket_url,
+        "unix_socket_path": unix_socket_path,
+        "ws_token_file": _normalize_path(payload.get("ws_token_file") or payload.get("auth_token_file")),
+        "shared_secret_file": _normalize_path(payload.get("shared_secret_file")),
         "tool_source_enabled": _bool(payload.get("tool_source_enabled")),
         "automation_endpoint_enabled": _bool(payload.get("automation_endpoint_enabled")),
     }
 
 
-def _non_loopback_websocket_without_auth(config: dict[str, Any], *, pack_root: Path | None = None) -> bool:
+def _read_secret_file(path_text: str) -> str:
+    path = Path(path_text).expanduser()
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _read_stored_secret(keys: tuple[str, ...], *, pack_root: Path | None = None) -> tuple[str, str]:
+    for key in keys:
+        try:
+            value = str(
+                _get_store(pack_root)._internal_read_value(
+                    key,
+                    caller_id="defaultspack.codex:app_server_auth",
+                )
+                or ""
+            ).strip()
+        except Exception:
+            value = ""
+        if value:
+            return value, key
+    return "", ""
+
+
+def _codex_app_server_auth(config: dict[str, Any], *, pack_root: Path | None = None) -> dict[str, str]:
+    for kind, _env_key, file_env_key, config_file_key, _secret_key in _APP_SERVER_AUTH_ENV:
+        file_path = str(config.get(config_file_key) or os.environ.get(file_env_key, "")).strip()
+        if file_path:
+            value = _read_secret_file(file_path)
+            if value:
+                return {"kind": kind, "source": "file", "file_path": file_path, "value": value}
+    for kind, env_key, _file_env_key, _config_file_key, _secret_key in _APP_SERVER_AUTH_ENV:
+        value = os.environ.get(env_key, "").strip()
+        if value:
+            return {"kind": kind, "source": "environment", "file_path": "", "value": value}
+    for kind, _env_key, _file_env_key, _config_file_key, secret_key in _APP_SERVER_AUTH_ENV:
+        value, key = _read_stored_secret((secret_key,), pack_root=pack_root)
+        if value:
+            return {"kind": kind, "source": "secret_store", "file_path": "", "secret_key": key, "value": value}
+    return {"kind": "", "source": "missing", "file_path": "", "value": ""}
+
+
+def _endpoint_requires_auth(config: dict[str, Any]) -> bool:
+    transport = str(config.get("transport") or "off")
+    if transport == "websocket_remote":
+        return True
+    base_url = str(config.get("base_url") or "").strip()
     websocket_url = str(config.get("websocket_url") or "").strip()
-    if not websocket_url or _url_is_loopback(websocket_url):
+    return bool(
+        (base_url and not _url_is_loopback(base_url))
+        or (websocket_url and not _url_is_loopback(websocket_url))
+    )
+
+
+def _config_is_loopback(config: dict[str, Any]) -> bool:
+    base_url = str(config.get("base_url") or "")
+    websocket_url = str(config.get("websocket_url") or "")
+    return bool((not base_url or _url_is_loopback(base_url)) and (not websocket_url or _url_is_loopback(websocket_url)))
+
+
+def _config_is_configured(config: dict[str, Any]) -> bool:
+    if not config.get("enabled") or config.get("transport") == "off":
         return False
-    return not bool(read_codex_access_token(pack_root=pack_root))
+    transport = str(config.get("transport") or "off")
+    if transport == "stdio":
+        return True
+    if transport == "unix":
+        return bool(config.get("unix_socket_path"))
+    if transport in {"websocket_loopback", "websocket_remote"}:
+        return bool(config.get("base_url") or config.get("websocket_url"))
+    return False
+
+
+def codex_app_server_auth_headers(
+    config: dict[str, Any] | None = None,
+    *,
+    pack_root: Path | None = None,
+) -> dict[str, str]:
+    normalized = _normalize_config(config) if isinstance(config, dict) else _read_config(pack_root)
+    auth = _codex_app_server_auth(normalized, pack_root=pack_root)
+    value = str(auth.get("value") or "")
+    if not value:
+        return {}
+    if auth.get("kind") == "shared_secret":
+        return {"X-Rumi-Codex-App-Server-Secret": value}
+    return {"Authorization": f"Bearer {value}"}
+
+
+def build_codex_app_server_command(config: dict[str, Any]) -> list[str]:
+    normalized = _normalize_config(config if isinstance(config, dict) else {})
+    if not normalized.get("enabled") or normalized.get("transport") == "off":
+        return []
+    transport = str(normalized.get("transport") or "off")
+    if transport == "stdio":
+        command = ["codex", "app-server", "stdio"]
+    elif transport == "unix":
+        command = ["codex", "app-server", "unix"]
+    elif transport == "websocket_loopback":
+        command = ["codex", "app-server", "websocket"]
+    else:
+        return []
+    if transport == "unix" and normalized.get("unix_socket_path"):
+        command.extend(["--socket", str(normalized["unix_socket_path"])])
+    if transport == "websocket_loopback":
+        if normalized.get("websocket_url"):
+            command.extend(["--websocket-url", str(normalized["websocket_url"])])
+        elif normalized.get("base_url"):
+            command.extend(["--base-url", str(normalized["base_url"])])
+    if normalized.get("ws_token_file"):
+        command.extend(["--ws-token-file", str(normalized["ws_token_file"])])
+    if normalized.get("shared_secret_file"):
+        command.extend(["--shared-secret-file", str(normalized["shared_secret_file"])])
+    return command
 
 
 def save_codex_app_server_config(payload: dict[str, Any], *, pack_root: Path | None = None) -> dict[str, Any]:
     config = _normalize_config(payload if isinstance(payload, dict) else {})
-    if _non_loopback_websocket_without_auth(config, pack_root=pack_root):
-        return {
-            "success": False,
-            "provider_id": "codex",
-            "error": "non-loopback websocket requires a saved Codex access token",
-            "code": "AUTH_REQUIRED_FOR_NON_LOOPBACK_WEBSOCKET",
-        }
     _write_config(config, pack_root)
     return {
         "success": True,
@@ -127,14 +299,14 @@ def clear_codex_app_server_config(*, pack_root: Path | None = None) -> dict[str,
 
 def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     config = _read_config(pack_root)
-    token_status = codex_connection_status(pack_root=pack_root)
     base_url = str(config.get("base_url") or "")
     websocket_url = str(config.get("websocket_url") or "")
-    configured = bool(config.get("enabled") and (base_url or websocket_url))
-    auth_required = bool(websocket_url and not _url_is_loopback(websocket_url))
-    auth_configured = bool(token_status.get("configured"))
+    configured = _config_is_configured(config)
+    auth_required = _endpoint_requires_auth(config)
+    auth = _codex_app_server_auth(config, pack_root=pack_root)
+    auth_configured = bool(auth.get("value"))
     blocked_reason = (
-        "Save Codex access token before using a non-loopback websocket."
+        "Configure a Codex App Server WS token or shared secret before using a non-loopback endpoint."
         if auth_required and not auth_configured
         else ""
     )
@@ -142,14 +314,21 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "provider_id": "codex",
         "configured": configured,
         "enabled": bool(config.get("enabled")),
+        "transport": str(config.get("transport") or "off"),
         "connection_status": "blocked_auth_required" if blocked_reason else "configured" if configured else "not_configured",
         "status_label": "Auth required" if blocked_reason else "Configured" if configured else "Not configured",
         "blocked_reason": blocked_reason,
         "base_url": base_url,
         "websocket_url": websocket_url,
-        "loopback": bool((not base_url or _url_is_loopback(base_url)) and (not websocket_url or _url_is_loopback(websocket_url))),
+        "unix_socket_path": str(config.get("unix_socket_path") or ""),
+        "loopback": _config_is_loopback(config),
         "auth_required": auth_required,
         "auth_configured": auth_configured,
+        "auth_source": str(auth.get("source") or "missing") if auth_configured else "missing",
+        "auth_kind": str(auth.get("kind") or ""),
+        "ws_token_file": str(config.get("ws_token_file") or ""),
+        "shared_secret_file": str(config.get("shared_secret_file") or ""),
+        "command": build_codex_app_server_command(config),
         "tool_source": {
             "enabled": bool(config.get("tool_source_enabled")),
             "status": "blocked_auth_required" if blocked_reason else "configured" if config.get("tool_source_enabled") and configured else "disabled",
@@ -165,16 +344,13 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
 def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.0) -> dict[str, Any]:
     status = codex_app_server_status(pack_root=pack_root)
     if status.get("blocked_reason"):
-        return {"success": False, "provider_id": "codex", "probe": {"status": "auth_required"}}
+        return {"success": False, "provider_id": "codex", "probe": {"status": "blocked_auth_required"}}
     base_url = str(status.get("base_url") or "").rstrip("/")
     if not base_url:
         return {"success": False, "provider_id": "codex", "probe": {"status": "not_configured"}}
-    if not status.get("loopback") and not read_codex_access_token(pack_root=pack_root):
-        return {"success": False, "provider_id": "codex", "probe": {"status": "auth_required"}}
-    token = read_codex_access_token(pack_root=pack_root)
     request = urllib.request.Request(f"{base_url}/status", method="GET")
-    if token:
-        request.add_header("Authorization", f"Bearer {token}")
+    for header, value in codex_app_server_auth_headers(pack_root=pack_root).items():
+        request.add_header(header, value)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return {

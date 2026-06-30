@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { AlertTriangle, Check, ChevronDown, Copy, Loader2, MoreVertical, Pencil, Plus, Search, Trash2, X } from "lucide-react";
 
 import { cn } from "../lib/cn";
-import type { ModelSearchItem, SettingsSection } from "../lib/api";
+import type { CodexAppServerConfig, ModelSearchItem, SettingsSection } from "../lib/api";
 import { PlacementHtmlRenderer } from "../components/PlacementHtmlRenderer";
 import { ToolExperienceSettingsPanel } from "../components/ToolExperienceSettingsPanel";
 import { t } from "../lib/i18n";
@@ -2917,10 +2917,14 @@ export function SettingsModalRenderer({
   const [connectionMessages, setConnectionMessages] = useState<Record<string, { tone: "success" | "error"; text: string }>>({});
   const [connectionScopeModes, setConnectionScopeModes] = useState<Record<string, string>>({});
   const [connectionCredentialDrafts, setConnectionCredentialDrafts] = useState<Record<string, string>>({});
-  const [codexAppServerDraft, setCodexAppServerDraft] = useState({
+  const [codexAppServerDraft, setCodexAppServerDraft] = useState<CodexAppServerConfig>({
+    transport: "off",
     enabled: false,
     baseUrl: "",
     websocketUrl: "",
+    unixSocketPath: "",
+    wsTokenFile: "",
+    sharedSecretFile: "",
     toolSourceEnabled: false,
     automationEndpointEnabled: false,
   });
@@ -2998,9 +3002,13 @@ export function SettingsModalRenderer({
   }, [placementMenuOpen]);
   useEffect(() => {
     setCodexAppServerDraft({
+      transport: codexAppServerPrelude.transport,
       enabled: codexAppServerPrelude.enabled,
       baseUrl: codexAppServerPrelude.baseUrl,
       websocketUrl: codexAppServerPrelude.websocketUrl,
+      unixSocketPath: codexAppServerPrelude.unixSocketPath,
+      wsTokenFile: codexAppServerPrelude.wsTokenFile,
+      sharedSecretFile: codexAppServerPrelude.sharedSecretFile,
       toolSourceEnabled: codexAppServerPrelude.toolSourceStatus !== "disabled",
       automationEndpointEnabled: codexAppServerPrelude.automationEndpointStatus !== "disabled",
     });
@@ -3008,8 +3016,12 @@ export function SettingsModalRenderer({
     codexAppServerPrelude.automationEndpointStatus,
     codexAppServerPrelude.baseUrl,
     codexAppServerPrelude.enabled,
+    codexAppServerPrelude.sharedSecretFile,
     codexAppServerPrelude.toolSourceStatus,
+    codexAppServerPrelude.transport,
+    codexAppServerPrelude.unixSocketPath,
     codexAppServerPrelude.websocketUrl,
+    codexAppServerPrelude.wsTokenFile,
   ]);
   const activeSection = visibleSections.find((section) => section.id === activeSectionId)
     ?? visibleSections[0]
@@ -3476,6 +3488,13 @@ export function SettingsModalRenderer({
     }
     if (section.id === "tools_mcp") {
       const appServerMessage = connectionMessages.codex_app_server;
+      const appServerTransportOptions: Array<{ value: NonNullable<CodexAppServerConfig["transport"]>; label: string }> = [
+        { value: "off", label: "Off" },
+        { value: "stdio", label: "stdio" },
+        { value: "unix", label: "Unix socket" },
+        { value: "websocket_loopback", label: "WebSocket loopback" },
+        { value: "websocket_remote", label: "WebSocket remote" },
+      ];
       const appServerToggleFields: Array<["enabled" | "toolSourceEnabled" | "automationEndpointEnabled", string]> = [
         ["enabled", "Enabled"],
         ["toolSourceEnabled", "Tool source"],
@@ -3517,9 +3536,37 @@ export function SettingsModalRenderer({
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-2">
               <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>Transport</span>
+                <select
+                  value={codexAppServerDraft.transport ?? "off"}
+                  onChange={(event) => {
+                    const transport = event.target.value as NonNullable<CodexAppServerConfig["transport"]>;
+                    setCodexAppServerDraft((current) => ({
+                      ...current,
+                      transport,
+                      enabled: transport === "off" ? false : current.enabled,
+                    }));
+                  }}
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none focus:border-cyan-700"
+                >
+                  {appServerTransportOptions.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>Unix socket path</span>
+                <input
+                  value={codexAppServerDraft.unixSocketPath ?? ""}
+                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, unixSocketPath: event.target.value }))}
+                  placeholder="/tmp/rumi-codex.sock"
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                />
+              </label>
+              <label className="space-y-1 text-[11px] text-zinc-500">
                 <span>Base URL</span>
                 <input
-                  value={codexAppServerDraft.baseUrl}
+                  value={codexAppServerDraft.baseUrl ?? ""}
                   onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, baseUrl: event.target.value }))}
                   placeholder="http://127.0.0.1:7331"
                   className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
@@ -3528,9 +3575,27 @@ export function SettingsModalRenderer({
               <label className="space-y-1 text-[11px] text-zinc-500">
                 <span>WebSocket URL</span>
                 <input
-                  value={codexAppServerDraft.websocketUrl}
+                  value={codexAppServerDraft.websocketUrl ?? ""}
                   onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, websocketUrl: event.target.value }))}
                   placeholder="ws://127.0.0.1:7331/ws"
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                />
+              </label>
+              <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>WS token file</span>
+                <input
+                  value={codexAppServerDraft.wsTokenFile ?? ""}
+                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, wsTokenFile: event.target.value }))}
+                  placeholder="~/.config/rumi/codex-app-server.token"
+                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                />
+              </label>
+              <label className="space-y-1 text-[11px] text-zinc-500">
+                <span>Shared secret file</span>
+                <input
+                  value={codexAppServerDraft.sharedSecretFile ?? ""}
+                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, sharedSecretFile: event.target.value }))}
+                  placeholder="~/.config/rumi/codex-app-server.secret"
                   className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
                 />
               </label>
@@ -3584,11 +3649,19 @@ export function SettingsModalRenderer({
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-zinc-500">
               <span className="rounded-full border border-zinc-800 px-2 py-0.5">
+                {codexAppServerPrelude.transport}
+              </span>
+              <span className="rounded-full border border-zinc-800 px-2 py-0.5">
                 {codexAppServerPrelude.loopback ? "Loopback" : "Remote"}
               </span>
               {codexAppServerPrelude.authRequired && (
                 <span className="rounded-full border border-amber-500/30 px-2 py-0.5 text-amber-200">
                   Auth {codexAppServerPrelude.authConfigured ? "ready" : "needed"}
+                </span>
+              )}
+              {codexAppServerPrelude.authConfigured && (
+                <span className="rounded-full border border-zinc-800 px-2 py-0.5">
+                  {codexAppServerPrelude.authKind || "auth"} via {codexAppServerPrelude.authSource}
                 </span>
               )}
             </div>

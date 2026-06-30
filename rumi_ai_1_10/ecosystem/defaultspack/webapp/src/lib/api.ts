@@ -2360,9 +2360,13 @@ async function readStreamEvents(
 }
 
 export type CodexAppServerConfig = {
+  transport?: "off" | "stdio" | "unix" | "websocket_loopback" | "websocket_remote";
   enabled?: boolean;
   baseUrl?: string;
   websocketUrl?: string;
+  unixSocketPath?: string;
+  wsTokenFile?: string;
+  sharedSecretFile?: string;
   toolSourceEnabled?: boolean;
   automationEndpointEnabled?: boolean;
 };
@@ -2971,9 +2975,13 @@ export const api = {
       body: JSON.stringify({
         action: "save_app_server",
         app_server: {
+          transport: config.transport,
           enabled: config.enabled,
           base_url: config.baseUrl,
           websocket_url: config.websocketUrl,
+          unix_socket_path: config.unixSocketPath,
+          ws_token_file: config.wsTokenFile,
+          shared_secret_file: config.sharedSecretFile,
           tool_source_enabled: config.toolSourceEnabled,
           automation_endpoint_enabled: config.automationEndpointEnabled,
         },

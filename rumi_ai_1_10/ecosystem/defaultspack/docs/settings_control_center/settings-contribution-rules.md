@@ -30,6 +30,14 @@ Every Settings contribution must include:
 - Pack lifecycle -> `packs_extensions`
 - Raw JSON/debug -> `diagnostics`
 
+Codex-specific ownership:
+
+- Codex access token -> `accounts_connections`; it is a credential for Codex local/programmatic workflows only.
+- Codex App Server transport/config -> `tools_mcp`; it is a tool source and automation endpoint, not an account login.
+- Codex App Server auth secret -> separate App Server credential such as `RUMI_CODEX_APP_SERVER_WS_TOKEN`, `RUMI_CODEX_APP_SERVER_SHARED_SECRET`, or matching `*_FILE` paths. Do not reuse `RUMI_CODEX_ACCESS_TOKEN`.
+- Codex action approvals -> `tools_mcp`; approval responses and execution grants are permission-policy settings.
+- Codex automation readiness -> `computer_automation`; summarize whether approval-aware automation is ready to run.
+
 ## UI label rules
 
 - `title` must be human-readable.
@@ -67,3 +75,4 @@ Developer/debug settings live under Advanced/Diagnostics.
 - Does it work under profiles?
 - Does it have a migration path?
 - Does a test prevent this from regressing?
+- For Codex, are access-token configuration, App Server transport/auth, action approvals, and automation readiness kept in their separate sections?

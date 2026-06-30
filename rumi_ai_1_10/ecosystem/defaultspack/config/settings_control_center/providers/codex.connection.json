@@ -18,28 +18,88 @@
   },
   "capabilities": [
     {
-      "id": "codex.local_workflow.access",
+      "id": "codex.access_token.configure",
       "displayName": {
-        "en": "Codex local workflow access",
-        "ja": "Codex local workflow access"
+        "en": "Configure Codex access token",
+        "ja": "Codex access token configuration"
       },
       "description": {
-        "en": "Store a Codex access token for local and programmatic workflow integrations.",
-        "ja": "local/programmatic workflow 用の Codex access token を保存します。"
+        "en": "Store a Codex access token for local and programmatic workflow integrations. The token is not used for Codex App Server auth.",
+        "ja": "local/programmatic workflow 用の Codex access token を保存します。この token は Codex App Server auth には使いません。"
+      },
+      "risk": "high"
+    },
+    {
+      "id": "codex.app_server.connect",
+      "displayName": {
+        "en": "Connect Codex App Server",
+        "ja": "Codex App Server connection"
+      },
+      "description": {
+        "en": "Use Codex App Server as a Tools & MCP tool source and automation endpoint with separate App Server auth.",
+        "ja": "Codex App Server を別の App Server auth で Tools & MCP の tool source / automation endpoint として使います。"
+      },
+      "risk": "high"
+    },
+    {
+      "id": "codex.thread.start",
+      "displayName": {
+        "en": "Start Codex thread",
+        "ja": "Start Codex thread"
+      },
+      "description": {
+        "en": "Start a Codex thread through a local or App Server-backed transport.",
+        "ja": "local または App Server-backed transport で Codex thread を開始します。"
       },
       "risk": "medium"
     },
     {
-      "id": "codex.app_server.tools",
+      "id": "codex.turn.run",
       "displayName": {
-        "en": "Codex App Server tools",
-        "ja": "Codex App Server tools"
+        "en": "Run Codex turn",
+        "ja": "Run Codex turn"
       },
       "description": {
-        "en": "Use Codex App Server as a tool source and automation endpoint.",
-        "ja": "Codex App Server を tool source / automation endpoint として使います。"
+        "en": "Run a Codex turn against a configured thread.",
+        "ja": "configured thread に対して Codex turn を実行します。"
       },
       "risk": "medium"
+    },
+    {
+      "id": "codex.events.stream",
+      "displayName": {
+        "en": "Stream Codex events",
+        "ja": "Stream Codex events"
+      },
+      "description": {
+        "en": "Read event streams from a Codex session without granting approvals by itself.",
+        "ja": "approval 付与なしで Codex session の event stream を読み取ります。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "codex.approval.respond",
+      "displayName": {
+        "en": "Respond to Codex approvals",
+        "ja": "Respond to Codex approvals"
+      },
+      "description": {
+        "en": "Approve or deny high-impact Codex actions such as writes, terminal commands, and git operations.",
+        "ja": "write、terminal command、git operation など high-impact Codex action を approve / deny します。"
+      },
+      "risk": "high"
+    },
+    {
+      "id": "codex.exec.run",
+      "displayName": {
+        "en": "Run Codex execution",
+        "ja": "Run Codex execution"
+      },
+      "description": {
+        "en": "Run Codex-backed execution that can reach workspace, terminal, or git operations under approval policy.",
+        "ja": "approval policy の下で workspace、terminal、git operation に到達し得る Codex-backed execution を実行します。"
+      },
+      "risk": "high"
     }
   ],
   "settings": {
@@ -49,8 +109,9 @@
   },
   "metadata": {
     "credential_kind": "codex_access_token",
+    "app_server_auth_kind": "codex_app_server_secret",
     "not_platform_api_key": true,
     "not_workspace_agent_token": true,
-    "secret_handling": "Never expose the raw token in Settings payloads, logs, snapshots, or repository files."
+    "secret_handling": "Never expose the raw Codex token or Codex App Server secret in Settings payloads, logs, snapshots, repository files, or CLI arguments."
   }
 }
