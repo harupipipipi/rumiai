@@ -731,6 +731,7 @@ class MimoCodingCompanyRuntime:
                     "terminal_actions_require_approval": True,
                     "tool_allowlist": ["rumi_api"],
                     "schedule_auto_approve_tool_allowlist": [
+                        "rumi_api:list_routes",
                         "GET /api/agent/mimo-company/status",
                         "GET /api/company/mimo-coding-company/status",
                     ],

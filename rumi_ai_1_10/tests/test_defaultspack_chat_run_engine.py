@@ -1506,7 +1506,7 @@ def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
     store = ChatStore()
-    conversation = store.create_conversation(model="opencode-go/mimo-v2.5-pro")
+    conversation = store.create_conversation(model="opencode-zen/mimo-v2.5-free")
     conversation_id = conversation["id"]
 
     metadata = {
@@ -1542,7 +1542,7 @@ def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_
         content=[],
         metadata=metadata,
         user_message=user_message,
-        model="opencode-go/mimo-v2.5-pro",
+        model="opencode-zen/mimo-v2.5-free",
         params={},
         request_context={
             "source": "scheduler",
@@ -1590,6 +1590,101 @@ def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_
     assert observed["current_tool_logs"] == []
     assert any(event.get("type") == "assistant_message_started" for event in events)
     assert any(event.get("type") == "task_failed" for event in events)
+    ChatStore._instance = None
+
+
+def test_nonstream_scheduled_mimo_finalizes_when_draft_update_is_stale(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    import domain.chat.stream_engine as engine_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="opencode-go/mimo-v2.5-pro")
+    conversation_id = conversation["id"]
+
+    metadata = {
+        "source": "scheduler",
+        "profile_id": "defaultspack.mimo_coding_company",
+    }
+    user_message = store.add_message(
+        conversation_id,
+        {
+            "id": "user-scheduled-stale-draft",
+            "role": "user",
+            "content": "run scheduled MiMo heartbeat",
+            "metadata": metadata,
+        },
+    )
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation=store.get_conversation(conversation_id),
+        input_data={},
+        request_id="req-scheduled-stale-draft",
+        content=[],
+        metadata=metadata,
+        user_message=user_message,
+        model="opencode-go/mimo-v2.5-pro",
+        params={},
+        request_context={
+            "source": "scheduler",
+            "profile_id": "defaultspack.mimo_coding_company",
+        },
+        tool_context={},
+        standard_messages=[{"role": "user", "content": "run scheduled MiMo heartbeat"}],
+        user_text="run scheduled MiMo heartbeat",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[],
+        tools_called=[],
+        connected_tool_names=set(),
+        call_handler=None,
+        model_routing={},
+    )
+    monkeypatch.setattr(engine_module, "prepare_chat_run", lambda input_data, context: prepared)
+
+    original_update_message = store.update_message
+
+    def flaky_update_message(conversation_id_arg, message_id, updates):
+        if updates.get("finish_reason") == "stop":
+            return None
+        return original_update_message(conversation_id_arg, message_id, updates)
+
+    monkeypatch.setattr(store, "update_message", flaky_update_message)
+
+    def fake_model_turn(self, prepared_arg, working_messages, draft):
+        del self, prepared_arg, working_messages, draft
+        if False:
+            yield {}
+        return (
+            {
+                "content": [{"type": "text", "text": "scheduled heartbeat complete"}],
+                "finish_reason": "stop",
+                "usage": {},
+            },
+            [],
+        )
+
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    engine = ChatRunEngine(store=store)
+    events = list(engine.stream({}, {}, stream_mode=False))
+    done_events = [event for event in events if event.get("type") == "done"]
+    error_events = [event for event in events if event.get("type") == "error"]
+    stored = store.get_conversation(conversation_id)
+    final = stored["messages"][-1]
+
+    assert done_events
+    assert error_events == []
+    assert final["role"] == "assistant"
+    assert final["parent_id"] == user_message["id"]
+    assert final["finish_reason"] == "stop"
+    assert final["raw_text"] == "scheduled heartbeat complete"
+    assert final["metadata"].get("draft") is None
     ChatStore._instance = None
 
 

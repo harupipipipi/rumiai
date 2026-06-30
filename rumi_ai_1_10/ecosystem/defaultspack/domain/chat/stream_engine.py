@@ -1190,8 +1190,6 @@ class _AssistantDraft:
             self._last_sync_at = now
 
     def finalize(self, assistant_message: dict[str, Any]) -> dict[str, Any] | None:
-        if not self.message:
-            return assistant_message
         updates = dict(assistant_message)
         metadata = dict(updates.get("metadata") or {})
         metadata.pop("streaming", None)
@@ -1203,7 +1201,15 @@ class _AssistantDraft:
         if thinking is not None and str(thinking.get("state") or "").strip().lower() == "running":
             metadata["thinking"] = {**thinking, "state": "completed"}
         updates["metadata"] = metadata
-        return self._store.update_message(self._conversation_id, self.id, updates)
+        if self.message:
+            updated = self._store.update_message(self._conversation_id, self.id, updates)
+            if updated is not None:
+                self.message = updated
+                return updated
+        stored = self._store.add_message(self._conversation_id, updates)
+        if stored is not None:
+            self.message = stored
+        return stored
 
     def _final_metadata_extra(self, *, status: str = "", error_code: str = "") -> dict[str, Any]:
         metadata = dict(self._metadata_extra)
