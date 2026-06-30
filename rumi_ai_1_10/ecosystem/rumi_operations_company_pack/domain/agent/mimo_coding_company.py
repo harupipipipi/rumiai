@@ -734,7 +734,12 @@ class MimoCodingCompanyRuntime:
                     "schedule_auto_approve_tool_allowlist": [
                         "rumi_api:list_routes",
                         "GET /api/agent/mimo-company/status",
+                        "GET /api/company/mimo-coding-company/channels",
+                        "GET /api/company/mimo-coding-company/messages",
                         "GET /api/company/mimo-coding-company/status",
+                        "GET /api/company/status",
+                        "GET /api/desktops",
+                        "GET /api/health",
                     ],
                 },
             )

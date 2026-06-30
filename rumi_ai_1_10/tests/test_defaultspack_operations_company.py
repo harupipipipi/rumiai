@@ -239,7 +239,12 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     heartbeat_auto_approve = set(heartbeat_schedule["task"]["tool_policy"]["schedule_auto_approve_tool_allowlist"])
     assert "rumi_api:list_routes" in heartbeat_auto_approve
     assert "GET /api/agent/mimo-company/status" in heartbeat_auto_approve
+    assert "GET /api/company/mimo-coding-company/channels" in heartbeat_auto_approve
+    assert "GET /api/company/mimo-coding-company/messages" in heartbeat_auto_approve
     assert "GET /api/company/mimo-coding-company/status" in heartbeat_auto_approve
+    assert "GET /api/company/status" in heartbeat_auto_approve
+    assert "GET /api/desktops" in heartbeat_auto_approve
+    assert "GET /api/health" in heartbeat_auto_approve
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "short read-only heartbeat" in heartbeat_schedule["task"]["message"]
     assert "at most one or two rumi_api GET/status checks" in heartbeat_schedule["task"]["message"]
