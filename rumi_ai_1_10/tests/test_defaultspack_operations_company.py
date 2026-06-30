@@ -582,6 +582,73 @@ def test_mimo_coding_company_desktop_monitor_blocks_bare_chat_target(monkeypatch
     assert "http://127.0.0.1:18766/chat" in message
 
 
+def test_mimo_coding_company_desktop_monitor_ignores_historical_bare_chat_targets(monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from blocks.sandbox import api as sandbox_api
+
+    def fake_desktops_list(payload, context):
+        assert payload == {"_handler": "desktops_list"}
+        assert context["source"] == "mimo_observability"
+        return {
+            "status": "ok",
+            "data": {
+                "desktops": [
+                    {
+                        "seat_id": "seat_running_qa",
+                        "status": "running",
+                        "template_id": "desktop.browser",
+                        "startup": {
+                            "starter": "browser_url",
+                            "browser_url": "http://127.0.0.1:18766/chat?chat=qa-loop-123",
+                        },
+                    },
+                    {
+                        "seat_id": "seat_old_stopped",
+                        "status": "stopped",
+                        "template_id": "desktop.browser",
+                        "startup": {
+                            "starter": "browser_url",
+                            "browser_url": "http://127.0.0.1:18766/chat",
+                        },
+                    },
+                    {
+                        "seat_id": "seat_old_destroyed",
+                        "status": "destroyed",
+                        "template_id": "desktop.browser",
+                        "metadata": {
+                            "startup": {
+                                "browser_url": "http://127.0.0.1:18766/chat",
+                            }
+                        },
+                    },
+                    {
+                        "seat_id": "seat_old_failed",
+                        "status": "failed",
+                        "template_id": "desktop.browser",
+                        "desktop_spec": {
+                            "browser_url": "http://127.0.0.1:18766/chat",
+                        },
+                    },
+                ]
+            },
+        }
+
+    monkeypatch.setattr(sandbox_api, "run", fake_desktops_list)
+
+    observation = MimoCodingCompanyRuntime._desktop_monitoring_observation()
+
+    assert observation["status"] == "ok"
+    assert "signal" not in observation
+    assert "missing_chat_targets" not in observation
+    assert observation["desktop_count"] == 4
+    assert [desktop["seat_id"] for desktop in observation["desktops"]] == [
+        "seat_running_qa",
+        "seat_old_stopped",
+        "seat_old_destroyed",
+        "seat_old_failed",
+    ]
+
+
 def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler

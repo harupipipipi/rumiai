@@ -891,6 +891,11 @@ class MimoCodingCompanyRuntime:
                 add(startup.get("browser_url"))
         return candidates
 
+    @staticmethod
+    def _desktop_can_block_missing_chat_target(desktop: dict[str, Any]) -> bool:
+        status = str(desktop.get("status") or desktop.get("state") or "").strip().lower()
+        return status in {"running", "ready", "busy"}
+
     def _persona_specs(self) -> list[dict[str, Any]]:
         path = self._docker_bundle_dir() / "personas.json"
         try:
@@ -2407,15 +2412,16 @@ class MimoCodingCompanyRuntime:
                 if browser_urls:
                     compact_item["browser_urls"] = browser_urls[:3]
                 compact.append(compact_item)
-                for browser_url in browser_urls:
-                    if MimoCodingCompanyRuntime._defaultspack_chat_url_missing_query(browser_url):
-                        missing_chat_targets.append(
-                            {
-                                "seat_id": compact_item.get("seat_id"),
-                                "status": compact_item.get("status"),
-                                "browser_url": browser_url,
-                            }
-                        )
+                if MimoCodingCompanyRuntime._desktop_can_block_missing_chat_target(desktop):
+                    for browser_url in browser_urls:
+                        if MimoCodingCompanyRuntime._defaultspack_chat_url_missing_query(browser_url):
+                            missing_chat_targets.append(
+                                {
+                                    "seat_id": compact_item.get("seat_id"),
+                                    "status": compact_item.get("status"),
+                                    "browser_url": browser_url,
+                                }
+                            )
             summary["desktop_count"] = len(desktops)
             summary["desktops"] = compact
             if not desktops:
