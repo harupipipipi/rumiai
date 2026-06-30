@@ -10,6 +10,12 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+SAFE_APP_SERVER_ARGS = [
+    "-c",
+    'approval_policy="untrusted"',
+    "-c",
+    'sandbox_mode="read-only"',
+]
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
@@ -305,6 +311,7 @@ def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_p
     assert command == [
         "codex",
         "app-server",
+        *SAFE_APP_SERVER_ARGS,
         "--listen",
         "unix:///tmp/rumi-codex.sock",
         "--ws-auth",
@@ -329,7 +336,7 @@ def test_codex_app_server_transport_command_uses_file_paths_not_raw_tokens(tmp_p
     assert saved["success"] is True
     assert status["transport"] == "stdio"
     assert status["connection_status"] == "configured"
-    assert status["command"] == ["codex", "app-server", "--listen", "stdio://"]
+    assert status["command"] == ["codex", "app-server", *SAFE_APP_SERVER_ARGS, "--listen", "stdio://"]
 
 
 def test_codex_app_server_stdio_smoke_runs_thread_turn_and_streams_events(monkeypatch):
@@ -413,7 +420,7 @@ def test_codex_app_server_stdio_smoke_runs_thread_turn_and_streams_events(monkey
 
     process = created["process"]
     assert result["success"] is True
-    assert result["command"] == ["codex", "app-server", "--listen", "stdio://"]
+    assert result["command"] == ["codex", "app-server", *SAFE_APP_SERVER_ARGS, "--listen", "stdio://"]
     assert result["thread_id"] == "thr_smoke"
     assert result["turn_id"] == "turn_smoke"
     assert "rumi-codex-smoke-ok" in result["final_output"]

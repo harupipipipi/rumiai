@@ -17,6 +17,12 @@ TRANSPORTS = {"off", "stdio", "unix", "websocket_loopback", "websocket_remote"}
 _APP_SERVER_WS_TOKEN_KEY = "RUMICODEX_APP_SERVER_WS_TOKEN"
 _APP_SERVER_SHARED_SECRET_KEY = "RUMICODEX_APP_SERVER_SHARED_SECRET"
 _APP_SERVER_SECRET_MATERIAL_TYPE = "app_server_secret"
+_APP_SERVER_SAFE_CONFIG_ARGS = [
+    "-c",
+    'approval_policy="untrusted"',
+    "-c",
+    'sandbox_mode="read-only"',
+]
 _DEFAULT_CONNECTION_ID = "default"
 _APP_SERVER_AUTH_ENV = (
     (
@@ -375,15 +381,21 @@ def build_codex_app_server_command(config: dict[str, Any]) -> list[str]:
         return []
     transport = str(normalized.get("transport") or "off")
     if transport == "stdio":
-        command = ["codex", "app-server", "--listen", "stdio://"]
+        command = ["codex", "app-server", *_APP_SERVER_SAFE_CONFIG_ARGS, "--listen", "stdio://"]
     elif transport == "unix":
         unix_socket_path = str(normalized.get("unix_socket_path") or "").strip()
-        command = ["codex", "app-server", "--listen", f"unix://{unix_socket_path}" if unix_socket_path else "unix://"]
+        command = [
+            "codex",
+            "app-server",
+            *_APP_SERVER_SAFE_CONFIG_ARGS,
+            "--listen",
+            f"unix://{unix_socket_path}" if unix_socket_path else "unix://",
+        ]
     elif transport == "websocket_loopback":
         listen_url = _websocket_listen_url(normalized)
         if not listen_url:
             return []
-        command = ["codex", "app-server", "--listen", listen_url]
+        command = ["codex", "app-server", *_APP_SERVER_SAFE_CONFIG_ARGS, "--listen", listen_url]
     else:
         return []
     if normalized.get("ws_token_file"):
