@@ -996,6 +996,8 @@ function ProviderOAuthPanel({
         const oauth = provider.oauth as Record<string, unknown>;
         const connected = Boolean(oauth.connected);
         const clientConfigured = Boolean(oauth.client_configured);
+        const connectEnabled = Boolean(oauth.connect_enabled);
+        const clientCanClear = oauth.client_can_clear !== false;
         const displayName = String(oauth.display_name ?? oauth.email ?? "");
         const email = String(oauth.email ?? "");
         const expiresAt = String(oauth.expires_at ?? "");
@@ -1005,12 +1007,15 @@ function ProviderOAuthPanel({
         const isBusy = busyAction.startsWith(`${providerId}:`);
         const banner = messages[providerId];
         const oauthSurfaceLabel = providerId === "google" ? "Google AI browser login" : `${providerId} browser login`;
-        const stateLabel = connected ? "Connected" : clientConfigured ? "Ready to connect" : "Client config needed";
+        const stateLabel = connected ? "Connected" : String(oauth.status_label ?? "") || (connectEnabled ? "Ready to connect" : "Client config needed");
         const stateTone = connected
           ? "border-emerald-800 bg-emerald-950/20 text-emerald-300"
-          : clientConfigured
+          : connectEnabled
             ? "border-cyan-800 bg-cyan-950/20 text-cyan-300"
             : "border-zinc-800 bg-zinc-950 text-zinc-400";
+        const clientPlaceholder = providerId === "cloudflare"
+          ? 'Paste Cloudflare OAuth client JSON, or set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env'
+          : 'Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"';
 
         return (
           <div key={providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
@@ -1034,7 +1039,8 @@ function ProviderOAuthPanel({
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={isBusy || !clientConfigured}
+                  disabled={isBusy || !connectEnabled}
+                  title={connectEnabled ? undefined : String(oauth.disabled_reason ?? hint)}
                   onClick={async () => {
                     let popup: Window | null = null;
                     try {
@@ -1071,7 +1077,7 @@ function ProviderOAuthPanel({
                   }}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-xs transition-colors",
-                    isBusy || !clientConfigured
+                    isBusy || !connectEnabled
                       ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
                       : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
                   )}
@@ -1113,7 +1119,7 @@ function ProviderOAuthPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={isBusy || !clientConfigured}
+                  disabled={isBusy || !clientConfigured || !clientCanClear}
                   onClick={async () => {
                     try {
                       setBusyAction(`${providerId}:clear`);
@@ -1138,7 +1144,7 @@ function ProviderOAuthPanel({
                   }}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-xs transition-colors",
-                    isBusy || !clientConfigured
+                    isBusy || !clientConfigured || !clientCanClear
                       ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
                       : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:text-zinc-200",
                   )}
@@ -1160,7 +1166,7 @@ function ProviderOAuthPanel({
                     return next;
                   });
                 }}
-                placeholder='Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"'
+                placeholder={clientPlaceholder}
                 className="min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-cyan-500"
               />
               <div className="flex flex-col justify-between gap-3">

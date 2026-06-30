@@ -37,5 +37,15 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
     metadata={
         "scope_selection": "Select exact OAuth scopes from Cloudflare OAuth client configuration/API for the minimum runner resources used by the implementation.",
         "oss_behavior": "If official broker is unavailable, show Download Official App and Configure self-host OAuth.",
+        "self_host_env": [
+            "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID",
+            "RUMI_CLOUDFLARE_OAUTH_SCOPES",
+            "RUMI_CLOUDFLARE_OAUTH_REDIRECT_URI",
+        ],
+        "self_host_client_credential": "optional_env",
+        "direct_token_env": [
+            "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",
+            "RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN",
+        ],
     },
 )

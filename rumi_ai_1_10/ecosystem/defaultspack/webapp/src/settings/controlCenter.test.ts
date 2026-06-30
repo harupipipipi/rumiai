@@ -119,6 +119,36 @@ test("account connection prelude shows Cloudflare fallback when provider exists 
   assert.match(cloudflare?.selfHostDescription ?? "", /Self-host OAuth remains available/);
 });
 
+test("account connection prelude enables Cloudflare when self-host OAuth is ready", () => {
+  const cards = buildAccountConnectionPrelude({
+    accounts_connections: {
+      providers: {
+        cloudflare: {
+          supported: true,
+          backend_supported: true,
+          client_configured: true,
+          connect_enabled: true,
+          connected: false,
+          connection_status: "not_connected",
+          status_label: "Ready to connect",
+          scopes: ["account:read", "user:read"],
+        },
+      },
+    },
+  });
+
+  const cloudflare = cards.find((card) => card.providerId === "cloudflare");
+  assert.equal(cloudflare?.canConnect, true);
+  assert.deepEqual(cloudflare?.connectAction, {
+    providerId: "cloudflare",
+    scopeMode: undefined,
+    services: [],
+  });
+  assert.equal(cloudflare?.primaryLabel, "Connect Cloudflare");
+  assert.equal(cloudflare?.disabledReason, "");
+  assert.deepEqual(cloudflare?.scopes, ["account:read", "user:read"]);
+});
+
 test("account connection prelude gives Google explicit OAuth scope mode actions", () => {
   const cards = buildAccountConnectionPrelude({
     apis: {

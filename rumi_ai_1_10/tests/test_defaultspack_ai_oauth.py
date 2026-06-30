@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
@@ -160,7 +161,7 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertIn("google_gmail_readonly", restricted_modes)
         self.assertIn("Restricted Gmail scopes", restricted_modes["google_gmail_metadata"]["warning"])
 
-    def test_cloudflare_oauth_is_not_connectable_until_scopes_are_configured(self):
+    def test_cloudflare_oauth_waits_for_self_host_scopes(self):
         from domain.ai_client.oauth_store import provider_oauth_status, start_provider_oauth
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -172,13 +173,130 @@ class TestDefaultspackAiOauth(unittest.TestCase):
                 pack_root=pack_root,
             )
 
-        self.assertFalse(status["supported"])
-        self.assertFalse(status["backend_supported"])
+        self.assertTrue(status["supported"])
+        self.assertTrue(status["backend_supported"])
         self.assertFalse(status["connect_enabled"])
         self.assertEqual(status["connection_status"], "missing_scope_config")
         self.assertEqual(status["disabled_reason"], "Configure self-host OAuth")
         self.assertFalse(started["success"])
-        self.assertEqual(started["status"], "missing_scope_config")
+        self.assertEqual(started["error"], "oauth client config is not saved")
+
+    def test_cloudflare_oauth_start_uses_env_client_and_manifest_endpoint(self):
+        from domain.ai_client.oauth_store import provider_oauth_status, start_provider_oauth
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            (pack_root / ".env").write_text(
+                "\n".join(
+                    [
+                        "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID=cloudflare-client-id",
+                        "RUMI_CLOUDFLARE_OAUTH_CLIENT_SECRET=cloudflare-client-secret",
+                        "RUMI_CLOUDFLARE_OAUTH_SCOPES=account:read user:read",
+                        "RUMI_CLOUDFLARE_OAUTH_REDIRECT_URI=http://127.0.0.1:8766/api/ai/oauth/cloudflare/callback",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                status = provider_oauth_status("cloudflare", pack_root=pack_root)
+                started = start_provider_oauth(
+                    "cloudflare",
+                    request_headers={"Host": "127.0.0.1:8766"},
+                    pack_root=pack_root,
+                )
+
+        self.assertTrue(status["supported"])
+        self.assertTrue(status["backend_supported"])
+        self.assertTrue(status["client_configured"])
+        self.assertEqual(status["client_source"], "env")
+        self.assertFalse(status["client_can_clear"])
+        self.assertTrue(status["connect_enabled"])
+        self.assertEqual(status["connection_status"], "not_connected")
+        self.assertTrue(started["success"], started)
+        parsed = urllib.parse.urlparse(started["authorize_url"])
+        params = urllib.parse.parse_qs(parsed.query)
+        self.assertEqual(f"{parsed.scheme}://{parsed.netloc}{parsed.path}", "https://dash.cloudflare.com/oauth2/auth")
+        self.assertEqual(params["client_id"], ["cloudflare-client-id"])
+        self.assertEqual(params["scope"], ["account:read user:read"])
+        self.assertEqual(params["redirect_uri"], ["http://127.0.0.1:8766/api/ai/oauth/cloudflare/callback"])
+        self.assertIn("code_challenge", params)
+        self.assertNotIn("include_granted_scopes", params)
+        self.assertNotIn("access_type", params)
+
+    def test_cloudflare_env_access_token_counts_as_connected(self):
+        from domain.ai_client.oauth_store import get_provider_access_token, provider_oauth_status
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            (pack_root / ".env").write_text(
+                "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN=cloudflare-oauth-access\n",
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                status = provider_oauth_status("cloudflare", pack_root=pack_root)
+                access_token = get_provider_access_token("cloudflare", pack_root=pack_root)
+
+        self.assertTrue(status["supported"])
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["connection_status"], "connected")
+        self.assertEqual(access_token, "cloudflare-oauth-access")
+
+    def test_cloudflare_oauth_finish_uses_cloudflare_token_and_userinfo_endpoints(self):
+        from domain.ai_client.oauth_store import finish_provider_oauth, start_provider_oauth
+
+        captured: dict[str, str] = {}
+
+        def fake_post(url: str, data: dict[str, str], *, timeout: float = 30.0) -> dict[str, object]:
+            del timeout
+            captured["post_url"] = url
+            captured["client_secret"] = data.get("client_secret", "")
+            return {
+                "access_token": "cloudflare-access-token",
+                "refresh_token": "cloudflare-refresh-token",
+                "expires_in": 3600,
+                "token_type": "Bearer",
+            }
+
+        def fake_get(url: str, access_token: str, *, timeout: float = 30.0) -> dict[str, object]:
+            del timeout
+            captured["get_url"] = url
+            captured["access_token"] = access_token
+            return {"email": "cloudflare-user@example.test", "name": "Cloudflare User"}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            (pack_root / ".env").write_text(
+                "\n".join(
+                    [
+                        "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID=cloudflare-client-id",
+                        "RUMI_CLOUDFLARE_OAUTH_CLIENT_SECRET=cloudflare-client-secret",
+                        "RUMI_CLOUDFLARE_OAUTH_SCOPES=account:read",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}, clear=True):
+                started = start_provider_oauth(
+                    "cloudflare",
+                    request_headers={"Host": "127.0.0.1:8766"},
+                    pack_root=pack_root,
+                )
+                with patch("domain.ai_client.oauth_store._http_post_form", side_effect=fake_post), patch(
+                    "domain.ai_client.oauth_store._http_get_json",
+                    side_effect=fake_get,
+                ):
+                    result = finish_provider_oauth(
+                        "cloudflare",
+                        {"code": "oauth-code", "state": started["state"]},
+                        pack_root=pack_root,
+                    )
+
+        self.assertTrue(result["success"], result)
+        self.assertEqual(captured["post_url"], "https://dash.cloudflare.com/oauth2/token")
+        self.assertEqual(captured["get_url"], "https://dash.cloudflare.com/oauth2/userinfo")
+        self.assertEqual(captured["client_secret"], "cloudflare-client-secret")
+        self.assertEqual(captured["access_token"], "cloudflare-access-token")
 
     def test_finish_provider_oauth_exchanges_code_and_persists_connection(self):
         from domain.ai_client.oauth_store import (

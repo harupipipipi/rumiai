@@ -82,18 +82,22 @@ _GOOGLE_SCOPE_MODE_DETAILS = {
 
 _CLIENT_CONFIG_SECRET_KEYS = {
     "google": "RUMIOAUTH_GOOGLE_CLIENT_CONFIG",
+    "cloudflare": "RUMIOAUTH_CLOUDFLARE_CLIENT_CONFIG",
 }
 _ACCESS_TOKEN_SECRET_KEYS = {
     "google": "RUMIOAUTH_GOOGLE_ACCESS_TOKEN",
+    "cloudflare": "RUMIOAUTH_CLOUDFLARE_ACCESS_TOKEN",
 }
 _REFRESH_TOKEN_SECRET_KEYS = {
     "google": "RUMIOAUTH_GOOGLE_REFRESH_TOKEN",
+    "cloudflare": "RUMIOAUTH_CLOUDFLARE_REFRESH_TOKEN",
 }
 _ID_TOKEN_SECRET_KEYS = {
     "google": "RUMIOAUTH_GOOGLE_ID_TOKEN",
+    "cloudflare": "RUMIOAUTH_CLOUDFLARE_ID_TOKEN",
 }
 
-_OAUTH_RUNTIME_PROVIDER_IDS = {"google"}
+_OAUTH_RUNTIME_PROVIDER_IDS = {"cloudflare", "google"}
 _PENDING_STATE_TTL_SECONDS = 600
 _ACCESS_TOKEN_SKEW_SECONDS = 60
 _pending_states: dict[str, dict[str, Any]] = {}
@@ -146,8 +150,115 @@ def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
     return ids
 
 
+def _dotenv_candidates(pack_root: Path | None = None) -> list[Path]:
+    root = pack_root or _pack_root()
+    candidates = [
+        root / ".env",
+        root / "config" / "settings_control_center" / "oauth.env",
+    ]
+    candidates.extend(parent / ".env" for parent in root.parents[:4])
+    seen: set[Path] = set()
+    ordered: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            resolved = candidate
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered.append(candidate)
+    return ordered
+
+
+def _parse_dotenv_file(path: Path) -> dict[str, str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[7:].lstrip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip()
+        quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}
+        if quoted:
+            value = value[1:-1]
+        else:
+            value = value.split(" #", 1)[0].strip()
+        values[key] = value
+    return values
+
+
+def _env_value(name: str, *, pack_root: Path | None = None) -> str:
+    name = str(name or "").strip()
+    if not name:
+        return ""
+    value = os.environ.get(name, "").strip()
+    if value:
+        return value
+    for path in _dotenv_candidates(pack_root):
+        value = str(_parse_dotenv_file(path).get(name) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _first_env_value(names: list[str], *, pack_root: Path | None = None) -> str:
+    for name in names:
+        value = _env_value(name, pack_root=pack_root)
+        if value:
+            return value
+    return ""
+
+
+def _provider_env_prefix(provider_id: str) -> str:
+    return str(provider_id or "").strip().upper().replace("-", "_")
+
+
+def _provider_oauth_env_names(provider_id: str, suffix: str) -> list[str]:
+    prefix = _provider_env_prefix(provider_id)
+    suffix = str(suffix or "").strip().upper()
+    if not prefix or not suffix:
+        return []
+    return [
+        f"RUMI_DEFAULTSPACK_{prefix}_OAUTH_{suffix}",
+        f"RUMI_{prefix}_OAUTH_{suffix}",
+    ]
+
+
+def _normalize_scope_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            payload = json.loads(text)
+        except json.JSONDecodeError:
+            payload = None
+        if isinstance(payload, list):
+            return [str(item).strip() for item in payload if str(item).strip()]
+    return [item for item in text.replace(",", " ").split() if item]
+
+
+def _scopes_from_env(provider_id: str, *, pack_root: Path | None = None) -> list[str]:
+    raw = _first_env_value(_provider_oauth_env_names(provider_id, "SCOPES"), pack_root=pack_root)
+    return _normalize_scope_list(raw)
+
+
 def _secrets_dir(pack_root: Path | None = None) -> Path:
-    override = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
+    override = _env_value("RUMI_DEFAULTSPACK_SECRETS_DIR", pack_root=pack_root).strip()
     if override:
         return Path(override)
     return (pack_root or _pack_root()) / "user_data" / "secrets"
@@ -225,7 +336,7 @@ def _secret_key(mapping: dict[str, str], provider_id: str) -> str:
 def _read_secret(key: str, caller_id: str, *, pack_root: Path | None = None) -> str:
     if not key:
         return ""
-    value = os.environ.get(key, "").strip()
+    value = _env_value(key, pack_root=pack_root).strip()
     if value:
         return value
     try:
@@ -233,6 +344,25 @@ def _read_secret(key: str, caller_id: str, *, pack_root: Path | None = None) -> 
     except Exception:
         return ""
     return str(secret or "").strip()
+
+
+def _read_provider_oauth_secret(
+    provider_id: str,
+    mapping: dict[str, str],
+    suffix: str,
+    caller_suffix: str,
+    *,
+    pack_root: Path | None = None,
+) -> str:
+    provider_id = str(provider_id or "").strip()
+    value = _first_env_value(_provider_oauth_env_names(provider_id, suffix), pack_root=pack_root).strip()
+    if value:
+        return value
+    key = _secret_key(mapping, provider_id)
+    value = _read_secret(key, f"defaultspack.oauth:{provider_id}:{caller_suffix}", pack_root=pack_root)
+    if value:
+        return value
+    return ""
 
 
 def _set_secret(key: str, value: str, *, actor: str, reason: str, pack_root: Path | None = None) -> None:
@@ -275,23 +405,33 @@ def _client_id_label(client_id: str) -> str:
     return f"{client_id[:10]}...{client_id[-8:]}"
 
 
-def _default_scopes(provider_id: str, scope_mode: str | None = None) -> list[str]:
+def _default_scopes(provider_id: str, scope_mode: str | None = None, *, pack_root: Path | None = None) -> list[str]:
     provider_id = str(provider_id or "").strip()
     if provider_id != "google":
-        provider = _connection_provider(provider_id)
+        env_scopes = _scopes_from_env(provider_id, pack_root=pack_root)
+        if env_scopes:
+            return env_scopes
+        client = load_provider_client_config(provider_id, pack_root=pack_root)
+        client_scopes = _normalize_scope_list((client or {}).get("scopes"))
+        if client_scopes:
+            return client_scopes
+        provider = _connection_provider(provider_id, pack_root=pack_root)
         return list(provider.oauth.default_scopes if provider and provider.oauth else [])
     mode = str(scope_mode or "google_identity").strip() or "google_identity"
     if mode == "default":
         mode = "google_identity"
     if mode not in _GOOGLE_SCOPE_MODES:
         raise ValueError(f"unsupported Google OAuth scope mode: {mode}")
-    override = os.environ.get("RUMI_DEFAULTSPACK_GOOGLE_OAUTH_SCOPES", "").strip()
+    override = _first_env_value(
+        ["RUMI_DEFAULTSPACK_GOOGLE_OAUTH_SCOPES", "RUMI_GOOGLE_OAUTH_SCOPES"],
+        pack_root=pack_root,
+    )
     if override and mode == "google_ai":
         return [item for item in override.split() if item]
     return list(_GOOGLE_SCOPE_MODES[mode])
 
 
-def _google_scope_mode_rows() -> list[dict[str, Any]]:
+def _google_scope_mode_rows(*, pack_root: Path | None = None) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for mode in (
         "google_identity",
@@ -307,7 +447,7 @@ def _google_scope_mode_rows() -> list[dict[str, Any]]:
                 "id": mode,
                 "label": str(details.get("label") or mode),
                 "description": str(details.get("description") or ""),
-                "scopes": _default_scopes("google", mode),
+                "scopes": _default_scopes("google", mode, pack_root=pack_root),
                 "services": list(details.get("services") or []),
                 "restricted": bool(details.get("restricted")),
                 "warning": str(details.get("warning") or ""),
@@ -353,44 +493,67 @@ def _scope_mode_from_services(provider_id: str, services: Any) -> str | None:
     return None
 
 
-def _load_env_client_config(provider_id: str) -> dict[str, Any] | None:
+def _load_env_client_config_for_root(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any] | None:
     provider_id = str(provider_id or "").strip()
-    if provider_id != "google":
-        return None
-    raw_json = os.environ.get("RUMI_DEFAULTSPACK_GOOGLE_OAUTH_CLIENT_JSON", "").strip()
-    raw_id = os.environ.get("RUMI_DEFAULTSPACK_GOOGLE_OAUTH_CLIENT_ID", "").strip()
-    raw_secret = os.environ.get("RUMI_DEFAULTSPACK_GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+    raw_json = _first_env_value(_provider_oauth_env_names(provider_id, "CLIENT_JSON"), pack_root=pack_root)
+    raw_id = _first_env_value(_provider_oauth_env_names(provider_id, "CLIENT_ID"), pack_root=pack_root)
+    raw_secret = _first_env_value(_provider_oauth_env_names(provider_id, "CLIENT_SECRET"), pack_root=pack_root)
+    raw_redirect_uri = _first_env_value(_provider_oauth_env_names(provider_id, "REDIRECT_URI"), pack_root=pack_root)
+    raw_scopes = _scopes_from_env(provider_id, pack_root=pack_root)
     if raw_json:
-        return _parse_provider_client_config(provider_id, raw_json)
-    if raw_id:
-        return {
+        config = _parse_provider_client_config(provider_id, raw_json)
+    elif raw_id:
+        config = {
             "provider_id": provider_id,
             "client_id": raw_id,
             "client_secret": raw_secret,
             "redirect_uris": [],
+            "scopes": [],
             "source": "env",
         }
-    return None
+    else:
+        return None
+    if raw_secret and not str(config.get("client_secret") or "").strip():
+        config["client_secret"] = raw_secret
+    if raw_redirect_uri:
+        redirect_uris = [
+            raw_redirect_uri,
+            *[
+                str(item).strip()
+                for item in (config.get("redirect_uris") or [])
+                if str(item).strip() and str(item).strip() != raw_redirect_uri
+            ],
+        ]
+        config["redirect_uris"] = redirect_uris
+    if raw_scopes:
+        config["scopes"] = raw_scopes
+    config["source"] = "env"
+    return config
 
 
-def _parse_google_client_config(raw_value: str) -> dict[str, Any]:
+def _load_env_client_config(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any] | None:
+    return _load_env_client_config_for_root(provider_id, pack_root=pack_root)
+
+
+def _parse_standard_client_config(provider_id: str, raw_value: str, provider_label: str) -> dict[str, Any]:
     text = str(raw_value or "").strip()
     if not text:
-        raise ValueError("Google OAuth client config is required")
+        raise ValueError(f"{provider_label} OAuth client config is required")
     client_id = ""
     client_secret = ""
     redirect_uris: list[str] = []
+    scopes: list[str] = []
     if text.startswith("{"):
         try:
             payload = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ValueError("Google OAuth client config must be valid JSON") from exc
+            raise ValueError(f"{provider_label} OAuth client config must be valid JSON") from exc
         if isinstance(payload.get("installed"), dict):
             payload = payload["installed"]
         elif isinstance(payload.get("web"), dict):
             payload = payload["web"]
         if not isinstance(payload, dict):
-            raise ValueError("Google OAuth client config JSON is invalid")
+            raise ValueError(f"{provider_label} OAuth client config JSON is invalid")
         client_id = str(payload.get("client_id") or "").strip()
         client_secret = str(payload.get("client_secret") or "").strip()
         redirect_uris = [
@@ -398,31 +561,44 @@ def _parse_google_client_config(raw_value: str) -> dict[str, Any]:
             for item in (payload.get("redirect_uris") or [])
             if str(item).strip()
         ]
+        redirect_uri = str(payload.get("redirect_uri") or "").strip()
+        if redirect_uri and redirect_uri not in redirect_uris:
+            redirect_uris.insert(0, redirect_uri)
+        scopes = _normalize_scope_list(payload.get("scopes") or payload.get("scope"))
     else:
         client_id = text
     if not client_id:
-        raise ValueError("Google OAuth client_id is required")
+        raise ValueError(f"{provider_label} OAuth client_id is required")
     return {
-        "provider_id": "google",
+        "provider_id": provider_id,
         "client_id": client_id,
         "client_secret": client_secret,
         "redirect_uris": redirect_uris,
+        "scopes": scopes,
         "source": "stored",
     }
+
+
+def _parse_google_client_config(raw_value: str) -> dict[str, Any]:
+    return _parse_standard_client_config("google", raw_value, "Google")
 
 
 def _parse_provider_client_config(provider_id: str, raw_value: str) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     if provider_id == "google":
         return _parse_google_client_config(raw_value)
-    raise ValueError(f"OAuth is not supported for provider '{provider_id}'")
+    provider = _connection_provider(provider_id)
+    if provider is None or provider.oauth is None or provider_id not in _OAUTH_RUNTIME_PROVIDER_IDS:
+        raise ValueError(f"OAuth is not supported for provider '{provider_id}'")
+    label = provider.display_name if isinstance(provider.display_name, str) else provider_id
+    return _parse_standard_client_config(provider_id, raw_value, str(label or provider_id))
 
 
 def load_provider_client_config(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any] | None:
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return None
-    env_config = _load_env_client_config(provider_id)
+    env_config = _load_env_client_config(provider_id, pack_root=pack_root)
     if env_config is not None:
         return env_config
     key = _secret_key(_CLIENT_CONFIG_SECRET_KEYS, provider_id)
@@ -453,6 +629,7 @@ def save_provider_oauth_client_config(
                     "client_id": config.get("client_id"),
                     "client_secret": config.get("client_secret"),
                     "redirect_uris": config.get("redirect_uris") or [],
+                    "scopes": _normalize_scope_list(config.get("scopes")),
                 },
                 ensure_ascii=False,
             ),
@@ -588,10 +765,17 @@ def save_provider_oauth_connection(
 
 
 def _has_valid_access_token(provider_id: str, *, pack_root: Path | None = None) -> bool:
-    access_key = _secret_key(_ACCESS_TOKEN_SECRET_KEYS, provider_id)
-    access_token = _read_secret(access_key, f"defaultspack.oauth:{provider_id}:access", pack_root=pack_root)
+    access_token = _read_provider_oauth_secret(
+        provider_id,
+        _ACCESS_TOKEN_SECRET_KEYS,
+        "ACCESS_TOKEN",
+        "access",
+        pack_root=pack_root,
+    )
     if not access_token:
         return False
+    if _first_env_value(_provider_oauth_env_names(provider_id, "ACCESS_TOKEN"), pack_root=pack_root):
+        return True
     metadata = _provider_metadata(provider_id, pack_root=pack_root)
     expires_at = _parse_datetime(metadata.get("expires_at"))
     if expires_at is None:
@@ -603,15 +787,28 @@ def provider_has_oauth_connection(provider_id: str, *, pack_root: Path | None = 
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return False
-    refresh_key = _secret_key(_REFRESH_TOKEN_SECRET_KEYS, provider_id)
-    if _read_secret(refresh_key, f"defaultspack.oauth:{provider_id}:refresh", pack_root=pack_root):
+    if _read_provider_oauth_secret(
+        provider_id,
+        _REFRESH_TOKEN_SECRET_KEYS,
+        "REFRESH_TOKEN",
+        "refresh",
+        pack_root=pack_root,
+    ):
         return True
     return _has_valid_access_token(provider_id, pack_root=pack_root)
 
 
-def _build_redirect_uri(provider_id: str, request_headers: dict[str, Any] | None = None) -> str:
+def _build_redirect_uri(
+    provider_id: str,
+    request_headers: dict[str, Any] | None = None,
+    *,
+    pack_root: Path | None = None,
+) -> str:
     provider_id = str(provider_id or "").strip()
-    base_url = os.environ.get("RUMI_DEFAULTSPACK_PUBLIC_BASE_URL", "").strip().rstrip("/")
+    explicit_redirect = _first_env_value(_provider_oauth_env_names(provider_id, "REDIRECT_URI"), pack_root=pack_root)
+    if explicit_redirect:
+        return explicit_redirect
+    base_url = _env_value("RUMI_DEFAULTSPACK_PUBLIC_BASE_URL", pack_root=pack_root).strip().rstrip("/")
     if base_url:
         return f"{base_url}/api/ai/oauth/{urllib.parse.quote(provider_id, safe='')}/callback"
     headers = request_headers or {}
@@ -642,20 +839,23 @@ def start_provider_oauth(
     client = load_provider_client_config(provider_id, pack_root=pack_root)
     if client is None:
         return {"success": False, "provider_id": provider_id, "error": "oauth client config is not saved"}
-    resolved_scope_mode = str(scope_mode or _scope_mode_from_services(provider_id, services) or "google_identity").strip() or "google_identity"
-    if resolved_scope_mode == "default":
+    default_scope_mode = "google_identity" if provider_id == "google" else "default"
+    resolved_scope_mode = str(scope_mode or _scope_mode_from_services(provider_id, services) or default_scope_mode).strip() or default_scope_mode
+    if provider_id == "google" and resolved_scope_mode == "default":
         resolved_scope_mode = "google_identity"
     try:
-        scopes = _default_scopes(provider_id, resolved_scope_mode)
+        scopes = _default_scopes(provider_id, resolved_scope_mode, pack_root=pack_root)
     except ValueError as exc:
         return {"success": False, "provider_id": provider_id, "error": str(exc)}
     if not scopes:
         return {"success": False, "provider_id": provider_id, "error": "missing scope config", "status": "missing_scope_config"}
-    requested_services = _normalize_requested_services(services) or list(_GOOGLE_SCOPE_MODE_DETAILS.get(resolved_scope_mode, {}).get("services") or [])
-    redirect_uri = _build_redirect_uri(provider_id, request_headers=request_headers)
+    requested_services = _normalize_requested_services(services)
+    if provider_id == "google" and not requested_services:
+        requested_services = list(_GOOGLE_SCOPE_MODE_DETAILS.get(resolved_scope_mode, {}).get("services") or [])
+    redirect_uri = _build_redirect_uri(provider_id, request_headers=request_headers, pack_root=pack_root)
     state = secrets.token_urlsafe(32)
-    code_verifier = _generate_code_verifier()
-    code_challenge = _generate_code_challenge(code_verifier)
+    code_verifier = _generate_code_verifier() if provider.oauth.pkce_supported else ""
+    code_challenge = _generate_code_challenge(code_verifier) if code_verifier else ""
     _cleanup_pending_states()
     _pending_states[state] = {
         "provider_id": provider_id,
@@ -670,15 +870,21 @@ def start_provider_oauth(
         "client_id": str(client.get("client_id") or ""),
         "redirect_uri": redirect_uri,
         "response_type": "code",
-        "code_challenge_method": "S256",
-        "code_challenge": code_challenge,
         "scope": " ".join(scopes),
         "state": state,
-        "access_type": "offline",
-        "include_granted_scopes": "true",
-        "prompt": "consent",
     }
-    authorize_url = f"{_GOOGLE_AUTHORIZE_URL}?{urllib.parse.urlencode(params)}"
+    if code_challenge:
+        params["code_challenge_method"] = "S256"
+        params["code_challenge"] = code_challenge
+    if provider_id == "google":
+        params.update(
+            {
+                "access_type": "offline",
+                "include_granted_scopes": "true",
+                "prompt": "consent",
+            }
+        )
+    authorize_url = f"{provider.oauth.authorization_url}?{urllib.parse.urlencode(params)}"
     return {
         "success": True,
         "provider_id": provider_id,
@@ -714,6 +920,9 @@ def _exchange_code_for_tokens(
     code_verifier: str,
     pack_root: Path | None = None,
 ) -> dict[str, Any]:
+    provider = _connection_provider(provider_id, pack_root=pack_root)
+    if provider is None or provider.oauth is None:
+        raise RuntimeError("oauth provider config is not available")
     client = load_provider_client_config(provider_id, pack_root=pack_root)
     if client is None:
         raise RuntimeError("oauth client config is not saved")
@@ -727,16 +936,21 @@ def _exchange_code_for_tokens(
     client_secret = str(client.get("client_secret") or "").strip()
     if client_secret:
         payload["client_secret"] = client_secret
-    return _http_post_form(_GOOGLE_TOKEN_URL, payload)
+    return _http_post_form(provider.oauth.token_url, payload)
 
 
 def _refresh_access_token(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+    provider = _connection_provider(provider_id, pack_root=pack_root)
+    if provider is None or provider.oauth is None:
+        raise RuntimeError("oauth provider config is not available")
     client = load_provider_client_config(provider_id, pack_root=pack_root)
     if client is None:
         raise RuntimeError("oauth client config is not saved")
-    refresh_token = _read_secret(
-        _secret_key(_REFRESH_TOKEN_SECRET_KEYS, provider_id),
-        f"defaultspack.oauth:{provider_id}:refresh",
+    refresh_token = _read_provider_oauth_secret(
+        provider_id,
+        _REFRESH_TOKEN_SECRET_KEYS,
+        "REFRESH_TOKEN",
+        "refresh",
         pack_root=pack_root,
     )
     if not refresh_token:
@@ -749,15 +963,17 @@ def _refresh_access_token(provider_id: str, *, pack_root: Path | None = None) ->
     client_secret = str(client.get("client_secret") or "").strip()
     if client_secret:
         payload["client_secret"] = client_secret
-    token_data = _http_post_form(_GOOGLE_TOKEN_URL, payload)
+    token_data = _http_post_form(provider.oauth.token_url, payload)
     if "refresh_token" not in token_data:
         token_data["refresh_token"] = refresh_token
     return token_data
 
 
 def _fetch_userinfo(provider_id: str, access_token: str) -> dict[str, Any]:
-    del provider_id
-    return _http_get_json(_GOOGLE_USERINFO_URL, access_token)
+    provider = _connection_provider(provider_id)
+    if provider is None or provider.oauth is None or not provider.oauth.userinfo_url:
+        return {}
+    return _http_get_json(provider.oauth.userinfo_url, access_token)
 
 
 def finish_provider_oauth(
@@ -883,12 +1099,22 @@ def get_provider_access_token(provider_id: str, *, pack_root: Path | None = None
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return None
-    access_key = _secret_key(_ACCESS_TOKEN_SECRET_KEYS, provider_id)
-    access_token = _read_secret(access_key, f"defaultspack.oauth:{provider_id}:access", pack_root=pack_root)
+    access_token = _read_provider_oauth_secret(
+        provider_id,
+        _ACCESS_TOKEN_SECRET_KEYS,
+        "ACCESS_TOKEN",
+        "access",
+        pack_root=pack_root,
+    )
     if access_token and _has_valid_access_token(provider_id, pack_root=pack_root):
         return access_token
-    refresh_key = _secret_key(_REFRESH_TOKEN_SECRET_KEYS, provider_id)
-    if not _read_secret(refresh_key, f"defaultspack.oauth:{provider_id}:refresh", pack_root=pack_root):
+    if not _read_provider_oauth_secret(
+        provider_id,
+        _REFRESH_TOKEN_SECRET_KEYS,
+        "REFRESH_TOKEN",
+        "refresh",
+        pack_root=pack_root,
+    ):
         return access_token or None
     try:
         token_data = _refresh_access_token(provider_id, pack_root=pack_root)
@@ -905,6 +1131,24 @@ def get_provider_access_token(provider_id: str, *, pack_root: Path | None = None
         return access_token or None
 
 
+def _provider_config_hint(provider_id: str, connection_status: str, *, client_configured: bool = False) -> str:
+    if provider_id == "google":
+        return "Paste a Google OAuth desktop client JSON or client ID to enable Google AI or Workspace browser login."
+    if provider_id != "cloudflare":
+        return ""
+    if connection_status == "missing_self_host_config":
+        return "Set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env, or paste a client JSON with scopes."
+    if connection_status == "missing_scope_config":
+        if not client_configured:
+            return "Set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env before connecting."
+        return "Set RUMI_CLOUDFLARE_OAUTH_SCOPES in .env or in the saved client JSON before connecting."
+    if connection_status == "not_connected":
+        return "Cloudflare OAuth is ready. Click Connect in browser to finish consent."
+    if connection_status == "connected":
+        return "Cloudflare OAuth token is available."
+    return ""
+
+
 def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     provider = _connection_provider(provider_id, pack_root=pack_root)
@@ -912,7 +1156,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
     client = load_provider_client_config(provider_id, pack_root=pack_root) if supported else None
     metadata = _provider_metadata(provider_id, pack_root=pack_root) if supported else {}
     connected = provider_has_oauth_connection(provider_id, pack_root=pack_root) if supported else False
-    default_scopes = list(provider.oauth.default_scopes if provider and provider.oauth else [])
+    default_scopes = _default_scopes(provider_id, pack_root=pack_root) if supported else list(provider.oauth.default_scopes if provider and provider.oauth else [])
     if connected:
         connection_status = "connected"
         status_label = "Connected"
@@ -922,7 +1166,8 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         status_label = "Unsupported"
         disabled_reason = "Official app required"
     elif provider_id not in _OAUTH_RUNTIME_PROVIDER_IDS:
-        if not default_scopes:
+        manifest_scopes = list(provider.oauth.default_scopes if provider and provider.oauth else [])
+        if not manifest_scopes:
             connection_status = "missing_scope_config"
             status_label = "Missing scope config"
             disabled_reason = "Configure self-host OAuth"
@@ -930,6 +1175,10 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
             connection_status = "needs_official_app"
             status_label = "Official app required"
             disabled_reason = "Official app required"
+    elif not default_scopes:
+        connection_status = "missing_scope_config"
+        status_label = "Missing scope config"
+        disabled_reason = "Configure self-host OAuth"
     elif client is None:
         connection_status = "missing_self_host_config"
         status_label = "Client config needed"
@@ -940,7 +1189,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         disabled_reason = ""
     scope_mode = str(metadata.get("scope_mode") or "google_identity").strip() if provider_id == "google" else ""
     try:
-        status_scopes = list(metadata.get("scopes") or _default_scopes(provider_id, scope_mode or None))
+        status_scopes = list(metadata.get("scopes") or _default_scopes(provider_id, scope_mode or None, pack_root=pack_root))
     except ValueError:
         status_scopes = list(metadata.get("scopes") or default_scopes)
     cloudflare_sdk = {}
@@ -965,8 +1214,10 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "auth_type": str(provider.auth_type if provider else ""),
         "client_configured": client is not None,
         "client_label": _client_id_label(str((client or {}).get("client_id") or "")),
+        "client_source": str((client or {}).get("source") or ""),
+        "client_can_clear": str((client or {}).get("source") or "") == "secret_store",
         "connected": connected,
-        "connect_enabled": supported and client is not None,
+        "connect_enabled": supported and client is not None and bool(default_scopes),
         "connection_status": connection_status,
         "status_label": status_label,
         "disabled_reason": disabled_reason,
@@ -976,20 +1227,14 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "scopes": status_scopes,
         "default_scopes": default_scopes,
         "scope_mode": scope_mode,
-        "scope_modes": _google_scope_mode_rows() if provider_id == "google" else [],
+        "scope_modes": _google_scope_mode_rows(pack_root=pack_root) if provider_id == "google" else [],
         "services": list(metadata.get("services") or []),
         "cloudflare_sdk": cloudflare_sdk,
         "provisioning": {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {},
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
         "redirect_path": f"/api/ai/oauth/{provider_id}/callback" if supported else "",
-        "config_hint": (
-            "Paste a Google OAuth desktop client JSON or client ID to enable Google AI or Workspace browser login."
-            if provider_id == "google"
-            else "Cloudflare OAuth scopes are not configured for this build. Use the official app flow or configure a self-host OAuth client with explicit scopes."
-            if connection_status == "missing_scope_config"
-            else ""
-        ),
+        "config_hint": _provider_config_hint(provider_id, connection_status, client_configured=client is not None),
     }
 
 

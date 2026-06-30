@@ -57,6 +57,16 @@
     "recommended": true
   },
   "metadata": {
-    "scope_note": "Configure least-privilege Cloudflare OAuth scopes for the exact runner resources used by the implementation. Do not request broad account permissions by default."
+    "scope_note": "Configure least-privilege Cloudflare OAuth scopes for the exact runner resources used by the implementation. Do not request broad account permissions by default.",
+    "self_host_env": [
+      "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID",
+      "RUMI_CLOUDFLARE_OAUTH_CLIENT_SECRET",
+      "RUMI_CLOUDFLARE_OAUTH_SCOPES",
+      "RUMI_CLOUDFLARE_OAUTH_REDIRECT_URI"
+    ],
+    "direct_token_env": [
+      "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",
+      "RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN"
+    ]
   }
 }
