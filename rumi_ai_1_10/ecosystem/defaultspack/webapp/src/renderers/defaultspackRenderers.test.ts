@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
-import { CompanyChannelView, visibleCompanyMessagesForChannel } from "../components/company/CompanyChannelView";
+import { CompanyChannelView, companyMessageChannelId, visibleCompanyMessagesForChannel } from "../components/company/CompanyChannelView";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
 import { CompanyTree } from "../components/company/CompanyTree";
 import {
@@ -420,6 +420,57 @@ test("company channels tab keeps latest ops messages visible from descending API
   assert.match(html, /Newest ops message/);
   assert.doesNotMatch(html, /General message/);
   assert.doesNotMatch(html, /No messages in this channel/);
+});
+
+test("company channels tab accepts API messages with channel ids in metadata", () => {
+  const messages = [
+    {
+      id: "message-meta-channel",
+      company_id: "mimo-coding-company",
+      channel_id: "",
+      sender_id: "qa_lead",
+      content: "Metadata-scoped ops update",
+      metadata: { channel_id: "ops-company" },
+      created_at: "2026-06-30T12:00:00Z",
+    },
+  ];
+
+  const visible = visibleCompanyMessagesForChannel(messages, "ops-company", 2);
+  const html = renderToStaticMarkup(
+    createElement(CompanyChannelView, {
+      channels: [{ id: "ops-company", name: "Ops Company", message_count: 260 }],
+      activeChannelId: "ops-company",
+      messages,
+    }),
+  );
+
+  assert.equal(companyMessageChannelId(messages[0]), "ops-company");
+  assert.deepEqual(visible.map((message) => message.id), ["message-meta-channel"]);
+  assert.match(html, /Metadata-scoped ops update/);
+  assert.doesNotMatch(html, /No messages in this channel/);
+});
+
+test("company channels tab falls back to unscoped messages for a single populated channel", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyChannelView, {
+      channels: [{ id: "ops-company", name: "Ops Company", message_count: 260 }],
+      activeChannelId: "ops-company",
+      messages: [
+        {
+          id: "message-unscoped",
+          company_id: "mimo-coding-company",
+          channel_id: "",
+          sender_id: "manager",
+          content: "Unscoped MiMo activity remains visible",
+          created_at: "2026-06-30T12:00:00Z",
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /Unscoped MiMo activity remains visible/);
+  assert.doesNotMatch(html, /No messages in this channel/);
+  assert.doesNotMatch(html, /Refreshing messages/);
 });
 
 test("company tabs avoid empty configured states when card counts are known", () => {

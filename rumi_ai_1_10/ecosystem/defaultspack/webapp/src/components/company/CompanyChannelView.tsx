@@ -12,13 +12,26 @@ function messageTime(value: string | undefined): number | null {
   return Number.isFinite(time) ? time : null;
 }
 
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function companyMessageChannelId(message: CompanyMessage): string {
+  return (
+    textValue(message.channel_id)
+    || textValue(message.metadata?.channel_id)
+    || textValue(message.metadata?.channelId)
+    || textValue(message.metadata?.channel)
+  );
+}
+
 export function visibleCompanyMessagesForChannel(
   messages: CompanyMessage[],
   selectedChannelId?: string | null,
   limit = 20,
 ): CompanyMessage[] {
   return messages
-    .filter((message) => !selectedChannelId || message.channel_id === selectedChannelId)
+    .filter((message) => !selectedChannelId || companyMessageChannelId(message) === selectedChannelId)
     .map((message, index) => ({ message, index }))
     .sort((left, right) => {
       const leftTime = messageTime(left.message.created_at);
@@ -53,8 +66,19 @@ export function CompanyChannelView({
     () => channels.find((channel) => channel.id === selectedChannelId) ?? channels[0] ?? null,
     [channels, selectedChannelId],
   );
-  const visibleMessages = useMemo(() => visibleCompanyMessagesForChannel(messages, selectedChannelId), [messages, selectedChannelId]);
   const expectedMessageCount = positiveCount(activeChannel?.message_count);
+  const visibleMessages = useMemo(() => {
+    const scopedMessages = visibleCompanyMessagesForChannel(messages, selectedChannelId);
+    if (scopedMessages.length > 0 || expectedMessageCount === 0 || messages.length === 0) {
+      return scopedMessages;
+    }
+    const knownChannelIds = new Set(channels.map((channel) => channel.id));
+    const messagesHaveKnownChannels = messages.some((message) => knownChannelIds.has(companyMessageChannelId(message)));
+    if (channels.length <= 1 || !messagesHaveKnownChannels) {
+      return visibleCompanyMessagesForChannel(messages, null);
+    }
+    return scopedMessages;
+  }, [channels, expectedMessageCount, messages, selectedChannelId]);
 
   return (
     <section className="space-y-2 p-2">

@@ -2,6 +2,7 @@ import { api, arrayFromRecord } from "../../../lib/api";
 
 export const companyResources = {
   listCompanies: api.listCompanies,
+  getCompany: api.getCompany,
   getCompanyStatus: api.getCompanyStatus,
   getMimoCodingCompanyStatus: api.getMimoCodingCompanyStatus,
   getP2PStatus: api.getP2PStatus,

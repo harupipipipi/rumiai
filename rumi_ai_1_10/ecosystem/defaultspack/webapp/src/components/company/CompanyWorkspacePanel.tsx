@@ -241,6 +241,25 @@ function preferLoadedCompanyResource<T>(loaded: T[] | null, fallback: T[]): T[] 
   return fallback;
 }
 
+function mergeCompanyRecords(primary: CompanyRecord | null, fallback: CompanyRecord | null): CompanyRecord | null {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    agents: primary.agents ?? fallback.agents,
+    channels: primary.channels ?? fallback.channels,
+    messages: primary.messages ?? fallback.messages,
+    tasks: primary.tasks ?? fallback.tasks,
+    inbound_routes: primary.inbound_routes ?? fallback.inbound_routes,
+    settings: primary.settings ?? fallback.settings,
+    metadata: {
+      ...(fallback.metadata ?? {}),
+      ...(primary.metadata ?? {}),
+    },
+  };
+}
+
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
@@ -321,13 +340,30 @@ export function CompanyWorkspacePanel({
       if (statusCompany?.id && statusCompany.id !== selectedId) {
         statusCompany = null;
       }
-      if (!statusCompany && selectedId) {
-        statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? null;
+      let selectedCompanyDetails: CompanyRecord | null = null;
+      let companyDetailsResult: PromiseSettledResult<CompanyRecord> | null = null;
+      if (selectedId) {
+        const [detailsResult] = await Promise.allSettled([
+          companyResources.getCompany(selectedId),
+        ]);
+        companyDetailsResult = detailsResult;
+        if (detailsResult.status === "fulfilled") {
+          selectedCompanyDetails = detailsResult.value;
+        }
       }
-      const selectedCompany = selectedId
-        ? statusCompany ?? listedCompanies.find((item) => item.id === selectedId) ?? null
+      if (!statusCompany && selectedId) {
+        statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? selectedCompanyDetails;
+      }
+      const listedSelectedCompany = selectedId
+        ? listedCompanies.find((item) => item.id === selectedId) ?? null
         : null;
-      setCompanies(listedCompanies);
+      const selectedCompany = selectedId
+        ? mergeCompanyRecords(selectedCompanyDetails, statusCompany ?? listedSelectedCompany)
+        : null;
+      const visibleCompanies = selectedCompany
+        ? [selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompany.id)]
+        : listedCompanies;
+      setCompanies(visibleCompanies);
       setActiveCompanyId(selectedId);
       setCompany(selectedCompany);
 
@@ -339,6 +375,8 @@ export function CompanyWorkspacePanel({
         settledErrorMessage("Company list", companyListResult),
         settledErrorMessage("Company status", statusResult),
       ].filter((message): message is string => Boolean(message));
+      const companyDetailsError = companyDetailsResult ? settledErrorMessage("Company details", companyDetailsResult) : null;
+      if (companyDetailsError && !selectedCompany) loadErrors.push(companyDetailsError);
 
       if (selectedId) {
         const [agentResult, channelResult, taskResult, routeResult, runResult] = await Promise.allSettled([
