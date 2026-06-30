@@ -72,6 +72,23 @@ def test_chat_store_get_conversation_window_returns_tail_and_offset(tmp_path, mo
     }
 
 
+def test_chat_store_window_uses_conversation_file_before_large_index(tmp_path, monkeypatch):
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation, message_ids = _conversation_with_messages(store, 4)
+    store._conversations = {}
+
+    def fail_full_index_refresh():
+        raise AssertionError("single conversation reads should not reload the full chat index")
+
+    monkeypatch.setattr(store, "_refresh_if_storage_changed", fail_full_index_refresh)
+
+    tail, window = store.get_conversation_window(conversation["id"], message_limit=2)
+
+    assert [message["id"] for message in tail["messages"]] == message_ids[-2:]
+    assert window["total"] == 4
+    assert window["returned"] == 2
+
+
 def test_compact_conversation_window_keeps_large_response_bounded():
     from domain.chat.public_metadata import (
         DEFAULT_CONVERSATION_MESSAGE_LIMIT,

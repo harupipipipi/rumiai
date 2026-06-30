@@ -5,7 +5,7 @@ from typing import Any
 from domain.input.envelope import RumiInputEnvelope
 
 
-_FAILED_DELEGATE_STATUSES = {"error", "failed", "failure"}
+_FAILED_DELEGATE_STATUSES = {"error", "failed", "failure", "timeout", "cancelled", "canceled"}
 _AUTHORITY_APPROVAL_STATUSES = {"authority_approval_required", "approval_required"}
 _PROVIDER_ERROR_HINTS = (
     "provider error",
@@ -157,12 +157,16 @@ def _delegate_summary(data: dict[str, Any], payload: dict[str, Any], envelope: R
 
 
 def _delegate_failed(data: dict[str, Any]) -> bool:
+    return bool(_delegate_failure_status(data))
+
+
+def _delegate_failure_status(data: dict[str, Any]) -> str:
     status = str(data.get("status") or "").strip().lower()
     if status in _FAILED_DELEGATE_STATUSES:
-        return True
+        return status
     nested = data.get("result") if isinstance(data.get("result"), dict) else {}
     nested_status = str(nested.get("status") or "").strip().lower()
-    return nested_status in _FAILED_DELEGATE_STATUSES
+    return nested_status if nested_status in _FAILED_DELEGATE_STATUSES else ""
 
 
 def _find_authority_approval(value: Any, *, depth: int = 0) -> dict[str, Any] | None:
@@ -241,7 +245,7 @@ def _delegate_failure_summary(data: dict[str, Any]) -> tuple[str, str]:
 
 def _safe_failed_delegate_result(data: dict[str, Any], assistant_text: str, code: str) -> dict[str, Any]:
     safe: dict[str, Any] = {
-        "status": str(data.get("status") or "error"),
+        "status": _delegate_failure_status(data) or str(data.get("status") or "error"),
         "code": code,
         "error": assistant_text,
         "error_redacted": True,

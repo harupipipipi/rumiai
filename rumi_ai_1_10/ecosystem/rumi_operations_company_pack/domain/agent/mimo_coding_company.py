@@ -22,7 +22,7 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
 from blocks._common import gen_id, timestamp
 from domain.agent.org_manager import OrgManager
 from domain.agent.role_registry import RoleRegistry
-from domain.agent.schedule_store import load_all_schedules, save_schedule
+from domain.agent.schedule_store import append_history, load_all_schedules, save_schedule
 from domain.agent.scheduler import Scheduler
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.company.runtime_store import CompanyRuntimeStore
@@ -640,6 +640,7 @@ class MimoCodingCompanyRuntime:
         seed_knowledge: bool = True,
         run_initial_review_now: bool = False,
     ) -> dict[str, Any]:
+        bootstrap_started_at = timestamp()
         main_model = self._allowed_model(model or DEFAULT_MAIN_MODEL)
         selected_vision_model = self._allowed_model(vision_model or DEFAULT_VISION_MODEL)
         selected_fast_model = self._allowed_model(fast_model or DEFAULT_FAST_MODEL)
@@ -776,6 +777,8 @@ class MimoCodingCompanyRuntime:
                 timeout_seconds=QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
             )
             self._pause_stale_mimo_schedules(state)
+            if start_nonstop:
+                self._recover_bootstrap_orphaned_running_executions(state, bootstrap_started_at)
         state["last_bootstrapped_at"] = timestamp()
         self._save_state(state)
         if start_nonstop:
@@ -2139,8 +2142,6 @@ class MimoCodingCompanyRuntime:
         if configured is None:
             configured = policy.get("schedule_suppress_external_issue_on")
         suppressions = {str(item or "").strip() for item in configured if str(item or "").strip()} if isinstance(configured, list) else set()
-        if not suppressions:
-            return ""
 
         skipped_reason = str(entry.get("skipped_reason") or "").strip()
         error_code = str(entry.get("error_code") or "").strip()
@@ -2150,7 +2151,7 @@ class MimoCodingCompanyRuntime:
             return "conversation_running"
 
         lowered = (text if text is not None else str(entry.get("error") or entry.get("result") or "")).lower()
-        if "scheduled task timed out after " in lowered and "scheduled_timeout" in suppressions:
+        if "scheduled task timed out after " in lowered:
             return "scheduled_timeout"
         return ""
 
@@ -2208,7 +2209,15 @@ class MimoCodingCompanyRuntime:
 
             store = ChatStore()
             parent = store.get_conversation(conversation_id) or {}
-            child_ids = self._subagent_child_conversation_ids(store, parent, conversation_id)
+            parent_ids = self._subagent_scan_parent_conversation_ids(store, parent, conversation_id, state)
+            child_ids: list[str] = []
+            seen_child_ids: set[str] = set()
+            for parent_id in parent_ids:
+                scan_parent = parent if parent_id == conversation_id else (store.get_conversation(parent_id) or {})
+                for child_id in self._subagent_child_conversation_ids(store, scan_parent, parent_id):
+                    if child_id not in seen_child_ids:
+                        seen_child_ids.add(child_id)
+                        child_ids.append(child_id)
             unanswered: list[dict[str, Any]] = []
             failed: list[dict[str, Any]] = []
             repaired: list[str] = []
@@ -2292,6 +2301,71 @@ class MimoCodingCompanyRuntime:
             return {"checked_ids": checked_ids, "unanswered": unanswered, "failed": failed, "repaired": repaired}
         except Exception:
             return {"checked_ids": [], "unanswered": [], "failed": [], "repaired": []}
+
+    @staticmethod
+    def _subagent_scan_parent_conversation_ids(
+        store: Any,
+        parent: dict[str, Any],
+        conversation_id: str,
+        state: dict[str, Any],
+    ) -> list[str]:
+        parent_ids: list[str] = []
+        seen: set[str] = set()
+
+        def add(raw_parent_id: Any) -> None:
+            parent_id = str(raw_parent_id or "").strip()
+            if parent_id and parent_id not in seen:
+                seen.add(parent_id)
+                parent_ids.append(parent_id)
+
+        root_parent_id = str(conversation_id or "").strip()
+        add(root_parent_id)
+
+        loop_conversation_ids = state.get("loop_conversation_ids") if isinstance(state.get("loop_conversation_ids"), dict) else {}
+        for raw_loop_id in loop_conversation_ids.values():
+            add(raw_loop_id)
+
+        for raw_child_id in parent.get("child_conversation_ids", []) if isinstance(parent, dict) else []:
+            child_id = str(raw_child_id or "").strip()
+            if not child_id:
+                continue
+            try:
+                child = store.get_conversation(child_id) or {}
+            except Exception:
+                continue
+            metadata = child.get("metadata") if isinstance(child.get("metadata"), dict) else {}
+            if (
+                str(child.get("conversation_kind") or "") == "mimo_coding_company_loop"
+                or (
+                    str(metadata.get("company_id") or "") == COMPANY_ID
+                    and str(metadata.get("loop_key") or "").strip()
+                )
+            ):
+                add(child_id)
+
+        try:
+            summaries, _total = store.list_conversations(
+                limit=1000,
+                offset=0,
+                conversation_kind="mimo_coding_company_loop",
+                include_messages=False,
+            )
+        except Exception:
+            return parent_ids
+
+        for summary in summaries if isinstance(summaries, list) else []:
+            if not isinstance(summary, dict):
+                continue
+            metadata = summary.get("metadata") if isinstance(summary.get("metadata"), dict) else {}
+            linked_parent_id = str(
+                summary.get("parent_conversation_id")
+                or metadata.get("parent_conversation_id")
+                or metadata.get("conversation_id")
+                or ""
+            ).strip()
+            if linked_parent_id == root_parent_id:
+                add(summary.get("id"))
+        return parent_ids
 
     @staticmethod
     def _subagent_child_conversation_ids(store: Any, parent: dict[str, Any], conversation_id: str) -> list[str]:
@@ -2974,6 +3048,95 @@ class MimoCodingCompanyRuntime:
             if updated and updated.get("status") == "active":
                 resumed.append(schedule_id)
         return resumed
+
+    def _recover_bootstrap_orphaned_running_executions(
+        self,
+        state: dict[str, Any],
+        bootstrap_started_at: str,
+    ) -> list[str]:
+        bootstrap_dt = self._parse_timestamp(bootstrap_started_at)
+        schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}
+        scheduler = Scheduler()
+        recovered: list[str] = []
+        for loop_key, raw_schedule_id in schedule_ids.items():
+            if str(loop_key) not in SCHEDULE_LOOP_KEYS:
+                continue
+            schedule_id = str(raw_schedule_id or "").strip()
+            if not schedule_id:
+                continue
+            schedule = scheduler.get_schedule(schedule_id)
+            if not isinstance(schedule, dict):
+                continue
+            running = schedule.get("running_execution") if isinstance(schedule.get("running_execution"), dict) else None
+            if not running:
+                continue
+            started_at = str(
+                running.get("started_at")
+                or schedule.get("running_started_at")
+                or running.get("marked_at")
+                or schedule.get("updated_at")
+                or ""
+            ).strip()
+            started_dt = self._parse_timestamp(started_at)
+            if bootstrap_dt is not None and started_dt is not None and started_dt >= bootstrap_dt:
+                continue
+            execution_id = str(running.get("execution_id") or "").strip() or "sexec_recovered_" + gen_id()
+            active_execution_ids = getattr(scheduler, "_active_execution_ids", set())
+            scheduler_lock = getattr(scheduler, "_lock", None)
+            if scheduler_lock is not None:
+                with scheduler_lock:
+                    if execution_id in set(active_execution_ids):
+                        continue
+            elif execution_id in set(active_execution_ids):
+                continue
+            completed_at = timestamp()
+            append_history(
+                schedule_id,
+                {
+                    "execution_id": execution_id,
+                    "schedule_id": schedule_id,
+                    "started_at": started_at or completed_at,
+                    "completed_at": completed_at,
+                    "status": "obsolete",
+                    "trigger": str(running.get("trigger") or "scheduled"),
+                    "result": None,
+                    "error": None,
+                    "obsolete_reason": "manager_bootstrap_restarted",
+                    "recovered_obsolete_running_execution": True,
+                    "recovered_bootstrap_orphaned_running_execution": True,
+                },
+            )
+            schedule.pop("running_execution", None)
+            schedule.pop("running_started_at", None)
+            try:
+                execution_count = int(schedule.get("execution_count") or 0)
+            except (TypeError, ValueError):
+                execution_count = 0
+            schedule["execution_count"] = execution_count + 1
+            schedule["last_executed_at"] = completed_at
+            schedule["updated_at"] = completed_at
+            save_schedule(schedule)
+            scheduler_schedules = getattr(scheduler, "_schedules", None)
+            if scheduler_lock is not None and isinstance(scheduler_schedules, dict):
+                with scheduler_lock:
+                    scheduler_schedules[schedule_id] = schedule
+            recovered.append(schedule_id)
+        return recovered
+
+    @staticmethod
+    def _parse_timestamp(value: Any) -> datetime | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        try:
+            parsed = datetime.fromisoformat(text)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
 
     def _pause_stale_mimo_schedules(self, state: dict[str, Any]) -> list[str]:
         schedule_ids = state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}

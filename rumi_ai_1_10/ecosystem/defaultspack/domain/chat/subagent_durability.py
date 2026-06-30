@@ -174,6 +174,24 @@ def mark_subagent_child_failed(
     )
 
 
+def mark_started_subagent_child_failed(
+    store: ChatStore,
+    child_id: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+    code: str,
+    text: str = SUBAGENT_FAILED_TEXT,
+) -> dict[str, Any] | None:
+    child = store.get_conversation(child_id) or {}
+    messages = child.get("messages") if isinstance(child.get("messages"), list) else []
+    if not any(
+        isinstance(message, dict) and str(message.get("role") or "").strip().lower() == "user"
+        for message in messages
+    ):
+        return None
+    return mark_subagent_child_failed(store, child_id, metadata=metadata, code=code, text=text)
+
+
 def _upsert_assistant_marker(
     store: ChatStore,
     child_id: str,

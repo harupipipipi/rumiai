@@ -990,6 +990,93 @@ def test_mimo_coding_company_bootstrap_defers_overdue_loop_schedule_arming_until
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_bootstrap_recovers_orphaned_running_loop_execution(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        MimoCodingCompanyRuntime,
+        QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
+    )
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", raising=False)
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:18766/chat"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    qa_schedule = next(
+        schedule
+        for schedule in first["schedules"]
+        if schedule["task"]["metadata"]["loop_key"] == "qa_loop"
+    )
+    qa_schedule_id = qa_schedule["id"]
+    execution_id = "sexec-orphaned-qa-loop"
+    started_at = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    persisted = load_schedule(qa_schedule_id)
+    persisted["running_execution"] = {
+        "execution_id": execution_id,
+        "schedule_id": qa_schedule_id,
+        "started_at": started_at,
+        "trigger": "scheduled",
+        "timeout_seconds": QA_LOOP_SCHEDULE_TIMEOUT_SECONDS,
+    }
+    persisted["running_started_at"] = started_at
+    save_schedule(persisted)
+    scheduler = Scheduler()
+    with scheduler._lock:
+        scheduler._schedules[qa_schedule_id] = persisted
+
+    second = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:18766/chat"],
+        docker_worker_count=0,
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    refreshed_qa = next(
+        schedule
+        for schedule in second["schedules"]
+        if schedule["task"]["metadata"]["loop_key"] == "qa_loop"
+    )
+
+    assert "running_execution" not in refreshed_qa
+    saved = load_schedule(qa_schedule_id)
+    assert "running_execution" not in saved
+    entries, _total = load_history(qa_schedule_id, limit=10)
+    recovered = next(entry for entry in entries if entry["execution_id"] == execution_id)
+    assert recovered["status"] == "obsolete"
+    assert recovered["obsolete_reason"] == "manager_bootstrap_restarted"
+    assert recovered["recovered_bootstrap_orphaned_running_execution"] is True
+    assert recovered["error"] is None
+
+    for schedule in second["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_rebootstrap_replenishes_completed_stream_task(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler
@@ -1832,6 +1919,17 @@ def test_mimo_coding_company_observability_suppresses_expected_schedule_noise(tm
 
     scheduler.delete_schedule(schedule["id"])
     _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_observability_suppresses_timeout_without_schedule_config():
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    reason = MimoCodingCompanyRuntime._schedule_noise_suppression_reason(
+        None,
+        {"status": "error", "error": "scheduled task timed out after 900 seconds"},
+    )
+
+    assert reason == "scheduled_timeout"
 
 
 def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tmp_path, monkeypatch):

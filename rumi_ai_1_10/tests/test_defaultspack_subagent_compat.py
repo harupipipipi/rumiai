@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -633,6 +635,34 @@ def test_agent_run_subagent_delegate_provider_error_surfaces_safe_text(monkeypat
     assert "API key" not in serialized
 
 
+def test_agent_run_subagent_delegate_timeout_surfaces_failed_result(monkeypatch):
+    def fake_execute(input_data, context):
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent-timeout",
+                "status": "ok",
+                "result": {
+                    "execution_id": "agent-timeout",
+                    "status": "timeout",
+                    "error": "handler execution timed out",
+                },
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = run_subagent_block({"payload": {"task": "delegate this"}}, {})
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["status"] == "error"
+    assert data["code"] == "DELEGATE_RUN_FAILED"
+    assert data["assistant_text"] == SUBAGENT_FAILED_TEXT
+    assert data["result"]["status"] == "timeout"
+    assert data["result"]["error_redacted"] is True
+
+
 def test_tool_subagent_compat_returns_structured_result(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     parent = _parent_conversation()
@@ -1025,6 +1055,61 @@ def test_non_stream_subagent_child_success_finalizes_without_draft_metadata(monk
     assert metadata["thinking"]["state"] == "completed"
 
 
+def test_non_stream_subagent_child_prepare_failure_adds_failed_assistant_marker(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": parent["id"],
+            "subagent": {"task": "probe", "source": "subagent_tool"},
+        },
+    )
+
+    def fake_prepare(input_data, context):
+        del context
+        ChatStore().add_message(
+            input_data["conversation_id"],
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "do the child work"}],
+            },
+        )
+        raise TimeoutError("handler execution timed out")
+
+    from domain.chat.stream_engine import ChatRunEngine
+
+    monkeypatch.setattr("domain.chat.stream_engine.prepare_chat_run", fake_prepare)
+
+    with pytest.raises(TimeoutError):
+        list(
+            ChatRunEngine().stream(
+                {
+                    "conversation_id": child["id"],
+                    "message": {"role": "user", "content": "do the child work"},
+                    "params": {},
+                    "tools": [],
+                },
+                {"chat_history_mode": "current_turn", "subagent_child_durable_draft": True},
+                stream_mode=False,
+            )
+        )
+
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    marker = child_after["messages"][-1]
+    assert marker["finish_reason"] == "error"
+    assert marker["raw_text"] == SUBAGENT_FAILED_TEXT
+    assert marker["metadata"]["status"] == "error"
+    assert marker["metadata"]["error_code"] == "SUBAGENT_PREPARE_FAILED"
+    assert child_after["metadata"]["subagent"]["status"] == "error"
+    assert child_after["metadata"]["subagent"]["error_code"] == "SUBAGENT_PREPARE_FAILED"
+
+
 def test_tool_subagent_adds_safe_marker_when_dispatch_returns_without_assistant(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     ChatStore._instance = None
@@ -1240,6 +1325,61 @@ def test_mimo_monitor_repairs_stale_subagent_child_missing_from_parent_index(mon
     assert result["unanswered"][0]["failed"] is True
     assert result["failed"][0]["child_conversation_id"] == child["id"]
     assert result["repaired"] == []
+    child_after = ChatStore().get_conversation(child["id"])
+    assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
+    assert child_after["metadata"]["subagent"]["status"] == "error"
+    assert child_after["metadata"]["subagent"]["error_code"] == "SUBAGENT_DISPATCH_INTERRUPTED"
+
+
+def test_mimo_monitor_repairs_stale_subagent_child_under_company_loop(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    store = ChatStore()
+    parent = store.create_conversation(model="stub/default")
+    loop = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=parent["id"],
+        conversation_kind="mimo_coding_company_loop",
+        metadata={
+            "company_id": "mimo-coding-company",
+            "loop_key": "qa_loop",
+            "parent_conversation_id": parent["id"],
+        },
+    )
+    child = store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=loop["id"],
+        conversation_kind="subagent",
+        metadata={
+            "parent_conversation_id": loop["id"],
+            "subagent": {"task": "loop child", "source": "subagent_tool"},
+        },
+    )
+    store.update_conversation(parent["id"], {"child_conversation_ids": [loop["id"]]})
+    store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Simple test JSON probe under loop"}],
+        },
+    )
+
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    runtime = MimoCodingCompanyRuntime()
+    monkeypatch.setattr(runtime, "_conversation_age_seconds", lambda conversation: 999.0)
+
+    result = runtime._subagent_reply_gaps(
+        {
+            "conversation_id": parent["id"],
+            "loop_conversation_ids": {"qa_loop": loop["id"]},
+        }
+    )
+
+    assert result["checked_ids"] == [child["id"]]
+    assert result["unanswered"][0]["child_conversation_id"] == child["id"]
+    assert result["unanswered"][0]["failed"] is True
+    assert result["failed"][0]["child_conversation_id"] == child["id"]
     child_after = ChatStore().get_conversation(child["id"])
     assert [message["role"] for message in child_after["messages"]] == ["user", "assistant"]
     assert child_after["metadata"]["subagent"]["status"] == "error"

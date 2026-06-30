@@ -291,6 +291,11 @@ class ChatStore:
 
     def get_conversation(self, conversation_id):
         conversation_id = str(conversation_id or "")
+        conv = self._load_conversation_file(conversation_id)
+        if conv is not None:
+            with self._lock:
+                self._conversations[conversation_id] = conv
+            return copy.deepcopy(conv)
         self._refresh_if_storage_changed()
         conv = self._conversations.get(conversation_id)
         if conv is None:
@@ -301,12 +306,17 @@ class ChatStore:
 
     def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
         conversation_id = str(conversation_id or "")
-        self._refresh_if_storage_changed()
-        conv = self._conversations.get(conversation_id)
+        conv = self._load_conversation_file(conversation_id)
         if conv is None:
-            conv = self._recover_conversation_from_file(conversation_id)
+            self._refresh_if_storage_changed()
+            conv = self._conversations.get(conversation_id)
             if conv is None:
-                return None, None
+                conv = self._recover_conversation_from_file(conversation_id)
+                if conv is None:
+                    return None, None
+        else:
+            with self._lock:
+                self._conversations[conversation_id] = conv
         messages = conv.get("messages", [])
         if not isinstance(messages, list):
             messages = []

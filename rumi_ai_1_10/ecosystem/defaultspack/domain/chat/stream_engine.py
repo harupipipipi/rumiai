@@ -71,6 +71,7 @@ from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.subagent_durability import (
     SUBAGENT_DURABLE_DRAFT_FLAG,
     SUBAGENT_PENDING_TEXT,
+    mark_started_subagent_child_failed,
     should_create_subagent_durable_draft,
     subagent_durable_draft_metadata,
 )
@@ -1379,7 +1380,12 @@ class ChatRunEngine:
         *,
         stream_mode: bool = True,
     ) -> Iterator[dict[str, Any]]:
-        prepared = prepare_chat_run(input_data, context)
+        context = context or {}
+        try:
+            prepared = prepare_chat_run(input_data, context)
+        except Exception:
+            self._mark_subagent_prepare_failed(input_data, context)
+            raise
         self._run_id = gen_id()
         self._conversation_id = prepared.conversation_id
         self._event_seq = 0
@@ -1616,6 +1622,26 @@ class ChatRunEngine:
                 except Exception:
                     pass
             cancellation_registry.unregister(prepared.conversation_id, request_cancel)
+
+    def _mark_subagent_prepare_failed(self, input_data: dict[str, Any], context: dict[str, Any]) -> None:
+        if not isinstance(input_data, dict):
+            return
+        conversation_id = str(input_data.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return
+        conversation = self._store.get_conversation(conversation_id)
+        if not should_create_subagent_durable_draft(conversation, context):
+            return
+        metadata = conversation.get("metadata") if isinstance(conversation, dict) else None
+        try:
+            mark_started_subagent_child_failed(
+                self._store,
+                conversation_id,
+                metadata=metadata if isinstance(metadata, dict) else None,
+                code="SUBAGENT_PREPARE_FAILED",
+            )
+        except Exception:
+            pass
 
     def _process_conversation_steer(self, conversation_id: str, context: dict[str, Any]) -> list[dict[str, Any]]:
         try:
