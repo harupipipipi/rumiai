@@ -39,6 +39,30 @@ def _setup_schedule_store(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
 
 
+def test_scheduler_chat_payload_preserves_task_message_for_provider_fallback():
+    from domain.agent import scheduler as scheduler_module
+
+    payload = scheduler_module._scheduler_chat_payload(
+        conversation_id="conv-qa",
+        content="Run the scheduled QA task.",
+        task_cfg={
+            "message": "Run the scheduled QA task.",
+            "model": "google/gemma-4-31b-it",
+            "agent_id": "browser_qa",
+        },
+        schedule_id="sched-qa",
+        exec_id="sexec-qa",
+        trigger="scheduled",
+        params={"model": "google/gemma-4-31b-it"},
+        tools=[],
+    )
+
+    assert payload["message"]["role"] == "user"
+    assert payload["message"]["content"] == "Run the scheduled QA task."
+    assert payload["message"]["metadata"]["scheduled_task_message"] == "Run the scheduled QA task."
+    assert payload["message"]["metadata"]["source"] == "scheduler"
+
+
 def _approval_required_response(
     approval,
     *,

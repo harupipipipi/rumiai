@@ -13,7 +13,7 @@ class GoogleNativeCompiler(ProviderCompiler):
 
     def compile_complete(self, planned: PlannedProviderRequest):
         name_map, reverse_name_map = GoogleProvider._tool_name_maps(planned.provider_tools)
-        messages = ir_to_legacy_standard_messages(planned.ir)
+        messages = ir_to_legacy_standard_messages(planned.ir, include_metadata=True)
         params = GoogleProvider._translate_params(dict(planned.params or {}), planned.model)
         body = GoogleProvider()._native_body(planned.model, messages, planned.provider_tools, params, name_map)
         return CompiledProviderRequest(

@@ -310,8 +310,9 @@ class GoogleProvider(OpenAICompatibleProvider):
         if not isinstance(value, dict):
             return None
         block_type = str(value.get("type") or "").lower()
-        if block_type == "text":
-            return {"text": str(value.get("text") or "")}
+        if block_type in {"text", "input_text"}:
+            text = str(value.get("text") or value.get("content") or "")
+            return {"text": text} if text else None
         if block_type == "image_url":
             image_url = value.get("image_url")
             url = image_url.get("url") if isinstance(image_url, dict) else value.get("url")
@@ -445,8 +446,14 @@ class GoogleProvider(OpenAICompatibleProvider):
                 continue
             role = str(message.get("role") or "user").lower()
             raw_content = message.get("content", "")
+            if raw_content is None or raw_content == [] or (isinstance(raw_content, str) and not raw_content.strip()):
+                raw_content = cls._native_message_text_fallback(message)
             raw_parts = raw_content if isinstance(raw_content, list) else [raw_content]
             parts = [] if role == "tool" else [part for part in (cls._native_text_part(item) for item in raw_parts) if part]
+            if not parts and role != "tool":
+                fallback = cls._native_message_text_fallback(message)
+                if fallback:
+                    parts = [{"text": fallback}]
             if role == "assistant":
                 parts.extend(
                     part
@@ -469,6 +476,19 @@ class GoogleProvider(OpenAICompatibleProvider):
             contents.append({"role": native_role, "parts": parts})
         system_instruction = {"parts": system_parts} if system_parts else None
         return contents, system_instruction
+
+    @staticmethod
+    def _native_message_text_fallback(message: Dict[str, Any]) -> str:
+        for key in ("text", "raw_text", "prompt", "message"):
+            value = message.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        for key in ("scheduled_task_message", "runtime_content", "user_text"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
 
     @staticmethod
     def _native_schema(value: Any) -> Dict[str, Any]:
@@ -553,6 +573,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         name_map: Dict[str, str] | None = None,
     ) -> Dict[str, Any]:
         contents, system_instruction = self._native_build_contents(messages, name_map)
+        if not contents:
+            raise ValueError("google native request requires at least one non-empty message content")
         body: Dict[str, Any] = {"contents": contents}
         if system_instruction:
             body["systemInstruction"] = system_instruction

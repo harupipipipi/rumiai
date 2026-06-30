@@ -427,6 +427,9 @@ def _scheduler_chat_payload(
     }
     if isinstance(metadata_extra, dict):
         message_metadata.update(metadata_extra)
+    task_message = str(task_cfg.get("message") or "").strip()
+    if task_message:
+        message_metadata.setdefault("scheduled_task_message", task_message)
     message = {
         "role": "user",
         "content": content,

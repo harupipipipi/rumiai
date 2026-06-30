@@ -308,6 +308,52 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         self.assertEqual(captured["timeout"], 17.0)
         self.assertEqual(response["content"][0]["text"], "ok")
 
+    def test_google_native_body_uses_fallback_text_when_content_is_empty(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        body = provider._native_body(
+            "gemma-4-31b-it",
+            [
+                {
+                    "role": "user",
+                    "content": [],
+                    "metadata": {"scheduled_task_message": "Run the scheduled QA task."},
+                }
+            ],
+            [],
+            {},
+        )
+
+        self.assertEqual(body["contents"][0]["role"], "user")
+        self.assertEqual(body["contents"][0]["parts"][0]["text"], "Run the scheduled QA task.")
+
+    def test_google_native_body_rejects_empty_contents_before_provider_request(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        with self.assertRaisesRegex(ValueError, "non-empty message content"):
+            provider._native_body("gemma-4-31b-it", [{"role": "user", "content": ""}], [], {})
+
+    def test_google_native_body_accepts_input_text_content_blocks(self):
+        from domain.ai_client.providers.google_provider import GoogleProvider
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
+            provider = GoogleProvider()
+
+        body = provider._native_body(
+            "gemma-4-31b-it",
+            [{"role": "user", "content": [{"type": "input_text", "content": "inspect the UI"}]}],
+            [],
+            {},
+        )
+
+        self.assertEqual(body["contents"][0]["parts"][0]["text"], "inspect the UI")
+
     def test_google_openai_compatible_request_retries_transient_backend_errors(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
