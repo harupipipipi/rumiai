@@ -3238,7 +3238,15 @@ export const api = {
     });
   },
 
-  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number; tail?: boolean }) {
+  listCompanyMessages(companyId: string, options?: {
+    channel_id?: string;
+    thread_id?: string;
+    limit?: number;
+    offset?: number;
+    tail?: boolean;
+    latest?: boolean;
+    order?: "asc" | "desc" | string;
+  }) {
     return request<{ messages: CompanyMessage[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/messages`, { company_id: companyId, ...options }),
       { cache: "no-store" },

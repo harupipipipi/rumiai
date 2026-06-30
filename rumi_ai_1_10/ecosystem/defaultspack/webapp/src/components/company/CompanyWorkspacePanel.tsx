@@ -160,8 +160,8 @@ export function resolveActiveChannelId(
 export function resolveCompanyMessageListOptions(
   channels: Pick<CompanyChannel, "id">[],
   resolvedChannelId: string,
-): { channel_id?: string; limit: number; tail: true } {
-  const options = { limit: 80, tail: true as const };
+): { channel_id?: string; limit: number; order: "desc" } {
+  const options = { limit: 80, order: "desc" as const };
   if (channels.some((channel) => channel.id === resolvedChannelId)) {
     return { ...options, channel_id: resolvedChannelId };
   }
@@ -234,6 +234,11 @@ function settledErrorMessage(label: string, result: PromiseSettledResult<unknown
   if (result.status !== "rejected") return null;
   const detail = result.reason instanceof Error ? result.reason.message : "unavailable";
   return `${label}: ${detail}`;
+}
+
+function preferLoadedCompanyResource<T>(loaded: T[] | null, fallback: T[]): T[] {
+  if (loaded && (loaded.length > 0 || fallback.length === 0)) return loaded;
+  return fallback;
 }
 
 export function CompanyWorkspacePanel({
@@ -319,9 +324,12 @@ export function CompanyWorkspacePanel({
       if (!statusCompany && selectedId) {
         statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? null;
       }
+      const selectedCompany = selectedId
+        ? statusCompany ?? listedCompanies.find((item) => item.id === selectedId) ?? null
+        : null;
       setCompanies(listedCompanies);
       setActiveCompanyId(selectedId);
-      setCompany(statusCompany);
+      setCompany(selectedCompany);
 
       if (p2pStatusResult.status === "fulfilled") setP2PStatus(p2pStatusResult.value);
       if (p2pIdentityResult.status === "fulfilled") setP2PIdentity(p2pIdentityResult.value.identity);
@@ -340,23 +348,54 @@ export function CompanyWorkspacePanel({
           companyResources.listCompanyInboundRoutes(selectedId),
           companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
-        const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);
+        const fallbackAgents = arrayFromRecord(selectedCompany?.agents);
+        const nextAgents = preferLoadedCompanyResource(
+          agentResult.status === "fulfilled" ? agentResult.value.agents : null,
+          fallbackAgents,
+        );
         setAgents(nextAgents);
-        const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
+        const fallbackChannels = arrayFromRecord(selectedCompany?.channels);
+        const nextChannels = preferLoadedCompanyResource(
+          channelResult.status === "fulfilled" ? channelResult.value.channels : null,
+          fallbackChannels,
+        );
         setChannels(nextChannels);
         const resolvedChannelId = resolveActiveChannelId(requestedChannelId ?? activeChannelId, nextChannels);
         setActiveChannelId(resolvedChannelId);
-        setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
-        setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
+        const fallbackTasks = arrayFromRecord(selectedCompany?.tasks);
+        setTasks(preferLoadedCompanyResource(
+          taskResult.status === "fulfilled" ? taskResult.value.tasks : null,
+          fallbackTasks,
+        ));
+        const fallbackRoutes = arrayFromRecord(selectedCompany?.inbound_routes);
+        setRoutes(preferLoadedCompanyResource(
+          routeResult.status === "fulfilled" ? routeResult.value.routes : null,
+          fallbackRoutes,
+        ));
         const [messageResult] = await Promise.allSettled([
           companyResources.listCompanyMessages(selectedId, resolveCompanyMessageListOptions(nextChannels, resolvedChannelId)),
         ]);
-        setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
+        let loadedMessages = messageResult.status === "fulfilled" ? messageResult.value.messages : null;
+        let messageRetryResult: PromiseSettledResult<{ messages: CompanyMessage[]; total: number }> | null = null;
+        const selectedChannel = nextChannels.find((channel) => channel.id === resolvedChannelId);
+        const selectedChannelMessageCount = typeof selectedChannel?.message_count === "number" ? selectedChannel.message_count : 0;
+        if ((loadedMessages?.length ?? 0) === 0 && selectedChannelMessageCount > 0) {
+          [messageRetryResult] = await Promise.allSettled([
+            companyResources.listCompanyMessages(selectedId, { limit: 80, order: "desc" }),
+          ]);
+          if (messageRetryResult.status === "fulfilled" && messageRetryResult.value.messages.length > 0) {
+            loadedMessages = messageRetryResult.value.messages;
+          }
+        }
+        const fallbackMessages = arrayFromRecord(selectedCompany?.messages);
+        setMessages(preferLoadedCompanyResource(loadedMessages, fallbackMessages));
         setRuns(runResult.status === "fulfilled" ? runResult.value.runs : []);
         const channelError = settledErrorMessage("Channels", channelResult);
         const messageError = settledErrorMessage("Messages", messageResult);
+        const messageRetryError = messageRetryResult ? settledErrorMessage("Messages retry", messageRetryResult) : null;
         if (channelError) loadErrors.push(channelError);
         if (messageError) loadErrors.push(messageError);
+        if (messageRetryError) loadErrors.push(messageRetryError);
         const inboxResults = await Promise.allSettled(
           nextAgents.map((agent) => companyResources.listCompanyAgentInbox(selectedId, agent.agent_id, { limit: 20 })),
         );
@@ -446,6 +485,7 @@ export function CompanyWorkspacePanel({
             agents={agents}
             runs={runs}
             inboxItems={inboxItems}
+            expectedAgentCount={activeCompany?.agent_count}
             busy={busy}
             onUpsertAgent={(agent) => activeCompanyId && void run(() => companyResources.upsertCompanyAgent(activeCompanyId, agent))}
           />
@@ -485,6 +525,7 @@ export function CompanyWorkspacePanel({
             tasks={tasks}
             agents={agents}
             runs={runs}
+            expectedTaskCount={activeCompany?.task_count}
             busy={busy}
             onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, {
               title,
@@ -540,6 +581,7 @@ export function CompanyWorkspacePanel({
       <CompanyTree
         companies={effectiveCompanies}
         activeCompanyId={activeCompanyId}
+        activeTaskCount={Math.max(tasks.length, activeCompany?.task_count ?? 0)}
         busy={busy}
         emptyMessage={hasActiveConversation ? "No employee group loaded." : "Start or send a chat message to create its employee group."}
         onSelect={(companyId) => void loadCompany(companyId)}

@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
-import { CompanyChannelView } from "../components/company/CompanyChannelView";
+import { CompanyChannelView, visibleCompanyMessagesForChannel } from "../components/company/CompanyChannelView";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
 import { CompanyTree } from "../components/company/CompanyTree";
 import {
@@ -373,9 +373,83 @@ test("company channels tab scopes and renders ops-company messages", () => {
   );
 
   assert.equal(resolvedChannelId, "ops-company");
-  assert.deepEqual(messageOptions, { limit: 80, tail: true, channel_id: "ops-company" });
+  assert.deepEqual(messageOptions, { limit: 80, order: "desc", channel_id: "ops-company" });
   assert.match(html, /Ops handoff is visible/);
   assert.doesNotMatch(html, /General chatter hidden from ops channel/);
+});
+
+test("company channels tab keeps latest ops messages visible from descending API results", () => {
+  const messages = [
+    {
+      id: "message-newest",
+      company_id: "mimo-coding-company",
+      channel_id: "ops-company",
+      sender_id: "ops_lead",
+      content: "Newest ops message",
+      created_at: "2026-06-30T12:00:00Z",
+    },
+    {
+      id: "message-general",
+      company_id: "mimo-coding-company",
+      channel_id: "general",
+      sender_id: "pm",
+      content: "General message",
+      created_at: "2026-06-30T11:30:00Z",
+    },
+    {
+      id: "message-older",
+      company_id: "mimo-coding-company",
+      channel_id: "ops-company",
+      sender_id: "ops_lead",
+      content: "Older ops message",
+      created_at: "2026-06-30T11:00:00Z",
+    },
+  ];
+
+  const visible = visibleCompanyMessagesForChannel(messages, "ops-company", 2);
+  const html = renderToStaticMarkup(
+    createElement(CompanyChannelView, {
+      channels: [{ id: "ops-company", name: "Ops Company", message_count: 254 }],
+      activeChannelId: "ops-company",
+      messages,
+    }),
+  );
+
+  assert.deepEqual(visible.map((message) => message.id), ["message-older", "message-newest"]);
+  assert.match(html, /Older ops message/);
+  assert.match(html, /Newest ops message/);
+  assert.doesNotMatch(html, /General message/);
+  assert.doesNotMatch(html, /No messages in this channel/);
+});
+
+test("company tabs avoid empty configured states when card counts are known", () => {
+  const channelHtml = renderToStaticMarkup(
+    createElement(CompanyChannelView, {
+      channels: [{ id: "ops-company", name: "Ops Company", message_count: 254 }],
+      activeChannelId: "ops-company",
+      messages: [],
+    }),
+  );
+  const taskHtml = renderToStaticMarkup(
+    createElement(CompanyTaskBoard, {
+      agents: [],
+      tasks: [],
+      expectedTaskCount: 6,
+    }),
+  );
+  const agentHtml = renderToStaticMarkup(
+    createElement(CompanyAgentList, {
+      agents: [],
+      expectedAgentCount: 7,
+    }),
+  );
+
+  assert.match(channelHtml, /254 messages recorded/);
+  assert.doesNotMatch(channelHtml, /No messages in this channel/);
+  assert.match(taskHtml, /6 tasks recorded/);
+  assert.doesNotMatch(taskHtml, /No delegated tasks/);
+  assert.match(agentHtml, /7 employees configured/);
+  assert.doesNotMatch(agentHtml, /No employees configured/);
 });
 
 test("company task board renders agent run errors", () => {

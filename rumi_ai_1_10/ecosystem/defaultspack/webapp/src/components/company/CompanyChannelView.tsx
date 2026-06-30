@@ -3,6 +3,35 @@ import { useMemo, useState } from "react";
 
 import type { CompanyChannel, CompanyMessage } from "../../lib/api";
 
+function positiveCount(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function messageTime(value: string | undefined): number | null {
+  const time = Date.parse(value ?? "");
+  return Number.isFinite(time) ? time : null;
+}
+
+export function visibleCompanyMessagesForChannel(
+  messages: CompanyMessage[],
+  selectedChannelId?: string | null,
+  limit = 20,
+): CompanyMessage[] {
+  return messages
+    .filter((message) => !selectedChannelId || message.channel_id === selectedChannelId)
+    .map((message, index) => ({ message, index }))
+    .sort((left, right) => {
+      const leftTime = messageTime(left.message.created_at);
+      const rightTime = messageTime(right.message.created_at);
+      if (leftTime !== null && rightTime !== null && leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return left.index - right.index;
+    })
+    .slice(-limit)
+    .map((item) => item.message);
+}
+
 export function CompanyChannelView({
   channels,
   messages,
@@ -20,10 +49,12 @@ export function CompanyChannelView({
 }) {
   const [draft, setDraft] = useState("");
   const selectedChannelId = activeChannelId || channels[0]?.id || "ops-company";
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => !selectedChannelId || message.channel_id === selectedChannelId),
-    [messages, selectedChannelId],
+  const activeChannel = useMemo(
+    () => channels.find((channel) => channel.id === selectedChannelId) ?? channels[0] ?? null,
+    [channels, selectedChannelId],
   );
+  const visibleMessages = useMemo(() => visibleCompanyMessagesForChannel(messages, selectedChannelId), [messages, selectedChannelId]);
+  const expectedMessageCount = positiveCount(activeChannel?.message_count);
 
   return (
     <section className="space-y-2 p-2">
@@ -44,7 +75,7 @@ export function CompanyChannelView({
       </div>
 
       <div className="max-h-48 space-y-1 overflow-y-auto">
-        {visibleMessages.slice(-20).map((message) => (
+        {visibleMessages.map((message) => (
           <div key={message.id} className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-1.5">
             <div className="mb-0.5 flex items-center gap-1.5 text-[10px] text-zinc-500">
               <MessageSquare size={10} />
@@ -55,7 +86,9 @@ export function CompanyChannelView({
         ))}
         {visibleMessages.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            No messages in this channel.
+            {expectedMessageCount > 0
+              ? `${expectedMessageCount} messages recorded. Refreshing messages...`
+              : "No messages in this channel."}
           </div>
         )}
       </div>
