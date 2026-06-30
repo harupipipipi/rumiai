@@ -23,6 +23,7 @@ from .composer import PageComposer
 from .compression_inspector import CompressionInspector
 from .fake_agent_backend import FakeUIAgentBackend
 from .foundation_generator import FoundationGenerator
+from .project_writer import write_json
 from .render_matrix import RenderMatrixRunner
 from .subagent_backend import SubagentToolBackend
 from .verifier import ProjectVerifier
@@ -112,6 +113,7 @@ class RecursiveUIBuildOrchestrator:
                     data={"runId": plan.run_id, "report": report_path, "idempotent": True},
                 )
             store.ensure_run_dirs(plan.run_id)
+            artifacts = {**artifacts, **_write_layer_artifacts(plan=plan, run_root=run_root, ui_tree=root_payload)}
             target_workspace = _target_workspace(workspace, data.get("target"))
             foundation_generator = FoundationGenerator(backend=self.agent_backend, store=store)
             foundations = foundation_generator.generate(
@@ -577,6 +579,17 @@ def _final_report(
         "responsive": audits.get("responsive", {}),
         "accessibility": audits.get("accessibility", {}),
         "qualityAudit": audits,
+        "generatedFilesSummary": _generated_files_summary(
+            plan=plan,
+            artifacts=artifacts,
+            composition=composition or {},
+            verification=verification_payload,
+        ),
+        "recursiveSplitSummary": _recursive_split_summary(plan),
+        "acceptedFoundationSummary": _accepted_foundation_summary(accepted_foundation or {}),
+        "acceptedLeafBundlesSummary": _accepted_leaf_bundles_summary(accepted_payload),
+        "auditSummary": _audit_summary(audits),
+        "failedRetriedCandidateSummary": _failed_retried_candidate_summary(accepted_payload),
         "verification": verification_payload,
         "buildTestLint": {
             "lint": verification_payload.get("lint"),
@@ -586,6 +599,255 @@ def _final_report(
         },
         "inspections": inspections or {},
         "failure": failure or {},
+    }
+
+
+def _write_layer_artifacts(*, plan: UIPlan, run_root: Path, ui_tree: dict[str, Any]) -> dict[str, Any]:
+    run_prefix = f".rumi/ui/runs/{plan.run_id}"
+    intent = _intent_artifact(plan)
+    topology = _topology_artifact(plan)
+    split = _split_manifest_artifact(plan, ui_tree)
+    write_json(run_root / "intent.json", intent)
+    write_json(run_root / "topology.json", topology)
+    write_json(run_root / "split-manifest.json", split)
+    return {
+        "intent": f"{run_prefix}/intent.json",
+        "topology": f"{run_prefix}/topology.json",
+        "splitManifest": f"{run_prefix}/split-manifest.json",
+    }
+
+
+def _intent_artifact(plan: UIPlan) -> dict[str, Any]:
+    root = plan.root.node
+    metadata = dict(root.metadata or {})
+    responsibilities = root.responsibilities.to_dict()
+    return {
+        "status": "planned",
+        "runId": plan.run_id,
+        "productMode": metadata.get("productMode") or root.density,
+        "audience": metadata.get("audience") or "coding-tool-user",
+        "primaryIntent": root.purpose,
+        "secondaryIntent": [
+            child.node.purpose
+            for child in plan.root.children
+            if child.node.importance != "primaryRegion"
+        ],
+        "tertiaryIntent": [],
+        "priorityOrder": metadata.get("priorityOrder") or ["trust", "readability", "speed", "safety"],
+        "density": root.density,
+        "importance": root.importance,
+        "desktopTabletMobilePriority": ["desktop", "mobile", "tablet"],
+        "constraints": {
+            "implementationMode": root.implementation_mode,
+            "responsibilities": responsibilities,
+            "mobilePolicy": metadata.get("mobilePolicy"),
+        },
+    }
+
+
+def _topology_artifact(plan: UIPlan) -> dict[str, Any]:
+    nodes = []
+    for planned in plan.root.planned_nodes():
+        envelope = planned.node.layout_envelope
+        nodes.append(
+            {
+                "nodeId": planned.node.id,
+                "importance": planned.node.importance,
+                "density": planned.node.density,
+                "desktop": {
+                    "preferredWidth": envelope.preferred_width,
+                    "maxWidth": envelope.max_width,
+                },
+                "tablet": {
+                    "minWidth": envelope.min_width,
+                    "preferredWidth": envelope.preferred_width,
+                },
+                "mobile": {
+                    "behavior": envelope.mobile_behavior or "stack",
+                    "policy": "route/drawer/sheet/disclosure/step-down instead of desktop shrink",
+                },
+                "visibleActionBudget": planned.node.visible_action_budget,
+            }
+        )
+    return {
+        "status": "planned",
+        "runId": plan.run_id,
+        "viewports": [390, 768, 1440],
+        "nodes": nodes,
+    }
+
+
+def _split_manifest_artifact(plan: UIPlan, ui_tree: dict[str, Any]) -> dict[str, Any]:
+    root_children = [
+        {
+            "nodeId": child.node.id,
+            "purpose": child.node.purpose,
+            "importance": child.node.importance,
+            "density": child.node.density,
+            "visibleActionBudget": child.node.visible_action_budget,
+            "responsibilities": child.node.responsibilities.to_dict(),
+            "slotId": _slot_for_child(plan.root, child.node.id),
+        }
+        for child in plan.root.children
+    ]
+    contracts = [
+        {
+            "contractId": contract.id,
+            "nodeId": contract.source_node_id or contract.id,
+            "candidateCount": contract.candidate_count,
+            "visibleActionBudget": contract.visible_action_budget,
+            "requiredStates": list(contract.required_states),
+        }
+        for contract in plan.contracts()
+    ]
+    return {
+        "status": "planned",
+        "runId": plan.run_id,
+        "splitBasis": "semantic responsibility boundaries",
+        "uiTree": ui_tree,
+        "regions": root_children,
+        "contracts": contracts,
+    }
+
+
+def _slot_for_child(parent: Any, child_id: str) -> str | None:
+    for slot in parent.node.slots:
+        if slot.accepts_node_id == child_id:
+            return slot.id
+    return None
+
+
+def _generated_files_summary(
+    *,
+    plan: UIPlan,
+    artifacts: dict[str, Any],
+    composition: dict[str, Any],
+    verification: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "plan": {
+            "manifest": artifacts.get("manifest"),
+            "blueprint": artifacts.get("blueprint"),
+            "report": artifacts.get("report"),
+            "intent": artifacts.get("intent"),
+            "topology": artifacts.get("topology"),
+            "splitManifest": artifacts.get("splitManifest"),
+            "contracts": list(artifacts.get("contracts") or []),
+        },
+        "composition": {
+            "sourceRoot": composition.get("sourceRoot"),
+            "entry": composition.get("entry"),
+            "imports": len(composition.get("imports") if isinstance(composition.get("imports"), list) else []),
+            "slotMappings": len(composition.get("slotMappings") if isinstance(composition.get("slotMappings"), list) else []),
+        },
+        "finalReport": f".rumi/ui/runs/{plan.run_id}/reports/final.json",
+        "npm": {
+            "lint": verification.get("lint"),
+            "test": verification.get("test"),
+            "build": verification.get("build"),
+        },
+    }
+
+
+def _recursive_split_summary(plan: UIPlan) -> dict[str, Any]:
+    plan_dict = plan.to_dict()
+    return {
+        "summary": plan_dict.get("summary") or {},
+        "semanticRegions": [
+            {
+                "nodeId": child.node.id,
+                "purpose": child.node.purpose,
+                "density": child.node.density,
+                "visibleActionBudget": child.node.visible_action_budget,
+            }
+            for child in plan.root.children
+        ],
+        "contracts": [
+            {
+                "contractId": contract.id,
+                "candidateCount": contract.candidate_count,
+                "visibleActionBudget": contract.visible_action_budget,
+            }
+            for contract in plan.contracts()
+        ],
+    }
+
+
+def _accepted_foundation_summary(foundation: dict[str, Any]) -> dict[str, Any]:
+    spec = foundation.get("spec") if isinstance(foundation.get("spec"), dict) else {}
+    if not spec:
+        spec = foundation
+    direction = spec.get("direction") if isinstance(spec.get("direction"), dict) else {}
+    typography = spec.get("typography") if isinstance(spec.get("typography"), dict) else {}
+    color = spec.get("color") if isinstance(spec.get("color"), dict) else {}
+    surface = spec.get("surface") if isinstance(spec.get("surface"), dict) else {}
+    return {
+        "candidateId": foundation.get("candidateId") or spec.get("candidateId"),
+        "productMode": direction.get("productMode"),
+        "typographyRoles": sorted((typography.get("roles") or {}).keys()) if isinstance(typography.get("roles"), dict) else [],
+        "colorRoles": list(color.get("roles") if isinstance(color.get("roles"), list) else []),
+        "surfacePolicy": surface,
+        "primitiveCount": len(spec.get("primitives") if isinstance(spec.get("primitives"), list) else []),
+    }
+
+
+def _accepted_leaf_bundles_summary(accepted: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for node_id, decision in sorted(accepted.items()):
+        data = decision if isinstance(decision, dict) else {}
+        chosen = data.get("acceptedCandidateId")
+        decision_payload = data.get("decision") if isinstance(data.get("decision"), dict) else {}
+        rows.append(
+            {
+                "nodeId": node_id,
+                "acceptedCandidateId": chosen,
+                "compressionScore": decision_payload.get("compressionScore"),
+                "rejectedCount": len(data.get("rejected") if isinstance(data.get("rejected"), list) else []),
+                "stateCoverage": decision_payload.get("stateCoverage"),
+                "renderMatrix": decision_payload.get("renderMatrix"),
+            }
+        )
+    return rows
+
+
+def _audit_summary(audits: dict[str, Any]) -> dict[str, Any]:
+    keys = [
+        "compression",
+        "textPressure",
+        "typography",
+        "colorRoles",
+        "surfaceAudit",
+        "interactionBudget",
+        "responsive",
+        "accessibility",
+    ]
+    return {
+        "status": audits.get("status"),
+        "failedAudits": list(audits.get("failedAudits") if isinstance(audits.get("failedAudits"), list) else []),
+        "sections": {
+            key: audits.get(key, {}).get("status")
+            for key in keys
+            if isinstance(audits.get(key), dict)
+        },
+    }
+
+
+def _failed_retried_candidate_summary(accepted: dict[str, Any]) -> dict[str, Any]:
+    rejected: list[dict[str, Any]] = []
+    retried: list[dict[str, Any]] = []
+    for node_id, decision in sorted(accepted.items()):
+        data = decision if isinstance(decision, dict) else {}
+        for item in data.get("rejected") if isinstance(data.get("rejected"), list) else []:
+            if isinstance(item, dict):
+                rejected.append({"nodeId": node_id, **item})
+        accepted_candidate = str(data.get("acceptedCandidateId") or "")
+        if "retry" in accepted_candidate:
+            retried.append({"nodeId": node_id, "acceptedCandidateId": accepted_candidate})
+    return {
+        "rejectedCount": len(rejected),
+        "retriedAcceptedCount": len(retried),
+        "rejected": rejected,
+        "retriedAccepted": retried,
     }
 
 

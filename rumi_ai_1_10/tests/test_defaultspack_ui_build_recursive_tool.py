@@ -86,7 +86,8 @@ def test_exported_runtime_helper_does_not_bypass_approval(tmp_path: Path) -> Non
 def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> None:
     write_pass_package(tmp_path / "project")
     result = ui_build_recursive(build_args("report-run"), fake_context(tmp_path))
-    final = json.loads((tmp_path / ".rumi" / "ui" / "runs" / "report-run" / "reports" / "final.json").read_text(encoding="utf-8"))
+    run_root = tmp_path / ".rumi" / "ui" / "runs" / "report-run"
+    final = json.loads((run_root / "reports" / "final.json").read_text(encoding="utf-8"))
 
     assert result["status"] == "ok"
     for key in [
@@ -106,6 +107,12 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
         "accessibility",
         "qualityAudit",
         "buildTestLint",
+        "generatedFilesSummary",
+        "recursiveSplitSummary",
+        "acceptedFoundationSummary",
+        "acceptedLeafBundlesSummary",
+        "auditSummary",
+        "failedRetriedCandidateSummary",
         "acceptedFoundation",
         "accepted",
         "composition",
@@ -118,6 +125,12 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
     assert final["verification"]["lint"] == "passed"
     assert final["verification"]["test"] == "passed"
     assert final["verification"]["build"] == "passed"
+    assert (run_root / "intent.json").is_file()
+    assert (run_root / "topology.json").is_file()
+    assert (run_root / "split-manifest.json").is_file()
+    assert final["generatedFilesSummary"]["plan"]["intent"].endswith("/intent.json")
+    assert final["recursiveSplitSummary"]["contracts"]
+    assert final["acceptedLeafBundlesSummary"]
 
 
 def test_quality_audit_fails_text_overload_as_first_class_section() -> None:
@@ -169,6 +182,119 @@ def test_quality_audit_fails_text_overload_as_first_class_section() -> None:
     assert audit["status"] == "fail"
     assert "textPressure" in audit["failedAudits"]
     assert any("visible character" in issue["message"] for issue in audit["textPressure"]["issues"])
+
+
+def test_quality_audit_fails_visual_abuse_budget_and_accessibility_sections() -> None:
+    plan = RecursiveUIPlanner().plan(fixture_tree(), run_id="audit-visual-abuse")
+    snapshot = RenderSnapshot(
+        subject_id="page",
+        candidate_id="composition",
+        viewport=390,
+        scenario="default",
+        text_scale=1,
+        image_path="",
+        dom_path="",
+        console_path="",
+        metrics={
+            "viewport": 390,
+            "visibleTextBlocks": 4,
+            "visibleCharacters": 360,
+            "averageLineLength": 70,
+            "visibleActions": 8,
+            "allowedActions": 2,
+            "horizontalOverflow": True,
+            "toolbarOverflow": 1,
+            "primaryActionUnreachable": 1,
+            "touchTargetFailures": 1,
+            "gradientCount": 2,
+            "nonSemanticColorCount": 3,
+            "mutedTextRatio": 0.8,
+            "surfaceDepth": 4,
+            "cardNestingDepth": 3,
+            "borderCount": 14,
+            "shadowCount": 3,
+            "radiusUniformity": 0.98,
+            "mobileDisclosureUsed": False,
+            "contrastMin": 3.8,
+            "focusVisible": False,
+            "keyboardNav": False,
+            "ariaRoles": 0,
+        },
+    )
+    foundation = {
+        "direction": {"productMode": "utility"},
+        "typography": {"roles": {role: {} for role in ["pageTitle", "sectionTitle", "body", "label", "caption", "numeric", "code"]}},
+        "spacing": {"density": "compact"},
+        "color": {"roles": ["canvas", "surface", "textPrimary", "textSecondary", "actionPrimary", "statusCritical"]},
+        "surface": {"maxNestedDepth": 1},
+        "primitives": ["Button", "TextInput"],
+    }
+
+    audit = UIQualityAuditOrchestrator().audit(
+        plan=plan,
+        foundation=foundation,
+        page_matrix=RenderMatrix(subject_id="page", candidate_id="composition", snapshots=[snapshot]),
+        page_compression={"status": "pass", "compressionScore": 0.95, "metrics": {}, "issues": []},
+        accepted_count=3,
+    )
+
+    assert {
+        "topology",
+        "colorRoles",
+        "surfaceAudit",
+        "interactionBudget",
+        "responsive",
+        "accessibility",
+    } <= set(audit["failedAudits"])
+    assert any("gradient" in issue["message"] for issue in audit["colorRoles"]["issues"])
+    assert any("card nesting" in issue["message"] for issue in audit["surfaceAudit"]["issues"])
+    assert any("visible action budget" in issue["message"] for issue in audit["interactionBudget"]["issues"])
+
+
+def test_quality_audit_fails_missing_typography_role_map() -> None:
+    plan = RecursiveUIPlanner().plan(fixture_tree(), run_id="audit-type-map")
+    snapshot = RenderSnapshot(
+        subject_id="page",
+        candidate_id="composition",
+        viewport=768,
+        scenario="default",
+        text_scale=1,
+        image_path="",
+        dom_path="",
+        console_path="",
+        metrics={
+            "viewport": 768,
+            "visibleTextBlocks": 4,
+            "visibleCharacters": 300,
+            "averageLineLength": 62,
+            "visibleActions": 2,
+            "allowedActions": 3,
+            "mobileDisclosureUsed": True,
+            "contrastMin": 4.8,
+            "focusVisible": True,
+            "keyboardNav": True,
+            "ariaRoles": 2,
+        },
+    )
+    foundation = {
+        "direction": {"productMode": "utility"},
+        "typography": {"roles": {"body": {}, "label": {}}},
+        "spacing": {"density": "compact"},
+        "color": {"roles": ["canvas", "surface", "textPrimary", "textSecondary", "actionPrimary", "statusCritical"]},
+        "surface": {"maxNestedDepth": 1},
+        "primitives": ["Button", "TextInput"],
+    }
+
+    audit = UIQualityAuditOrchestrator().audit(
+        plan=plan,
+        foundation=foundation,
+        page_matrix=RenderMatrix(subject_id="page", candidate_id="composition", snapshots=[snapshot]),
+        page_compression={"status": "pass", "compressionScore": 0.95, "metrics": {}, "issues": []},
+        accepted_count=3,
+    )
+
+    assert "typography" in audit["failedAudits"]
+    assert any("missing typography roles" in issue["message"] for issue in audit["typography"]["issues"])
 
 
 def test_recursive_ui_http_routes_are_registered() -> None:
