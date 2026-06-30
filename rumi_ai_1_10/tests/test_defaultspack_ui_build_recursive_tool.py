@@ -131,6 +131,19 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
     assert final["generatedFilesSummary"]["plan"]["intent"].endswith("/intent.json")
     assert final["recursiveSplitSummary"]["contracts"]
     assert final["acceptedLeafBundlesSummary"]
+    task_files = {path.name for path in (run_root / "agent-tasks").glob("*.json")}
+    assert {
+        "report-run-intent-agent.json",
+        "report-run-page-topology-agent.json",
+        "report-run-semantic-region-planner.json",
+        "report-run-text-pressure-auditor.json",
+        "report-run-compression-auditor.json",
+        "report-run-candidate-selector.json",
+        "report-run-composition-agent.json",
+        "report-run-refinement-selector.json",
+    } <= task_files
+    pipeline_tasks = final["generatedFilesSummary"]["plan"].get("pipelineTasks") or []
+    assert len(pipeline_tasks) >= 11
 
 
 def test_quality_audit_fails_text_overload_as_first_class_section() -> None:

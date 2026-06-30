@@ -8,6 +8,7 @@ from domain.tool_policy.internal_context import (
     tool_server_approval_context_is_internal,
 )
 from domain.ui_compiler import (
+    UIAgentTask,
     UICompilerArtifactStore,
     UICompilerConfig,
     UIPlan,
@@ -113,7 +114,10 @@ class RecursiveUIBuildOrchestrator:
                     data={"runId": plan.run_id, "report": report_path, "idempotent": True},
                 )
             store.ensure_run_dirs(plan.run_id)
-            artifacts = {**artifacts, **_write_layer_artifacts(plan=plan, run_root=run_root, ui_tree=root_payload)}
+            artifacts = {
+                **artifacts,
+                **_write_layer_artifacts(store=store, plan=plan, run_root=run_root, ui_tree=root_payload),
+            }
             target_workspace = _target_workspace(workspace, data.get("target"))
             foundation_generator = FoundationGenerator(backend=self.agent_backend, store=store)
             foundations = foundation_generator.generate(
@@ -602,7 +606,13 @@ def _final_report(
     }
 
 
-def _write_layer_artifacts(*, plan: UIPlan, run_root: Path, ui_tree: dict[str, Any]) -> dict[str, Any]:
+def _write_layer_artifacts(
+    *,
+    store: UICompilerArtifactStore,
+    plan: UIPlan,
+    run_root: Path,
+    ui_tree: dict[str, Any],
+) -> dict[str, Any]:
     run_prefix = f".rumi/ui/runs/{plan.run_id}"
     intent = _intent_artifact(plan)
     topology = _topology_artifact(plan)
@@ -610,11 +620,63 @@ def _write_layer_artifacts(*, plan: UIPlan, run_root: Path, ui_tree: dict[str, A
     write_json(run_root / "intent.json", intent)
     write_json(run_root / "topology.json", topology)
     write_json(run_root / "split-manifest.json", split)
+    pipeline_tasks = _save_pipeline_specialist_tasks(store=store, plan=plan, run_root=run_root)
     return {
         "intent": f"{run_prefix}/intent.json",
         "topology": f"{run_prefix}/topology.json",
         "splitManifest": f"{run_prefix}/split-manifest.json",
+        "pipelineTasks": pipeline_tasks,
     }
+
+
+PIPELINE_SPECIALIST_TASKS = [
+    ("intent-agent", "intent", "Resolve product intent, audience, constraints, and trust/speed/readability/safety order."),
+    ("page-topology-agent", "topology", "Design desktop, tablet, and mobile topology without desktop-shrink mobile."),
+    ("semantic-region-planner", "semantic-region", "Split the page by responsibility, density, and visible action budget."),
+    ("state-completeness-auditor", "state-audit", "Audit default, long, empty, loading, error, selected, disabled, success, warn, and error states."),
+    ("responsive-auditor", "responsive", "Audit 390/768/1440 topology, overflow, disclosure, drawer, sheet, and step-down behavior."),
+    ("accessibility-interaction-auditor", "accessibility", "Audit keyboard navigation, aria roles, contrast, focus visibility, and touch targets."),
+    ("text-pressure-auditor", "text-pressure-audit", "Audit visible text blocks, visible characters, line length, clipping, ellipses, and Japanese wrapping."),
+    ("compression-auditor", "compression-audit", "Audit gap, boundary, text, action, surface, hierarchy, and responsive pressure."),
+    ("candidate-selector", "candidate-selector", "Select only artifact-backed candidates that passed render and audit evidence."),
+    ("composition-agent", "composition", "Compose accepted bundles by slot mapping without editing leaf sources."),
+    ("refinement-selector", "refinement-selector", "Choose accepted artifacts or trigger regenerate/refine based on audit evidence."),
+]
+
+
+def _save_pipeline_specialist_tasks(
+    *,
+    store: UICompilerArtifactStore,
+    plan: UIPlan,
+    run_root: Path,
+) -> list[dict[str, Any]]:
+    tasks: list[dict[str, Any]] = []
+    for role_id, kind, prompt in PIPELINE_SPECIALIST_TASKS:
+        task_id = f"{plan.run_id}-{role_id}"
+        output_dir = run_root / "pipeline-tasks" / role_id
+        task = UIAgentTask(
+            task_id=task_id,
+            run_id=plan.run_id,
+            node_id="page",
+            candidate_id=role_id,
+            kind=kind,
+            prompt=prompt,
+            output_dir=str(output_dir),
+            allowed_paths=[str(output_dir)],
+            metadata={"role": role_id, "stage": kind, "subagentSplit": True},
+        )
+        payload = task.to_dict()
+        store.save_agent_task(run_id=plan.run_id, task_id=task_id, task=payload)
+        write_json(output_dir / "task.json", payload)
+        tasks.append(
+            {
+                "role": role_id,
+                "kind": kind,
+                "taskId": task_id,
+                "outputDir": f".rumi/ui/runs/{plan.run_id}/pipeline-tasks/{role_id}",
+            }
+        )
+    return tasks
 
 
 def _intent_artifact(plan: UIPlan) -> dict[str, Any]:
@@ -732,6 +794,7 @@ def _generated_files_summary(
             "intent": artifacts.get("intent"),
             "topology": artifacts.get("topology"),
             "splitManifest": artifacts.get("splitManifest"),
+            "pipelineTasks": list(artifacts.get("pipelineTasks") if isinstance(artifacts.get("pipelineTasks"), list) else []),
             "contracts": list(artifacts.get("contracts") or []),
         },
         "composition": {

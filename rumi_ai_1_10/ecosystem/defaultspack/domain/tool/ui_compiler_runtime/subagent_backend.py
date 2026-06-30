@@ -70,6 +70,19 @@ def _role_id_for_task(task: UIAgentTask) -> str:
         return "foundation-synthesizer"
     if kind == "leaf":
         return f"leaf-component-{task.node_id}"
-    if kind in {"composition", "audit", "responsive", "accessibility"}:
+    if kind in {
+        "intent",
+        "topology",
+        "semantic-region",
+        "state-audit",
+        "responsive",
+        "accessibility",
+        "text-pressure-audit",
+        "compression-audit",
+        "candidate-selector",
+        "composition",
+        "refinement-selector",
+        "audit",
+    }:
         return kind
     return "recursive-ui-delegate"
