@@ -175,6 +175,11 @@ def _chat_result_content(result: dict[str, Any] | None) -> str:
     return str(content)
 
 
+def _chat_result_message_id(result: dict[str, Any] | None) -> str:
+    data = _chat_result_data(result)
+    return str(data.get("id") or "").strip() if data else ""
+
+
 def _redact_scheduler_error_text(value: Any) -> str:
     text = str(value or "scheduled chat failed")
     text = _SCHEDULED_CHAT_SECRET_VALUE_RE.sub("[redacted]", text)
@@ -407,6 +412,7 @@ def _scheduler_chat_payload(
     trigger: str,
     params: dict[str, Any],
     tools: list[Any] | None,
+    parent_id: str | None = None,
     metadata_extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
@@ -421,16 +427,35 @@ def _scheduler_chat_payload(
     }
     if isinstance(metadata_extra, dict):
         message_metadata.update(metadata_extra)
+    message = {
+        "role": "user",
+        "content": content,
+        "metadata": message_metadata,
+    }
+    if parent_id is not None:
+        message["parent_id"] = parent_id
     return {
         "conversation_id": conversation_id,
-        "message": {
-            "role": "user",
-            "content": content,
-            "metadata": message_metadata,
-        },
+        "message": message,
         "params": dict(params),
         "tools": tools,
     }
+
+
+def _current_conversation_node_id(conversation_id: str) -> str | None:
+    conversation_id = str(conversation_id or "").strip()
+    if not conversation_id:
+        return None
+    try:
+        from domain.chat.store import ChatStore
+
+        conversation = ChatStore().get_conversation(conversation_id)
+    except Exception:
+        return None
+    if not isinstance(conversation, dict):
+        return None
+    current_id = str(conversation.get("current_node_id") or "").strip()
+    return current_id or None
 
 
 def _schedule_auto_approval_limit(task_cfg: dict[str, Any]) -> int | None:
@@ -573,6 +598,7 @@ def _resume_scheduled_chat_approvals(
         if cancel_event is not None and cancel_event.is_set():
             break
         auto_approvals.append(approved["summary"])
+        followup_parent_id = _chat_result_message_id(result) or None
         result = send_chat(
             _scheduler_chat_payload(
                 conversation_id=conversation_id,
@@ -586,6 +612,7 @@ def _resume_scheduled_chat_approvals(
                 trigger=trigger,
                 params=_followup_params(params),
                 tools=tools,
+                parent_id=followup_parent_id,
                 metadata_extra={
                     "source": "scheduler_approval_followup",
                     "approval_followup": approved["followup"],
@@ -1868,6 +1895,7 @@ class Scheduler:
                     params, tools = _scheduler_chat_params_and_tools(task_cfg, timeout_seconds=timeout_seconds)
 
                     def run_chat_task():
+                        initial_parent_id = _current_conversation_node_id(str(conversation_id))
                         chat_result = chat_send_run(
                             _scheduler_chat_payload(
                                 conversation_id=conversation_id,
@@ -1878,6 +1906,7 @@ class Scheduler:
                                 trigger=trigger,
                                 params=params,
                                 tools=tools,
+                                parent_id=initial_parent_id,
                             ),
                             _scheduler_chat_context(task_cfg, cancel_event=cancel_event),
                         )

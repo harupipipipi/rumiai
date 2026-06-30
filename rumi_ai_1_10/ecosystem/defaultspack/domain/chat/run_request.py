@@ -224,14 +224,16 @@ def prepare_chat_run(
     chat_references = _chat_references(store, conversation_id, metadata)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata.setdefault("chat_references", chat_references)
-    user_message = store.add_message(
-        conversation_id,
-        {
-            "role": message.get("role", "user"),
-            "content": content,
-            "metadata": metadata or None,
-        },
-    )
+    user_message_dict = {
+        "role": message.get("role", "user"),
+        "content": content,
+        "metadata": metadata or None,
+    }
+    if "parent_id" in message:
+        parent_id = str(message.get("parent_id") or "").strip()
+        if parent_id:
+            user_message_dict["parent_id"] = parent_id
+    user_message = store.add_message(conversation_id, user_message_dict)
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 

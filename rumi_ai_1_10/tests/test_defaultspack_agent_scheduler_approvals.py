@@ -647,6 +647,153 @@ def test_stale_scheduled_chat_recovery_ignores_empty_streaming_assistant(tmp_pat
         ChatStore._instance = None
 
 
+def test_scheduled_approval_followup_uses_fresh_approval_parent_when_current_node_is_stale(tmp_path, monkeypatch):
+    _setup_schedule_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    from domain.chat.store import ChatStore
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    conversation_id = conversation["id"]
+
+    root = store.add_message(conversation_id, {"role": "user", "content": "root"})
+    error_branch = store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "parent_id": root["id"],
+            "content": "old error",
+            "finish_reason": "error",
+        },
+    )
+    old_followup = store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "parent_id": root["id"],
+            "content": "old approval followup",
+            "metadata": {"source": "scheduler_approval_followup", "schedule_id": "old-schedule"},
+        },
+    )
+    stale_cancelled = store.add_message(
+        conversation_id,
+        {
+            "role": "assistant",
+            "parent_id": old_followup["id"],
+            "content": "cancelled",
+            "finish_reason": "cancelled",
+            "metadata": {"cancelled": True},
+        },
+    )
+    store.update_conversation(conversation_id, {"current_node_id": stale_cancelled["id"]})
+
+    from domain.agent import scheduler as scheduler_module
+
+    send_calls: list[dict] = []
+
+    def fake_approve_schedule_pending_approval(task_cfg, pending, *, conversation_id):
+        return {
+            "summary": {"tool_name": "browser_use", "operation": "browser.open_url"},
+            "followup": {"approved": True},
+        }
+
+    def fake_send_chat(payload, context):
+        send_calls.append(payload)
+        message = payload["message"]
+        user_message = {
+            "role": "user",
+            "content": message["content"],
+            "metadata": message.get("metadata"),
+        }
+        if "parent_id" in message:
+            user_message["parent_id"] = message["parent_id"]
+        user = store.add_message(payload["conversation_id"], user_message)
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        is_followup = metadata.get("source") == "scheduler_approval_followup"
+        assistant = store.add_message(
+            payload["conversation_id"],
+            {
+                "role": "assistant",
+                "parent_id": user["id"],
+                "content": "continued" if is_followup else "approval needed",
+                "finish_reason": "stop" if is_followup else "approval_required",
+                "metadata": (
+                    {}
+                    if is_followup
+                    else {
+                        "pending_approval": {
+                            "tool_name": "browser_use",
+                            "operation": "browser.open_url",
+                            "approval_required": True,
+                        }
+                    }
+                ),
+            },
+        )
+        if not is_followup:
+            store.update_conversation(payload["conversation_id"], {"current_node_id": stale_cancelled["id"]})
+        return {"status": "ok", "data": assistant}
+
+    monkeypatch.setattr(scheduler_module, "approve_schedule_pending_approval", fake_approve_schedule_pending_approval)
+    monkeypatch.setattr("blocks.chat.send.run", fake_send_chat)
+
+    scheduler = scheduler_module.Scheduler()
+    schedule = scheduler.create_schedule(
+        "once",
+        {
+            "message": "Run scheduled task.",
+            "model": "stub/default",
+            "conversation_id": conversation_id,
+            "tool_policy": {"schedule_auto_approve_max_followups": 1},
+        },
+        {"run_at": "2099-01-01T00:00:00Z"},
+    )
+
+    try:
+        history = scheduler.trigger_now(schedule["id"])
+        stored = store.get_conversation(conversation_id)
+        scheduled_user = next(
+            message
+            for message in stored["messages"]
+            if (message.get("metadata") or {}).get("source") == "scheduler"
+            and (message.get("metadata") or {}).get("schedule_execution_id") == history["execution_id"]
+        )
+        approval_assistant = next(
+            message
+            for message in stored["messages"]
+            if message.get("role") == "assistant"
+            and message.get("parent_id") == scheduled_user["id"]
+            and message.get("finish_reason") == "approval_required"
+        )
+        followup_user = next(
+            message
+            for message in stored["messages"]
+            if (message.get("metadata") or {}).get("source") == "scheduler_approval_followup"
+            and (message.get("metadata") or {}).get("schedule_execution_id") == history["execution_id"]
+        )
+        followup_assistant = next(
+            message
+            for message in stored["messages"]
+            if message.get("role") == "assistant" and message.get("parent_id") == followup_user["id"]
+        )
+
+        assert history["status"] == "completed"
+        assert scheduled_user["parent_id"] == stale_cancelled["id"]
+        assert approval_assistant["parent_id"] == scheduled_user["id"]
+        assert followup_user["parent_id"] == approval_assistant["id"]
+        assert followup_assistant["parent_id"] == followup_user["id"]
+        assert send_calls[1]["message"]["parent_id"] == approval_assistant["id"]
+        assert stored["current_node_id"] == followup_assistant["id"]
+        assert error_branch["id"] != followup_user["parent_id"]
+        assert stale_cancelled["id"] != followup_user["parent_id"]
+    finally:
+        scheduler.delete_schedule(schedule["id"])
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
 def test_scheduler_recovers_active_stale_running_execution_once_when_original_unwinds(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
