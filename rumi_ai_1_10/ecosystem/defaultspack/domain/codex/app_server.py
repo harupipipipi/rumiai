@@ -602,8 +602,11 @@ def codex_app_server_stdio_smoke(
         send({"method": "thread/start", "id": 1, "params": thread_params})
 
         while time.monotonic() < deadline:
-            line = _readline_before_deadline(proc.stdout, deadline)
+            read_deadline = min(deadline, time.monotonic() + 2.0) if final_parts else deadline
+            line = _readline_before_deadline(proc.stdout, read_deadline)
             if not line:
+                if final_parts:
+                    completed = True
                 break
             message = _parse_json_line(line)
             if not message:
@@ -646,6 +649,9 @@ def codex_app_server_stdio_smoke(
                 if method == "item/agentMessage/delta":
                     final_parts.append(_redact_known_secrets(str(params.get("delta") or "")))
                     turn_id = turn_id or str(params.get("turnId") or "")
+                elif method == "item/completed" and final_parts:
+                    completed = True
+                    break
                 elif method == "turn/started":
                     turn_id = turn_id or str(_nested(params, "turn", "id") or "")
                 elif method == "turn/completed":
