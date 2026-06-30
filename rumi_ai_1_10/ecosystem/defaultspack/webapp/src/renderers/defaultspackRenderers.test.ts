@@ -4,13 +4,18 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { CompanyAgentList } from "../components/company/CompanyAgentList";
+import { CompanyChannelView } from "../components/company/CompanyChannelView";
 import { CompanyTaskBoard } from "../components/company/CompanyTaskBoard";
+import { CompanyTree } from "../components/company/CompanyTree";
 import {
   CompanyWorkspacePanel,
+  MIMO_CODING_COMPANY_ID,
   resolveActiveChannelId,
+  resolveCompanyMessageListOptions,
   resolveCompanyWorkspaceHint,
   resolveCompanyWorkspaceHintFromGroup,
   resolveEffectiveCompanies,
+  resolveSelectedCompanyId,
 } from "../components/company/CompanyWorkspacePanel";
 import { buildCompactHistoryRailItems, buildGroupsFromChats } from "../components/HistoryBoard";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
@@ -160,6 +165,43 @@ test("company workspace renders a visible empty state before a chat exists", () 
   assert.doesNotMatch(html, /Rumi Operations Company/);
 });
 
+test("company workspace selects and renders the first global MiMo company without a chat or hint", () => {
+  const companies = [
+    {
+      id: MIMO_CODING_COMPANY_ID,
+      name: "MiMo Coding Company",
+      agent_count: 7,
+      task_count: 6,
+    },
+    {
+      id: "operations-company",
+      name: "Rumi Operations Company",
+      agent_count: 9,
+      task_count: 1,
+    },
+  ];
+  const selectedId = resolveSelectedCompanyId({
+    activeConversationId: null,
+    activeCompanyId: null,
+    hintedCompanyId: null,
+    statusCompany: null,
+    companies,
+  });
+
+  const html = renderToStaticMarkup(
+    createElement(CompanyTree, {
+      companies,
+      activeCompanyId: selectedId,
+    }),
+  );
+
+  assert.equal(selectedId, MIMO_CODING_COMPANY_ID);
+  assert.match(html, /MiMo Coding Company/);
+  assert.match(html, /7 employees/);
+  assert.match(html, /6 tasks/);
+  assert.doesNotMatch(html, /Start or send a chat message/);
+});
+
 test("company workspace keeps global companies visible for conversation-scoped groups", () => {
   const effectiveCompanies = resolveEffectiveCompanies({
     activeConversationId: "chat-1",
@@ -264,6 +306,42 @@ test("company workspace repairs stale channel selection when switching companies
   assert.equal(resolveActiveChannelId("qa-findings", channels), "qa-findings");
   assert.equal(resolveActiveChannelId("old-chat-channel", channels), "ops-company");
   assert.equal(resolveActiveChannelId(null, [{ id: "research" }]), "research");
+});
+
+test("company channels tab scopes and renders ops-company messages", () => {
+  const channels = [
+    { id: "ops-company", name: "Ops Company" },
+    { id: "general", name: "General" },
+  ];
+  const resolvedChannelId = resolveActiveChannelId(null, channels);
+  const messageOptions = resolveCompanyMessageListOptions(channels, resolvedChannelId);
+  const html = renderToStaticMarkup(
+    createElement(CompanyChannelView, {
+      channels,
+      activeChannelId: resolvedChannelId,
+      messages: [
+        {
+          id: "message-ops",
+          company_id: "operations-company",
+          channel_id: "ops-company",
+          sender_id: "ops_lead",
+          content: "Ops handoff is visible",
+        },
+        {
+          id: "message-general",
+          company_id: "operations-company",
+          channel_id: "general",
+          sender_id: "pm",
+          content: "General chatter hidden from ops channel",
+        },
+      ],
+    }),
+  );
+
+  assert.equal(resolvedChannelId, "ops-company");
+  assert.deepEqual(messageOptions, { limit: 80, tail: true, channel_id: "ops-company" });
+  assert.match(html, /Ops handoff is visible/);
+  assert.doesNotMatch(html, /General chatter hidden from ops channel/);
 });
 
 test("company task board renders agent run errors", () => {

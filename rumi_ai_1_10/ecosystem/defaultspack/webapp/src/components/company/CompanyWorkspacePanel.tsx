@@ -143,6 +143,36 @@ export function resolveActiveChannelId(
   return channels[0]?.id || fallbackChannelId;
 }
 
+export function resolveCompanyMessageListOptions(
+  channels: Pick<CompanyChannel, "id">[],
+  resolvedChannelId: string,
+): { channel_id?: string; limit: number; tail: true } {
+  const options = { limit: 80, tail: true as const };
+  if (channels.some((channel) => channel.id === resolvedChannelId)) {
+    return { ...options, channel_id: resolvedChannelId };
+  }
+  return options;
+}
+
+export function resolveSelectedCompanyId({
+  activeConversationId,
+  activeCompanyId,
+  hintedCompanyId,
+  statusCompany,
+  companies,
+}: {
+  activeConversationId?: string | null;
+  activeCompanyId?: string | null;
+  hintedCompanyId?: string | null;
+  statusCompany?: CompanyRecord | null;
+  companies: CompanyRecord[];
+}): string | null {
+  const normalizedHint = companyIdFromHint(hintedCompanyId);
+  if (normalizedHint) return normalizedHint;
+  if (activeConversationId) return statusCompany?.id ?? null;
+  return activeCompanyId ?? companies[0]?.id ?? statusCompany?.id ?? null;
+}
+
 export function resolveEffectiveCompanies({
   activeConversationId,
   activeCompanyIdHint,
@@ -184,6 +214,12 @@ function researchTaskDescription(query: string, sources: Array<Record<string, un
   return lines.join("\n");
 }
 
+function settledErrorMessage(label: string, result: PromiseSettledResult<unknown>): string | null {
+  if (result.status !== "rejected") return null;
+  const detail = result.reason instanceof Error ? result.reason.message : "unavailable";
+  return `${label}: ${detail}`;
+}
+
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
@@ -222,37 +258,27 @@ export function CompanyWorkspacePanel({
     companies,
   }), [activeConversationId, companies, company, normalizedActiveCompanyIdHint]);
 
-  const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
+  const loadCompany = useCallback(async (requestedCompanyId?: string | null, requestedChannelId?: string | null) => {
     setBusy(true);
     setError(null);
     try {
-      const hintedCompanyId = requestedCompanyId ?? normalizedActiveCompanyIdHint;
-      if (!hintedCompanyId && !activeConversationId) {
-        setCompanies([]);
-        setActiveCompanyId(null);
-        setCompany(null);
-        setAgents([]);
-        setChannels([]);
-        setTasks([]);
-        setRuns([]);
-        setInboxItems([]);
-        setRoutes([]);
-        setMessages([]);
-        setP2PStatus(null);
-        setP2PIdentity(null);
-        setPeers([]);
-        setActiveChannelId(null);
-        return;
-      }
+      const requestedCompanyWasProvided = requestedCompanyId !== undefined;
+      const hintedCompanyId = requestedCompanyWasProvided
+        ? companyIdFromHint(requestedCompanyId)
+        : normalizedActiveCompanyIdHint;
+      const activeCompanyCandidate = requestedCompanyWasProvided ? null : activeCompanyId;
 
       const statusTarget = hintedCompanyId
         ? hintedCompanyId
         : activeConversationId
           ? { conversationId: activeConversationId, bootstrap: true }
-          : activeCompanyId ?? undefined;
+          : activeCompanyCandidate ?? null;
+      const statusRequest = statusTarget
+        ? companyResources.getCompanyStatus(statusTarget)
+        : Promise.resolve({ bootstrapped: false, company_id: "", company: null });
       const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
         companyResources.listCompanies(),
-        companyResources.getCompanyStatus(statusTarget),
+        statusRequest,
         companyResources.getP2PStatus(),
         companyResources.getP2PIdentity(),
         companyResources.listP2PPeers(),
@@ -260,7 +286,19 @@ export function CompanyWorkspacePanel({
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
       let statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
-      const selectedId = hintedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
+      const selectedId = resolveSelectedCompanyId({
+        activeConversationId,
+        activeCompanyId: activeCompanyCandidate,
+        hintedCompanyId,
+        statusCompany,
+        companies: listedCompanies,
+      });
+      if (statusCompany?.id && statusCompany.id !== selectedId) {
+        statusCompany = null;
+      }
+      if (!statusCompany && selectedId) {
+        statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? null;
+      }
       if (selectedId === MIMO_CODING_COMPANY_ID) {
         try {
           const mimoStatus = await companyResources.getMimoCodingCompanyStatus();
@@ -279,24 +317,36 @@ export function CompanyWorkspacePanel({
       if (p2pIdentityResult.status === "fulfilled") setP2PIdentity(p2pIdentityResult.value.identity);
       if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
 
+      const loadErrors = [
+        settledErrorMessage("Company list", companyListResult),
+        settledErrorMessage("Company status", statusResult),
+      ].filter((message): message is string => Boolean(message));
+
       if (selectedId) {
-        const [agentResult, channelResult, taskResult, routeResult, messageResult, runResult] = await Promise.allSettled([
+        const [agentResult, channelResult, taskResult, routeResult, runResult] = await Promise.allSettled([
           companyResources.listCompanyAgents(selectedId),
           companyResources.listCompanyChannels(selectedId),
           companyResources.listCompanyTasks(selectedId),
           companyResources.listCompanyInboundRoutes(selectedId),
-          companyResources.listCompanyMessages(selectedId, { limit: 80, tail: true }),
           companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
         const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);
         setAgents(nextAgents);
         const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
         setChannels(nextChannels);
-        setActiveChannelId((current) => resolveActiveChannelId(current, nextChannels));
+        const resolvedChannelId = resolveActiveChannelId(requestedChannelId ?? activeChannelId, nextChannels);
+        setActiveChannelId(resolvedChannelId);
         setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
         setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
+        const [messageResult] = await Promise.allSettled([
+          companyResources.listCompanyMessages(selectedId, resolveCompanyMessageListOptions(nextChannels, resolvedChannelId)),
+        ]);
         setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
         setRuns(runResult.status === "fulfilled" ? runResult.value.runs : []);
+        const channelError = settledErrorMessage("Channels", channelResult);
+        const messageError = settledErrorMessage("Messages", messageResult);
+        if (channelError) loadErrors.push(channelError);
+        if (messageError) loadErrors.push(messageError);
         const inboxResults = await Promise.allSettled(
           nextAgents.map((agent) => companyResources.listCompanyAgentInbox(selectedId, agent.agent_id, { limit: 20 })),
         );
@@ -313,19 +363,17 @@ export function CompanyWorkspacePanel({
         setMessages([]);
       }
 
-      const firstError = [companyListResult, statusResult]
-        .find((result) => result.status === "rejected") as PromiseRejectedResult | undefined;
-      if (firstError) {
-        setError(firstError.reason instanceof Error ? firstError.reason.message : "Company APIs are unavailable.");
+      if (loadErrors.length > 0) {
+        setError(loadErrors.join(" "));
       }
     } finally {
       setBusy(false);
     }
-  }, [activeCompanyId, activeConversationId, normalizedActiveCompanyIdHint]);
+  }, [activeChannelId, activeCompanyId, activeConversationId, normalizedActiveCompanyIdHint]);
 
   useEffect(() => {
     setActiveCompanyId(normalizedActiveCompanyIdHint);
-    void loadCompany();
+    void loadCompany(normalizedActiveCompanyIdHint);
   }, [activeConversationId, normalizedActiveCompanyIdHint]);
 
   useEffect(() => {
@@ -369,8 +417,9 @@ export function CompanyWorkspacePanel({
             activeChannelId={activeChannelId}
             busy={busy}
             onChannelChange={(channelId) => {
+              if (!activeCompanyId) return;
               setActiveChannelId(channelId);
-              void loadCompany(activeCompanyId);
+              void loadCompany(activeCompanyId, channelId);
             }}
             onSendMessage={(content, channelId) => activeCompanyId && void run(() => companyResources.sendCompanyMessage(activeCompanyId, { content, channel_id: channelId, sender_id: "user" }))}
           />

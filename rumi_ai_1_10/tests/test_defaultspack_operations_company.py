@@ -290,6 +290,72 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_status_includes_runtime_workspace_counts(tmp_path, monkeypatch):
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    runtime.bootstrap(
+        start_nonstop=False,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    runtime_store = CompanyRuntimeStore()
+    _before_messages, before_total = runtime_store.list_messages(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        limit=1,
+        offset=0,
+    )
+    runtime_store.add_message(
+        "mimo-coding-company",
+        channel_id="ops-company",
+        sender_id="scheduler",
+        content="MiMo Team Workspace runtime sync check",
+    )
+
+    status = runtime.status()
+
+    expected_total = before_total + 1
+    assert status["company"]["message_count"] == expected_total
+    assert status["company"]["runtime_counts"]["messages"] == expected_total
+    assert status["company"]["channels"]["ops-company"]["message_count"] == expected_total
+    assert status["company"]["channels"]["ops-company"]["last_message_at"]
+
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_status_block_accepts_explicit_recovery_flag(monkeypatch):
+    from ecosystem.rumi_operations_company_pack.blocks.agent.mimo_company import status as status_block
+
+    calls = []
+
+    class FakeRuntime:
+        def status(self, *, recover_scheduled_approvals=False):
+            calls.append(recover_scheduled_approvals)
+            return {"bootstrapped": True}
+
+    monkeypatch.setattr(status_block, "MimoCodingCompanyRuntime", FakeRuntime)
+
+    default_result = status_block.run({}, {})
+    explicit_result = status_block.run({"recover_scheduled_approvals": "true"}, {})
+
+    assert default_result["status"] == "ok"
+    assert explicit_result["status"] == "ok"
+    assert calls == [False, True]
+
+
 def test_mimo_coding_company_bootstrap_can_run_without_docker_swarm(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.scheduler import Scheduler

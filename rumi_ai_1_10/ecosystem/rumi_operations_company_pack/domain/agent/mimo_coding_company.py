@@ -509,6 +509,10 @@ class MimoCodingCompanyRuntime:
             recover_scheduled_approvals=recover_scheduled_approvals,
         )
         company = self._sync_company_record({**state, "observability": observability})
+        try:
+            company = CompanyService().get_company(COMPANY_ID) or company
+        except Exception:
+            pass
         open_tasks = 0
         try:
             task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
