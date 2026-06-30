@@ -716,9 +716,19 @@ class MimoCodingCompanyRuntime:
                 message=self._heartbeat_message(state),
                 model=selected_fast_model,
                 agent_id="scheduler",
-                tools=["rumi_api", "todo", "subagent"],
+                tools=["rumi_api"],
                 description="Keep the coding company alive and quiet on normal ticks.",
                 timeout_seconds=HEARTBEAT_SCHEDULE_TIMEOUT_SECONDS,
+                tool_policy_overrides={
+                    "allow_file_write": False,
+                    "write_actions_require_approval": True,
+                    "terminal_actions_require_approval": True,
+                    "tool_allowlist": ["rumi_api"],
+                    "schedule_auto_approve_tool_allowlist": [
+                        "GET /api/agent/mimo-company/status",
+                        "GET /api/company/mimo-coding-company/status",
+                    ],
+                },
             )
             self._ensure_interval_schedule(
                 state,
@@ -2577,6 +2587,7 @@ class MimoCodingCompanyRuntime:
         tools: list[str],
         description: str,
         timeout_seconds: int = DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS,
+        tool_policy_overrides: dict[str, Any] | None = None,
     ) -> str | None:
         safe_minutes = max(1, min(int(minutes or 1), 1440))
         safe_timeout_seconds = max(1, int(timeout_seconds or DEFAULT_INTERVAL_SCHEDULE_TIMEOUT_SECONDS))
@@ -2585,6 +2596,9 @@ class MimoCodingCompanyRuntime:
         existing_id = schedule_ids.get(key)
         conversation_id = self._ensure_loop_conversation(state, key=key, model=model, agent_id=agent_id)
         parent_conversation_id = str(state.get("conversation_id") or "").strip()
+        tool_policy = self._schedule_policy(state)
+        if tool_policy_overrides:
+            tool_policy.update(tool_policy_overrides)
         task = {
             "message": message,
             "model": model,
@@ -2594,7 +2608,7 @@ class MimoCodingCompanyRuntime:
             "agent_id": agent_id,
             "thinking_level": "high",
             "tools": list(tools),
-            "tool_policy": self._schedule_policy(state),
+            "tool_policy": tool_policy,
             "metadata": {
                 "profile_id": PROFILE_ID,
                 "company_id": COMPANY_ID,
@@ -3086,8 +3100,9 @@ class MimoCodingCompanyRuntime:
     def _heartbeat_message(self, state: dict[str, Any]) -> str:
         monitoring_summary = self._docker_swarm_monitoring_summary(state)
         return (
-            "Run a short heartbeat for the MiMo Coding Company. Check pending tasks, recent failures, QA bugs, and blocked work. "
-            "Also verify Team Workspace/Company Workspace channel sync, unanswered subagent child conversations, and the managed desktop list at /api/desktops, including that local /chat desktop targets include an explicit chat query. "
+            "Run a short read-only heartbeat for the MiMo Coding Company. Use at most one or two rumi_api GET/status checks. "
+            "Do not call todo or subagent tools, do not enumerate routes, and do not make fixes or create issues. "
+            "Check pending tasks, recent failures, QA bugs, and blocked work only from status evidence. "
             + (monitoring_summary + " " if monitoring_summary else "")
             + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo/Gemma loops keep moving. "
             "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence. "

@@ -226,7 +226,22 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert qa_schedule["task"]["tool_policy"]["provider_health_blocker_signal"] == "provider_health_blocker"
     assert qa_schedule["task"]["tool_policy"]["schedule_auto_approve_expires_in_seconds"] == 24 * 60 * 60
     assert "conversation_running" in qa_schedule["task"]["tool_policy"]["schedule_suppress_external_issue_on"]
+    assert heartbeat_schedule["task"]["tools"] == ["rumi_api"]
+    heartbeat_allowlist = set(heartbeat_schedule["task"]["tool_policy"]["tool_allowlist"])
+    assert "rumi_api" in heartbeat_allowlist
+    assert "todo" not in heartbeat_schedule["task"]["tools"]
+    assert "subagent" not in heartbeat_schedule["task"]["tools"]
+    assert "todo" not in heartbeat_allowlist
+    assert "subagent" not in heartbeat_allowlist
+    assert "knowledge_search" not in heartbeat_allowlist
+    assert "knowledge_create" not in heartbeat_allowlist
+    assert "web_search" not in heartbeat_allowlist
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
+    assert "short read-only heartbeat" in heartbeat_schedule["task"]["message"]
+    assert "at most one or two rumi_api GET/status checks" in heartbeat_schedule["task"]["message"]
+    assert "Do not call todo or subagent tools" in heartbeat_schedule["task"]["message"]
+    assert "do not enumerate routes" in heartbeat_schedule["task"]["message"]
+    assert "do not make fixes or create issues" in heartbeat_schedule["task"]["message"]
     assert "0/4 workers reported status" in qa_schedule["task"]["message"]
     assert "one small, useful, testable change" in improvement_schedule["task"]["message"]
     assert "Keep repo discovery narrow" in improvement_schedule["task"]["message"]
