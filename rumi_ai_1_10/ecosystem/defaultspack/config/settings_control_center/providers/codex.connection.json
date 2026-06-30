@@ -13,9 +13,12 @@
   "service_kind": "dev",
   "auth": {
     "type": "api_key",
+    "template": "credential_bundle",
+    "token_import_supported": true,
     "official_broker_supported": false,
     "self_host_client_supported": false
   },
+  "scope_presets": [],
   "capabilities": [
     {
       "id": "codex.access_token.configure",
@@ -102,6 +105,20 @@
       "risk": "high"
     }
   ],
+  "scope_to_capability": [
+    {
+      "credential_kind": "codex_access_token",
+      "capabilities": ["codex.access_token.configure"]
+    },
+    {
+      "credential_kind": "app_server_secret",
+      "capabilities": ["codex.app_server.connect"]
+    }
+  ],
+  "adapter": {
+    "python": "ecosystem.defaultspack.domain.connections.codex:CodexConnectionAdapter",
+    "sdk_optional": true
+  },
   "settings": {
     "section": "accounts_connections",
     "priority": 50,

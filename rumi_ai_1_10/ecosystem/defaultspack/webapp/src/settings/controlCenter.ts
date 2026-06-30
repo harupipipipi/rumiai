@@ -66,6 +66,9 @@ export type AccountConnectionPreludeCard = {
   scopeMode?: string;
   services: string[];
   scopes: string[];
+  capabilities: string[];
+  credentialRef: string;
+  expiresAt: string;
   scopeModes: AccountConnectionScopeModeOption[];
   credential?: {
     kind: "codex_access_token";
@@ -529,6 +532,23 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       configureLabel: "Configure self-host OAuth",
     },
     {
+      providerId: "github",
+      label: "GitHub",
+      description: "Connect GitHub identity, repositories, and workflow scopes through a credential bundle.",
+      fallbackStatus: {
+        supported: true,
+        backend_supported: false,
+        connect_enabled: false,
+        connected: false,
+        connection_status: "missing_self_host_config",
+        status_label: "Credential needed",
+        disabled_reason: "Import credential bundle",
+        scopes: [],
+      },
+      configureSectionId: "accounts_connections" as const,
+      configureLabel: "Import JSON",
+    },
+    {
       providerId: "codex",
       label: "Codex",
       description: "Save the local/programmatic Codex workflow access credential.",
@@ -576,6 +596,7 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       : scopeModes[0]?.id ?? definition.scopeMode;
     const selectedScopeModeOption = scopeModes.find((option) => option.id === selectedScopeMode);
     const selectedServices = selectedScopeModeOption?.services ?? [];
+    const credentialRef = recordValue(status.credential_ref);
     return {
       providerId: definition.providerId,
       label: definition.label,
@@ -604,6 +625,9 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
       scopeMode: selectedScopeMode,
       services: selectedServices,
       scopes: selectedScopeModeOption?.scopes.length ? selectedScopeModeOption.scopes : stringList(status.scopes),
+      capabilities: stringList(status.capabilities),
+      credentialRef: String(credentialRef.credential_id || ""),
+      expiresAt: String(status.expires_at || ""),
       scopeModes,
       credential,
     };

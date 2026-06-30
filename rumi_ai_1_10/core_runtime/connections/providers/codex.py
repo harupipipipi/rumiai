@@ -11,6 +11,8 @@ CODEX_PROVIDER = ConnectionProvider(
     auth_type="api_key",
     official_broker_supported=False,
     self_host_client_supported=False,
+    auth_template="credential_bundle",
+    token_import_supported=True,
     priority=50,
     capabilities=[
         ProviderCapability(
@@ -56,6 +58,15 @@ CODEX_PROVIDER = ConnectionProvider(
             risk="high",
         ),
     ],
+    scope_presets=[],
+    scope_to_capability=[
+        {"credential_kind": "codex_access_token", "capabilities": ["codex.access_token.configure"]},
+        {"credential_kind": "app_server_secret", "capabilities": ["codex.app_server.connect"]},
+    ],
+    adapter={
+        "python": "ecosystem.defaultspack.domain.connections.codex:CodexConnectionAdapter",
+        "sdk_optional": True,
+    },
     metadata={
         "credential_kind": "codex_access_token",
         "app_server_auth_kind": "codex_app_server_secret",

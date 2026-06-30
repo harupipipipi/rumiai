@@ -31,6 +31,10 @@ export const settingsApiResources = {
     return api.saveProviderOAuthClientConfig(providerId, clientConfig);
   },
 
+  importProviderConnection(providerId: string, credentialBundle: string) {
+    return api.importProviderConnection(providerId, credentialBundle);
+  },
+
   getCodexConnectionStatus() {
     return api.getCodexConnectionStatus();
   },

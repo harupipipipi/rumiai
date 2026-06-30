@@ -13,6 +13,8 @@ from urllib.parse import urlsplit
 TRANSPORTS = {"off", "stdio", "unix", "websocket_loopback", "websocket_remote"}
 _APP_SERVER_WS_TOKEN_KEY = "RUMICODEX_APP_SERVER_WS_TOKEN"
 _APP_SERVER_SHARED_SECRET_KEY = "RUMICODEX_APP_SERVER_SHARED_SECRET"
+_APP_SERVER_SECRET_MATERIAL_TYPE = "app_server_secret"
+_DEFAULT_CONNECTION_ID = "default"
 _APP_SERVER_AUTH_ENV = (
     (
         "ws_token",
@@ -206,7 +208,63 @@ def _read_stored_secret(keys: tuple[str, ...], *, pack_root: Path | None = None)
     return "", ""
 
 
+def _read_connection_app_server_auth(*, pack_root: Path | None = None) -> dict[str, str]:
+    from domain.connections.store import connection_credential_ref, read_connection_credential
+
+    payload = read_connection_credential(
+        "codex",
+        _APP_SERVER_SECRET_MATERIAL_TYPE,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+    credentials = payload.get("credentials") if isinstance(payload.get("credentials"), dict) else {}
+    credential_ref = connection_credential_ref(
+        "codex",
+        _APP_SERVER_SECRET_MATERIAL_TYPE,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+    ws_token = str(credentials.get("ws_token") or credentials.get("access_token") or "").strip()
+    if ws_token:
+        return {
+            "kind": "ws_token",
+            "source": "secret_store",
+            "file_path": "",
+            "secret_key": str(credential_ref.get("credential_id") or ""),
+            "value": ws_token,
+        }
+    shared_secret = str(
+        credentials.get("shared_secret")
+        or credentials.get("app_server_secret")
+        or credentials.get("secret")
+        or ""
+    ).strip()
+    if shared_secret:
+        return {
+            "kind": "shared_secret",
+            "source": "secret_store",
+            "file_path": "",
+            "secret_key": str(credential_ref.get("credential_id") or ""),
+            "value": shared_secret,
+        }
+    return {"kind": "", "source": "missing", "file_path": "", "value": ""}
+
+
+def _app_server_credential_ref(*, pack_root: Path | None = None) -> dict[str, str]:
+    from domain.connections.store import connection_credential_ref
+
+    return connection_credential_ref(
+        "codex",
+        _APP_SERVER_SECRET_MATERIAL_TYPE,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+
+
 def _codex_app_server_auth(config: dict[str, Any], *, pack_root: Path | None = None) -> dict[str, str]:
+    imported = _read_connection_app_server_auth(pack_root=pack_root)
+    if imported.get("value"):
+        return imported
     for kind, _env_key, file_env_key, config_file_key, _secret_key in _APP_SERVER_AUTH_ENV:
         file_path = str(config.get(config_file_key) or os.environ.get(file_env_key, "")).strip()
         if file_path:
@@ -368,6 +426,11 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "auth_configured": auth_configured,
         "auth_source": str(auth.get("source") or "missing") if auth_configured else "missing",
         "auth_kind": str(auth.get("kind") or ""),
+        "credential_ref": _app_server_credential_ref(pack_root=pack_root) if auth_configured else {},
+        "scopes": [],
+        "capabilities": ["codex.app_server.connect"] if auth_configured else [],
+        "expires_at": "",
+        "status": connection_status,
         "ws_token_file": str(config.get("ws_token_file") or ""),
         "shared_secret_file": str(config.get("shared_secret_file") or ""),
         "command": build_codex_app_server_command(config),

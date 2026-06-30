@@ -2,6 +2,7 @@ from core_runtime.connections.registry import ConnectionsRegistry
 from core_runtime.connections.oauth_service import InMemoryOAuthStateStore
 from core_runtime.connections.providers.codex import CODEX_PROVIDER
 from core_runtime.connections.providers.cloudflare import CLOUDFLARE_PROVIDER
+from core_runtime.connections.providers.github import GITHUB_PROVIDER
 from core_runtime.connections.providers.google import GOOGLE_PROVIDER
 
 
@@ -9,17 +10,24 @@ def test_connections_registry_orders_providers():
     registry = ConnectionsRegistry()
     registry.register(GOOGLE_PROVIDER)
     registry.register(CLOUDFLARE_PROVIDER)
+    registry.register(GITHUB_PROVIDER)
     registry.register(CODEX_PROVIDER)
     providers = registry.list_providers()
-    assert [provider["providerId"] for provider in providers][:3] == ["cloudflare", "google", "codex"]
+    assert [provider["providerId"] for provider in providers][:4] == ["cloudflare", "google", "github", "codex"]
 
 
 def test_provider_safe_payload_has_no_secret():
     payload = CLOUDFLARE_PROVIDER.to_dict()
-    assert "client_secret" not in str(payload).lower()
+    payload_text = str(payload).lower()
+    assert "rumi_cloudflare_oauth_client_secret" not in payload_text
+    assert "secret_value" not in payload_text
+    assert "token_value" not in payload_text
     assert payload["officialBrokerSupported"] is True
     assert payload["selfHostClientSupported"] is True
     assert payload["pkceSupported"] is True
+    assert payload["authTemplate"] == "generic_oauth2_pkce"
+    assert payload["tokenImportSupported"] is True
+    assert payload["scopeToCapability"][0]["capabilities"] == ["cloudflare.account.read"]
     assert payload["capabilities"][0]["displayName"] == "Read account metadata"
 
 
@@ -36,6 +44,21 @@ def test_codex_provider_safe_payload_has_no_token_material():
     assert payload["metadata"]["credential_kind"] == "codex_access_token"
     assert payload["metadata"]["not_platform_api_key"] is True
     assert payload["metadata"]["not_workspace_agent_token"] is True
+    assert payload["authTemplate"] == "credential_bundle"
+    assert payload["tokenImportSupported"] is True
+    assert payload["scopeToCapability"][0]["credential_kind"] == "codex_access_token"
+
+
+def test_github_provider_template_supports_manifest_driven_import():
+    payload = GITHUB_PROVIDER.to_dict()
+    payload_text = str(payload).lower()
+    assert "access_token_value" not in payload_text
+    assert "refresh_token" not in payload_text
+    assert "secret_value" not in payload_text
+    assert payload["providerId"] == "github"
+    assert payload["authTemplate"] == "generic_oauth2_pkce"
+    assert payload["tokenImportSupported"] is True
+    assert payload["scopeToCapability"][0]["capabilities"] == ["github.user.read"]
 
 
 def test_codex_core_provider_exposes_high_risk_execution_capabilities():

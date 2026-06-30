@@ -70,8 +70,13 @@ class ConnectionProvider:
     self_host_client_supported: bool
     capabilities: list[ProviderCapability]
     priority: int
+    auth_template: str = ""
+    token_import_supported: bool = False
     oauth: OAuthConfig | None = None
     services: list[dict[str, Any]] = field(default_factory=list)
+    scope_presets: list[dict[str, Any]] = field(default_factory=list)
+    scope_to_capability: list[dict[str, Any]] = field(default_factory=list)
+    adapter: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -88,8 +93,13 @@ class ConnectionProvider:
             self_host_client_supported=bool(auth.get("self_host_client_supported", False)),
             capabilities=[ProviderCapability.from_dict(item) for item in raw.get("capabilities", [])],
             priority=int(raw.get("settings", {}).get("priority", raw.get("priority", 100))),
+            auth_template=str(auth.get("template") or ""),
+            token_import_supported=bool(auth.get("token_import_supported", False)),
             oauth=OAuthConfig.from_dict(auth["oauth"]) if "oauth" in auth else None,
             services=list(raw.get("services", [])),
+            scope_presets=list(raw.get("scope_presets", [])),
+            scope_to_capability=list(raw.get("scope_to_capability", [])),
+            adapter=dict(raw.get("adapter") or {}),
             metadata=dict(raw.get("metadata", {})),
         )
 
@@ -101,6 +111,10 @@ class ConnectionProvider:
         data["authType"] = data.pop("auth_type")
         data["officialBrokerSupported"] = data.pop("official_broker_supported")
         data["selfHostClientSupported"] = data.pop("self_host_client_supported")
+        data["authTemplate"] = data.pop("auth_template")
+        data["tokenImportSupported"] = data.pop("token_import_supported")
+        data["scopePresets"] = data.pop("scope_presets")
+        data["scopeToCapability"] = data.pop("scope_to_capability")
         data["pkceSupported"] = bool(self.oauth.pkce_supported) if self.oauth else False
         data["capabilities"] = [
             {
@@ -138,12 +152,19 @@ class Connection:
 
     def safe_dict(self) -> dict[str, Any]:
         data = asdict(self)
-        data.pop("credential_ref", None)
+        credential_ref = data.pop("credential_ref", None)
         data["connectionId"] = data.pop("connection_id")
         data["providerId"] = data.pop("provider_id")
         data["accountLabel"] = data.pop("account_label")
         data["scopesGranted"] = data.pop("scopes_granted")
         data["capabilitiesGranted"] = data.pop("capabilities_granted")
+        if credential_ref:
+            data["credentialRef"] = {
+                "credentialId": credential_ref.get("credential_id", ""),
+                "providerId": credential_ref.get("provider_id", ""),
+                "connectionId": credential_ref.get("connection_id", ""),
+                "keyVersion": credential_ref.get("key_version", ""),
+            }
         data["profileBindings"] = data.pop("profile_bindings")
         data["createdAt"] = data.pop("created_at")
         data["updatedAt"] = data.pop("updated_at")

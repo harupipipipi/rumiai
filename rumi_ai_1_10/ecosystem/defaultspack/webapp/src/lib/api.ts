@@ -2914,6 +2914,25 @@ export const api = {
     });
   },
 
+  importProviderConnection(providerId: string, credentialBundle: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "import",
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
   startProviderOAuth(providerId: string, options: { scopeMode?: string; services?: string[] } = {}) {
     return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scope_mode?: string; services?: string[]; scopes: string[] }>("/api/ai/oauth", {
       method: "POST",

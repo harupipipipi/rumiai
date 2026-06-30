@@ -13,6 +13,8 @@
   "service_kind": "cloud",
   "auth": {
     "type": "oauth2",
+    "template": "generic_oauth2_pkce",
+    "token_import_supported": true,
     "official_broker_supported": true,
     "self_host_client_supported": true,
     "pkce_supported": true,
@@ -22,9 +24,17 @@
       "revoke_url": "https://dash.cloudflare.com/oauth2/revoke",
       "userinfo_url": "https://dash.cloudflare.com/oauth2/userinfo",
       "default_scopes": [],
-      "pkce_supported": true
+      "pkce_supported": true,
+      "token_endpoint_auth_method": "client_secret_post"
     }
   },
+  "scope_presets": [
+    {
+      "id": "account_read",
+      "label": "Read account metadata",
+      "scopes": ["account:read", "user:read"]
+    }
+  ],
   "capabilities": [
     {
       "id": "cloudflare.account.read",
@@ -51,6 +61,27 @@
       "risk": "medium"
     }
   ],
+  "scope_to_capability": [
+    {
+      "scopes": ["account:read"],
+      "capabilities": ["cloudflare.account.read"]
+    },
+    {
+      "scopes": [
+        "workers:write",
+        "workers_scripts:edit",
+        "d1:write",
+        "r2:write",
+        "queues:write",
+        "workflows:write"
+      ],
+      "capabilities": ["cloudflare.runner.deploy"]
+    }
+  ],
+  "adapter": {
+    "python": "ecosystem.defaultspack.domain.connections.cloudflare:CloudflareConnectionAdapter",
+    "sdk_optional": true
+  },
   "settings": {
     "section": "accounts_connections",
     "priority": 30,

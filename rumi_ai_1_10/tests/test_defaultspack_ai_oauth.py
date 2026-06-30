@@ -298,6 +298,75 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(captured["client_secret"], "cloudflare-client-secret")
         self.assertEqual(captured["access_token"], "cloudflare-access-token")
 
+    def test_connection_import_resolves_capabilities_from_manifest_not_json_claims(self):
+        from domain.ai_client.oauth_store import get_provider_access_token, provider_oauth_status
+        from domain.connections.store import import_connection_bundle
+
+        raw_token = "github-imported-secret-token"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                imported = import_connection_bundle(
+                    {
+                        "schema": "rumi.connection.credential_bundle.v1",
+                        "provider_id": "github",
+                        "connection_id": "default",
+                        "material_type": "oauth2_token",
+                        "credentials": {"access_token": raw_token},
+                        "scopes": ["read:user"],
+                        "token_metadata": {
+                            "account_label": "GitHub User",
+                            "capabilities": ["github.repo.write"],
+                        },
+                    },
+                    pack_root=pack_root,
+                )
+                status = provider_oauth_status("github", pack_root=pack_root)
+                access_token = get_provider_access_token("github", pack_root=pack_root)
+
+        self.assertTrue(imported["success"], imported)
+        self.assertEqual(imported["capabilities"], ["github.user.read"])
+        self.assertNotIn("github.repo.write", imported["capabilities"])
+        self.assertNotIn(raw_token, str(imported))
+        self.assertTrue(status["connected"])
+        self.assertEqual(status["credential_ref"]["provider_id"], "github")
+        self.assertEqual(status["capabilities"], ["github.user.read"])
+        self.assertEqual(access_token, raw_token)
+
+    def test_oauth_connection_persists_token_bundle_under_connection_credential_ref(self):
+        from domain.ai_client.oauth_store import provider_oauth_status, save_provider_oauth_connection
+        from domain.connections.store import connection_secret_key
+
+        raw_token = "google-oauth-access-bundle"
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            secrets_dir = pack_root / "user_data" / "secrets"
+            env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
+            with patch.dict(os.environ, env, clear=True):
+                saved = save_provider_oauth_connection(
+                    "google",
+                    {
+                        "access_token": raw_token,
+                        "refresh_token": "google-refresh-bundle",
+                        "expires_in": 3600,
+                        "scope": "openid email profile https://www.googleapis.com/auth/drive.file",
+                    },
+                    userinfo={"email": "drive@example.test"},
+                    pack_root=pack_root,
+                )
+                status = provider_oauth_status("google", pack_root=pack_root)
+
+        expected_key = connection_secret_key("google", "default", "oauth2_token")
+        self.assertTrue(saved["success"], saved)
+        self.assertEqual(saved["credential_ref"]["credential_id"], expected_key)
+        self.assertEqual(status["credential_ref"]["credential_id"], expected_key)
+        self.assertIn("google.drive.file", status["capabilities"])
+        self.assertFalse((secrets_dir / "RUMIOAUTH_GOOGLE_ACCESS_TOKEN.json").exists())
+        self.assertNotIn(raw_token, str(saved))
+        self.assertNotIn(raw_token, str(status))
+
     def test_finish_provider_oauth_exchanges_code_and_persists_connection(self):
         from domain.ai_client.oauth_store import (
             finish_provider_oauth,

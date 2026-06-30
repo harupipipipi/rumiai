@@ -97,6 +97,9 @@ _ID_TOKEN_SECRET_KEYS = {
     "cloudflare": "RUMIOAUTH_CLOUDFLARE_ID_TOKEN",
 }
 
+_OAUTH_CLIENT_MATERIAL_TYPE = "oauth2_client_config"
+_OAUTH_TOKEN_MATERIAL_TYPE = "oauth2_token"
+_DEFAULT_CONNECTION_ID = "default"
 _OAUTH_RUNTIME_PROVIDER_IDS = {"cloudflare", "google"}
 _PENDING_STATE_TTL_SECONDS = 600
 _ACCESS_TOKEN_SKEW_SECONDS = 60
@@ -355,14 +358,88 @@ def _read_provider_oauth_secret(
     pack_root: Path | None = None,
 ) -> str:
     provider_id = str(provider_id or "").strip()
-    value = _first_env_value(_provider_oauth_env_names(provider_id, suffix), pack_root=pack_root).strip()
-    if value:
-        return value
+    bundle_value = _read_provider_oauth_bundle_value(provider_id, suffix, pack_root=pack_root)
+    if bundle_value:
+        return bundle_value
     key = _secret_key(mapping, provider_id)
     value = _read_secret(key, f"defaultspack.oauth:{provider_id}:{caller_suffix}", pack_root=pack_root)
     if value:
         return value
+    value = _first_env_value(_provider_oauth_env_names(provider_id, suffix), pack_root=pack_root).strip()
+    if value:
+        return value
     return ""
+
+
+def _read_connection_credential(provider_id: str, material_type: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+    from domain.connections.store import read_connection_credential
+
+    return read_connection_credential(
+        provider_id,
+        material_type,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+
+
+def _save_connection_credential(
+    provider_id: str,
+    material_type: str,
+    secret_material: dict[str, Any],
+    *,
+    token_metadata: dict[str, Any] | None = None,
+    pack_root: Path | None = None,
+) -> dict[str, Any]:
+    from domain.connections.store import save_connection_credential
+
+    return save_connection_credential(
+        provider_id,
+        material_type,
+        secret_material,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        token_metadata=token_metadata,
+        pack_root=pack_root,
+    )
+
+
+def _delete_connection_credential(provider_id: str, material_type: str, *, pack_root: Path | None = None) -> None:
+    from domain.connections.store import delete_connection_credential
+
+    delete_connection_credential(
+        provider_id,
+        material_type,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+
+
+def _connection_credential_ref(provider_id: str, material_type: str, *, pack_root: Path | None = None) -> dict[str, str]:
+    from domain.connections.store import connection_credential_ref
+
+    return connection_credential_ref(
+        provider_id,
+        material_type,
+        connection_id=_DEFAULT_CONNECTION_ID,
+        pack_root=pack_root,
+    )
+
+
+def _resolve_connection_capabilities(provider_id: str, token_metadata: dict[str, Any], *, pack_root: Path | None = None) -> dict[str, Any]:
+    from domain.connections.store import resolve_capabilities_for_provider
+
+    return resolve_capabilities_for_provider(provider_id, token_metadata, pack_root=pack_root)
+
+
+def _read_provider_oauth_bundle_value(provider_id: str, suffix: str, *, pack_root: Path | None = None) -> str:
+    payload = _read_connection_credential(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root)
+    credentials = payload.get("credentials") if isinstance(payload.get("credentials"), dict) else {}
+    lookup = {
+        "ACCESS_TOKEN": "access_token",
+        "REFRESH_TOKEN": "refresh_token",
+        "ID_TOKEN": "id_token",
+    }
+    field = lookup.get(str(suffix or "").strip().upper(), "")
+    return str(credentials.get(field) or "").strip() if field else ""
 
 
 def _set_secret(key: str, value: str, *, actor: str, reason: str, pack_root: Path | None = None) -> None:
@@ -393,7 +470,7 @@ def _reset_ai_client() -> None:
 def provider_supports_oauth(provider_id: str) -> bool:
     provider_id = str(provider_id or "").strip()
     provider = _connection_provider(provider_id)
-    return provider_id in _OAUTH_RUNTIME_PROVIDER_IDS and provider is not None and provider.oauth is not None
+    return provider is not None and provider.oauth is not None
 
 
 def _client_id_label(client_id: str) -> str:
@@ -408,15 +485,15 @@ def _client_id_label(client_id: str) -> str:
 def _default_scopes(provider_id: str, scope_mode: str | None = None, *, pack_root: Path | None = None) -> list[str]:
     provider_id = str(provider_id or "").strip()
     if provider_id != "google":
-        env_scopes = _scopes_from_env(provider_id, pack_root=pack_root)
-        if env_scopes:
-            return env_scopes
         client = load_provider_client_config(provider_id, pack_root=pack_root)
         client_scopes = _normalize_scope_list((client or {}).get("scopes"))
         if client_scopes:
             return client_scopes
         provider = _connection_provider(provider_id, pack_root=pack_root)
-        return list(provider.oauth.default_scopes if provider and provider.oauth else [])
+        manifest_scopes = list(provider.oauth.default_scopes if provider and provider.oauth else [])
+        if manifest_scopes:
+            return manifest_scopes
+        return _scopes_from_env(provider_id, pack_root=pack_root)
     mode = str(scope_mode or "google_identity").strip() or "google_identity"
     if mode == "default":
         mode = "google_identity"
@@ -588,7 +665,7 @@ def _parse_provider_client_config(provider_id: str, raw_value: str) -> dict[str,
     if provider_id == "google":
         return _parse_google_client_config(raw_value)
     provider = _connection_provider(provider_id)
-    if provider is None or provider.oauth is None or provider_id not in _OAUTH_RUNTIME_PROVIDER_IDS:
+    if provider is None or provider.oauth is None:
         raise ValueError(f"OAuth is not supported for provider '{provider_id}'")
     label = provider.display_name if isinstance(provider.display_name, str) else provider_id
     return _parse_standard_client_config(provider_id, raw_value, str(label or provider_id))
@@ -598,16 +675,31 @@ def load_provider_client_config(provider_id: str, *, pack_root: Path | None = No
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return None
-    env_config = _load_env_client_config(provider_id, pack_root=pack_root)
-    if env_config is not None:
-        return env_config
+    bundle = _read_connection_credential(provider_id, _OAUTH_CLIENT_MATERIAL_TYPE, pack_root=pack_root)
+    credentials = bundle.get("credentials") if isinstance(bundle.get("credentials"), dict) else {}
+    if credentials:
+        config = {
+            "provider_id": provider_id,
+            "client_id": str(credentials.get("client_id") or "").strip(),
+            "client_secret": str(credentials.get("client_secret") or "").strip(),
+            "redirect_uris": [
+                str(item).strip()
+                for item in (credentials.get("redirect_uris") or [])
+                if str(item).strip()
+            ],
+            "scopes": _normalize_scope_list(credentials.get("scopes")),
+            "source": "secret_store",
+            "credential_ref": _connection_credential_ref(provider_id, _OAUTH_CLIENT_MATERIAL_TYPE, pack_root=pack_root),
+        }
+        if config["client_id"]:
+            return config
     key = _secret_key(_CLIENT_CONFIG_SECRET_KEYS, provider_id)
     raw_value = _read_secret(key, f"defaultspack.oauth:{provider_id}:client", pack_root=pack_root)
-    if not raw_value:
-        return None
-    config = _parse_provider_client_config(provider_id, raw_value)
-    config["source"] = "secret_store"
-    return config
+    if raw_value:
+        config = _parse_provider_client_config(provider_id, raw_value)
+        config["source"] = "secret_store"
+        return config
+    return _load_env_client_config(provider_id, pack_root=pack_root)
 
 
 def save_provider_oauth_client_config(
@@ -620,21 +712,24 @@ def save_provider_oauth_client_config(
     if not provider_supports_oauth(provider_id):
         return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
     config = _parse_provider_client_config(provider_id, raw_value)
-    key = _secret_key(_CLIENT_CONFIG_SECRET_KEYS, provider_id)
     try:
-        _set_secret(
-            key,
-            json.dumps(
-                {
+        saved = _save_connection_credential(
+            provider_id,
+            _OAUTH_CLIENT_MATERIAL_TYPE,
+            {
+                "credentials": {
                     "client_id": config.get("client_id"),
                     "client_secret": config.get("client_secret"),
                     "redirect_uris": config.get("redirect_uris") or [],
                     "scopes": _normalize_scope_list(config.get("scopes")),
                 },
-                ensure_ascii=False,
-            ),
-            actor="defaultspack",
-            reason=f"save {provider_id} oauth client config",
+            },
+            token_metadata={
+                "credential_kind": _OAUTH_CLIENT_MATERIAL_TYPE,
+                "scopes": _normalize_scope_list(config.get("scopes")),
+                "status": "configured",
+                "account_label": _client_id_label(str(config.get("client_id") or "")),
+            },
             pack_root=pack_root,
         )
     except RuntimeError as exc:
@@ -644,6 +739,7 @@ def save_provider_oauth_client_config(
         "provider_id": provider_id,
         "client_configured": True,
         "client_label": _client_id_label(str(config.get("client_id") or "")),
+        "credential_ref": saved.get("credential_ref", {}),
     }
 
 
@@ -651,6 +747,7 @@ def clear_provider_oauth_client_config(provider_id: str, *, pack_root: Path | No
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
+    _delete_connection_credential(provider_id, _OAUTH_CLIENT_MATERIAL_TYPE, pack_root=pack_root)
     _delete_secret(
         _secret_key(_CLIENT_CONFIG_SECRET_KEYS, provider_id),
         actor="defaultspack",
@@ -661,8 +758,18 @@ def clear_provider_oauth_client_config(provider_id: str, *, pack_root: Path | No
     return {"success": True, "provider_id": provider_id, "client_configured": False, "connected": False}
 
 
+def _provider_bundle_metadata(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+    payload = _read_connection_credential(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root)
+    token_metadata = payload.get("token_metadata") if isinstance(payload.get("token_metadata"), dict) else {}
+    return dict(token_metadata)
+
+
 def _provider_metadata(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
-    return dict(_read_metadata(pack_root).get(str(provider_id or "").strip(), {}))
+    provider_id = str(provider_id or "").strip()
+    return {
+        **_provider_bundle_metadata(provider_id, pack_root=pack_root),
+        **dict(_read_metadata(pack_root).get(provider_id, {})),
+    }
 
 
 def _write_provider_metadata(provider_id: str, payload: dict[str, Any], *, pack_root: Path | None = None) -> None:
@@ -698,31 +805,6 @@ def save_provider_oauth_connection(
     if not access_token and not refresh_token:
         return {"success": False, "provider_id": provider_id, "error": "token payload is missing access and refresh tokens"}
 
-    if access_token:
-        _set_secret(
-            _secret_key(_ACCESS_TOKEN_SECRET_KEYS, provider_id),
-            access_token,
-            actor="defaultspack",
-            reason=f"save {provider_id} oauth access token",
-            pack_root=pack_root,
-        )
-    if refresh_token:
-        _set_secret(
-            _secret_key(_REFRESH_TOKEN_SECRET_KEYS, provider_id),
-            refresh_token,
-            actor="defaultspack",
-            reason=f"save {provider_id} oauth refresh token",
-            pack_root=pack_root,
-        )
-    if id_token:
-        _set_secret(
-            _secret_key(_ID_TOKEN_SECRET_KEYS, provider_id),
-            id_token,
-            actor="defaultspack",
-            reason=f"save {provider_id} oauth id token",
-            pack_root=pack_root,
-        )
-
     existing = _provider_metadata(provider_id, pack_root=pack_root)
     scopes = [
         item
@@ -748,6 +830,29 @@ def save_provider_oauth_connection(
         "sub": str(profile.get("sub") or existing.get("sub") or "").strip(),
         "has_refresh_token": bool(refresh_token or existing.get("has_refresh_token")),
     }
+    resolved = _resolve_connection_capabilities(provider_id, {**metadata, "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE}, pack_root=pack_root)
+    metadata["capabilities"] = list(resolved.get("capabilities") or [])
+    saved = _save_connection_credential(
+        provider_id,
+        _OAUTH_TOKEN_MATERIAL_TYPE,
+        {
+            "credentials": {
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "id_token": id_token,
+                "token_type": metadata.get("token_type", "Bearer"),
+            },
+        },
+        token_metadata={
+            **metadata,
+            "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE,
+            "scopes": list(resolved.get("scopes") or scopes),
+            "capabilities": metadata["capabilities"],
+            "status": "connected",
+            "account_label": str(metadata.get("email") or metadata.get("display_name") or provider_id),
+        },
+        pack_root=pack_root,
+    )
     _write_provider_metadata(provider_id, metadata, pack_root=pack_root)
     _reset_ai_client()
     return {
@@ -761,6 +866,8 @@ def save_provider_oauth_connection(
         "services": list(metadata.get("services") or []),
         "expires_at": metadata.get("expires_at", ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
+        "credential_ref": saved.get("credential_ref", {}),
+        "capabilities": metadata["capabilities"],
     }
 
 
@@ -774,8 +881,6 @@ def _has_valid_access_token(provider_id: str, *, pack_root: Path | None = None) 
     )
     if not access_token:
         return False
-    if _first_env_value(_provider_oauth_env_names(provider_id, "ACCESS_TOKEN"), pack_root=pack_root):
-        return True
     metadata = _provider_metadata(provider_id, pack_root=pack_root)
     expires_at = _parse_datetime(metadata.get("expires_at"))
     if expires_at is None:
@@ -1062,6 +1167,7 @@ def disconnect_provider_oauth(provider_id: str, *, pack_root: Path | None = None
     provider_id = str(provider_id or "").strip()
     if not provider_supports_oauth(provider_id):
         return {"success": False, "provider_id": provider_id, "error": "unsupported provider"}
+    _delete_connection_credential(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root)
     _delete_secret(
         _secret_key(_ACCESS_TOKEN_SECRET_KEYS, provider_id),
         actor="defaultspack",
@@ -1133,15 +1239,15 @@ def get_provider_access_token(provider_id: str, *, pack_root: Path | None = None
 
 def _provider_config_hint(provider_id: str, connection_status: str, *, client_configured: bool = False) -> str:
     if provider_id == "google":
-        return "Paste a Google OAuth desktop client JSON or client ID to enable Google AI or Workspace browser login."
+        return "Import or paste a Google OAuth desktop client JSON to enable Google AI or Workspace browser login."
     if provider_id != "cloudflare":
         return ""
     if connection_status == "missing_self_host_config":
-        return "Set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env, or paste a client JSON with scopes."
+        return "Import or paste a Cloudflare OAuth client JSON with explicit least-privilege scopes before connecting."
     if connection_status == "missing_scope_config":
         if not client_configured:
-            return "Set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env before connecting."
-        return "Set RUMI_CLOUDFLARE_OAUTH_SCOPES in .env or in the saved client JSON before connecting."
+            return "Import a Cloudflare OAuth client JSON with scopes before connecting."
+        return "Add Cloudflare scopes to the saved client JSON before connecting."
     if connection_status == "not_connected":
         return "Cloudflare OAuth is ready. Click Connect in browser to finish consent."
     if connection_status == "connected":
@@ -1192,6 +1298,18 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         status_scopes = list(metadata.get("scopes") or _default_scopes(provider_id, scope_mode or None, pack_root=pack_root))
     except ValueError:
         status_scopes = list(metadata.get("scopes") or default_scopes)
+    credential_ref = _connection_credential_ref(provider_id, _OAUTH_TOKEN_MATERIAL_TYPE, pack_root=pack_root) if supported else {}
+    client_credential_ref = _connection_credential_ref(provider_id, _OAUTH_CLIENT_MATERIAL_TYPE, pack_root=pack_root) if supported else {}
+    resolved = _resolve_connection_capabilities(
+        provider_id,
+        {
+            **metadata,
+            "credential_kind": _OAUTH_TOKEN_MATERIAL_TYPE if credential_ref else str(metadata.get("credential_kind") or ""),
+            "scopes": status_scopes,
+        },
+        pack_root=pack_root,
+    ) if supported else {"capabilities": [], "scopes": status_scopes}
+    capabilities = list(metadata.get("capabilities") or resolved.get("capabilities") or [])
     cloudflare_sdk = {}
     if provider_id == "cloudflare":
         try:
@@ -1216,15 +1334,18 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "client_label": _client_id_label(str((client or {}).get("client_id") or "")),
         "client_source": str((client or {}).get("source") or ""),
         "client_can_clear": str((client or {}).get("source") or "") == "secret_store",
+        "client_credential_ref": client_credential_ref,
         "connected": connected,
         "connect_enabled": supported and client is not None and bool(default_scopes),
         "connection_status": connection_status,
+        "status": connection_status,
         "status_label": status_label,
         "disabled_reason": disabled_reason,
         "display_name": str(metadata.get("display_name") or "").strip(),
         "email": str(metadata.get("email") or "").strip(),
         "picture_url": str(metadata.get("picture_url") or "").strip(),
         "scopes": status_scopes,
+        "capabilities": capabilities,
         "default_scopes": default_scopes,
         "scope_mode": scope_mode,
         "scope_modes": _google_scope_mode_rows(pack_root=pack_root) if provider_id == "google" else [],
@@ -1233,6 +1354,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "provisioning": {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {},
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
+        "credential_ref": credential_ref,
         "redirect_path": f"/api/ai/oauth/{provider_id}/callback" if supported else "",
         "config_hint": _provider_config_hint(provider_id, connection_status, client_configured=client is not None),
     }

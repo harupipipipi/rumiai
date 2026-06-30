@@ -967,6 +967,17 @@ function publicUrlConfig(value: unknown, fallback: unknown): Record<string, unkn
   return {};
 }
 
+function connectionDraftKind(value: string): "credential_bundle" | "oauth_client" {
+  const text = value.trim();
+  if (!text.startsWith("{")) return "oauth_client";
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    return String(parsed.schema ?? "") === "rumi.connection.credential_bundle.v1" ? "credential_bundle" : "oauth_client";
+  } catch {
+    return "oauth_client";
+  }
+}
+
 function ProviderOAuthPanel({
   sectionId,
   fieldId,
@@ -998,11 +1009,14 @@ function ProviderOAuthPanel({
         const clientConfigured = Boolean(oauth.client_configured);
         const connectEnabled = Boolean(oauth.connect_enabled);
         const clientCanClear = oauth.client_can_clear !== false;
-        const displayName = String(oauth.display_name ?? oauth.email ?? "");
-        const email = String(oauth.email ?? "");
         const expiresAt = String(oauth.expires_at ?? "");
         const hint = String(oauth.config_hint ?? "");
         const scopes = Array.isArray(oauth.scopes) ? oauth.scopes.map((scope) => String(scope)).filter(Boolean) : [];
+        const capabilities = Array.isArray(oauth.capabilities) ? oauth.capabilities.map((capability) => String(capability)).filter(Boolean) : [];
+        const credentialRef = oauth.credential_ref && typeof oauth.credential_ref === "object" && !Array.isArray(oauth.credential_ref)
+          ? oauth.credential_ref as Record<string, unknown>
+          : {};
+        const credentialRefId = String(credentialRef.credential_id ?? "");
         const draft = clientDrafts[providerId] ?? "";
         const isBusy = busyAction.startsWith(`${providerId}:`);
         const banner = messages[providerId];
@@ -1014,8 +1028,8 @@ function ProviderOAuthPanel({
             ? "border-cyan-800 bg-cyan-950/20 text-cyan-300"
             : "border-zinc-800 bg-zinc-950 text-zinc-400";
         const clientPlaceholder = providerId === "cloudflare"
-          ? 'Paste Cloudflare OAuth client JSON, or set RUMI_CLOUDFLARE_OAUTH_CLIENT_ID and RUMI_CLOUDFLARE_OAUTH_SCOPES in .env'
-          : 'Paste Google OAuth desktop client JSON or a client ID like "123....apps.googleusercontent.com"';
+          ? "Paste Cloudflare OAuth client JSON or a rumi.connection.credential_bundle.v1 JSON"
+          : "Paste OAuth client JSON or a rumi.connection.credential_bundle.v1 JSON";
 
         return (
           <div key={providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-4">
@@ -1029,9 +1043,12 @@ function ProviderOAuthPanel({
                 </div>
                 <p className="mt-1 text-xs leading-5 text-zinc-500">
                   {connected
-                    ? `Connected${displayName ? ` as ${displayName}` : ""}${email ? ` (${email})` : ""}.`
+                    ? "Connected with a stored credential reference."
                     : hint}
                 </p>
+                {credentialRefId && (
+                  <p className="mt-1 text-[11px] text-zinc-600">Credential ref: {credentialRefId}</p>
+                )}
                 {expiresAt && (
                   <p className="mt-1 text-[11px] text-zinc-600">Access token expires at: {expiresAt}</p>
                 )}
@@ -1176,12 +1193,17 @@ function ProviderOAuthPanel({
                   onClick={async () => {
                     try {
                       setBusyAction(`${providerId}:save`);
-                      await settingsApiResources.saveProviderOAuthClientConfig(providerId, draft);
+                      const kind = connectionDraftKind(draft);
+                      if (kind === "credential_bundle") {
+                        await settingsApiResources.importProviderConnection(providerId, draft);
+                      } else {
+                        await settingsApiResources.saveProviderOAuthClientConfig(providerId, draft);
+                      }
                       setClientDrafts((current) => ({ ...current, [providerId]: "" }));
                       refresh(providerId);
                       setMessages((current) => ({
                         ...current,
-                        [providerId]: { tone: "success", text: "OAuth client config saved." },
+                        [providerId]: { tone: "success", text: kind === "credential_bundle" ? "Connection credential imported." : "OAuth client config saved." },
                       }));
                     } catch (errorValue) {
                       setMessages((current) => ({
@@ -1202,11 +1224,16 @@ function ProviderOAuthPanel({
                       : "border-zinc-100 bg-zinc-100 text-zinc-950",
                   )}
                 >
-                  {isBusy && busyAction === `${providerId}:save` ? "Saving..." : "Save OAuth client"}
+                  {isBusy && busyAction === `${providerId}:save` ? "Saving..." : "Save / import"}
                 </button>
                 {scopes.length > 0 && (
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-500">
                     Scopes: {scopes.join(", ")}
+                  </div>
+                )}
+                {capabilities.length > 0 && (
+                  <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-[11px] text-zinc-500">
+                    Capabilities: {capabilities.join(", ")}
                   </div>
                 )}
               </div>
@@ -3156,6 +3183,42 @@ export function SettingsModalRenderer({
     }
   };
 
+  const saveAccountConnectionJson = async (card: AccountConnectionPreludeCard) => {
+    const draft = String(connectionCredentialDrafts[card.providerId] ?? "").trim();
+    if (!draft) {
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "error", text: "JSON is required." },
+      }));
+      return;
+    }
+    try {
+      setConnectionBusy(`${card.providerId}:save_json`);
+      const kind = connectionDraftKind(draft);
+      if (kind === "credential_bundle") {
+        await settingsApiResources.importProviderConnection(card.providerId, draft);
+      } else {
+        await settingsApiResources.saveProviderOAuthClientConfig(card.providerId, draft);
+      }
+      setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: "" }));
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: { tone: "success", text: kind === "credential_bundle" ? "Connection credential imported." : "OAuth client config saved." },
+      }));
+      refreshConnectionStatus(card.providerId);
+    } catch (errorValue) {
+      setConnectionMessages((current) => ({
+        ...current,
+        [card.providerId]: {
+          tone: "error",
+          text: errorValue instanceof Error ? errorValue.message : "Failed to save connection JSON.",
+        },
+      }));
+    } finally {
+      setConnectionBusy("");
+    }
+  };
+
   const saveCodexAppServer = async () => {
     try {
       setConnectionBusy("codex_app_server:save");
@@ -3406,6 +3469,13 @@ export function SettingsModalRenderer({
                     Selected scopes: {selectedScopes.join(", ")}
                   </div>
                 )}
+                {(card.credentialRef || card.capabilities.length > 0 || card.expiresAt) && (
+                  <div className="mt-3 space-y-1 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
+                    {card.credentialRef && <div>Credential ref: {card.credentialRef}</div>}
+                    {card.capabilities.length > 0 && <div>Capabilities: {card.capabilities.join(", ")}</div>}
+                    {card.expiresAt && <div>Expires at: {card.expiresAt}</div>}
+                  </div>
+                )}
                 {card.credential && (
                   <div className="mt-3 space-y-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3446,6 +3516,29 @@ export function SettingsModalRenderer({
                         className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
                       >
                         {connectionBusy === `${card.providerId}:clear_credential` ? "Clearing..." : card.credential.clearLabel}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!card.credential && (
+                  <div className="mt-3 grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
+                    <textarea
+                      value={connectionCredentialDrafts[card.providerId] ?? ""}
+                      onChange={(event) => setConnectionCredentialDrafts((current) => ({
+                        ...current,
+                        [card.providerId]: event.target.value,
+                      }))}
+                      placeholder="Paste OAuth client JSON or rumi.connection.credential_bundle.v1 JSON"
+                      className="min-h-20 w-full rounded-md border border-zinc-800 bg-black px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
+                    />
+                    <div>
+                      <button
+                        type="button"
+                        disabled={connectionBusy === `${card.providerId}:save_json` || !String(connectionCredentialDrafts[card.providerId] ?? "").trim()}
+                        onClick={() => void saveAccountConnectionJson(card)}
+                        className="rounded-lg border border-zinc-100 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-950 transition-colors disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+                      >
+                        {connectionBusy === `${card.providerId}:save_json` ? "Saving..." : "Save / import JSON"}
                       </button>
                     </div>
                   </div>

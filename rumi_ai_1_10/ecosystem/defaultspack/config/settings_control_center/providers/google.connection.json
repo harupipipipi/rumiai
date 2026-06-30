@@ -13,6 +13,8 @@
   "service_kind": "google",
   "auth": {
     "type": "oauth2",
+    "template": "generic_oauth2_pkce",
+    "token_import_supported": true,
     "official_broker_supported": true,
     "self_host_client_supported": true,
     "pkce_supported": true,
@@ -26,9 +28,27 @@
         "email",
         "profile"
       ],
-      "pkce_supported": true
+      "pkce_supported": true,
+      "token_endpoint_auth_method": "client_secret_post"
     }
   },
+  "scope_presets": [
+    {
+      "id": "google_identity",
+      "label": "Google identity",
+      "scopes": ["openid", "email", "profile"]
+    },
+    {
+      "id": "google_drive",
+      "label": "Google Drive selected files",
+      "scopes": ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"]
+    },
+    {
+      "id": "google_gmail_labels",
+      "label": "Gmail labels",
+      "scopes": ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"]
+    }
+  ],
   "services": [
     {
       "service_id": "drive",
@@ -111,6 +131,27 @@
       "risk": "high"
     }
   ],
+  "scope_to_capability": [
+    {
+      "scopes": ["https://www.googleapis.com/auth/drive.file"],
+      "capabilities": ["google.drive.file"]
+    },
+    {
+      "scopes": ["https://www.googleapis.com/auth/gmail.labels"],
+      "capabilities": ["google.gmail.labels"]
+    },
+    {
+      "scopes": [
+        "https://www.googleapis.com/auth/gmail.metadata",
+        "https://www.googleapis.com/auth/gmail.readonly"
+      ],
+      "capabilities": ["google.gmail.metadata_restricted"]
+    }
+  ],
+  "adapter": {
+    "python": "ecosystem.defaultspack.domain.connections.google:GoogleConnectionAdapter",
+    "sdk_optional": true
+  },
   "settings": {
     "section": "accounts_connections",
     "priority": 40,
