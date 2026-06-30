@@ -49,7 +49,7 @@ export type RuntimeProviderStatus = {
   platform?: string;
   version?: string | null;
   guest_protocol?: string | number | null;
-  capabilities?: string[];
+  capabilities?: string[] | string;
   missing?: RuntimeDoctorIssue[];
   isolation?: RuntimeIsolationFacts;
   diagnostics?: Record<string, unknown>;
