@@ -29,6 +29,12 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import {
+  initialActiveWorkspaceTabIdForPathname,
+  initialWorkspaceTabsForPathname,
+  workspaceKindForPathname,
+  workspaceUrlForKind,
+} from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -48,6 +54,7 @@ import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToke
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
+import { loadConversationForRefresh } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -2052,6 +2059,8 @@ function isPendingInLocation(): boolean {
 }
 
 function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
+  const routeKind = workspaceKindForPathname(window.location.pathname);
+  if (routeKind && routeKind !== "chat" && routeKind !== "coding") return;
   const url = new URL(window.location.href);
   url.pathname = window.location.pathname === "/coding" ? "/coding" : "/chat";
   if (conversationId) {
@@ -2071,34 +2080,11 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   }
 }
 
-export async function loadConversationForRefresh({
-  preferredId,
-  activeConversationId,
-  locationChatId,
-  listedConversations,
-  loadConversation,
-}: {
-  preferredId?: string | null;
-  activeConversationId?: string | null;
-  locationChatId?: string | null;
-  listedConversations: Array<Pick<Conversation, "id">>;
-  loadConversation: (conversationId: string | null) => Promise<void>;
-}): Promise<void> {
-  const targetId = preferredId ?? activeConversationId ?? locationChatId ?? listedConversations[0]?.id ?? null;
-  if (!targetId) {
-    await loadConversation(null);
-    return;
-  }
-
-  if (listedConversations.some((conversation) => conversation.id === targetId)) {
-    await loadConversation(targetId);
-    return;
-  }
-
-  try {
-    await loadConversation(targetId);
-  } catch {
-    await loadConversation(listedConversations[0]?.id ?? null);
+function pushWorkspaceRoute(kind: WorkspaceTabKind, conversationId: string | null = null) {
+  const next = workspaceUrlForKind(kind, window.location.href, conversationId);
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) {
+    window.history.pushState({ workspaceKind: kind, conversationId }, "", next);
   }
 }
 
@@ -2304,10 +2290,8 @@ function ChatApp() {
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
-    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
-  ]);
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialActiveWorkspaceTabIdForPathname(window.location.pathname));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -3241,6 +3225,20 @@ function ChatApp() {
   useEffect(() => {
     const handlePopState = () => {
       setError(null);
+      const routeKind = workspaceKindForPathname(window.location.pathname) ?? "chat";
+      if (routeKind !== "chat") {
+        const routeTabId = `workspace-tab-route-${routeKind}`;
+        setWorkspaceTabs((current) => (
+          current.some((tab) => tab.id === routeTabId)
+            ? current
+            : [...current, createWorkspaceTab(routeKind, { id: routeTabId })]
+        ));
+        setActiveWorkspaceTabId(routeTabId);
+        setMode(routeKind === "coding" ? "coding" : "agent");
+      } else {
+        setActiveWorkspaceTabId(DEFAULT_WORKSPACE_TAB_ID);
+        setMode("agent");
+      }
       void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
       });
@@ -4070,8 +4068,9 @@ function ChatApp() {
     }
   };
 
-  const handleModeChange = (newMode: AppMode) => {
+  const handleModeChange = (newMode: AppMode, updateRoute = true) => {
     setMode(newMode);
+    if (!updateRoute) return;
     if (newMode === "coding" && window.location.pathname !== "/coding") {
       const url = new URL(window.location.href);
       url.pathname = "/coding";
@@ -4090,15 +4089,18 @@ function ChatApp() {
     setActiveWorkspaceTabId(tab.id);
     setError(null);
     if (tab.kind === "chat") {
-      handleModeChange("agent");
-      void loadConversation(tab.conversationId ?? null);
+      handleModeChange("agent", false);
+      pushWorkspaceRoute("chat", tab.conversationId ?? null);
+      void loadConversation(tab.conversationId ?? null, false);
       return;
     }
     if (tab.kind === "coding") {
-      handleModeChange("coding");
+      handleModeChange("coding", false);
+      pushWorkspaceRoute("coding", activeConversationId);
       return;
     }
-    handleModeChange("agent");
+    handleModeChange("agent", false);
+    pushWorkspaceRoute(tab.kind, activeConversationId);
     if (tab.kind === "calendar" || tab.kind === "kanban") {
       return;
     }
