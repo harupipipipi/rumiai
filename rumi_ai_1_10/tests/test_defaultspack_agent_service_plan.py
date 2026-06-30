@@ -941,7 +941,7 @@ def test_chat_stream_recovers_when_provider_returns_empty_text(tmp_path, monkeyp
     assert "".join(deltas) == "Recovered after empty stream."
     assert final["raw_text"] == "Recovered after empty stream."
     assert final["metadata"]["recovered_from_empty_stream"] is True
-    assert captured["retry_params"] == {"temperature": 0.2}
+    assert captured["retry_params"] == {"temperature": 0.2, "thinking_level": "none"}
     ChatStore._instance = None
 
 

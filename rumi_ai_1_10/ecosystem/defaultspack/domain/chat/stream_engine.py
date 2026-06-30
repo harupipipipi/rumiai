@@ -2687,6 +2687,7 @@ class ChatRunEngine:
         if not followup:
             return None
         token = str(followup.get("approval_token") or followup.get("token") or "").strip()
+        original_token = token
         tool_name = _canonical_tool_name(followup.get("tool_name"))
         request_id = str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
         if not (token and tool_name and request_id):
@@ -2755,6 +2756,39 @@ class ChatRunEngine:
             )
         except Exception:
             return None
+        if not getattr(verification, "valid", False):
+            code = str(getattr(verification, "code", "") or "")
+            if request_status == "approved" and code in {
+                "APPROVAL_ARGUMENTS_CHANGED",
+                "APPROVAL_OPERATION_MISMATCH",
+                "APPROVAL_PACK_MISMATCH",
+                "APPROVAL_CONVERSATION_MISMATCH",
+                "APPROVAL_EXPIRED",
+                "APPROVAL_NOT_APPROVED",
+                "APPROVAL_REQUEST_MISSING",
+            }:
+                try:
+                    refreshed = _approval_mod.approve(request_id)
+                    refreshed_token = str(
+                        (refreshed if isinstance(refreshed, dict) else {}).get("token") or ""
+                    ).strip()
+                    if refreshed_token:
+                        refreshed_verification = _approval_mod.verify_execution_token(
+                            refreshed_token,
+                            operation,
+                            args_hash,
+                            consume=False,
+                        )
+                        if getattr(refreshed_verification, "valid", False):
+                            token = refreshed_token
+                            verification = refreshed_verification
+                            self._replace_replayed_approval_token(
+                                prepared,
+                                old_token=original_token,
+                                new_token=refreshed_token,
+                            )
+                except Exception:
+                    pass
         if not getattr(verification, "valid", False):
             if (
                 str(request.get("status") or "") == "consumed"
@@ -2965,6 +2999,26 @@ class ChatRunEngine:
                 "arguments": dict(stored_args or {}),
             }
         return None
+
+    def _replace_replayed_approval_token(
+        self,
+        prepared: PreparedChatRun,
+        *,
+        old_token: str,
+        new_token: str,
+    ) -> None:
+        if not old_token or not new_token or old_token == new_token:
+            return
+        if not isinstance(prepared.tool_context, dict):
+            prepared.tool_context = {}
+        tokens = prepared.tool_context.get("tool_approval_tokens")
+        if isinstance(tokens, dict):
+            prepared.tool_context["tool_approval_tokens"] = {
+                key: (new_token if str(value or "").strip() == old_token else value)
+                for key, value in tokens.items()
+            }
+        if str(prepared.tool_context.get("_tool_server_approval_token") or "").strip() == old_token:
+            prepared.tool_context["_tool_server_approval_token"] = new_token
 
     def _consume_replayed_approval_token(
         self,

@@ -546,6 +546,13 @@ class DefaultsHttpServer:
                 context.get("source"),
                 context.get("approval_id"),
             )
+        if fallback_block_module and hasattr(self, "facade") and self.facade is None:
+            return self._invoke_fallback_block(
+                fallback_block_module,
+                request_data,
+                path_params,
+                inject,
+            )
         if fallback_block_module in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
             return invoke_block(fallback_block_module, payload, context)
         if fallback_block_module in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:

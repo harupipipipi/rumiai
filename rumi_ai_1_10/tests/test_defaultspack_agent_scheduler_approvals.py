@@ -2486,6 +2486,183 @@ def test_scheduler_auto_approves_mimo_scheduled_todo_request(tmp_path, monkeypat
     _reset_scheduler_singleton()
 
 
+def test_scheduler_replay_refreshes_expired_auto_approval_token_for_todo(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    from domain.agent.scheduler import _scheduler_chat_context
+    from domain.chat.run_request import PreparedChatRun
+    from domain.chat.stream_engine import ChatRunEngine
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.scheduled_approval import approve_schedule_pending_approval
+
+    conversation_id = "conv-mimo"
+    approval_args = {"action": "list"}
+    request = approval.create_approval_request(
+        "tool.todo",
+        "medium",
+        approval_args,
+        details={
+            "tool_name": "todo",
+            "action": "tool.todo",
+            "function_id": "tool.todo",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": approval_args,
+        },
+    )
+    pending = {
+        "tool_name": "todo",
+        "tool_call_id": "call-todo-initial",
+        "action": "tool.todo",
+        "operation": "tool.todo",
+        "payload": approval_args,
+        "arguments": approval_args,
+        "approval_required": True,
+        "approval_request_id": request["request_id"],
+        "request_id": request["request_id"],
+        "expires_at": request["expires_at"],
+    }
+    task_cfg = {
+        "message": "Check the todo list heartbeat.",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "tool_policy": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "schedule_auto_approve_tool_requests": True,
+            "schedule_auto_approve_tool_allowlist": ["todo"],
+        },
+        "metadata": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    }
+    real_approve = approval.approve
+    approve_calls: list[dict] = []
+    expired_followup_token: dict[str, str] = {}
+
+    def approve_with_expired_first_token(request_id):
+        decision = dict(real_approve(request_id))
+        approve_calls.append(dict(decision))
+        if len(approve_calls) == 1 and decision.get("approved"):
+            stored = approval.get_approval_request(request_id)
+            details = stored.get("details") if isinstance(stored, dict) else {}
+            expired = approval.issue_execution_token(
+                request_id,
+                str(stored.get("args_hash") or ""),
+                expires_at=approval._now() - 10,
+                operation=str(stored.get("operation") or ""),
+                function_id=str(details.get("function_id") or details.get("action") or ""),
+                pack_id=str(details.get("pack_id") or ""),
+                conversation_id=str(details.get("conversation_id") or ""),
+            )
+            expired_followup_token["token"] = expired
+            decision["token"] = expired
+            decision["expires_at"] = approval._now() - 10
+        return decision
+
+    monkeypatch.setattr(approval, "approve", approve_with_expired_first_token)
+    approved = approve_schedule_pending_approval(task_cfg, pending, conversation_id=conversation_id)
+    assert approved is not None
+    followup = approved["followup"]
+    assert followup["approval_token"] == expired_followup_token["token"]
+
+    invocations: list[dict] = []
+
+    def fake_execute(self, tool_name, arguments, context):
+        del self
+        args = dict(arguments or {})
+        tokens = context.get("tool_approval_tokens") if isinstance(context, dict) else {}
+        context_token = ""
+        if isinstance(tokens, dict):
+            context_token = str(tokens.get("todo") or tokens.get("tool.todo") or "").strip()
+        token = str(context_token or args.get("approval_token") or "").strip()
+        verification = approval.verify_execution_token(
+            token,
+            "tool.todo",
+            approval.hash_arguments(approval_args),
+            consume=True,
+        )
+        invocations.append(
+            {
+                "tool_name": tool_name,
+                "arguments": args,
+                "used_token": token,
+                "valid_token": verification.valid,
+                "token_code": verification.code,
+            }
+        )
+        return {
+            "result": "todo list returned open tasks" if verification.valid else "Approval token expired before `todo list` could execute",
+            "is_error": not verification.valid,
+            "widget": {"type": "todo", "items": []} if verification.valid else None,
+        }
+
+    monkeypatch.setattr(ToolExecutor, "execute", fake_execute)
+    metadata = {
+        "source": "scheduler_approval_followup",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "schedule_id": "sched-mimo",
+        "approval_followup": followup,
+    }
+    tool_context = _scheduler_chat_context(task_cfg)
+    tool_context["tool_approval_tokens"] = {
+        "todo": followup["approval_token"],
+        "tool.todo": followup["approval_token"],
+        followup["request_id"]: followup["approval_token"],
+    }
+    prepared = PreparedChatRun(
+        conversation_id=conversation_id,
+        conversation={"id": conversation_id, "messages": []},
+        input_data={},
+        request_id="req-mimo",
+        content=[],
+        metadata=metadata,
+        user_message={"id": "user-followup", "role": "user", "metadata": metadata},
+        model="stub/default",
+        params={},
+        request_context=dict(tool_context),
+        tool_context=tool_context,
+        standard_messages=[],
+        user_text="Continue this approved scheduled task.",
+        system_prompt="",
+        enrich_info={},
+        raw_tools=[],
+        provider_tools=[{"name": "todo"}],
+        tools_called=[],
+        connected_tool_names={"todo"},
+        call_handler=None,
+        model_routing={},
+    )
+
+    engine = ChatRunEngine.__new__(ChatRunEngine)
+    engine._run_id = "run-mimo"
+    engine._conversation_id = conversation_id
+    engine._event_seq = 0
+    engine._activity_events = []
+    engine._tool_logs = []
+    engine._text_parts = []
+    engine._thinking_transcript_parts = []
+    engine._started_tool_call_ids = set()
+    engine._cancel_event = threading.Event()
+    engine._external_cancel_checker = None
+    engine._stream_mode = False
+
+    replay = engine._replay_approval_followup_if_present(prepared, [], prepared.chat_ir, None)
+    while True:
+        try:
+            next(replay)
+        except StopIteration as stop:
+            blocked = stop.value
+            break
+
+    assert blocked is None
+    assert len(approve_calls) == 2
+    assert len(invocations) == 1
+    assert invocations[0]["valid_token"] is True
+    assert invocations[0]["used_token"]
+    assert invocations[0]["used_token"] != expired_followup_token["token"]
+    assert prepared.tool_context["tool_approval_tokens"]["todo"] == invocations[0]["used_token"]
+    assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+
+
 def test_scheduler_auto_approves_display_name_tool_requests(tmp_path, monkeypatch):
     approval = _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
