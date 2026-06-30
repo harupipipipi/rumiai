@@ -9,7 +9,36 @@ from domain.ui_compiler import FoundationCandidate, FoundationSpec, UIAgentTask,
 from domain.ui_compiler.models import canonical_id
 
 from .agent_backend import UIAgentBackend
+from .project_writer import write_json
 from .prompts import foundation_prompt
+
+
+FOUNDATION_SPECIALIST_ROLES = [
+    {
+        "id": "product-intent",
+        "prompt": "Define product mode, audience, task priorities, constraints, and trust/speed/readability/safety order.",
+    },
+    {
+        "id": "typography",
+        "prompt": "Design font role map for heading, body, label, numeric, code, and caption roles.",
+    },
+    {
+        "id": "color-system",
+        "prompt": "Design semantic color roles and reject arbitrary colors or generic gradients.",
+    },
+    {
+        "id": "spacing-density",
+        "prompt": "Design density mode, spacing relationships, gutters, and touch rhythm.",
+    },
+    {
+        "id": "surface-policy",
+        "prompt": "Design surface, border, shadow, radius, and emphasis policy while preventing box/card abuse.",
+    },
+    {
+        "id": "motion-state",
+        "prompt": "Design motion, focus, loading, success, warning, error, and disabled state visibility.",
+    },
+]
 
 
 class FoundationGenerator:
@@ -29,6 +58,11 @@ class FoundationGenerator:
         for index in range(max(1, count)):
             candidate_id = f"foundation-{index + 1}"
             output_dir = run_root / "foundation" / "candidates" / candidate_id
+            specialist_tasks = self._write_specialist_task_manifests(
+                run_id=run_id,
+                candidate_id=candidate_id,
+                output_dir=output_dir,
+            )
             task = UIAgentTask(
                 task_id=f"{run_id}-foundation-{index + 1}",
                 run_id=run_id,
@@ -38,7 +72,7 @@ class FoundationGenerator:
                 prompt=foundation_prompt(run_id=run_id, candidate_id=candidate_id),
                 output_dir=str(output_dir),
                 allowed_paths=[str(output_dir)],
-                metadata={"candidateIndex": index},
+                metadata={"candidateIndex": index, "specialistTasks": specialist_tasks},
             )
             self.store.save_agent_task(run_id=run_id, task_id=task.task_id, task=task.to_dict())
             result = self.backend.run_task(task, context)
@@ -50,6 +84,7 @@ class FoundationGenerator:
                     report={"status": "fail", "agentResult": result.to_dict()},
                 )
                 continue
+            write_json(output_dir / "specialist-manifest.json", {"specialists": specialist_tasks})
             candidate = self._read_candidate(candidate_id, output_dir)
             validation_report = _validate_foundation_output(output_dir, candidate.report)
             self.store.save_foundation_candidate(
@@ -71,6 +106,36 @@ class FoundationGenerator:
             )
             candidates.append(candidate)
         return candidates
+
+    def _write_specialist_task_manifests(
+        self,
+        *,
+        run_id: str,
+        candidate_id: str,
+        output_dir: Path,
+    ) -> list[dict[str, Any]]:
+        manifests: list[dict[str, Any]] = []
+        base_dir = output_dir.parent.parent / "specialist-tasks" / candidate_id
+        for role in FOUNDATION_SPECIALIST_ROLES:
+            task_id = f"{run_id}-{candidate_id}-{role['id']}"
+            role_dir = base_dir / role["id"]
+            task = UIAgentTask(
+                task_id=task_id,
+                run_id=run_id,
+                node_id="foundation",
+                candidate_id=candidate_id,
+                kind=f"foundation-{role['id']}",
+                prompt=str(role["prompt"]),
+                output_dir=str(role_dir),
+                allowed_paths=[str(role_dir)],
+                metadata={"role": role["id"], "stage": "foundation"},
+            )
+            self.store.save_agent_task(run_id=run_id, task_id=task_id, task=task.to_dict())
+            manifest = task.to_dict()
+            write_json(role_dir / "task.json", manifest)
+            manifests.append({"role": role["id"], "taskId": task_id, "outputDir": str(role_dir)})
+        return manifests
+
 
     def select(self, *, run_id: str, candidates: list[FoundationCandidate]) -> FoundationCandidate:
         if not candidates:

@@ -184,6 +184,16 @@ def _metrics(
     scroll_width = max(content_width, action_width)
     if forced_overflow:
         scroll_width = content_width + 48
+    visible_text_blocks = int(manifest.get("visibleTextBlocks") or (6 if scenario == "long" else 3))
+    visible_characters = int(
+        manifest.get("visibleCharacters")
+        or (920 if scenario == "long" else 240)
+        + max(0, visible_actions - 2) * 36
+    )
+    line_clamps = int(manifest.get("lineClampCount") or (1 if scenario == "long" and manifest.get("longTextClipped") else 0))
+    ellipses = int(manifest.get("ellipsisCount") or line_clamps)
+    label_count = int(manifest.get("labelCount") or max(2, visible_actions + 2))
+    mobile_strategy = str(manifest.get("mobileBehavior") or manifest.get("responsiveTopology") or "stack")
     return {
         "viewport": viewport,
         "scenario": scenario,
@@ -209,6 +219,29 @@ def _metrics(
         "primaryClipped": bool(manifest.get("forcePrimaryClipped")) or (scenario == "long" and bool(manifest.get("longTextClipped"))),
         "touchTargetMin": int(manifest.get("touchTargetMin") or 36),
         "requiredStates": list(manifest.get("requiredStates") if isinstance(manifest.get("requiredStates"), list) else []),
+        "visibleTextBlocks": visible_text_blocks,
+        "visibleCharacters": visible_characters,
+        "averageLineLength": int(manifest.get("averageLineLength") or min(84, max(28, visible_characters // max(visible_text_blocks, 1)))),
+        "lineClampCount": line_clamps,
+        "ellipsisCount": ellipses,
+        "repeatedMetadataLines": int(manifest.get("repeatedMetadataLines") or 0),
+        "japaneseBreakQuality": float(manifest.get("japaneseBreakQuality") or 0.9),
+        "labelDensity": round(label_count / max(1, visible_text_blocks), 3),
+        "gradientCount": int(manifest.get("gradientCount") or 0),
+        "nonSemanticColorCount": int(manifest.get("nonSemanticColorCount") or 0),
+        "mutedTextRatio": float(manifest.get("mutedTextRatio") or 0.25),
+        "borderCount": int(manifest.get("borderCount") or max(1, int(manifest.get("dividerCount") or 0) + 1)),
+        "cardCount": int(manifest.get("cardCount") or max(0, int(manifest.get("surfaceDepth") or 1) - 1)),
+        "cardNestingDepth": int(manifest.get("cardNestingDepth") or int(manifest.get("surfaceDepth") or 1)),
+        "radiusUniformity": float(manifest.get("radiusUniformity") or 0.45),
+        "shadowCount": int(manifest.get("shadowCount") or 0),
+        "mobileBehavior": mobile_strategy,
+        "desktopColumns": int(manifest.get("desktopColumns") or (2 if viewport >= 768 else 1)),
+        "mobileDisclosureUsed": bool(manifest.get("mobileDisclosureUsed") or (viewport <= 390 and mobile_strategy in {"route", "sheet", "drawer", "stack"})),
+        "focusVisible": manifest.get("focusVisible", True) is not False,
+        "ariaRoles": int(manifest.get("ariaRoles") or 2),
+        "contrastMin": float(manifest.get("contrastMin") or 4.8),
+        "keyboardNav": manifest.get("keyboardNav", True) is not False,
     }
 
 

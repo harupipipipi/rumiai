@@ -16,6 +16,7 @@ from domain.ui_compiler.models import DEFAULT_SCENARIOS, DEFAULT_TEXT_SCALES, DE
 from domain.ui_compiler.planner import RecursiveUIPlanner
 
 from .agent_backend import UIAgentBackend
+from .audit_orchestrator import UIQualityAuditOrchestrator
 from .candidate_generator import CandidateGenerator
 from .candidate_selector import CandidateSelector
 from .composer import PageComposer
@@ -360,10 +361,22 @@ class RecursiveUIBuildOrchestrator:
                 browser_render=options["browserRender"],
             )
             page_compression = inspector.inspect_page(render_matrix=page_matrix, accepted_count=len(accepted))
+            quality_audit = UIQualityAuditOrchestrator().audit(
+                plan=plan,
+                foundation=accepted_foundation.spec.to_dict(),
+                page_matrix=page_matrix,
+                page_compression=page_compression,
+                accepted_count=len(accepted),
+            )
+            verification_compression = dict(page_compression)
+            if quality_audit.get("status") != "pass":
+                verification_compression["status"] = "fail"
+                verification_compression["qualityAuditStatus"] = quality_audit.get("status")
+                verification_compression["failedAudits"] = quality_audit.get("failedAudits", [])
             verification = self.verifier.verify(
                 workspace=target_workspace,
                 render_matrix=page_matrix,
-                compression_report=page_compression,
+                compression_report=verification_compression,
                 run_build=options["runBuild"],
             )
             status = "ok" if verification.passed else "error"
@@ -388,6 +401,7 @@ class RecursiveUIBuildOrchestrator:
                 accepted={node_id: decision.to_dict() for node_id, decision in accepted.items()},
                 composition=composition.to_dict(),
                 page_compression=page_compression,
+                quality_audit=quality_audit,
                 verification=verification.to_dict(),
                 inspections=inspections_by_node,
             )
@@ -420,7 +434,7 @@ class RecursiveUIBuildOrchestrator:
 def run_recursive_build(arguments: dict[str, Any] | None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     return RecursiveUIBuildOrchestrator(agent_backend=SubagentToolBackend()).run(
         arguments,
-        workspace_root=(context or {}).get("conversation_workspace_dir") if isinstance(context, dict) else None,
+        workspace_root=_context_workspace_root(context),
         authorized=_authorized(context),
         context=context,
     )
@@ -445,6 +459,13 @@ def backend_from_context(context: dict[str, Any] | None) -> UIAgentBackend:
     if isinstance(context, dict) and context.get("_ui_compiler_backend") == "fake":
         return FakeUIAgentBackend()
     return SubagentToolBackend()
+
+
+def _context_workspace_root(context: dict[str, Any] | None) -> str | None:
+    if not isinstance(context, dict):
+        return None
+    raw = context.get("workspace_root") or context.get("workspaceRoot") or context.get("conversation_workspace_dir") or context.get("workspace_dir")
+    return str(raw) if raw else None
 
 
 def _authorized(context: dict[str, Any] | None) -> bool:
@@ -519,21 +540,50 @@ def _final_report(
     accepted: dict[str, Any] | None = None,
     composition: dict[str, Any] | None = None,
     page_compression: dict[str, Any] | None = None,
+    quality_audit: dict[str, Any] | None = None,
     verification: dict[str, Any] | None = None,
     inspections: dict[str, Any] | None = None,
     failure: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    audits = quality_audit if isinstance(quality_audit, dict) else {}
+    accepted_payload = accepted or {}
+    verification_payload = verification or {}
     return {
         "status": status,
         "runId": plan.run_id,
         "artifacts": artifacts,
         "summary": summary,
         "planSummary": plan.to_dict()["summary"],
+        "intent": audits.get("intent", {}),
         "acceptedFoundation": accepted_foundation or {},
+        "foundation": audits.get("foundation", accepted_foundation or {}),
+        "topology": audits.get("topology", {}),
+        "split": audits.get("split", {}),
+        "candidateGeneration": {
+            "contracts": len(plan.contracts()),
+            "candidateBundles": summary.get("candidateBundles"),
+            "compressionFailures": summary.get("compressionFailures"),
+        },
         "accepted": accepted or {},
+        "acceptedSelection": accepted_payload,
         "composition": composition or {},
         "pageCompression": page_compression or {},
-        "verification": verification or {},
+        "compression": audits.get("compression", page_compression or {}),
+        "textPressure": audits.get("textPressure", {}),
+        "typography": audits.get("typography", {}),
+        "colorRoles": audits.get("colorRoles", {}),
+        "surfaceAudit": audits.get("surfaceAudit", {}),
+        "interactionBudget": audits.get("interactionBudget", {}),
+        "responsive": audits.get("responsive", {}),
+        "accessibility": audits.get("accessibility", {}),
+        "qualityAudit": audits,
+        "verification": verification_payload,
+        "buildTestLint": {
+            "lint": verification_payload.get("lint"),
+            "test": verification_payload.get("test"),
+            "build": verification_payload.get("build"),
+            "commands": verification_payload.get("commands", []),
+        },
         "inspections": inspections or {},
         "failure": failure or {},
     }

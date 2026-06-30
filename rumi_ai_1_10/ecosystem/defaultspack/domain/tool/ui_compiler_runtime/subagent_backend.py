@@ -17,13 +17,14 @@ class SubagentToolBackend:
             from importlib import import_module
 
             run_subagent_compat = import_module("domain.agent.subagent_orchestrator").run_subagent_compat
+            role_id = _role_id_for_task(task)
             result = run_subagent_compat(
-                "delegate",
+                role_id,
                 {
                     "task": task.prompt,
                     "output_dir": str(output_dir),
                     "allowed_paths": list(task.allowed_paths),
-                    "metadata": dict(task.metadata),
+                    "metadata": {"uiCompilerRole": role_id, **dict(task.metadata)},
                 },
                 model=str(task.metadata.get("model") or ""),
                 context=context,
@@ -59,3 +60,16 @@ def _relative_files(root: Path) -> list[str]:
     if not root.exists():
         return []
     return sorted(str(path.relative_to(root)) for path in root.rglob("*") if path.is_file())
+
+
+def _role_id_for_task(task: UIAgentTask) -> str:
+    kind = str(task.kind or "").strip()
+    if kind.startswith("foundation-"):
+        return kind
+    if kind == "foundation":
+        return "foundation-synthesizer"
+    if kind == "leaf":
+        return f"leaf-component-{task.node_id}"
+    if kind in {"composition", "audit", "responsive", "accessibility"}:
+        return kind
+    return "recursive-ui-delegate"

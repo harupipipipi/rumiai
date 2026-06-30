@@ -3,14 +3,16 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.ui_compiler_test_utils import build_args, fake_context, write_pass_package
+from tests.ui_compiler_test_utils import build_args, fake_context, fixture_tree, write_pass_package
 
 from domain.tool.executor import ToolExecutor
 from domain.tool.registry import ToolRegistry
 from domain.tool.ui_compiler_tools import ui_build_recursive
 from domain.tool.ui_compiler_runtime import run_recursive_build
+from domain.tool.ui_compiler_runtime.audit_orchestrator import UIQualityAuditOrchestrator
 from domain.tool.ui_compiler_runtime.subagent_backend import SubagentToolBackend
-from domain.ui_compiler import UIAgentTask
+from domain.ui_compiler import RenderMatrix, RenderSnapshot, UIAgentTask
+from domain.ui_compiler.planner import RecursiveUIPlanner
 from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
 
 
@@ -87,11 +89,86 @@ def test_final_report_contains_all_recursive_build_sections(tmp_path: Path) -> N
     final = json.loads((tmp_path / ".rumi" / "ui" / "runs" / "report-run" / "reports" / "final.json").read_text(encoding="utf-8"))
 
     assert result["status"] == "ok"
-    for key in ["acceptedFoundation", "accepted", "composition", "pageCompression", "verification", "inspections"]:
+    for key in [
+        "intent",
+        "foundation",
+        "topology",
+        "split",
+        "candidateGeneration",
+        "acceptedSelection",
+        "compression",
+        "textPressure",
+        "typography",
+        "colorRoles",
+        "surfaceAudit",
+        "interactionBudget",
+        "responsive",
+        "accessibility",
+        "qualityAudit",
+        "buildTestLint",
+        "acceptedFoundation",
+        "accepted",
+        "composition",
+        "pageCompression",
+        "verification",
+        "inspections",
+    ]:
         assert key in final
+    assert final["qualityAudit"]["status"] == "pass"
     assert final["verification"]["lint"] == "passed"
     assert final["verification"]["test"] == "passed"
     assert final["verification"]["build"] == "passed"
+
+
+def test_quality_audit_fails_text_overload_as_first_class_section() -> None:
+    plan = RecursiveUIPlanner().plan(fixture_tree(), run_id="audit-overload")
+    snapshot = RenderSnapshot(
+        subject_id="page",
+        candidate_id="composition",
+        viewport=390,
+        scenario="long",
+        text_scale=1,
+        image_path="",
+        dom_path="",
+        console_path="",
+        metrics={
+            "viewport": 390,
+            "visibleTextBlocks": 14,
+            "visibleCharacters": 1600,
+            "averageLineLength": 108,
+            "lineClampCount": 1,
+            "ellipsisCount": 3,
+            "labelDensity": 3,
+            "japaneseBreakQuality": 0.7,
+            "visibleActions": 2,
+            "allowedActions": 3,
+            "mobileDisclosureUsed": True,
+            "contrastMin": 4.8,
+            "focusVisible": True,
+            "keyboardNav": True,
+            "ariaRoles": 3,
+        },
+    )
+    foundation = {
+        "direction": {"productMode": "utility"},
+        "typography": {"roles": {role: {} for role in ["pageTitle", "sectionTitle", "body", "label", "caption", "numeric", "code"]}},
+        "spacing": {"density": "compact"},
+        "color": {"roles": ["canvas", "surface", "textPrimary", "textSecondary", "actionPrimary", "statusCritical"]},
+        "surface": {"maxNestedDepth": 1},
+        "primitives": ["Button", "TextInput"],
+    }
+
+    audit = UIQualityAuditOrchestrator().audit(
+        plan=plan,
+        foundation=foundation,
+        page_matrix=RenderMatrix(subject_id="page", candidate_id="composition", snapshots=[snapshot]),
+        page_compression={"status": "pass", "compressionScore": 0.95, "metrics": {}, "issues": []},
+        accepted_count=3,
+    )
+
+    assert audit["status"] == "fail"
+    assert "textPressure" in audit["failedAudits"]
+    assert any("visible character" in issue["message"] for issue in audit["textPressure"]["issues"])
 
 
 def test_recursive_ui_http_routes_are_registered() -> None:

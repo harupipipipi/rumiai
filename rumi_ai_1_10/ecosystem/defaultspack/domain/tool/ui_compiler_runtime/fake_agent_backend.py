@@ -68,6 +68,7 @@ class FakeUIAgentBackend:
                     "label": "type-label",
                     "caption": "type-caption",
                     "numeric": "type-numeric",
+                    "code": "type-code",
                 },
             },
             "spacing": {

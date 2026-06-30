@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 import threading
 import time
+from pathlib import Path
 from typing import Any, Iterator
 
 from blocks._common import gen_id, timestamp
@@ -53,11 +55,13 @@ from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
 from domain.chat.store import ChatStore
+from domain.coding.frontend_precision import tool_arguments_for_precision
 from domain.kanban.chat_sync import sync_conversation_kanban
 from domain.context_engine.compressor import ContextCompressor
 from domain.dev.inspector import Inspector
 from domain.stream.events import run_event, to_legacy_chat_stream_event
 from domain.tool.executor import ToolExecutor
+from domain.tool_policy.internal_context import mark_tool_server_approval_context
 from domain.tool.schema_adapter import build_tool_execution_context, max_tool_calls, tool_name_from_definition
 
 
@@ -262,6 +266,111 @@ def _merge_tool_context(base: dict[str, Any] | None, extra: dict[str, Any] | Non
         else:
             merged[key] = value
     return merged
+
+
+def _frontend_precision_from_prepared(prepared: PreparedChatRun) -> dict[str, Any]:
+    for source in (prepared.tool_context, prepared.request_context, prepared.metadata):
+        if not isinstance(source, dict):
+            continue
+        precision = source.get("frontend_precision")
+        if isinstance(precision, dict) and precision.get("enabled"):
+            return dict(precision)
+    return {}
+
+
+def _frontend_precision_tool_context(prepared: PreparedChatRun, precision: dict[str, Any]) -> dict[str, Any]:
+    context = dict(prepared.tool_context or {})
+    request_context = prepared.request_context if isinstance(prepared.request_context, dict) else {}
+    for key in (
+        "workspace_root",
+        "workspaceRoot",
+        "workspace_id",
+        "workspace_dir",
+        "conversation_workspace_dir",
+        "conversation_id",
+        "request_id",
+        "profile_id",
+        "agent_id",
+        "_ui_compiler_backend",
+    ):
+        if key in request_context and key not in context:
+            context[key] = request_context[key]
+    context["frontend_precision"] = precision
+    if request_context.get("_ui_compiler_backend") == "fake":
+        context["_ui_compiler_backend"] = "fake"
+    mark_tool_server_approval_context(context)
+    return context
+
+
+def _frontend_precision_run_id(prepared: PreparedChatRun) -> str:
+    raw = str(prepared.request_id or gen_id()).lower()
+    safe = re.sub(r"[^a-z0-9-]+", "-", raw).strip("-")
+    if not safe or not safe[0].isalpha():
+        safe = "run-" + safe
+    return "frontend-" + safe[:48]
+
+
+def _frontend_precision_target_project_path(prepared: PreparedChatRun) -> str:
+    context = prepared.request_context if isinstance(prepared.request_context, dict) else {}
+    root_raw = context.get("workspace_root") or context.get("workspaceRoot") or context.get("workspace_dir")
+    if not root_raw:
+        return "."
+    root = Path(str(root_raw)).expanduser()
+    candidates = [
+        root / "rumi_ai_1_10" / "ecosystem" / "defaultspack" / "webapp",
+        root / "ecosystem" / "defaultspack" / "webapp",
+        root / "webapp",
+        root,
+    ]
+    for candidate in candidates:
+        if (candidate / "package.json").is_file():
+            try:
+                return str(candidate.resolve().relative_to(root.resolve()))
+            except ValueError:
+                return "."
+    return "."
+
+
+def _frontend_precision_report_path(result: Any) -> str:
+    for payload in _dict_walk(result):
+        report = payload.get("report")
+        if isinstance(report, str) and report:
+            return report
+        data = payload.get("data")
+        if isinstance(data, dict) and isinstance(data.get("report"), str):
+            return str(data.get("report") or "")
+    return ""
+
+
+def _frontend_precision_summary(result: Any) -> dict[str, Any]:
+    for payload in _dict_walk(result):
+        summary = payload.get("summary")
+        if isinstance(summary, dict):
+            return dict(summary)
+        data = payload.get("data")
+        if isinstance(data, dict) and isinstance(data.get("summary"), dict):
+            return dict(data.get("summary") or {})
+    return {}
+
+
+def _dict_walk(value: Any) -> list[dict[str, Any]]:
+    found: list[dict[str, Any]] = []
+    seen: set[int] = set()
+
+    def visit(item: Any) -> None:
+        if not isinstance(item, dict):
+            return
+        marker = id(item)
+        if marker in seen:
+            return
+        seen.add(marker)
+        found.append(item)
+        for child in item.values():
+            if isinstance(child, dict):
+                visit(child)
+
+    visit(value)
+    return found
 
 
 def _approval_request_from_tool_result(
@@ -1094,6 +1203,11 @@ class ChatRunEngine:
         )
         if replay_blocked is not None:
             return replay_blocked
+        frontend_precision_blocked = yield from self._run_frontend_precision_if_present(
+            prepared, working_messages, working_ir, draft,
+        )
+        if frontend_precision_blocked is not None:
+            return frontend_precision_blocked
         tool_context_message = _tool_visibility_message(prepared.provider_tools)
         if tool_context_message is not None:
             insert_at = 1 if working_messages and working_messages[0].get("role") == "system" else 0
@@ -1216,6 +1330,124 @@ class ChatRunEngine:
             prepared.params,
             events=list(self._activity_events),
         )
+
+    def _run_frontend_precision_if_present(
+        self,
+        prepared: PreparedChatRun,
+        working_messages: list[dict[str, Any]],
+        working_ir: Any,
+        draft: _AssistantDraft | None,
+    ) -> Iterator[dict[str, Any]]:
+        precision = _frontend_precision_from_prepared(prepared)
+        if not precision:
+            return None
+        if isinstance(prepared.tool_context, dict) and prepared.tool_context.get("frontend_precision_executed"):
+            return None
+
+        tool_name = "tool_ui_build_recursive"
+        tool_call_id = "frontend_precision_" + gen_id()
+        arguments = tool_arguments_for_precision(
+            precision,
+            run_id=_frontend_precision_run_id(prepared),
+            target_project_path=_frontend_precision_target_project_path(prepared),
+        )
+        self._started_tool_call_ids.add(tool_call_id)
+        display_payload = _tool_display_payload(tool_name, arguments, status="running")
+        yield self._emit(
+            "tool_call_started",
+            data={
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "arguments": arguments,
+                "frontend_precision": True,
+                **display_payload,
+            },
+            message="frontend precision pipeline を実行しています",
+            phase="frontend_precision",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            arguments=arguments,
+            frontend_precision=True,
+        )
+        self._sync_draft(draft, force=True)
+
+        original_context = prepared.tool_context
+        invoke_context = _frontend_precision_tool_context(prepared, precision)
+        prepared.tool_context = invoke_context
+        try:
+            result = self._execute_tool(prepared, tool_name, tool_call_id, arguments)
+        finally:
+            prepared.tool_context = original_context
+
+        summary = _tool_result_summary(tool_name, result)
+        artifacts = _tool_result_artifacts(result)
+        status = "failed" if _tool_result_is_error(result) else "completed"
+        completed_payload = _tool_display_payload(tool_name, arguments, status=status, summary=summary)
+        yield self._emit(
+            "tool_call_completed",
+            data={
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "is_error": _tool_result_is_error(result),
+                "recovery_kind": _tool_result_recovery_kind(result),
+                "result_summary": summary,
+                "summary": summary,
+                "frontend_precision": True,
+                **completed_payload,
+                "result": _bounded_compact_tool_result(result, summary, artifacts),
+                "artifacts": artifacts,
+                "artifact_paths": [artifact.get("path") for artifact in artifacts if artifact.get("path")],
+            },
+            message=completed_payload["display_text"],
+            phase="frontend_precision_completed",
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            is_error=_tool_result_is_error(result),
+            frontend_precision=True,
+        )
+        self._sync_draft(draft, force=True)
+
+        approval_request = _approval_request_from_tool_result(tool_name, tool_call_id, arguments, result)
+        if approval_request is not None:
+            yield self._emit(
+                "approval_requested",
+                data=approval_request,
+                message=_APPROVAL_WAITING_TEXT,
+                phase="approval_requested",
+                tool_name=tool_name,
+                tool_call_id=tool_call_id,
+                requires_approval=True,
+            )
+            self._sync_draft(draft, force=True)
+            return _approval_waiting_response(
+                prepared.model,
+                approval_request,
+                prepared.params,
+                events=list(self._activity_events),
+            )
+
+        synth_tool_uses = [{"id": tool_call_id, "name": tool_name, "input": arguments}]
+        _append_assistant_tool_use_message(working_messages, synth_tool_uses)
+        try:
+            append_assistant_tool_use_to_ir(working_ir, synth_tool_uses)
+        except Exception:
+            pass
+        _append_tool_result_message(working_messages, tool_name, result, tool_call_id, model=prepared.model)
+        try:
+            append_tool_result_to_ir(working_ir, tool_name, result, tool_call_id, model=prepared.model)
+        except Exception:
+            pass
+
+        if isinstance(prepared.tool_context, dict):
+            prepared.tool_context.setdefault("_attached_provider_tools_snapshot", list(prepared.provider_tools or []))
+            prepared.tool_context["frontend_precision_executed"] = {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "report": _frontend_precision_report_path(result),
+                "summary": _frontend_precision_summary(result),
+            }
+        prepared.provider_tools = []
+        return None
 
     def _inject_conversation_steer(self, conversation_id: str, working_messages: list[dict[str, Any]]) -> Iterator[dict[str, Any]]:
         try:
@@ -2088,6 +2320,14 @@ class ChatRunEngine:
             metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
         if prepared.matched_skills:
             metadata["matched_skill_instructions"] = list(prepared.matched_skills)
+        if isinstance(prepared.tool_context, dict):
+            frontend_precision = prepared.tool_context.get("frontend_precision")
+            frontend_executed = prepared.tool_context.get("frontend_precision_executed")
+            if isinstance(frontend_precision, dict):
+                metadata["frontend_precision"] = {
+                    **frontend_precision,
+                    **({"executed": frontend_executed} if isinstance(frontend_executed, dict) else {}),
+                }
         finalized["metadata"] = metadata
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)
