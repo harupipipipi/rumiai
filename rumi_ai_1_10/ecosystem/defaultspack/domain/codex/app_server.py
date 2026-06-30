@@ -51,6 +51,7 @@ _DEFAULT_CONFIG = {
     "tool_source_enabled": False,
     "automation_endpoint_enabled": False,
     "url_secret_rejected": False,
+    "account": {},
 }
 
 
@@ -175,6 +176,39 @@ def _normalize_path(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _safe_account_metadata(value: Any) -> dict[str, Any]:
+    account = value if isinstance(value, dict) else {}
+    account_type = str(account.get("type") or account.get("account_type") or "").strip()
+    if not account_type:
+        return {}
+    email = str(account.get("email") or "").strip()
+    plan_type = str(account.get("planType") or account.get("plan_type") or "").strip()
+    requires_openai_auth = account.get("requiresOpenaiAuth")
+    if requires_openai_auth is None:
+        requires_openai_auth = account.get("requires_openai_auth")
+    label = str(account.get("account_label") or "").strip()
+    if not label:
+        if account_type == "chatgpt":
+            label = email or "ChatGPT account"
+        elif account_type == "apiKey":
+            label = "OpenAI API key"
+        elif account_type == "amazonBedrock":
+            label = "Amazon Bedrock"
+        else:
+            label = account_type
+    result: dict[str, Any] = {
+        "type": account_type,
+        "account_label": label,
+    }
+    if email:
+        result["email"] = email
+    if plan_type:
+        result["plan_type"] = plan_type
+    if isinstance(requires_openai_auth, bool):
+        result["requires_openai_auth"] = requires_openai_auth
+    return result
+
+
 def _infer_transport(payload: dict[str, Any], *, base_url: str, websocket_url: str, unix_socket_path: str) -> str:
     explicit = str(payload.get("transport") or payload.get("mode") or "").strip().lower()
     if explicit in TRANSPORTS:
@@ -219,6 +253,7 @@ def _normalize_config(payload: dict[str, Any]) -> dict[str, Any]:
         "tool_source_enabled": _bool(payload.get("tool_source_enabled")),
         "automation_endpoint_enabled": _bool(payload.get("automation_endpoint_enabled")),
         "url_secret_rejected": url_secret_rejected,
+        "account": _safe_account_metadata(payload.get("account") or payload.get("last_account")),
     }
 
 
@@ -434,6 +469,15 @@ def clear_codex_app_server_config(*, pack_root: Path | None = None) -> dict[str,
     }
 
 
+def _cache_codex_app_server_account(account: dict[str, Any], *, pack_root: Path | None = None) -> None:
+    safe_account = _safe_account_metadata(account)
+    if not safe_account:
+        return
+    config = _read_config(pack_root)
+    config["account"] = safe_account
+    _write_config(config, pack_root)
+
+
 def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     config = _read_config(pack_root)
     base_url = str(config.get("base_url") or "")
@@ -497,6 +541,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "ws_token_file": str(config.get("ws_token_file") or ""),
         "shared_secret_file": str(config.get("shared_secret_file") or ""),
         "command": build_codex_app_server_command(config),
+        "account": _safe_account_metadata(config.get("account")),
         "tool_source": {
             "enabled": bool(config.get("tool_source_enabled")),
             "status": connection_status
@@ -527,7 +572,15 @@ def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.
         return {"success": False, "provider_id": "codex", "probe": {"status": "blocked_auth_required"}}
     base_url = str(status.get("base_url") or "").rstrip("/")
     if not base_url:
-        return {"success": False, "provider_id": "codex", "probe": {"status": "not_configured"}}
+        account_result = codex_app_server_account_status(
+            command=status.get("command") if isinstance(status.get("command"), list) and status.get("command") else None,
+            timeout=max(float(timeout), 3.0),
+        )
+        account = _safe_account_metadata(account_result.get("account"))
+        if account:
+            _cache_codex_app_server_account(account, pack_root=pack_root)
+            account_result["app_server"] = codex_app_server_status(pack_root=pack_root)
+        return account_result
     auth_headers = codex_app_server_auth_headers(pack_root=pack_root)
     last_http_error: urllib.error.HTTPError | None = None
     for endpoint in ("readyz", "healthz"):
@@ -558,6 +611,150 @@ def codex_app_server_probe(*, pack_root: Path | None = None, timeout: float = 2.
             "probe": {"status": "http_error", "http_status": int(last_http_error.code)},
         }
     return {"success": False, "provider_id": "codex", "probe": {"status": "unreachable"}}
+
+
+def codex_app_server_account_status(
+    *,
+    timeout: float = 5.0,
+    command: list[str] | None = None,
+) -> dict[str, Any]:
+    command = command or build_codex_app_server_command({"enabled": True, "transport": "stdio"})
+    if not command:
+        return {"success": False, "provider_id": "codex", "probe": {"status": "stdio_not_configured"}, "account": {}}
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    sent: list[dict[str, Any]] = []
+    messages: list[dict[str, Any]] = []
+
+    def send(message: dict[str, Any]) -> None:
+        if proc.stdin is None:
+            raise RuntimeError("codex app-server stdin is unavailable")
+        sent.append(message)
+        proc.stdin.write(json.dumps(message, ensure_ascii=False) + "\n")
+        proc.stdin.flush()
+
+    deadline = time.monotonic() + max(float(timeout), 0.1)
+    try:
+        send(
+            {
+                "method": "initialize",
+                "id": 0,
+                "params": {
+                    "clientInfo": {
+                        "name": "rumi_defaultspack",
+                        "title": "Rumi Defaultspack",
+                        "version": "0.1.0",
+                    },
+                    "capabilities": {"experimentalApi": True},
+                },
+            }
+        )
+        while time.monotonic() < deadline:
+            line = _readline_before_deadline(proc.stdout, min(deadline, time.monotonic() + 2.0))
+            if not line:
+                continue
+            message = _parse_json_line(line)
+            if not message:
+                continue
+            messages.append(_safe_codex_message(message))
+            if message.get("id") != 0:
+                continue
+            if message.get("error"):
+                return _account_status_result(
+                    success=False,
+                    command=command,
+                    sent=sent,
+                    messages=messages,
+                    error=message.get("error"),
+                    probe_status="initialize_failed",
+                )
+            break
+        else:
+            return _account_status_result(
+                success=False,
+                command=command,
+                sent=sent,
+                messages=messages,
+                error="initialize_timeout",
+                probe_status="timeout",
+            )
+
+        send({"method": "initialized", "params": {}})
+        send({"method": "account/read", "id": 1, "params": {"refreshToken": False}})
+        while time.monotonic() < deadline:
+            line = _readline_before_deadline(proc.stdout, min(deadline, time.monotonic() + 2.0))
+            if not line:
+                continue
+            message = _parse_json_line(line)
+            if not message:
+                continue
+            messages.append(_safe_codex_message(message))
+            if message.get("id") != 1:
+                continue
+            if message.get("error"):
+                return _account_status_result(
+                    success=False,
+                    command=command,
+                    sent=sent,
+                    messages=messages,
+                    error=message.get("error"),
+                    probe_status="account_read_failed",
+                )
+            result = message.get("result") if isinstance(message.get("result"), dict) else {}
+            account = _safe_account_metadata(result.get("account"))
+            requires_openai_auth = bool(result.get("requiresOpenaiAuth"))
+            if requires_openai_auth and "requires_openai_auth" not in account:
+                account["requires_openai_auth"] = True
+            return _account_status_result(
+                success=bool(account),
+                command=command,
+                sent=sent,
+                messages=messages,
+                account=account,
+                requires_openai_auth=requires_openai_auth,
+                probe_status="ok" if account else "auth_required" if requires_openai_auth else "not_connected",
+            )
+        return _account_status_result(
+            success=False,
+            command=command,
+            sent=sent,
+            messages=messages,
+            error="account_read_timeout",
+            probe_status="timeout",
+        )
+    finally:
+        _terminate_process(proc)
+
+
+def _account_status_result(
+    *,
+    success: bool,
+    command: list[str],
+    sent: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    account: dict[str, Any] | None = None,
+    requires_openai_auth: bool = False,
+    error: Any = "",
+    probe_status: str,
+) -> dict[str, Any]:
+    return {
+        "success": success,
+        "provider_id": "codex",
+        "transport": "stdio",
+        "command": list(command),
+        "account": _safe_account_metadata(account),
+        "requires_openai_auth": requires_openai_auth,
+        "probe": {"status": probe_status, "endpoint": "stdio://account/read"},
+        "sent_methods": [str(item.get("method") or "") for item in sent],
+        "messages": messages,
+        "error": error,
+    }
 
 
 def codex_app_server_stdio_smoke(

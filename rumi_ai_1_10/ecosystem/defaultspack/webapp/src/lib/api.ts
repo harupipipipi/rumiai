@@ -2382,6 +2382,7 @@ export type CodexConnectionActionResponse = Partial<CodexConnectionStatusRespons
   cleared?: boolean;
   created?: boolean;
   status?: Record<string, unknown>;
+  account?: Record<string, unknown>;
   probe?: Record<string, unknown>;
 };
 

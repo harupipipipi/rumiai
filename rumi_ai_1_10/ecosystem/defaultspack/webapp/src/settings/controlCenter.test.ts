@@ -267,6 +267,13 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
         auth_kind: "",
         ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
         shared_secret_file: "",
+        account: {
+          type: "chatgpt",
+          account_label: "rumi-user@example.test",
+          email: "rumi-user@example.test",
+          plan_type: "prolite",
+          requires_openai_auth: true,
+        },
         tool_source: { status: "blocked_auth_required" },
         automation_endpoint: { status: "disabled" },
       },
@@ -283,6 +290,11 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
   assert.equal(prelude.authSource, "missing");
   assert.equal(prelude.wsTokenFile, "/Users/haru/.config/rumi/codex-app-server.token");
   assert.equal(prelude.authConfigured, false);
+  assert.equal(prelude.accountType, "chatgpt");
+  assert.equal(prelude.accountLabel, "rumi-user@example.test");
+  assert.equal(prelude.accountEmail, "rumi-user@example.test");
+  assert.equal(prelude.accountPlanType, "prolite");
+  assert.equal(prelude.requiresOpenaiAuth, true);
   assert.equal(prelude.toolSourceStatus, "blocked_auth_required");
   assert.equal(prelude.automationEndpointStatus, "disabled");
 });

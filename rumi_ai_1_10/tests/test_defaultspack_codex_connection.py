@@ -560,6 +560,93 @@ def test_codex_app_server_stdio_smoke_surfaces_approval_requests(monkeypatch):
     assert result["error"] == "turn_not_completed"
 
 
+def test_codex_app_server_probe_reads_and_caches_chatgpt_account(monkeypatch):
+    from domain.codex import app_server
+
+    created: dict[str, object] = {}
+
+    class FakeStdout:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def push(self, payload: dict[str, object]) -> None:
+            self.lines.append(json.dumps(payload) + "\n")
+
+        def readline(self) -> str:
+            return self.lines.pop(0) if self.lines else ""
+
+    class FakeStdin:
+        def __init__(self, stdout: FakeStdout) -> None:
+            self.stdout = stdout
+            self.messages: list[dict[str, object]] = []
+
+        def write(self, text: str) -> int:
+            payload = json.loads(text)
+            self.messages.append(payload)
+            if payload.get("method") == "initialize":
+                self.stdout.push({"id": 0, "result": {"platformFamily": "macos"}})
+            if payload.get("method") == "account/read":
+                self.stdout.push(
+                    {
+                        "id": 1,
+                        "result": {
+                            "account": {
+                                "type": "chatgpt",
+                                "email": "rumi-user@example.test",
+                                "planType": "prolite",
+                            },
+                            "requiresOpenaiAuth": True,
+                        },
+                    }
+                )
+            return len(text)
+
+        def flush(self) -> None:
+            return None
+
+    class FakeProcess:
+        def __init__(self, command: list[str], **_kwargs: object) -> None:
+            created["command"] = command
+            self.stdout = FakeStdout()
+            self.stdin = FakeStdin(self.stdout)
+            self.stderr = None
+            created["process"] = self
+
+        def terminate(self) -> None:
+            return None
+
+        def wait(self, timeout: float | None = None) -> int:
+            del timeout
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    monkeypatch.setattr(app_server.subprocess, "Popen", FakeProcess)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        result = app_server.codex_app_server_probe(pack_root=pack_root, timeout=0.2)
+        status = app_server.codex_app_server_status(pack_root=pack_root)
+
+    process = created["process"]
+    assert result["success"] is True
+    assert result["probe"]["status"] == "ok"
+    assert result["account"] == {
+        "type": "chatgpt",
+        "account_label": "rumi-user@example.test",
+        "email": "rumi-user@example.test",
+        "plan_type": "prolite",
+        "requires_openai_auth": True,
+    }
+    assert status["account"] == result["account"]
+    assert created["command"] == ["codex", "app-server", *SAFE_APP_SERVER_ARGS, "--listen", "stdio://"]
+    assert result["sent_methods"] == ["initialize", "initialized", "account/read"]
+    sent_messages = process.stdin.messages
+    assert sent_messages[0]["params"]["capabilities"] == {"experimentalApi": True}
+    assert sent_messages[2]["params"] == {"refreshToken": False}
+
+
 def test_frontend_registry_drops_client_supplied_codex_secret_payloads():
     from domain.frontend.registry import FrontendRegistry
 

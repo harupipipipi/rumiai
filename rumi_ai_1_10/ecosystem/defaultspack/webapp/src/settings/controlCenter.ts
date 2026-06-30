@@ -101,6 +101,11 @@ export type CodexAppServerPrelude = {
   sharedSecretFile: string;
   toolSourceStatus: string;
   automationEndpointStatus: string;
+  accountLabel: string;
+  accountType: string;
+  accountEmail: string;
+  accountPlanType: string;
+  requiresOpenaiAuth: boolean;
 };
 
 const BLOCKED_RAW_LABELS = new Map([
@@ -643,6 +648,7 @@ export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}):
   const appServer = recordValue(toolsMcp.codex_app_server);
   const toolSource = recordValue(appServer.tool_source);
   const automationEndpoint = recordValue(appServer.automation_endpoint);
+  const account = recordValue(appServer.account);
   const configured = Boolean(appServer.configured);
   const enabled = Boolean(appServer.enabled);
   const status = String(appServer.connection_status || (configured ? "configured" : "not_configured"));
@@ -672,5 +678,10 @@ export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}):
     sharedSecretFile: String(appServer.shared_secret_file || ""),
     toolSourceStatus: String(toolSource.status || "disabled"),
     automationEndpointStatus: String(automationEndpoint.status || "disabled"),
+    accountLabel: String(account.account_label || account.email || ""),
+    accountType: String(account.type || ""),
+    accountEmail: String(account.email || ""),
+    accountPlanType: String(account.plan_type || account.planType || ""),
+    requiresOpenaiAuth: Boolean(account.requires_openai_auth ?? account.requiresOpenaiAuth),
   };
 }

@@ -3302,9 +3302,16 @@ export function SettingsModalRenderer({
       setConnectionBusy("codex_app_server:probe");
       const result = await settingsApiResources.probeCodexAppServer();
       const probeStatus = String(result.probe?.status ?? "unknown");
+      const account = result.account && typeof result.account === "object" && !Array.isArray(result.account)
+        ? result.account as Record<string, unknown>
+        : {};
+      const accountLabel = String(account.account_label || account.email || "");
       setConnectionMessages((current) => ({
         ...current,
-        codex_app_server: { tone: probeStatus === "ok" ? "success" : "error", text: `Probe: ${probeStatus}` },
+        codex_app_server: {
+          tone: probeStatus === "ok" ? "success" : "error",
+          text: accountLabel ? `Probe: ${probeStatus}; account: ${accountLabel}` : `Probe: ${probeStatus}`,
+        },
       }));
       refreshConnectionStatus("codex");
     } catch (errorValue) {
@@ -3657,6 +3664,14 @@ export function SettingsModalRenderer({
                 <p className="mt-1 text-xs leading-5 text-zinc-500">
                   Tool source: {codexAppServerPrelude.toolSourceStatus}; automation endpoint: {codexAppServerPrelude.automationEndpointStatus}
                 </p>
+                {codexAppServerPrelude.accountLabel && (
+                  <p className="mt-1 max-w-full break-all text-xs leading-5 text-emerald-300/90">
+                    Connected {codexAppServerPrelude.accountType === "chatgpt" ? "ChatGPT account" : "account"}: {codexAppServerPrelude.accountLabel}
+                    {codexAppServerPrelude.accountPlanType && (
+                      <span className="text-emerald-300/65"> ({codexAppServerPrelude.accountPlanType})</span>
+                    )}
+                  </p>
+                )}
               </div>
               <span className={cn(
                 "rounded-full border px-2 py-0.5 text-[10px] font-medium",
