@@ -1012,6 +1012,51 @@ def test_authority_scoped_grants_are_profile_filtered(tmp_path, monkeypatch):
     assert set(core_all["grants"]) >= {"profile:work", "profile:personal"}
 
 
+def test_authority_scoped_grant_delete_is_profile_filtered(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "network.egress", {"domains": ["example.com"]})
+    grants.grant_permission("profile:personal", "model.invoke", {"provider_ids": ["anthropic"]})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    own = service.delete_grant("profile:work", "model.invoke", actor_principal=actor)
+    own_child = service.delete_grant(
+        "profile:work__graph:startup",
+        "network.egress",
+        actor_principal=actor,
+    )
+    cross_profile = service.delete_grant(
+        "profile:personal",
+        "model.invoke",
+        actor_principal=actor,
+    )
+
+    assert own["success"] is True
+    assert own["revoked"] is True
+    assert own_child["success"] is True
+    assert own_child["revoked"] is True
+    assert cross_profile["success"] is False
+    assert cross_profile["status_code"] == 404
+    work_grant = grants.get_grant("profile:work")
+    work_child_grant = grants.get_grant("profile:work__graph:startup")
+    personal_grant = grants.get_grant("profile:personal")
+    assert work_grant is None or not work_grant.permissions["model.invoke"].enabled
+    assert work_child_grant is None or not work_child_grant.permissions["network.egress"].enabled
+    assert personal_grant is not None
+    assert "model.invoke" in personal_grant.permissions
+
+
 def test_authority_events_are_core_only(tmp_path, monkeypatch):
     from core_runtime.access_tokens import AuthenticatedPrincipal
 

@@ -9,14 +9,13 @@ test_pack_api_server.py — pack_api_server.py のユニットテスト
 from __future__ import annotations
 
 import io
-import json
 import threading
 import time
 import urllib.request
 from email.message import Message
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -608,6 +607,81 @@ class TestCheckAuth:
         assert result == {"grants": {}, "count": 0}
         assert captured["principal_id"] == "profile:other"
         assert captured["actor_principal"] is principal
+
+    def test_scoped_authority_delete_grant_handler_passes_actor_principal(self, monkeypatch) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.api.security import authority_handlers
+
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        captured = {}
+
+        class FakeAuthorityService:
+            def delete_grant(self, principal_id, permission_id, **kwargs):
+                captured["principal_id"] = principal_id
+                captured["permission_id"] = permission_id
+                captured.update(kwargs)
+                return {"success": True, "revoked": True}
+
+        monkeypatch.setattr(
+            authority_handlers,
+            "_authority_service",
+            lambda: FakeAuthorityService(),
+        )
+        handler = _make_handler(_authenticated_principal=principal)
+
+        result = handler._authority_delete_grant("profile:other", "model.invoke")
+
+        assert result == {"success": True, "revoked": True}
+        assert captured["principal_id"] == "profile:other"
+        assert captured["permission_id"] == "model.invoke"
+        assert captured["actor_principal"] is principal
+
+    def test_scoped_authority_grant_delete_route_uses_grant_manage_permission(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+        from core_runtime.api.request_authorizer import route_resource
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("g" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="phone-1",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        for grant_principal in (
+            "profile:work",
+            "profile:work__surface:mobile",
+            "profile:work__surface:mobile__device:phone-1",
+        ):
+            grants.grant_permission(grant_principal, "authority.grant.manage", {})
+        handler = _make_handler(_authenticated_principal=principal)
+        path = "/api/authority/grants/profile%3Awork/model.invoke"
+
+        assert handler._authorize_authenticated_route("DELETE", path) is True
+        resource = route_resource("DELETE", path)
+        assert resource["target_principal_id"] == "profile:work"
+        assert resource["target_permission_id"] == "model.invoke"
 
     def test_scoped_authority_events_route_is_core_only(self, tmp_path, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal

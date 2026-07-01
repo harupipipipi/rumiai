@@ -886,14 +886,36 @@ class AuthorityService:
         result = {pid: grant.to_dict() if hasattr(grant, "to_dict") else grant for pid, grant in dict(all_grants or {}).items()}
         return {"grants": result, "count": len(result)}
 
-    def delete_grant(self, principal_id: str, permission_id: str) -> dict[str, Any]:
+    def delete_grant(
+        self,
+        principal_id: str,
+        permission_id: str,
+        *,
+        actor_principal: Any = None,
+    ) -> dict[str, Any]:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "revoke_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
+        principal_id = str(principal_id or "").strip()
+        permission_id = str(permission_id or "").strip()
+        if not principal_id or not permission_id:
+            return {"success": False, "error": "principal_id and permission_id are required", "status_code": 400}
+        actor_profile_id = self._actor_profile_id(actor_principal)
+        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+            if not actor_profile_id:
+                return {"success": False, "error": "Forbidden", "status_code": 403}
+            profile_prefix = f"profile:{actor_profile_id}"
+            if principal_id != profile_prefix and not principal_id.startswith(f"{profile_prefix}__"):
+                return {"success": False, "error": "Authority grants not found", "status_code": 404}
         revoked = bool(manager.revoke_permission(principal_id, permission_id))
         self._request_store.audit(
             "authority_grant_deleted",
-            {"principal_id": principal_id, "permission_id": permission_id, "revoked": revoked},
+            {
+                "principal_id": principal_id,
+                "permission_id": permission_id,
+                "revoked": revoked,
+                "actor_profile_id": actor_profile_id,
+            },
         )
         return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": revoked}
 
