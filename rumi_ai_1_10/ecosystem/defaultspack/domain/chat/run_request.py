@@ -89,6 +89,86 @@ _COMPUTER_USE_REQUEST_RE = re.compile(
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
+
+
+def _is_unexpected_profiles_type_error(exc: TypeError) -> bool:
+    return "unexpected keyword argument 'profiles'" in str(exc)
+
+
+def _route_model_request_with_profiles(request: ModelRoutingRequest, profiles):
+    if profiles is None:
+        return route_model_request(request)
+    try:
+        return route_model_request(request, profiles=profiles)
+    except TypeError as exc:
+        if not _is_unexpected_profiles_type_error(exc):
+            raise
+        return route_model_request(request)
+
+
+def _get_model_capabilities_with_profiles(model: str, profiles):
+    if profiles is None:
+        return get_model_capabilities(model)
+    try:
+        return get_model_capabilities(model, profiles=profiles)
+    except TypeError as exc:
+        if not _is_unexpected_profiles_type_error(exc):
+            raise
+        return get_model_capabilities(model)
+
+
+def _stub_default_profile() -> dict[str, Any]:
+    return {
+        "id": "stub/default",
+        "profile_id": "stub/default",
+        "qualified_model_id": "stub/default",
+        "provider_id": "stub",
+        "provider": "stub",
+        "provider_display_name": "Stub",
+        "model_id": "default",
+        "model": "default",
+        "display_name": "Stub Default",
+        "name": "Stub Default",
+        "type": "chat",
+        "configured": True,
+        "local": True,
+        "supports_tool_calling": True,
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "capability_tags": ["tools", "thinking"],
+        "allowed_roles": ["deep_reasoning", "primary_chat", "subagent_default", "tool_selector"],
+        "recommended_roles": ["primary_chat", "deep_reasoning"],
+        "max_context": -1,
+        "defaults": {"chat": True},
+        "availability": {
+            "active": False,
+            "available": False,
+            "configured": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "status": "configured",
+            "configuration_source": "builtin",
+        },
+        "metadata": {
+            "capabilities": {
+                "text": True,
+                "tool_calls": True,
+                "tool_calling": True,
+                "thinking": True,
+                "streaming": True,
+            },
+            "supports_tool_calling": True,
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "capability_tags": ["tools", "thinking"],
+        },
+    }
+
+
+def _lightweight_profiles_for_model(model: str) -> list[dict[str, Any]]:
+    return [_stub_default_profile()] if str(model or "").strip() == "stub/default" else []
+
+
 _COMPUTER_USE_CHROME_TARGET_RE = re.compile(
     r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE
 )
@@ -359,7 +439,7 @@ def prepare_chat_run(
     if requested_route_model and not requested_model:
         model = requested_route_model
     resolve_runtime_settings = not str(model or "").strip().startswith("stub/")
-    routing_profiles = None if resolve_runtime_settings else []
+    routing_profiles = None if resolve_runtime_settings else _lightweight_profiles_for_model(model)
     model_settings = model_settings_service.get_settings(resolve_api_keys=resolve_runtime_settings)
     if "thinking_level" not in params:
         params["thinking_level"] = (
@@ -541,7 +621,7 @@ def prepare_chat_run(
         _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
-    routing_decision = route_model_request(
+    routing_decision = _route_model_request_with_profiles(
         ModelRoutingRequest(
             conversation_id=conversation_id,
             user_text=user_text,
@@ -570,10 +650,10 @@ def prepare_chat_run(
             },
             settings=model_settings,
         ),
-        profiles=routing_profiles,
+        routing_profiles,
     )
     model = routing_decision.selected_model
-    selected_capabilities = get_model_capabilities(model, profiles=routing_profiles) or {}
+    selected_capabilities = _get_model_capabilities_with_profiles(model, routing_profiles) or {}
     selected_metadata = selected_capabilities.get("metadata") if isinstance(selected_capabilities.get("metadata"), dict) else {}
     provider_capabilities = get_model_provider_capabilities(
         model,
