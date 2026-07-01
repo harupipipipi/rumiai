@@ -916,6 +916,7 @@ def test_builtin_rumi_model_pack_uses_available_runtime_model(monkeypatch, tmp_p
     provider = DemoProvider()
     client = AIClient()
     client._providers = {"stub": object(), "google": provider}
+    monkeypatch.setattr(AIClient, "_provider_requires_authority", staticmethod(lambda *args, **kwargs: False))
 
     monkeypatch.setattr(
         AIClient,

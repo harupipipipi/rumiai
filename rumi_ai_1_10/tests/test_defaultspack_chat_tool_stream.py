@@ -476,7 +476,9 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
             "is_error": False,
         }
 
-    monkeypatch.setattr("domain.host_bridge.computer_router.run_computer_action", fake_router)
+    from ecosystem.defaultspack.domain.host_bridge import computer_router
+
+    monkeypatch.setattr(computer_router, "run_computer_action", fake_router)
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
     monkeypatch.setattr(
         ToolExecutor,

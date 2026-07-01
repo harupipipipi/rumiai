@@ -141,7 +141,7 @@ def test_pid_event_accepts_payload_action(tmp_path):
     """_computer_seat_pid_event should use payload['action'] as sub-action."""
     ctrl = BrowserComputerController(artifact_root=tmp_path)
     svc = MagicMock()
-    svc.key.return_value = asdict(ActionResult(action="key", driver="mock", executed=True))
+    svc.pid_event.return_value = asdict(ActionResult(action="key", driver="mac_cgevent_pid", executed=True))
     ctrl._computer_seat = svc
 
     result = ctrl._computer_seat_pid_event(
@@ -149,21 +149,38 @@ def test_pid_event_accepts_payload_action(tmp_path):
         yolo_mode=True,
     )
     assert result["action"] == "computer.pid_event"
-    svc.key.assert_called_once()
+    assert result["sub_action"] == "key"
+    svc.pid_event.assert_called_once_with(
+        "key",
+        {
+            "kind": "desktop",
+            "app": None,
+            "pid": 123,
+            "window_id": None,
+            "window_title": None,
+            "hwnd": None,
+            "bundle_id": None,
+            "coordinate_space": "window",
+        },
+        {"key_combo": "cmd+s"},
+    )
 
 
 def test_pid_event_sub_action_takes_priority(tmp_path):
     """sub_action should take priority over action."""
     ctrl = BrowserComputerController(artifact_root=tmp_path)
     svc = MagicMock()
-    svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mock", executed=True))
+    svc.pid_event.return_value = asdict(ActionResult(action="type_text", driver="windows_postmessage", executed=True))
     ctrl._computer_seat = svc
 
     result = ctrl._computer_seat_pid_event(
         {"pid": 123, "sub_action": "type_text", "action": "click", "text": "hi"},
         yolo_mode=True,
     )
-    svc.type_text.assert_called_once()
+    assert result["sub_action"] == "type_text"
+    svc.pid_event.assert_called_once()
+    assert svc.pid_event.call_args.args[0] == "type_text"
+    assert svc.pid_event.call_args.args[2] == {"text": "hi"}
 
 
 # ---------------------------------------------------------------------------

@@ -145,6 +145,33 @@ def test_dynamic_tool_post_routes_are_guarded():
     )
 
 
+def test_non_loopback_websocket_upgrade_requires_local_auth(monkeypatch):
+    from transport.http import _websocket_auth_error
+
+    headers = {"Upgrade": "websocket", "Connection": "Upgrade"}
+    monkeypatch.delenv("RUMI_DEFAULTSPACK_LOCAL_TOKEN", raising=False)
+    monkeypatch.delenv("RUMI_API_TOKEN", raising=False)
+    monkeypatch.delenv("RUMI_TOKEN", raising=False)
+
+    assert _websocket_auth_error(headers, ("127.0.0.1", 54321)) is None
+    assert _websocket_auth_error(headers, ("203.0.113.10", 54321)) == (
+        403,
+        "websocket auth token is not configured",
+        "AUTH_REQUIRED",
+    )
+
+    monkeypatch.setenv("RUMI_API_TOKEN", "local-ws-token")
+    assert _websocket_auth_error(headers, ("203.0.113.10", 54321)) == (
+        401,
+        "websocket auth token required",
+        "AUTH_REQUIRED",
+    )
+    assert _websocket_auth_error(
+        {**headers, "Authorization": "Bearer local-ws-token"},
+        ("203.0.113.10", 54321),
+    ) is None
+
+
 def test_route_metadata_sensitive_reads_server_route_table():
     from transport.http import _RequestHandler
 

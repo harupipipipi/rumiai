@@ -1,5 +1,5 @@
 import { api } from "../../../lib/api";
-import type { ModelSearchResponse } from "../../../lib/api";
+import type { CodexAppServerConfig, ModelSearchResponse } from "../../../lib/api";
 import { createProviderApiKeyResources, type ProviderKeySaveResult } from "../../apiKeys";
 import { createModelSearchResources } from "../../models";
 
@@ -15,8 +15,8 @@ export const settingsApiResources = {
     return providerApiKeyResources.saveProviderApiKey(providerId, value, options) as Promise<ProviderKeySaveResult>;
   },
 
-  startProviderOAuth(providerId: string) {
-    return api.startProviderOAuth(providerId);
+  startProviderOAuth(providerId: string, options?: { scopeMode?: string; services?: string[] }) {
+    return api.startProviderOAuth(providerId, options);
   },
 
   disconnectProviderOAuth(providerId: string) {
@@ -29,6 +29,38 @@ export const settingsApiResources = {
 
   saveProviderOAuthClientConfig(providerId: string, clientConfig: string) {
     return api.saveProviderOAuthClientConfig(providerId, clientConfig);
+  },
+
+  importProviderConnection(providerId: string, credentialBundle: string) {
+    return api.importProviderConnection(providerId, credentialBundle);
+  },
+
+  importConnectionBundle(credentialBundle: string | Record<string, unknown>, providerId?: string) {
+    return api.importConnectionBundle(credentialBundle, providerId);
+  },
+
+  getCodexConnectionStatus() {
+    return api.getCodexConnectionStatus();
+  },
+
+  saveCodexAccessToken(accessToken: string) {
+    return api.saveCodexAccessToken(accessToken);
+  },
+
+  clearCodexAccessToken() {
+    return api.clearCodexAccessToken();
+  },
+
+  saveCodexAppServerConfig(config: CodexAppServerConfig) {
+    return api.saveCodexAppServerConfig(config);
+  },
+
+  clearCodexAppServerConfig() {
+    return api.clearCodexAppServerConfig();
+  },
+
+  probeCodexAppServer() {
+    return api.probeCodexAppServer();
   },
 
   createPublicUrl(payload: Parameters<typeof api.createPublicUrl>[0]) {

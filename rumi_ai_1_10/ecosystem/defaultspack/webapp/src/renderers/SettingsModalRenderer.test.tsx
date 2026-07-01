@@ -883,3 +883,280 @@ test("settings system info shows browser context message when info is null", () 
   assert.match(html, /Rumi Viewerを起動し/);
   assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
 });
+
+test("settings accounts prelude renders actionable Google and disabled Cloudflare states", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "google",
+              oauth: {
+                supported: true,
+                backend_supported: true,
+                client_configured: true,
+                connect_enabled: true,
+                connection_status: "not_connected",
+                status_label: "Ready to connect",
+                scope_mode: "google_gmail_labels",
+                scope_modes: [
+                  {
+                    id: "google_identity",
+                    label: "Google identity",
+                    description: "Basic sign-in identity only.",
+                    scopes: ["openid", "email", "profile"],
+                    services: ["identity"],
+                  },
+                  {
+                    id: "google_drive",
+                    label: "Google Drive selected files",
+                    description: "Drive file scope.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"],
+                    services: ["identity", "drive_file"],
+                  },
+                  {
+                    id: "google_gmail_labels",
+                    label: "Gmail labels",
+                    description: "Labels only.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"],
+                    services: ["identity", "gmail_labels"],
+                  },
+                  {
+                    id: "google_gmail_metadata",
+                    label: "Gmail metadata/search",
+                    description: "Restricted metadata mode.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+                    services: ["identity", "gmail_metadata"],
+                    restricted: true,
+                    warning: "Restricted Gmail scopes require explicit review.",
+                  },
+                ],
+                scopes: [
+                  "openid",
+                  "email",
+                  "profile",
+                  "https://www.googleapis.com/auth/drive.file",
+                  "https://www.googleapis.com/auth/gmail.labels",
+                ],
+              },
+            },
+            {
+              provider_id: "cloudflare",
+              oauth: {
+                backend_supported: false,
+                connect_enabled: false,
+                connection_status: "missing_scope_config",
+                status_label: "Missing scope config",
+                disabled_reason: "Configure self-host OAuth",
+              },
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Connect selected mode/);
+  assert.match(html, /Ready to connect/);
+  assert.match(html, /Google identity/);
+  assert.match(html, /Google Drive selected files/);
+  assert.match(html, /Gmail labels/);
+  assert.match(html, /Gmail metadata\/search/);
+  assert.match(html, /Restricted/);
+  assert.match(html, /Restricted Gmail scopes require explicit review/);
+  assert.match(html, /<input[^>]*(value="google_gmail_labels"[^>]*checked=""|checked=""[^>]*value="google_gmail_labels")/);
+  assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/gmail\.labels/);
+  assert.match(html, /Connect Cloudflare/);
+  assert.match(html, /Missing scope config/);
+  assert.match(html, /Official app required|Hosted broker flows|official hosted broker/);
+  assert.match(html, /Configure self-host OAuth/);
+  assert.match(html, /title="Configure self-host OAuth"/);
+  assert.doesNotMatch(html, />Not connected</);
+});
+
+test("settings accounts prelude renders Codex token credential without raw token", () => {
+  const rawToken = ["codex", "renderer", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              connected: true,
+              token_configured: true,
+              can_clear: true,
+              connection_status: "connected",
+              status_label: "Token saved",
+              access_token: rawToken,
+            },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex access token/);
+  assert.match(html, /Token saved/);
+  assert.match(html, /Saved/);
+  assert.match(html, /Update token/);
+  assert.match(html, /Clear token/);
+  assert.doesNotMatch(html, /Connect Codex/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+});
+
+test("settings tools prelude renders Codex App Server status and controls", () => {
+  const rawToken = ["codex", "hidden", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "tools", label: "Tools", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              token_configured: true,
+              access_token: rawToken,
+            },
+          },
+        },
+        tools_mcp: {
+          codex_app_server: {
+            configured: true,
+            enabled: true,
+            transport: "websocket_loopback",
+            connection_status: "configured",
+            status_label: "Configured",
+            base_url: "http://127.0.0.1:7331",
+            websocket_url: "ws://127.0.0.1:7331/ws",
+            unix_socket_path: "",
+            loopback: true,
+            auth_required: false,
+            auth_configured: true,
+            auth_source: "file",
+            auth_kind: "ws_token",
+            ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+            shared_secret_file: "",
+            account: {
+              provider_id: "codex",
+              provider_kind: "codex",
+              type: "chatgpt",
+              auth_method: "chatgpt_account",
+              auth_method_label: "ChatGPT account",
+              account_label: "rumi-user@example.test",
+              email: "rumi-user@example.test",
+              plan_type: "prolite",
+            },
+            tool_source: { status: "configured" },
+            automation_endpoint: { status: "configured" },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex App Server/);
+  assert.match(html, /Tool source/);
+  assert.match(html, /Automation/);
+  assert.match(html, /http:\/\/127\.0\.0\.1:7331/);
+  assert.match(html, /ws:\/\/127\.0\.0\.1:7331\/ws/);
+  assert.match(html, /websocket_loopback/);
+  assert.match(html, /ws_token via file/);
+  assert.match(html, /Connected Codex provider via ChatGPT account: rumi-user@example.test/);
+  assert.match(html, /Save config/);
+  assert.match(html, /Probe/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+  assert.doesNotMatch(html, /Connected ChatGPT account/);
+});
+
+test("settings help pane uses reported active profile with fallback when absent", () => {
+  const withProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: { profiles: { active_profile: "workbench/deep-focus" } },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  const withoutProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(withProfile, /workbench\/deep-focus/);
+  assert.doesNotMatch(withProfile, />default</);
+  assert.match(withoutProfile, /No active profile reported/);
+  assert.doesNotMatch(withoutProfile, />default</);
+});

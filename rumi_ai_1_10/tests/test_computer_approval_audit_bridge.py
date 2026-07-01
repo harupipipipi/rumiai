@@ -20,10 +20,16 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer
 @pytest.fixture
 def controller(tmp_path):
     ctrl = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    shared = tmp_path / "user_data" / "shared"
+    ctrl._session_path = shared / "browser_sessions.json"
+    ctrl._approval_path = shared / "browser_computer_approvals.json"
+    ctrl._browser_root = shared / "browser"
+    ctrl._profile_root = ctrl._browser_root / "profiles"
     svc = MagicMock()
     svc.click.return_value = asdict(ActionResult(action="click", driver="mock", executed=True))
     svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mock", executed=True))
     svc.semantic_action.return_value = asdict(ActionResult(action="semantic_action", driver="mock", executed=True))
+    svc.pid_event.return_value = asdict(ActionResult(action="pid_event", driver="mock", executed=True))
     svc.observe.return_value = {"platform": "darwin", "screenshot": {"data_url": "data:image/png;base64,AAAA"}}
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     ctrl._computer_seat = svc
@@ -39,7 +45,7 @@ def test_click_requires_approval_without_yolo(controller):
 
 def test_click_executes_with_yolo(controller):
     """click with yolo_mode should execute without approval."""
-    result = controller.run("computer.click", {"x": 50, "y": 50}, yolo_mode=True)
+    result = controller.run("computer.click", {"x": 50, "y": 50, "include_screenshot": False}, yolo_mode=True)
     assert result["executed"] is True
 
 

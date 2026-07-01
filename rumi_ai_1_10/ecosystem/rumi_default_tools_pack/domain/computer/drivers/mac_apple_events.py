@@ -36,9 +36,11 @@ class MacAppleEventsDriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=True,
+            can_background_type=False,
+            can_background_key=False,
             can_pid_event=False,
             can_foreground_action=False,
-            can_parallel_user_work=True,
+            can_parallel_user_work=False,
         )
 
     def observe(self, target: ComputerTarget) -> ObserveResult:

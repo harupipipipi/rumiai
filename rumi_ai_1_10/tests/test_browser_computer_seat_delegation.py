@@ -9,6 +9,12 @@ from dataclasses import asdict
 
 import pytest
 
+ROOT = Path(__file__).resolve().parent.parent
+DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+for path in (ROOT, DEFAULTSPACK_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
+
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.models import (
     ActionResult,
     ObserveResult,
@@ -19,20 +25,39 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer
 
 
 @pytest.fixture
-def controller(tmp_path):
-    return BrowserComputerController(artifact_root=tmp_path / "artifacts")
+def controller(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "computer seat delegation")
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+    instance = BrowserComputerController(artifact_root=tmp_path / "artifacts")
+    shared = tmp_path / "user_data" / "shared"
+    instance._session_path = shared / "browser_sessions.json"
+    instance._approval_path = shared / "browser_computer_approvals.json"
+    instance._browser_root = shared / "browser"
+    instance._profile_root = instance._browser_root / "profiles"
+    return instance
 
 
 def _mock_service():
     svc = MagicMock()
-    svc.click.return_value = asdict(ActionResult(action="click", driver="mac_accessibility", executed=True))
-    svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mac_accessibility", executed=True))
-    svc.key.return_value = asdict(ActionResult(action="key", driver="mac_accessibility", executed=True))
-    svc.scroll.return_value = asdict(ActionResult(action="scroll", driver="mac_accessibility", executed=True))
+    safe_result_kwargs = {
+        "can_parallel_user_work": True,
+        "requires_foreground": False,
+        "uses_physical_input": False,
+    }
+    svc.click.return_value = asdict(ActionResult(action="click", driver="mac_accessibility", executed=True, **safe_result_kwargs))
+    svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mac_accessibility", executed=True, confidence="high", **safe_result_kwargs))
+    svc.key.return_value = asdict(ActionResult(action="key", driver="mac_accessibility", executed=True, confidence="high", **safe_result_kwargs))
+    svc.scroll.return_value = asdict(ActionResult(action="scroll", driver="mac_accessibility", executed=True, confidence="high", **safe_result_kwargs))
     svc.move.return_value = asdict(ActionResult(action="move", driver="mac_accessibility", executed=True))
     svc.drag.return_value = asdict(ActionResult(action="drag", driver="mac_accessibility", executed=True))
     svc.observe.return_value = asdict(ObserveResult(platform="darwin"))
     svc.semantic_action.return_value = asdict(ActionResult(action="semantic_action", driver="mac_accessibility", executed=True))
+    svc.background_action.side_effect = lambda action, target, payload, **kwargs: {
+        "type_text": svc.type_text.return_value,
+        "key": svc.key.return_value,
+        "scroll": svc.scroll.return_value,
+        "click": svc.click.return_value,
+    }.get(action, asdict(ActionResult(action=action, driver="none", executed=False)))
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": ["mac_accessibility"], "available_drivers": [], "unavailable_drivers": []}
     return svc
 
@@ -58,8 +83,19 @@ def _approval_token_for(controller: BrowserComputerController, action: str, payl
 def test_click_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.click", {"x": 100, "y": 200, "physical": True, "approval_token": "bypass"}, yolo_mode=True)
-    assert result["executed"] is True
+    result = controller.run(
+        "computer.click",
+        {
+            "x": 100,
+            "y": 200,
+            "physical": True,
+            "target": "desktop",
+            "approval_token": "bypass",
+            "include_screenshot": False,
+        },
+        yolo_mode=True,
+    )
+    assert result["executed"] is True, result
     assert result["action"] == "computer.click"
     svc.click.assert_called_once()
 
@@ -67,25 +103,40 @@ def test_click_delegates_to_seat(controller):
 def test_type_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.type", {"text": "hello"}, yolo_mode=True)
+    result = controller.run(
+        "computer.type",
+        {"text": "hello", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
-    svc.type_text.assert_called_once()
+    svc.background_action.assert_called_once()
+    assert svc.background_action.call_args.args[0] == "type_text"
 
 
 def test_key_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.key", {"key": "enter"}, yolo_mode=True)
+    result = controller.run(
+        "computer.key",
+        {"key": "enter", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
-    svc.key.assert_called_once()
+    svc.background_action.assert_called_once()
+    assert svc.background_action.call_args.args[0] == "key"
 
 
 def test_scroll_delegates_to_seat(controller):
     svc = _mock_service()
     controller._computer_seat = svc
-    result = controller.run("computer.scroll", {"direction": "down"}, yolo_mode=True)
+    result = controller.run(
+        "computer.scroll",
+        {"direction": "down", "include_screenshot": False},
+        yolo_mode=True,
+    )
     assert result["executed"] is True
-    svc.scroll.assert_called_once()
+    svc.background_action.assert_called_once()
+    assert svc.background_action.call_args.args[0] == "scroll"
 
 
 def test_observe_requires_approval_without_yolo(controller):

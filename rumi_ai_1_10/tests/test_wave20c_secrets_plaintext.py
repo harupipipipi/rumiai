@@ -7,11 +7,11 @@ and CRITICAL audit logging on plaintext fallback.
 from __future__ import annotations
 
 import json
-import os
+import stat
 import sys
 import types
 from pathlib import Path
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import patch
 
 import pytest
 
@@ -237,3 +237,4 @@ class TestRegressionEncryptedSecrets:
         assert data["value"].startswith(_FERNET_PREFIX), (
             "保存された value は Fernet 暗号化されているべき"
         )
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600

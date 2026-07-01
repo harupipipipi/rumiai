@@ -162,6 +162,9 @@ def test_template_function_routes_join_canonical_transport_registry():
     provider_key_route = canonical[("POST", "/api/ai/provider-key")]
     assert provider_key_route.function_name == "defaultspack:ai_set_provider_key"
     assert provider_key_route.sensitive is True
+    connection_import_route = canonical[("POST", "/api/connections/import")]
+    assert connection_import_route.block_module == "blocks.connections.import_bundle"
+    assert connection_import_route.sensitive is True
     external_template_route = canonical[("POST", "/api/external/templates")]
     assert (
         external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
@@ -1262,6 +1265,14 @@ def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
             {"_method": "POST"},
         ),
         (
+            "POST",
+            "/api/connections/import",
+            "blocks.connections.import_bundle",
+            {},
+            {},
+            {"_method": "POST"},
+        ),
+        (
             "DELETE",
             "/api/p2p/peers/peer-a",
             "blocks.p2p.peers",
@@ -1385,6 +1396,7 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
         ("PUT", "/api/p2p/peers/{peer_id}", "blocks.p2p.peers"),
         ("POST", "/api/p2p/messages/inbound", "blocks.p2p.messages_inbound"),
         ("POST", "/api/integrations/p2p/events", "blocks.integrations.p2p"),
+        ("POST", "/api/connections/import", "blocks.connections.import_bundle"),
         ("POST", "/api/chat/conversations/{id}/compact", "blocks.chat.compact"),
         ("POST", "/api/chat/conversations/{id}/auto-compact", "blocks.chat.auto_compact"),
         ("GET", "/api/coding/workspaces/get", "blocks.coding.workspace.get"),
