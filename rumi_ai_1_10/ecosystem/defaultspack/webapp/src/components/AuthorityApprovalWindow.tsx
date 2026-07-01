@@ -65,6 +65,21 @@ function requestIdFromLocation(): string {
   }
 }
 
+function approvalReturnToFromLocation(): string {
+  try {
+    const value = new URLSearchParams(window.location.search).get("return_to")?.trim() ?? "";
+    if (!value) return "";
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "";
+    if (!url.pathname.startsWith("/finger-recording") && !url.pathname.startsWith("/ambient-debug")) {
+      return "";
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "";
+  }
+}
+
 function requestToApproval(request: AuthorityRequest): AuthorityApproval {
   return {
     requestId: request.request_id,
@@ -105,17 +120,22 @@ async function returnToFingerRecordingAfterApproval() {
   }, 250);
 }
 
-async function closeAuthorityApprovalWindow() {
+async function closeAuthorityApprovalWindow(fallbackReturnTo = "") {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
     // Fall back below when the approval page is not inside Rumi Viewer.
   }
   window.close();
+  if (!fallbackReturnTo) return;
+  window.setTimeout(() => {
+    if (document.hidden) return;
+    window.location.replace(defaultspackUrlWithStoredLocalAuth(browserApprovalTokenizedPath(fallbackReturnTo)));
+  }, 250);
 }
 
-function scheduleAuthorityApprovalWindowClose() {
-  window.setTimeout(() => void closeAuthorityApprovalWindow(), 650);
+function scheduleAuthorityApprovalWindowClose(fallbackReturnTo = "") {
+  window.setTimeout(() => void closeAuthorityApprovalWindow(fallbackReturnTo), 650);
 }
 
 function hasNativeAuthorityApprovalContext(): boolean {
@@ -218,6 +238,7 @@ export function AuthorityApprovalWindow() {
   const browserApprovalAvailable = Boolean(!nativeApprovalAvailable && browserApprovalToken);
   const approvalContextAvailable = nativeApprovalAvailable || browserApprovalAvailable;
   const showApprovalControls = Boolean(request && request.status === "pending" && approvalContextAvailable && !displayedSettledStatus && decisionState.kind === "idle");
+  const showPendingRequestPicker = pendingRequests.length > 0 && (!requestId || pendingRequests.length > 1);
   const controlsDisabled = !showApprovalControls || action !== null;
   const confirmationPhrase = stringValue(request?.display_metadata?.confirmation_phrase) || stringValue(request?.resource?.confirmation_phrase);
   const typedConfirmationRequired = Boolean(
@@ -319,7 +340,7 @@ export function AuthorityApprovalWindow() {
     const shouldScheduleClose = options?.scheduleClose
       ?? (nativeApprovalAvailableRef.current || Boolean(browserApprovalTokenRef.current));
     if (shouldScheduleClose) {
-      scheduleAuthorityApprovalWindowClose();
+      scheduleAuthorityApprovalWindowClose(nativeApprovalAvailableRef.current ? "" : approvalReturnToFromLocation());
     }
   }, []);
 
@@ -755,7 +776,7 @@ export function AuthorityApprovalWindow() {
           )}
         </section>
 
-        {pendingRequests.length > 1 && (
+        {showPendingRequestPicker && (
           <section className="mt-5 border-t border-zinc-800 pt-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-600">Pending</p>
             <div className="mt-2 grid gap-2">

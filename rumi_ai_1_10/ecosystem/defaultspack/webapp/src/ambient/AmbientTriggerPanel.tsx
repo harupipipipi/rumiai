@@ -339,7 +339,7 @@ export function AmbientTriggerPanel({
     browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && !browserApprovalToken.trim(),
   );
   const miniBrowserApprovalDirectUrl = browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow() && browserApprovalToken.trim()
-    ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, browserApprovalToken.trim())
+    ? browserAuthorityApprovalPath(miniAuthorityApproval.requestId, browserApprovalToken.trim(), ambientAuthorityApprovalReturnPath())
     : null;
   const inlineSettingsControlsVisible = !standalone;
   const miniChatRoutingSummary = standalone ? "次の送信で作成" : routingSummary;
@@ -570,7 +570,7 @@ export function AmbientTriggerPanel({
       setMessage("AIが続きを作成しています。");
       void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
       void waitForMiniAuthorityContinuation(miniAuthorityApproval, targetConversationId);
-    }, { replayStored: true });
+    }, { replayStored: true, replayStoredRequestId: miniAuthorityApproval.requestId });
   }, [loadMiniConversation, miniAuthorityApproval?.requestId, miniConversation?.id, miniConversationId]);
 
   useEffect(() => {
@@ -619,7 +619,7 @@ export function AmbientTriggerPanel({
     setRumiApprovalOpen(false);
     setMessage(event.status === "approved" ? "使えるようになりました。次にMacのマイク/カメラを確認します。" : "許可しませんでした。必要になったらもう一度許可できます。");
     void refresh({ probeOs: true });
-  }, { replayStored: true }), []);
+  }, { replayStored: true, replayStoredRequestId: AMBIENT_AUTHORITY_REQUEST_ID }), []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -1144,7 +1144,7 @@ export function AmbientTriggerPanel({
         rememberBrowserApprovalToken(nextBrowserApprovalToken);
         setBrowserApprovalToken(nextBrowserApprovalToken);
         setBrowserApprovalTokenInput(nextBrowserApprovalToken);
-        const approvalUrl = browserAuthorityApprovalPath(resolvedApproval.requestId, nextBrowserApprovalToken);
+        const approvalUrl = browserAuthorityApprovalPath(resolvedApproval.requestId, nextBrowserApprovalToken, ambientAuthorityApprovalReturnPath());
         const popup = window.open(approvalUrl, `rumi-authority-approval-${resolvedApproval.requestId}`, "width=720,height=820");
         if (popup) {
           if (!options?.auto) setMessage("ブラウザ承認ページを開きました。");
@@ -2510,6 +2510,16 @@ function hasNativeAuthorityApprovalWindow(): boolean {
   if (typeof window === "undefined") return false;
   const maybeWindow = window as TauriAmbientWindow;
   return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
+}
+
+function ambientAuthorityApprovalReturnPath(): string {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("authority_approved", "1");
+    return `${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    return "/ambient-debug?authority_approved=1";
+  }
 }
 
 function cleanString(value: unknown): string | null {

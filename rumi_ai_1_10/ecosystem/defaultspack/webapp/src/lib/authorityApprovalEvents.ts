@@ -1,6 +1,7 @@
 const AUTHORITY_APPROVAL_CHANNEL = "rumi-authority-approval";
 const AUTHORITY_APPROVAL_MESSAGE_TYPE = "rumi-authority-approval-settlement";
 const AUTHORITY_APPROVAL_STORAGE_KEY = "rumi.authority.approval.settlement";
+const AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS = 5 * 60 * 1000;
 
 export type AuthorityApprovalSettlement = {
   requestId: string;
@@ -10,6 +11,11 @@ export type AuthorityApprovalSettlement = {
 
 type SubscribeAuthorityApprovalSettlementOptions = {
   replayStored?: boolean;
+  replayStoredRequestId?: string;
+};
+
+type StoredAuthorityApprovalSettlement = AuthorityApprovalSettlement & {
+  ts: number;
 };
 
 function isSettlement(value: unknown): value is AuthorityApprovalSettlement {
@@ -25,6 +31,14 @@ function settlementFromMessage(value: unknown): AuthorityApprovalSettlement | nu
   const record = value as Record<string, unknown>;
   if (record.type !== AUTHORITY_APPROVAL_MESSAGE_TYPE) return null;
   return isSettlement(record.event) ? record.event : null;
+}
+
+function storedSettlementFromMessage(value: unknown): StoredAuthorityApprovalSettlement | null {
+  const settlement = settlementFromMessage(value);
+  if (!settlement || !value || typeof value !== "object" || Array.isArray(value)) return null;
+  const ts = Number((value as Record<string, unknown>).ts);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  return { ...settlement, ts };
 }
 
 export function broadcastAuthorityApprovalSettlement(event: AuthorityApprovalSettlement): void {
@@ -47,11 +61,42 @@ export function broadcastAuthorityApprovalSettlement(event: AuthorityApprovalSet
   }
 }
 
-export function readStoredAuthorityApprovalSettlement(): AuthorityApprovalSettlement | null {
+export function clearStoredAuthorityApprovalSettlement(requestId?: string): void {
+  try {
+    const stored = window.localStorage.getItem(AUTHORITY_APPROVAL_STORAGE_KEY);
+    if (!stored) return;
+    if (requestId) {
+      const settlement = settlementFromMessage(JSON.parse(stored));
+      if (settlement && settlement.requestId !== requestId) return;
+    }
+    window.localStorage.removeItem(AUTHORITY_APPROVAL_STORAGE_KEY);
+  } catch {
+    // Storage may be unavailable in restricted browser contexts.
+  }
+}
+
+export function readStoredAuthorityApprovalSettlement(
+  options?: { requestId?: string; maxAgeMs?: number },
+): AuthorityApprovalSettlement | null {
   try {
     const stored = window.localStorage.getItem(AUTHORITY_APPROVAL_STORAGE_KEY);
     if (!stored) return null;
-    return settlementFromMessage(JSON.parse(stored));
+    const settlement = storedSettlementFromMessage(JSON.parse(stored));
+    if (!settlement) {
+      window.localStorage.removeItem(AUTHORITY_APPROVAL_STORAGE_KEY);
+      return null;
+    }
+    if (options?.requestId && settlement.requestId !== options.requestId) return null;
+    const maxAgeMs = options?.maxAgeMs ?? AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS;
+    if (Date.now() - settlement.ts > maxAgeMs) {
+      clearStoredAuthorityApprovalSettlement(settlement.requestId);
+      return null;
+    }
+    return {
+      requestId: settlement.requestId,
+      status: settlement.status,
+      conversationId: settlement.conversationId,
+    };
   } catch {
     return null;
   }
@@ -91,8 +136,12 @@ export function subscribeAuthorityApprovalSettlements(
   if (options?.replayStored) {
     const replay = () => {
       if (!active) return;
-      const settlement = readStoredAuthorityApprovalSettlement();
-      if (settlement) handler(settlement);
+      const settlement = readStoredAuthorityApprovalSettlement({
+        requestId: options.replayStoredRequestId,
+      });
+      if (!settlement) return;
+      clearStoredAuthorityApprovalSettlement(settlement.requestId);
+      handler(settlement);
     };
     if (typeof window.queueMicrotask === "function") {
       window.queueMicrotask(replay);

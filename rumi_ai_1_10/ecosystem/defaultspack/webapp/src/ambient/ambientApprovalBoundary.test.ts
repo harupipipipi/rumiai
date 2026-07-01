@@ -60,11 +60,15 @@ test("ambient mini authority browser fallback is debug QA only and opens tokeniz
   assert.match(source, /const browserApprovalQaEnabled = standalone && debugMode/);
   assert.match(source, /browserApprovalQaEnabled && miniAuthorityApproval && !hasNativeAuthorityApprovalWindow\(\) && browserApprovalToken\.trim\(\)/);
   assert.match(source, /const nextBrowserApprovalToken = browserApprovalQaEnabled \? readBrowserApprovalToken\(\) : ""/);
-  assert.match(source, /browserAuthorityApprovalPath\(resolvedApproval\.requestId, nextBrowserApprovalToken\)/);
+  assert.match(source, /browserAuthorityApprovalPath\(resolvedApproval\.requestId, nextBrowserApprovalToken, ambientAuthorityApprovalReturnPath\(\)\)/);
+  assert.match(source, /browserAuthorityApprovalPath\(miniAuthorityApproval\.requestId, browserApprovalToken\.trim\(\), ambientAuthorityApprovalReturnPath\(\)\)/);
+  assert.match(source, /function ambientAuthorityApprovalReturnPath\(\)/);
+  assert.match(source, /url\.searchParams\.set\("authority_approved", "1"\)/);
   assert.match(source, /window\.open\(approvalUrl/);
   assert.match(source, /ブラウザで承認するにはテストトークンを保存してください。/);
   assert.doesNotMatch(source, /window\.open\(["'`]\/approval\?request_id/);
   assert.match(helperSource, /params\.set\("browser_approval_token", token\)/);
+  assert.match(helperSource, /params\.set\("return_to", normalizedReturnTo\)/);
 });
 
 test("authority approval route does not render ambient gesture overlay", () => {
@@ -87,10 +91,11 @@ test("ambient authority approval cancel and close settle the opener", () => {
 test("generic authority approval settlements schedule window close", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
-  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)/);
+  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(fallbackReturnTo = ""\)/);
   assert.match(source, /if \(await closeCurrentWindow\(\)\) return/);
   assert.match(source, /window\.close\(\)/);
-  assert.match(source, /const settleAuthorityRequest = useCallback[\s\S]*scheduleAuthorityApprovalWindowClose\(\);/);
+  assert.match(source, /window\.location\.replace\(defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\(fallbackReturnTo\)\)\)/);
+  assert.match(source, /const settleAuthorityRequest = useCallback[\s\S]*scheduleAuthorityApprovalWindowClose\(nativeApprovalAvailableRef\.current \? "" : approvalReturnToFromLocation\(\)\);/);
   assert.match(source, /nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
   assert.match(source, /await finalizeApprovedDecision\(request, decision\)/);
   assert.match(source, /await finalizeDeniedRequest\(request\)/);
@@ -120,8 +125,11 @@ test("ambient authority settlement subscribers replay stored browser fallback se
 
   assert.match(eventSource, /readStoredAuthorityApprovalSettlement/);
   assert.match(eventSource, /options\?\.replayStored/);
-  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*miniAuthorityApproval[\s\S]*\}, \{ replayStored: true \}\)/);
-  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*AMBIENT_AUTHORITY_REQUEST_ID[\s\S]*\}, \{ replayStored: true \}\)/);
+  assert.match(eventSource, /AUTHORITY_APPROVAL_STORAGE_MAX_AGE_MS = 5 \* 60 \* 1000/);
+  assert.match(eventSource, /replayStoredRequestId\?: string/);
+  assert.match(eventSource, /clearStoredAuthorityApprovalSettlement\(settlement\.requestId\)/);
+  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*miniAuthorityApproval[\s\S]*\}, \{ replayStored: true, replayStoredRequestId: miniAuthorityApproval\.requestId \}\)/);
+  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*AMBIENT_AUTHORITY_REQUEST_ID[\s\S]*\}, \{ replayStored: true, replayStoredRequestId: AMBIENT_AUTHORITY_REQUEST_ID \}\)/);
 });
 
 test("generic authority approval stale post failure refetches and settles before error", () => {

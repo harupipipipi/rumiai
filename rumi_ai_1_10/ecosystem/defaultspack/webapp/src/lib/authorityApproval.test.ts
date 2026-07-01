@@ -390,6 +390,10 @@ test("authority approval browser token helper accepts URL aliases and builds tok
     "/approval?request_id=auth+1&browser_approval_token=tok%2Fen",
   );
   assert.equal(
+    browserAuthorityApprovalPath("auth 1", "tok/en", "/ambient-debug?authority_approved=1"),
+    "/approval?request_id=auth+1&browser_approval_token=tok%2Fen&return_to=%2Fambient-debug%3Fauthority_approved%3D1",
+  );
+  assert.equal(
     browserApprovalTokenizedPath("/finger-recording?authority_approved=1", "tok/en"),
     "/finger-recording?authority_approved=1&browser_approval_token=tok%2Fen",
   );
@@ -465,12 +469,30 @@ test("authority approval window settles already-approved or denied requests on l
 test("authority approval window finalizes hidden resume before broadcasting approve settlement", () => {
   const source = authorityApprovalWindowSource();
 
-  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)[\s\S]*closeAuthorityApprovalWindow/);
+  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(fallbackReturnTo = ""\)[\s\S]*closeAuthorityApprovalWindow\(fallbackReturnTo\)/);
   assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose[\s\S]*nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
+  assert.match(source, /scheduleAuthorityApprovalWindowClose\(nativeApprovalAvailableRef\.current \? "" : approvalReturnToFromLocation\(\)\)/);
   assert.match(source, /const decision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, decision\);/);
   assert.match(source, /const retriedDecision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, retriedDecision\);/);
   assert.doesNotMatch(source, /settleApprovedDecision\(request,/);
   assert.match(source, /await submitRejectOnce\(\);\s*settleDeniedRequest\(request\);\s*await finalizeDeniedRequest\(request\);/);
+});
+
+test("authority approval browser fallback returns same-tab approvals to a safe ambient route", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /function approvalReturnToFromLocation\(\)/);
+  assert.match(source, /url\.origin !== window\.location\.origin/);
+  assert.match(source, /!url\.pathname\.startsWith\("\/finger-recording"\) && !url\.pathname\.startsWith\("\/ambient-debug"\)/);
+  assert.match(source, /window\.location\.replace\(defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\(fallbackReturnTo\)\)\)/);
+});
+
+test("authority approval route shows the pending picker when request_id is missing", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /const showPendingRequestPicker = pendingRequests\.length > 0 && \(!requestId \|\| pendingRequests\.length > 1\)/);
+  assert.match(source, /\{showPendingRequestPicker && \(/);
+  assert.doesNotMatch(source, /\{pendingRequests\.length > 1 && \(/);
 });
 
 test("authority approval window ignores late settlements for a request that is no longer selected", () => {
