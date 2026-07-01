@@ -1,5 +1,6 @@
 from core_runtime.connections.registry import ConnectionsRegistry
 from core_runtime.connections.oauth_service import InMemoryOAuthStateStore
+from core_runtime.connections.permission_resolver import resolve_connection_permissions
 from core_runtime.connections.providers.codex import CODEX_PROVIDER
 from core_runtime.connections.providers.cloudflare import CLOUDFLARE_PROVIDER
 from core_runtime.connections.providers.github import GITHUB_PROVIDER
@@ -29,6 +30,62 @@ def test_provider_safe_payload_has_no_secret():
     assert payload["tokenImportSupported"] is True
     assert payload["scopeToCapability"][0]["capabilities"] == ["cloudflare.account.read"]
     assert payload["capabilities"][0]["displayName"] == "Read account metadata"
+
+
+def test_cloudflare_pages_write_requires_approval():
+    resolved = resolve_connection_permissions(
+        CLOUDFLARE_PROVIDER,
+        {
+            "scopes": ["pages:write"],
+            "requested_capabilities": [
+                "cloudflare.pages.project.write",
+                "cloudflare.pages.deployment.write",
+            ],
+        },
+    )
+
+    assert resolved.capabilities == []
+    assert resolved.approval_required_capabilities == [
+        "cloudflare.pages.deployment.write",
+        "cloudflare.pages.project.write",
+    ]
+    assert resolved.rejected_capabilities == []
+
+
+def test_cloudflare_pages_write_does_not_grant_runner_deploy():
+    resolved = resolve_connection_permissions(
+        CLOUDFLARE_PROVIDER,
+        {
+            "scopes": ["pages:write"],
+            "requested_capabilities": ["cloudflare.runner.deploy"],
+        },
+    )
+
+    assert "cloudflare.runner.deploy" not in resolved.capabilities
+    assert "cloudflare.runner.deploy" not in resolved.approval_required_capabilities
+    assert "cloudflare.runner.deploy" in resolved.rejected_capabilities
+
+
+def test_cloudflare_full_runner_scope_requires_approval_for_runner_deploy():
+    resolved = resolve_connection_permissions(
+        CLOUDFLARE_PROVIDER,
+        {
+            "scopes": [
+                "workers:write",
+                "workers_scripts:edit",
+                "pages:write",
+                "d1:write",
+                "r2:write",
+                "queues:write",
+                "workflows:write",
+            ],
+            "requested_capabilities": ["cloudflare.runner.deploy"],
+        },
+    )
+
+    assert resolved.capabilities == []
+    assert resolved.approval_required_capabilities == ["cloudflare.runner.deploy"]
+    assert resolved.rejected_capabilities == []
 
 
 def test_codex_provider_safe_payload_has_no_token_material():

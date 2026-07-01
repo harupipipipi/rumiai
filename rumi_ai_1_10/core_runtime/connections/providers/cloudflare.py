@@ -40,7 +40,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.pages.project.write",
             display_name="Write Pages projects",
             description="Create, update, and delete Cloudflare Pages projects.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.pages.deployment.read",
@@ -52,7 +52,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.pages.deployment.write",
             display_name="Write Pages deployments",
             description="Create and delete Cloudflare Pages deployments.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.worker.read",
@@ -64,7 +64,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.worker.write",
             display_name="Write Workers",
             description="Create or update Cloudflare Worker resources.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.r2.read",
@@ -76,7 +76,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.r2.write",
             display_name="Write R2",
             description="Create or update Cloudflare R2 resources.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.d1.read",
@@ -88,7 +88,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.d1.write",
             display_name="Write D1",
             description="Create or update Cloudflare D1 resources.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.queue.read",
@@ -100,7 +100,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.queue.write",
             display_name="Write Queues",
             description="Create or update Cloudflare Queues resources.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.workflow.read",
@@ -112,13 +112,13 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
             id="cloudflare.workflow.write",
             display_name="Write Workflows",
             description="Create or update Cloudflare Workflows resources.",
-            risk="medium",
+            risk="high",
         ),
         ProviderCapability(
             id="cloudflare.runner.deploy",
             display_name="Deploy Rumi runner",
             description="Create or update Rumi runner resources such as Worker, Workflow, D1, R2, Queue, and secrets.",
-            risk="medium",
+            risk="high",
         ),
     ],
     scope_presets=[
@@ -135,27 +135,26 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
                 "cloudflare.pages.project.write",
                 "cloudflare.pages.deployment.read",
                 "cloudflare.pages.deployment.write",
-                "cloudflare.runner.deploy",
             ],
         },
         {"scopes": ["workers:read", "workers_scripts:read"], "capabilities": ["cloudflare.worker.read"]},
         {
             "scopes": ["workers:write", "workers_scripts:edit"],
-            "capabilities": ["cloudflare.worker.read", "cloudflare.worker.write", "cloudflare.runner.deploy"],
+            "capabilities": ["cloudflare.worker.read", "cloudflare.worker.write"],
         },
         {"scopes": ["d1:read"], "capabilities": ["cloudflare.d1.read"]},
-        {"scopes": ["d1:write"], "capabilities": ["cloudflare.d1.read", "cloudflare.d1.write", "cloudflare.runner.deploy"]},
+        {"scopes": ["d1:write"], "capabilities": ["cloudflare.d1.read", "cloudflare.d1.write"]},
         {"scopes": ["r2:read"], "capabilities": ["cloudflare.r2.read"]},
-        {"scopes": ["r2:write"], "capabilities": ["cloudflare.r2.read", "cloudflare.r2.write", "cloudflare.runner.deploy"]},
+        {"scopes": ["r2:write"], "capabilities": ["cloudflare.r2.read", "cloudflare.r2.write"]},
         {"scopes": ["queues:read"], "capabilities": ["cloudflare.queue.read"]},
         {
             "scopes": ["queues:write"],
-            "capabilities": ["cloudflare.queue.read", "cloudflare.queue.write", "cloudflare.runner.deploy"],
+            "capabilities": ["cloudflare.queue.read", "cloudflare.queue.write"],
         },
         {"scopes": ["workflows:read"], "capabilities": ["cloudflare.workflow.read"]},
         {
             "scopes": ["workflows:write"],
-            "capabilities": ["cloudflare.workflow.read", "cloudflare.workflow.write", "cloudflare.runner.deploy"],
+            "capabilities": ["cloudflare.workflow.read", "cloudflare.workflow.write"],
         },
         {
             "scopes": [
@@ -167,6 +166,7 @@ CLOUDFLARE_PROVIDER = ConnectionProvider(
                 "queues:write",
                 "workflows:write",
             ],
+            "match": "all",
             "capabilities": ["cloudflare.runner.deploy"],
         },
     ],

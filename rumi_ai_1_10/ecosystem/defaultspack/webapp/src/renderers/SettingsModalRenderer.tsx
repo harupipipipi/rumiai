@@ -984,6 +984,102 @@ function connectionDraftKind(value: string): "connection_import" | "oauth_client
   }
 }
 
+
+function providerAccentClass(providerId: string): string {
+  switch (providerId) {
+    case "cloudflare":
+      return "from-orange-500 via-amber-400 to-orange-700";
+    case "google":
+      return "from-sky-500 via-emerald-400 to-yellow-400";
+    case "github":
+      return "from-zinc-200 via-zinc-500 to-zinc-800";
+    case "codex":
+      return "from-violet-500 via-cyan-400 to-emerald-400";
+    default:
+      return "from-cyan-500 via-sky-500 to-violet-500";
+  }
+}
+
+function statusBadgeClass(status: string, connected: boolean, canConnect: boolean): string {
+  const normalized = status.toLowerCase();
+  if (connected || normalized === "connected" || normalized === "configured") {
+    return "border-emerald-500/35 bg-emerald-500/10 text-emerald-300";
+  }
+  if (normalized.includes("approval")) {
+    return "border-amber-500/35 bg-amber-500/10 text-amber-200";
+  }
+  if (normalized.includes("blocked") || normalized.includes("mismatch") || normalized.includes("rejected") || normalized.includes("error")) {
+    return "border-rose-500/35 bg-rose-500/10 text-rose-200";
+  }
+  if (canConnect) {
+    return "border-cyan-500/35 bg-cyan-500/10 text-cyan-200";
+  }
+  return "border-zinc-700 bg-zinc-900 text-zinc-400";
+}
+
+function capabilityToneClass(tone: "enabled" | "approval" | "rejected" | "scope" | "neutral"): string {
+  switch (tone) {
+    case "enabled":
+      return "border-emerald-500/25 bg-emerald-500/10 text-emerald-200";
+    case "approval":
+      return "border-amber-500/30 bg-amber-500/10 text-amber-100";
+    case "rejected":
+      return "border-rose-500/25 bg-rose-500/10 text-rose-200";
+    case "scope":
+      return "border-sky-500/25 bg-sky-500/10 text-sky-200";
+    default:
+      return "border-zinc-800 bg-zinc-950 text-zinc-400";
+  }
+}
+
+function compactCredentialRef(value: string): string {
+  const text = value.trim();
+  if (text.length <= 32) return text;
+  return `${text.slice(0, 14)}…${text.slice(-10)}`;
+}
+
+function importPlaceholderForProvider(providerId: string): string {
+  if (providerId === "cloudflare") {
+    return [
+      "{",
+      '  "schema": "rumi.connection.credential_bundle.v1",',
+      '  "provider_id": "cloudflare",',
+      '  "credentials": { "access_token": "..." },',
+      '  "scopes": ["account:read", "pages:write"],',
+      '  "requested_capabilities": ["cloudflare.pages.project.write"]',
+      "}",
+    ].join("\n");
+  }
+  if (providerId === "github") {
+    return [
+      "{",
+      '  "schema": "rumi.connection.credential_bundle.v1",',
+      '  "provider_id": "github",',
+      '  "credentials": { "access_token": "..." },',
+      '  "scopes": ["read:user", "repo"],',
+      '  "requested_capabilities": ["github.repo.read"]',
+      "}",
+    ].join("\n");
+  }
+  if (providerId === "google") {
+    return "Paste Google OAuth client JSON or a credential bundle JSON. Token values are stored in SecretsStore and never echoed back.";
+  }
+  return "Paste credential bundle JSON or .env-style token lines. Raw secrets are stored only in Rumi secret storage.";
+}
+
+function connectionDraftHelp(providerId: string): string {
+  if (providerId === "cloudflare") {
+    return "Use credential JSON for direct token import, or OAuth client JSON for self-host browser connect. Pages/Workers write capabilities require approval.";
+  }
+  if (providerId === "github") {
+    return "Import a fine-grained token or OAuth token. Requested capabilities limit what Rumi can actually use.";
+  }
+  if (providerId === "google") {
+    return "Choose a scope mode for browser OAuth, or paste self-host client JSON. Restricted Gmail modes are labeled before connect.";
+  }
+  return "Do not paste secrets into .env as the primary path. Import here so Rumi can store a credential_ref and keep raw values out of Settings.";
+}
+
 function ProviderOAuthPanel({
   sectionId,
   fieldId,
@@ -3429,203 +3525,242 @@ export function SettingsModalRenderer({
       );
     }
     if (section.id === "accounts_connections") {
+      const connectedCount = accountConnectionCards.filter((card) => card.connected || card.credential?.configured).length;
+      const approvalCount = accountConnectionCards.reduce((sum, card) => sum + card.approvalRequiredCapabilities.length, 0);
+      const blockedCount = accountConnectionCards.filter((card) => card.disabledReason && !card.connected && !card.credential?.configured).length;
       return (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {accountConnectionCards.map((card) => {
-            const isBusy = connectionBusy === `${card.providerId}:start`;
-            const message = connectionMessages[card.providerId];
-            const selectedScopeOption = selectedConnectionScopeMode(card);
-            const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
-            const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;
-            return (
-              <div key={card.providerId} className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-zinc-100">{card.label}</div>
-                    <p className="mt-1 text-xs leading-5 text-zinc-500">
-                      {card.description}
-                    </p>
-                  </div>
-                  <span className={cn(
-                    "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                    card.connected
-                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                      : card.canConnect
-                        ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-200"
-                        : "border-amber-500/30 bg-amber-500/10 text-amber-200",
-                  )}>
-                    {card.statusLabel}
-                  </span>
-                </div>
-                {card.scopeModes.length > 0 && (
-                  <div className="mt-3 space-y-2" role="radiogroup" aria-label={`${card.label} OAuth scope mode`}>
-                    {card.scopeModes.map((mode) => {
-                      const selected = mode.id === selectedScopeModeId;
-                      return (
-                        <label
-                          key={mode.id}
-                          className={cn(
-                            "block cursor-pointer rounded-md border px-3 py-2 transition-colors",
-                            selected
-                              ? "border-cyan-600 bg-cyan-950/30"
-                              : "border-zinc-800 bg-zinc-950 hover:border-zinc-700",
-                          )}
-                        >
-                          <input
-                            type="radio"
-                            name={`oauth-scope-mode-${card.providerId}`}
-                            value={mode.id}
-                            checked={selected}
-                            onChange={() => setConnectionScopeModes((current) => ({ ...current, [card.providerId]: mode.id }))}
-                            className="sr-only"
-                          />
-                          <span className="flex flex-wrap items-center gap-2">
-                            <span className="text-xs font-medium text-zinc-100">{mode.label}</span>
-                            {mode.restricted && (
-                              <span className="rounded-full border border-amber-500/40 bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-200">
-                                Restricted scope
-                              </span>
-                            )}
-                          </span>
-                          <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{mode.description}</span>
-                          {mode.restricted && mode.warning && (
-                            <span className="mt-2 block rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-5 text-amber-100/80">
-                              {mode.warning}
-                            </span>
-                          )}
-                        </label>
-                      );
-                    })}
-                  </div>
-                )}
-                {selectedScopes.length > 0 && (
-                  <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
-                    Selected scopes: {selectedScopes.join(", ")}
-                  </div>
-                )}
-                {(card.credentialRef || card.capabilities.length > 0 || card.approvalRequiredCapabilities.length > 0 || card.rejectedCapabilities.length > 0 || card.expiresAt) && (
-                  <div className="mt-3 space-y-1 rounded-md border border-zinc-800 bg-zinc-950 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
-                    {card.credentialRef && <div>Credential ref: {card.credentialRef}</div>}
-                    {card.capabilities.length > 0 && <div>Capabilities: {card.capabilities.join(", ")}</div>}
-                    {card.approvalRequiredCapabilities.length > 0 && <div className="text-amber-200/80">Approval required: {card.approvalRequiredCapabilities.join(", ")}</div>}
-                    {card.rejectedCapabilities.length > 0 && <div>Not granted: {card.rejectedCapabilities.join(", ")}</div>}
-                    {card.expiresAt && <div>Expires at: {card.expiresAt}</div>}
-                  </div>
-                )}
-                {card.credential && (
-                  <div className="mt-3 space-y-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-xs font-medium text-zinc-200">Codex access token</span>
-                      <span className={cn(
-                        "rounded-full border px-2 py-0.5 text-[10px]",
-                        card.credential.configured
-                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                          : "border-amber-500/30 bg-amber-500/10 text-amber-200",
-                      )}>
-                        {card.credential.configured ? "Saved" : "Missing"}
-                      </span>
-                    </div>
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      value={connectionCredentialDrafts[card.providerId] ?? ""}
-                      onChange={(event) => setConnectionCredentialDrafts((current) => ({
-                        ...current,
-                        [card.providerId]: event.target.value,
-                      }))}
-                      placeholder={card.credential.placeholder}
-                      className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                    />
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        disabled={connectionBusy === `${card.providerId}:save_credential`}
-                        onClick={() => void saveConnectionCredential(card)}
-                        className="rounded-lg border border-cyan-700 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-100 transition-colors hover:border-cyan-500 hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
-                      >
-                        {connectionBusy === `${card.providerId}:save_credential` ? "Saving..." : card.credential.saveLabel}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!card.credential.canClear || connectionBusy === `${card.providerId}:clear_credential`}
-                        onClick={() => void clearConnectionCredential(card)}
-                        className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
-                      >
-                        {connectionBusy === `${card.providerId}:clear_credential` ? "Clearing..." : card.credential.clearLabel}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {!card.credential && (
-                  <div className="mt-3 grid gap-2 rounded-md border border-zinc-800 bg-zinc-950 px-3 py-3">
-                    <textarea
-                      value={connectionCredentialDrafts[card.providerId] ?? ""}
-                      onChange={(event) => setConnectionCredentialDrafts((current) => ({
-                        ...current,
-                        [card.providerId]: event.target.value,
-                      }))}
-                      placeholder="Paste OAuth client JSON, credential JSON, or .env token lines"
-                      className="min-h-20 w-full rounded-md border border-zinc-800 bg-black px-3 py-2 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                    />
-                    <div>
-                      <button
-                        type="button"
-                        disabled={connectionBusy === `${card.providerId}:save_json` || !String(connectionCredentialDrafts[card.providerId] ?? "").trim()}
-                        onClick={() => void saveAccountConnectionJson(card)}
-                        className="rounded-lg border border-zinc-100 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-950 transition-colors disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
-                      >
-                        {connectionBusy === `${card.providerId}:save_json` ? "Saving..." : "Import credential JSON"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {card.disabledReason && (
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <p className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
-                      {card.officialAppDescription}
-                    </p>
-                    <p className="rounded-md border border-zinc-800 bg-zinc-900/40 px-2.5 py-2 text-[11px] leading-5 text-zinc-500">
-                      {card.selfHostDescription}
-                    </p>
-                  </div>
-                )}
-                {!card.credential && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      disabled={!card.canConnect || isBusy}
-                      onClick={() => void startAccountConnection(card, selectedScopeOption)}
-                      title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`}
-                      className={cn(
-                        "rounded-lg border px-3 py-1.5 text-xs transition-colors",
-                        !card.canConnect || isBusy
-                          ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600"
-                          : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35",
-                      )}
-                    >
-                      {isBusy ? "Opening..." : card.primaryLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => openSection(card.configureSectionId)}
-                      className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-                    >
-                      {card.configureLabel}
-                    </button>
-                  </div>
-                )}
-                {message && (
-                  <p className={cn("mt-3 text-[11px]", message.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
-                    {message.text}
+        <div className="space-y-4">
+          <div className="overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70">
+            <div className="bg-gradient-to-r from-cyan-500/15 via-violet-500/10 to-amber-500/15 px-4 py-4 sm:px-5">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="max-w-2xl">
+                  <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-cyan-200/80">Accounts & Connections</div>
+                  <h3 className="mt-2 text-base font-semibold text-zinc-50">接続は “ログイン・credential・権限” を分けて管理</h3>
+                  <p className="mt-2 text-xs leading-5 text-zinc-400">
+                    OAuth tokenやAPI tokenはSecretsStoreへ保存し、Settingsにはcredential_ref・scopes・capabilitiesだけを表示します。requested_capabilitiesがRumi側の実行範囲を絞ります。
                   </p>
-                )}
+                </div>
+                <div className="grid min-w-[220px] grid-cols-3 gap-2 text-center text-[11px]">
+                  <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-emerald-200">
+                    <div className="text-base font-semibold">{connectedCount}</div>
+                    <div className="text-[10px] text-emerald-200/70">connected</div>
+                  </div>
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-amber-100">
+                    <div className="text-base font-semibold">{approvalCount}</div>
+                    <div className="text-[10px] text-amber-100/70">approval</div>
+                  </div>
+                  <div className="rounded-xl border border-zinc-700 bg-zinc-900/70 px-3 py-2 text-zinc-300">
+                    <div className="text-base font-semibold">{blockedCount}</div>
+                    <div className="text-[10px] text-zinc-500">needs setup</div>
+                  </div>
+                </div>
               </div>
-            );
-          })}
-          <div className="rounded-lg border border-sky-500/20 bg-sky-500/10 p-4 lg:col-span-2">
+            </div>
+            <div className="grid gap-3 border-t border-zinc-800 px-4 py-3 text-[11px] text-zinc-500 sm:grid-cols-3 sm:px-5">
+              <div><span className="text-zinc-300">1. Connect</span> — browser OAuth or credential bundle JSON.</div>
+              <div><span className="text-zinc-300">2. Store</span> — raw secrets stay in Rumi secret storage.</div>
+              <div><span className="text-zinc-300">3. Govern</span> — high-risk capabilities require approval.</div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            {accountConnectionCards.map((card) => {
+              const isBusy = connectionBusy === `${card.providerId}:start`;
+              const jsonBusy = connectionBusy === `${card.providerId}:save_json`;
+              const message = connectionMessages[card.providerId];
+              const selectedScopeOption = selectedConnectionScopeMode(card);
+              const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
+              const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;
+              const hasPermissionSummary = selectedScopes.length > 0 || card.credentialRef || card.capabilities.length > 0 || card.approvalRequiredCapabilities.length > 0 || card.rejectedCapabilities.length > 0 || card.expiresAt;
+              return (
+                <article key={card.providerId} className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
+                  <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass(card.providerId))} />
+                  <div className="p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex min-w-0 gap-3">
+                        <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-sm font-semibold text-black", providerAccentClass(card.providerId))}>
+                          {card.label.slice(0, 2).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h4 className="text-sm font-semibold text-zinc-50">{card.label}</h4>
+                            <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", statusBadgeClass(card.status, card.connected, card.canConnect))}>
+                              {card.statusLabel}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs leading-5 text-zinc-500">{card.description}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                      <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Identity</div>
+                        <div className="mt-1 text-xs text-zinc-200">{card.connected ? "Connected" : card.canConnect ? "Ready" : "Needs setup"}</div>
+                      </div>
+                      <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Credential</div>
+                        <div className="mt-1 break-all text-xs text-zinc-200">{card.credentialRef ? compactCredentialRef(card.credentialRef) : card.credential?.configured ? "Stored" : "Not stored"}</div>
+                      </div>
+                      <div className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2">
+                        <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Permission</div>
+                        <div className="mt-1 text-xs text-zinc-200">{card.approvalRequiredCapabilities.length ? "Approval needed" : card.capabilities.length ? "Granted" : "Limited"}</div>
+                      </div>
+                    </div>
+
+                    {card.scopeModes.length > 0 && (
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3" role="radiogroup" aria-label={`${card.label} OAuth scope mode`}>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-zinc-200">Choose permission mode</div>
+                          <div className="text-[10px] text-zinc-600">before browser connect</div>
+                        </div>
+                        <div className="grid gap-2">
+                          {card.scopeModes.map((mode) => {
+                            const selected = mode.id === selectedScopeModeId;
+                            return (
+                              <label
+                                key={mode.id}
+                                className={cn(
+                                  "block cursor-pointer rounded-lg border px-3 py-2 transition-colors",
+                                  selected
+                                    ? "border-cyan-500/60 bg-cyan-500/10"
+                                    : "border-zinc-800 bg-zinc-950 hover:border-zinc-700",
+                                )}
+                              >
+                                <input
+                                  type="radio"
+                                  name={`oauth-scope-mode-${card.providerId}`}
+                                  value={mode.id}
+                                  checked={selected}
+                                  onChange={() => setConnectionScopeModes((current) => ({ ...current, [card.providerId]: mode.id }))}
+                                  className="sr-only"
+                                />
+                                <span className="flex flex-wrap items-center gap-2">
+                                  <span className="text-xs font-medium text-zinc-100">{mode.label}</span>
+                                  {mode.restricted && <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("approval"))}>Restricted</span>}
+                                </span>
+                                <span className="mt-1 block text-[11px] leading-5 text-zinc-500">{mode.description}</span>
+                                {mode.restricted && mode.warning && (
+                                  <span className="mt-2 block rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-5 text-amber-100/80">{mode.warning}</span>
+                                )}
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {hasPermissionSummary && (
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-zinc-950/80 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-zinc-200">Resolved permission state</div>
+                          {card.expiresAt && <div className="text-[10px] text-zinc-600">expires {card.expiresAt}</div>}
+                        </div>
+                        {card.credentialRef && <div className="mt-2 text-[11px] text-zinc-500">Credential ref: <span className="font-mono text-zinc-300">{compactCredentialRef(card.credentialRef)}</span></div>}
+                        <div className="mt-3 space-y-2">
+                          {selectedScopes.length > 0 && (
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">Selected scopes</div>
+                              <div className="flex flex-wrap gap-1.5">{selectedScopes.map((scope) => <span key={scope} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("scope"))}>{scope}</span>)}</div>
+                            </div>
+                          )}
+                          {card.capabilities.length > 0 && (
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-zinc-600">Enabled capabilities</div>
+                              <div className="flex flex-wrap gap-1.5">{card.capabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("enabled"))}>{capability}</span>)}</div>
+                            </div>
+                          )}
+                          {card.approvalRequiredCapabilities.length > 0 && (
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-amber-300/70">Needs approval</div>
+                              <div className="flex flex-wrap gap-1.5">{card.approvalRequiredCapabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("approval"))}>{capability}</span>)}</div>
+                            </div>
+                          )}
+                          {card.rejectedCapabilities.length > 0 && (
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-[0.14em] text-rose-300/70">Not granted</div>
+                              <div className="flex flex-wrap gap-1.5">{card.rejectedCapabilities.map((capability) => <span key={capability} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("rejected"))}>{capability}</span>)}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {card.credential ? (
+                      <div className="mt-4 rounded-xl border border-violet-500/20 bg-violet-500/10 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-medium text-violet-100">Codex access token</div>
+                            <p className="mt-1 text-[11px] leading-5 text-violet-100/65">This is not a Platform API key or App Server auth. It is stored as a local credential.</p>
+                          </div>
+                          <span className={cn("rounded-full border px-2 py-0.5 text-[10px]", card.credential.configured ? capabilityToneClass("enabled") : capabilityToneClass("approval"))}>{card.credential.configured ? "Saved" : "Missing"}</span>
+                        </div>
+                        <input
+                          type="password"
+                          autoComplete="off"
+                          value={connectionCredentialDrafts[card.providerId] ?? ""}
+                          onChange={(event) => setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }))}
+                          placeholder={card.credential.placeholder}
+                          className="mt-3 h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-violet-500"
+                        />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button type="button" disabled={connectionBusy === `${card.providerId}:save_credential`} onClick={() => void saveConnectionCredential(card)} className="rounded-lg border border-violet-500/50 bg-violet-500/15 px-3 py-1.5 text-xs text-violet-100 transition-colors hover:border-violet-400 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
+                            {connectionBusy === `${card.providerId}:save_credential` ? "Saving..." : card.credential.saveLabel}
+                          </button>
+                          <button type="button" disabled={!card.credential.canClear || connectionBusy === `${card.providerId}:clear_credential`} onClick={() => void clearConnectionCredential(card)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700">
+                            {connectionBusy === `${card.providerId}:clear_credential` ? "Clearing..." : card.credential.clearLabel}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-medium text-zinc-200">Credential bundle / client config</div>
+                            <p className="mt-1 text-[11px] leading-5 text-zinc-500">{connectionDraftHelp(card.providerId)}</p>
+                          </div>
+                          <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Secrets never echo</span>
+                        </div>
+                        <textarea
+                          value={connectionCredentialDrafts[card.providerId] ?? ""}
+                          onChange={(event) => setConnectionCredentialDrafts((current) => ({ ...current, [card.providerId]: event.target.value }))}
+                          placeholder={importPlaceholderForProvider(card.providerId)}
+                          spellCheck={false}
+                          className="mt-3 min-h-28 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-[11px] leading-5 text-zinc-100 outline-none placeholder:text-zinc-700 focus:border-cyan-600"
+                        />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button type="button" disabled={jsonBusy || !String(connectionCredentialDrafts[card.providerId] ?? "").trim()} onClick={() => void saveAccountConnectionJson(card)} className="rounded-lg border border-zinc-100 bg-zinc-100 px-3 py-1.5 text-xs text-zinc-950 transition-colors hover:bg-white disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">
+                            {jsonBusy ? "Saving..." : "Import credential JSON / save client"}
+                          </button>
+                          <button type="button" disabled={!card.canConnect || isBusy} onClick={() => void startAccountConnection(card, selectedScopeOption)} title={card.disabledReason || `${card.primaryLabel}${selectedScopeOption ? ` using ${selectedScopeOption.label}` : ""}`} className={cn("rounded-lg border px-3 py-1.5 text-xs transition-colors", !card.canConnect || isBusy ? "cursor-not-allowed border-zinc-800 bg-zinc-900 text-zinc-600" : "border-cyan-700 bg-cyan-950/30 text-cyan-100 hover:border-cyan-500 hover:bg-cyan-900/35")}>
+                            {isBusy ? "Opening..." : card.primaryLabel}
+                          </button>
+                          <button type="button" onClick={() => openSection(card.configureSectionId)} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200">
+                            {card.configureLabel}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {card.disabledReason && !card.connected && !card.credential?.configured && (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[11px] leading-5 text-zinc-500">{card.officialAppDescription}</p>
+                        <p className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2 text-[11px] leading-5 text-zinc-500">{card.selfHostDescription}</p>
+                      </div>
+                    )}
+                    {message && (
+                      <p className={cn("mt-4 rounded-lg border px-3 py-2 text-[11px] leading-5", message.tone === "success" ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-rose-500/25 bg-rose-500/10 text-rose-200")}>{message.text}</p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <div className="rounded-2xl border border-sky-500/20 bg-sky-500/10 p-4">
             <div className="text-sm font-medium text-sky-100">OSS / official app mode</div>
             <p className="mt-1 text-xs leading-5 text-sky-100/75">
-              No official client secret is bundled. Use the official hosted broker, or configure your own OAuth client with PKCE/server credentials.
+              Official secrets are not bundled. Hosted broker flows can live in the official app; self-hosted installs can import a credential bundle or configure their own OAuth client.
             </p>
           </div>
         </div>
@@ -3633,196 +3768,118 @@ export function SettingsModalRenderer({
     }
     if (section.id === "tools_mcp") {
       const appServerMessage = connectionMessages.codex_app_server;
-      const appServerTransportOptions: Array<{ value: NonNullable<CodexAppServerConfig["transport"]>; label: string }> = [
-        { value: "off", label: "Off" },
-        { value: "stdio", label: "stdio" },
-        { value: "unix", label: "Unix socket" },
-        { value: "websocket_loopback", label: "WebSocket loopback" },
-        { value: "websocket_remote", label: "WebSocket remote" },
+      const appServerTransportOptions: Array<{ value: NonNullable<CodexAppServerConfig["transport"]>; label: string; detail: string }> = [
+        { value: "off", label: "Off", detail: "Disable Codex App Server integration." },
+        { value: "stdio", label: "stdio", detail: "Local process transport. Best default for trusted desktop use." },
+        { value: "unix", label: "Unix socket", detail: "Local socket transport with file-system boundaries." },
+        { value: "websocket_loopback", label: "WebSocket loopback", detail: "Only localhost / 127.0.0.1 / ::1 endpoints." },
+        { value: "websocket_remote", label: "WebSocket remote", detail: "Requires separate App Server auth before use." },
       ];
-      const appServerToggleFields: Array<["enabled" | "toolSourceEnabled" | "automationEndpointEnabled", string]> = [
-        ["enabled", "Enabled"],
-        ["toolSourceEnabled", "Tool source"],
-        ["automationEndpointEnabled", "Automation endpoint"],
+      const appServerToggleFields: Array<["enabled" | "toolSourceEnabled" | "automationEndpointEnabled", string, string]> = [
+        ["enabled", "Enabled", "Allow Rumi to use this App Server configuration."],
+        ["toolSourceEnabled", "Tool source", "Expose threads, turns, approvals, and events as tool capabilities."],
+        ["automationEndpointEnabled", "Automation endpoint", "Show readiness in Computer & Automation."],
       ];
+      const appServerBlocked = Boolean(codexAppServerPrelude.blockedReason);
       return (
-        <div className="grid gap-3 lg:grid-cols-2">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-zinc-100">MCP and tool policy are split from account login</div>
-                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  MCP servers define tools and required connections. Accounts & Connections owns the actual login and credential state.
-                </p>
+        <div className="space-y-4">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-zinc-800 bg-zinc-950/70 p-4">
+                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500">Tools & MCP</div>
+                <h3 className="mt-2 text-sm font-semibold text-zinc-50">Tools are not logins</h3>
+                <p className="mt-2 text-xs leading-5 text-zinc-500">MCP servers and tool sources define callable actions. Account login, OAuth tokens, and access tokens remain in Accounts & Connections.</p>
+                <div className="mt-4 grid gap-2 text-[11px]">
+                  <div className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2"><span className="text-zinc-300">Credential</span> → Accounts & Connections</div>
+                  <div className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2"><span className="text-zinc-300">Tool source</span> → Tools & MCP</div>
+                  <div className="rounded-lg border border-zinc-800 bg-black/20 px-3 py-2"><span className="text-zinc-300">Readiness</span> → Computer & Automation</div>
+                </div>
               </div>
-              <span className="rounded-full border border-zinc-800 px-2.5 py-1 text-[10px] text-zinc-400">
-                {section.fields.length} controls
-              </span>
+              <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium text-amber-100"><AlertTriangle className="h-4 w-4" /> Safety rules</div>
+                <ul className="mt-3 space-y-2 text-[11px] leading-5 text-amber-100/75">
+                  <li>Remote WebSocket requires a separate App Server token or shared secret.</li>
+                  <li>Codex access token is never reused as App Server auth.</li>
+                  <li>URL query strings are rejected so secrets cannot leak into CLI args or logs.</li>
+                </ul>
+              </div>
             </div>
-          </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-sm font-medium text-zinc-100">Codex App Server</div>
-                <p className="mt-1 text-xs leading-5 text-zinc-500">
-                  Tool source: {codexAppServerPrelude.toolSourceStatus}; automation endpoint: {codexAppServerPrelude.automationEndpointStatus}
-                </p>
-                {codexAppServerPrelude.accountLabel && (
-                  <p className="mt-1 max-w-full break-all text-xs leading-5 text-emerald-300/90">
-                    Connected Codex provider via {codexAppServerPrelude.accountAuthMethodLabel || "account"}: {codexAppServerPrelude.accountLabel}
-                    {codexAppServerPrelude.accountPlanType && (
-                      <span className="text-emerald-300/65"> ({codexAppServerPrelude.accountPlanType})</span>
+
+            <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
+              <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass("codex"))} />
+              <div className="p-4 sm:p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div>
+                    <div className="text-sm font-semibold text-zinc-50">Codex App Server</div>
+                    <p className="mt-1 text-xs leading-5 text-zinc-500">Use Codex as a local/rich agent integration for threads, turns, streamed events, and approvals.</p>
+                    {codexAppServerPrelude.accountLabel && (
+                      <p className="mt-2 max-w-full break-all text-xs leading-5 text-emerald-300/90">
+                        Connected Codex provider via {codexAppServerPrelude.accountAuthMethodLabel || "account"}: {codexAppServerPrelude.accountLabel}
+                        {codexAppServerPrelude.accountPlanType && <span className="text-emerald-300/65"> ({codexAppServerPrelude.accountPlanType})</span>}
+                      </p>
                     )}
-                  </p>
-                )}
-              </div>
-              <span className={cn(
-                "rounded-full border px-2 py-0.5 text-[10px] font-medium",
-                codexAppServerPrelude.blockedReason
-                  ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
-                  : codexAppServerPrelude.configured
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400",
-              )}>
-                {codexAppServerPrelude.statusLabel}
-              </span>
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2">
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>Transport</span>
-                <select
-                  value={codexAppServerDraft.transport ?? "off"}
-                  onChange={(event) => {
-                    const transport = event.target.value as NonNullable<CodexAppServerConfig["transport"]>;
-                    setCodexAppServerDraft((current) => ({
-                      ...current,
-                      transport,
-                      enabled: transport === "off" ? false : current.enabled,
-                    }));
-                  }}
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none focus:border-cyan-700"
-                >
-                  {appServerTransportOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                  </div>
+                  <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-medium", statusBadgeClass(codexAppServerPrelude.status, codexAppServerPrelude.configured, !appServerBlocked))}>{codexAppServerPrelude.statusLabel}</span>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Transport</div>
+                    <div className="grid gap-2">
+                      {appServerTransportOptions.map((option) => {
+                        const selected = codexAppServerDraft.transport === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setCodexAppServerDraft((current) => ({ ...current, transport: option.value, enabled: option.value === "off" ? false : current.enabled }))}
+                            className={cn("rounded-lg border px-3 py-2 text-left transition-colors", selected ? "border-cyan-500/60 bg-cyan-500/10" : "border-zinc-800 bg-black/20 hover:border-zinc-700")}
+                          >
+                            <div className="text-xs font-medium text-zinc-100">{option.label}</div>
+                            <div className="mt-0.5 text-[11px] leading-4 text-zinc-500">{option.detail}</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-zinc-800 bg-black/20 p-3">
+                    <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">Current state</div>
+                    <div className="mt-3 grid gap-2 text-[11px]">
+                      <div className="flex justify-between gap-2"><span className="text-zinc-500">Transport</span><span className="text-zinc-200">{codexAppServerPrelude.transport}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-zinc-500">Network</span><span className="text-zinc-200">{codexAppServerPrelude.loopback ? "Loopback" : "Remote"}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-zinc-500">Auth</span><span className={codexAppServerPrelude.authRequired && !codexAppServerPrelude.authConfigured ? "text-amber-200" : "text-zinc-200"}>{codexAppServerPrelude.authConfigured ? `${codexAppServerPrelude.authKind || "auth"} via ${codexAppServerPrelude.authSource}` : codexAppServerPrelude.authRequired ? "Required" : "Not required"}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-zinc-500">Tool source</span><span className="text-zinc-200">{codexAppServerPrelude.toolSourceStatus}</span></div>
+                      <div className="flex justify-between gap-2"><span className="text-zinc-500">Automation</span><span className="text-zinc-200">{codexAppServerPrelude.automationEndpointStatus}</span></div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <label className="space-y-1 text-[11px] text-zinc-500"><span>Unix socket path</span><input value={codexAppServerDraft.unixSocketPath ?? ""} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, unixSocketPath: event.target.value }))} placeholder="/tmp/rumi-codex.sock" className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700" /></label>
+                  <label className="space-y-1 text-[11px] text-zinc-500"><span>Base URL</span><input value={codexAppServerDraft.baseUrl ?? ""} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, baseUrl: event.target.value }))} placeholder="http://127.0.0.1:7331" className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700" /></label>
+                  <label className="space-y-1 text-[11px] text-zinc-500"><span>WebSocket URL</span><input value={codexAppServerDraft.websocketUrl ?? ""} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, websocketUrl: event.target.value }))} placeholder="ws://127.0.0.1:7331/ws" className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700" /></label>
+                  <label className="space-y-1 text-[11px] text-zinc-500"><span>WS token file</span><input value={codexAppServerDraft.wsTokenFile ?? ""} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, wsTokenFile: event.target.value }))} placeholder="~/.config/rumi/codex-app-server.token" className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700" /></label>
+                  <label className="space-y-1 text-[11px] text-zinc-500 sm:col-span-2"><span>Shared secret file</span><input value={codexAppServerDraft.sharedSecretFile ?? ""} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, sharedSecretFile: event.target.value }))} placeholder="~/.config/rumi/codex-app-server.secret" className="h-10 w-full rounded-lg border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700" /></label>
+                </div>
+
+                <div className="mt-4 grid gap-2 sm:grid-cols-3">
+                  {appServerToggleFields.map(([key, label, detail]) => (
+                    <label key={key} className="rounded-xl border border-zinc-800 bg-black/20 px-3 py-2 text-xs text-zinc-300">
+                      <span className="flex items-center gap-2"><input type="checkbox" checked={codexAppServerDraft[key]} onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, [key]: event.target.checked }))} className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 text-cyan-500" />{label}</span>
+                      <span className="mt-1 block text-[10px] leading-4 text-zinc-600">{detail}</span>
+                    </label>
                   ))}
-                </select>
-              </label>
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>Unix socket path</span>
-                <input
-                  value={codexAppServerDraft.unixSocketPath ?? ""}
-                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, unixSocketPath: event.target.value }))}
-                  placeholder="/tmp/rumi-codex.sock"
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                />
-              </label>
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>Base URL</span>
-                <input
-                  value={codexAppServerDraft.baseUrl ?? ""}
-                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, baseUrl: event.target.value }))}
-                  placeholder="http://127.0.0.1:7331"
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                />
-              </label>
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>WebSocket URL</span>
-                <input
-                  value={codexAppServerDraft.websocketUrl ?? ""}
-                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, websocketUrl: event.target.value }))}
-                  placeholder="ws://127.0.0.1:7331/ws"
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                />
-              </label>
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>WS token file</span>
-                <input
-                  value={codexAppServerDraft.wsTokenFile ?? ""}
-                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, wsTokenFile: event.target.value }))}
-                  placeholder="~/.config/rumi/codex-app-server.token"
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                />
-              </label>
-              <label className="space-y-1 text-[11px] text-zinc-500">
-                <span>Shared secret file</span>
-                <input
-                  value={codexAppServerDraft.sharedSecretFile ?? ""}
-                  onChange={(event) => setCodexAppServerDraft((current) => ({ ...current, sharedSecretFile: event.target.value }))}
-                  placeholder="~/.config/rumi/codex-app-server.secret"
-                  className="h-9 w-full rounded-md border border-zinc-800 bg-black px-3 text-xs text-zinc-100 outline-none placeholder:text-zinc-600 focus:border-cyan-700"
-                />
-              </label>
+                </div>
+
+                {codexAppServerPrelude.blockedReason && <p className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100/80">{codexAppServerPrelude.blockedReason}</p>}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button type="button" disabled={connectionBusy === "codex_app_server:save"} onClick={() => void saveCodexAppServer()} className="rounded-lg border border-cyan-700 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-100 transition-colors hover:border-cyan-500 hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600">{connectionBusy === "codex_app_server:save" ? "Saving..." : "Save config"}</button>
+                  <button type="button" disabled={connectionBusy === "codex_app_server:probe"} onClick={() => void probeCodexAppServer()} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700">{connectionBusy === "codex_app_server:probe" ? "Probing..." : "Probe"}</button>
+                  <button type="button" disabled={connectionBusy === "codex_app_server:clear"} onClick={() => void clearCodexAppServer()} className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700">{connectionBusy === "codex_app_server:clear" ? "Clearing..." : "Clear"}</button>
+                </div>
+                {appServerMessage && <p className={cn("mt-4 rounded-lg border px-3 py-2 text-[11px] leading-5", appServerMessage.tone === "success" ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-200" : "border-rose-500/25 bg-rose-500/10 text-rose-200")}>{appServerMessage.text}</p>}
+              </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-3">
-              {appServerToggleFields.map(([key, label]) => (
-                <label key={key} className="inline-flex items-center gap-2 text-xs text-zinc-300">
-                  <input
-                    type="checkbox"
-                    checked={codexAppServerDraft[key]}
-                    onChange={(event) => setCodexAppServerDraft((current) => ({
-                      ...current,
-                      [key]: event.target.checked,
-                    }))}
-                    className="h-3.5 w-3.5 rounded border-zinc-700 bg-zinc-950 text-cyan-500"
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            {codexAppServerPrelude.blockedReason && (
-              <p className="mt-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-5 text-amber-100/80">
-                {codexAppServerPrelude.blockedReason}
-              </p>
-            )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={connectionBusy === "codex_app_server:save"}
-                onClick={() => void saveCodexAppServer()}
-                className="rounded-lg border border-cyan-700 bg-cyan-950/30 px-3 py-1.5 text-xs text-cyan-100 transition-colors hover:border-cyan-500 hover:bg-cyan-900/35 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
-              >
-                {connectionBusy === "codex_app_server:save" ? "Saving..." : "Save config"}
-              </button>
-              <button
-                type="button"
-                disabled={connectionBusy === "codex_app_server:probe"}
-                onClick={() => void probeCodexAppServer()}
-                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
-              >
-                {connectionBusy === "codex_app_server:probe" ? "Probing..." : "Probe"}
-              </button>
-              <button
-                type="button"
-                disabled={connectionBusy === "codex_app_server:clear"}
-                onClick={() => void clearCodexAppServer()}
-                className="rounded-lg border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition-colors hover:border-zinc-600 hover:text-zinc-200 disabled:cursor-not-allowed disabled:text-zinc-700"
-              >
-                {connectionBusy === "codex_app_server:clear" ? "Clearing..." : "Clear"}
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-[10px] text-zinc-500">
-              <span className="rounded-full border border-zinc-800 px-2 py-0.5">
-                {codexAppServerPrelude.transport}
-              </span>
-              <span className="rounded-full border border-zinc-800 px-2 py-0.5">
-                {codexAppServerPrelude.loopback ? "Loopback" : "Remote"}
-              </span>
-              {codexAppServerPrelude.authRequired && (
-                <span className="rounded-full border border-amber-500/30 px-2 py-0.5 text-amber-200">
-                  Auth {codexAppServerPrelude.authConfigured ? "ready" : "needed"}
-                </span>
-              )}
-              {codexAppServerPrelude.authConfigured && (
-                <span className="rounded-full border border-zinc-800 px-2 py-0.5">
-                  {codexAppServerPrelude.authKind || "auth"} via {codexAppServerPrelude.authSource}
-                </span>
-              )}
-            </div>
-            {appServerMessage && (
-              <p className={cn("mt-3 text-[11px]", appServerMessage.tone === "success" ? "text-emerald-400" : "text-rose-300")}>
-                {appServerMessage.text}
-              </p>
-            )}
           </div>
         </div>
       );

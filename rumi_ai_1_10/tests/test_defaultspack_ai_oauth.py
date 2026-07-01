@@ -272,13 +272,16 @@ class TestDefaultspackAiOauth(unittest.TestCase):
             status["capabilities"],
             [
                 "cloudflare.account.read",
-                "cloudflare.pages.deployment.write",
-                "cloudflare.pages.project.write",
-                "cloudflare.runner.deploy",
             ],
         )
-        self.assertEqual(status["approval_required_capabilities"], [])
-        self.assertEqual(status["rejected_capabilities"], [])
+        self.assertEqual(
+            status["approval_required_capabilities"],
+            [
+                "cloudflare.pages.deployment.write",
+                "cloudflare.pages.project.write",
+            ],
+        )
+        self.assertEqual(status["rejected_capabilities"], ["cloudflare.runner.deploy"])
         self.assertNotIn("cloudflare-oauth-access", json.dumps(status, ensure_ascii=False))
 
     def test_cloudflare_oauth_finish_uses_cloudflare_token_and_userinfo_endpoints(self):
@@ -431,7 +434,7 @@ class TestDefaultspackAiOauth(unittest.TestCase):
         self.assertEqual(imported["approval_required_capabilities"], ["github.repo.write"])
         self.assertNotIn("github.repo.write", imported["rejected_capabilities"])
 
-    def test_connection_import_cloudflare_pages_scopes_grant_requested_pages_capabilities(self):
+    def test_connection_import_cloudflare_pages_write_requires_approval_without_runner_deploy(self):
         from domain.connections.store import import_connection_bundle
 
         raw_token = "cloudflare-pages-secret-token"
@@ -462,13 +465,16 @@ class TestDefaultspackAiOauth(unittest.TestCase):
             imported["capabilities"],
             [
                 "cloudflare.account.read",
-                "cloudflare.pages.deployment.write",
-                "cloudflare.pages.project.write",
-                "cloudflare.runner.deploy",
             ],
         )
-        self.assertEqual(imported["approval_required_capabilities"], [])
-        self.assertEqual(imported["rejected_capabilities"], [])
+        self.assertEqual(
+            imported["approval_required_capabilities"],
+            [
+                "cloudflare.pages.deployment.write",
+                "cloudflare.pages.project.write",
+            ],
+        )
+        self.assertEqual(imported["rejected_capabilities"], ["cloudflare.runner.deploy"])
         self.assertNotIn(raw_token, json.dumps(imported, ensure_ascii=False))
 
     def test_connection_provider_manifest_extensibility_with_dummy_provider(self):

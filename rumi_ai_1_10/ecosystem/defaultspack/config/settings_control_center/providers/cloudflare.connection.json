@@ -70,7 +70,7 @@
         "en": "Create, update, and delete Cloudflare Pages projects.",
         "ja": "Cloudflare Pages projectを作成・更新・削除します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.pages.deployment.read",
@@ -94,7 +94,7 @@
         "en": "Create and delete Cloudflare Pages deployments.",
         "ja": "Cloudflare Pages deploymentを作成・削除します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.worker.read",
@@ -118,7 +118,7 @@
         "en": "Create or update Cloudflare Worker resources.",
         "ja": "Cloudflare Workerリソースを作成・更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.r2.read",
@@ -142,7 +142,7 @@
         "en": "Create or update Cloudflare R2 resources.",
         "ja": "Cloudflare R2リソースを作成・更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.d1.read",
@@ -166,7 +166,7 @@
         "en": "Create or update Cloudflare D1 resources.",
         "ja": "Cloudflare D1リソースを作成・更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.queue.read",
@@ -190,7 +190,7 @@
         "en": "Create or update Cloudflare Queues resources.",
         "ja": "Cloudflare Queuesリソースを作成・更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.workflow.read",
@@ -214,7 +214,7 @@
         "en": "Create or update Cloudflare Workflows resources.",
         "ja": "Cloudflare Workflowsリソースを作成・更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     },
     {
       "id": "cloudflare.runner.deploy",
@@ -226,7 +226,7 @@
         "en": "Create/update runner resources for cloud continuation.",
         "ja": "クラウド継続用runnerリソースを作成/更新します。"
       },
-      "risk": "medium"
+      "risk": "high"
     }
   ],
   "scope_to_capability": [
@@ -248,8 +248,7 @@
         "cloudflare.pages.project.read",
         "cloudflare.pages.project.write",
         "cloudflare.pages.deployment.read",
-        "cloudflare.pages.deployment.write",
-        "cloudflare.runner.deploy"
+        "cloudflare.pages.deployment.write"
       ]
     },
     {
@@ -258,7 +257,7 @@
     },
     {
       "scopes": ["workers:write", "workers_scripts:edit"],
-      "capabilities": ["cloudflare.worker.read", "cloudflare.worker.write", "cloudflare.runner.deploy"]
+      "capabilities": ["cloudflare.worker.read", "cloudflare.worker.write"]
     },
     {
       "scopes": ["d1:read"],
@@ -266,7 +265,7 @@
     },
     {
       "scopes": ["d1:write"],
-      "capabilities": ["cloudflare.d1.read", "cloudflare.d1.write", "cloudflare.runner.deploy"]
+      "capabilities": ["cloudflare.d1.read", "cloudflare.d1.write"]
     },
     {
       "scopes": ["r2:read"],
@@ -274,7 +273,7 @@
     },
     {
       "scopes": ["r2:write"],
-      "capabilities": ["cloudflare.r2.read", "cloudflare.r2.write", "cloudflare.runner.deploy"]
+      "capabilities": ["cloudflare.r2.read", "cloudflare.r2.write"]
     },
     {
       "scopes": ["queues:read"],
@@ -282,7 +281,7 @@
     },
     {
       "scopes": ["queues:write"],
-      "capabilities": ["cloudflare.queue.read", "cloudflare.queue.write", "cloudflare.runner.deploy"]
+      "capabilities": ["cloudflare.queue.read", "cloudflare.queue.write"]
     },
     {
       "scopes": ["workflows:read"],
@@ -290,7 +289,7 @@
     },
     {
       "scopes": ["workflows:write"],
-      "capabilities": ["cloudflare.workflow.read", "cloudflare.workflow.write", "cloudflare.runner.deploy"]
+      "capabilities": ["cloudflare.workflow.read", "cloudflare.workflow.write"]
     },
     {
       "scopes": [
@@ -302,6 +301,7 @@
         "queues:write",
         "workflows:write"
       ],
+      "match": "all",
       "capabilities": ["cloudflare.runner.deploy"]
     }
   ],
