@@ -527,7 +527,7 @@ def _remove_module_binding(module_name: str) -> None:
         return
     parent_name, attr_name = module_name.rsplit(".", 1)
     parent = sys.modules.get(parent_name)
-    if parent is not None and getattr(parent, attr_name, None) is not None:
+    if parent is not None and attr_name in vars(parent):
         try:
             delattr(parent, attr_name)
         except AttributeError:
@@ -536,6 +536,9 @@ def _remove_module_binding(module_name: str) -> None:
 
 def _clear_collection_module_mocks() -> None:
     for module_name in (
+        "backend_core.ecosystem.active_ecosystem",
+        "backend_core.ecosystem.mounts",
+        "backend_core.ecosystem.registry",
         "rumi_ai_1_10.core_runtime.paths",
         "rumi_ai_1_10.core_runtime.logging_utils",
         "rumi_ai_1_10.core_runtime.profiling",
@@ -600,6 +603,7 @@ def pytest_collectreport(report):
 _install_capability_handler_registry_shim()
 _REAL_DI_CONTAINER_MODULE = importlib.import_module("core_runtime.di_container")
 _REAL_GET_CONTAINER = _REAL_DI_CONTAINER_MODULE.get_container
+_restore_collection_aliases()
 
 # ---------------------------------------------------------------------------
 # 共通 fixture
