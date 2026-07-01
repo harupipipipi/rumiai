@@ -965,8 +965,10 @@ def _obsolete_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
         if isinstance(scheduled_user, dict):
             previous_message = _scheduled_chat_message_text(scheduled_user)
             if previous_message and current_message and previous_message != current_message:
-                reason = "execution_input_message_changed"
-                message_id = str(scheduled_user.get("id") or "").strip()
+                _started_at, started_dt = _running_execution_started_at(sched)
+                if started_dt is None:
+                    reason = "execution_input_message_changed"
+                    message_id = str(scheduled_user.get("id") or "").strip()
 
     if not reason:
         return None

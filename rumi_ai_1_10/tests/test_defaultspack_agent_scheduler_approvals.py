@@ -1164,7 +1164,7 @@ def test_task_update_obsoletes_active_running_execution_and_allows_retry(tmp_pat
         _reset_scheduler_singleton()
 
 
-def test_legacy_running_execution_obsoletes_when_chat_user_message_differs_from_task(tmp_path, monkeypatch):
+def test_legacy_running_execution_message_mismatch_stays_active_before_timeout(tmp_path, monkeypatch):
     _setup_approval_store(tmp_path, monkeypatch)
     _reset_scheduler_singleton()
 
@@ -1250,23 +1250,128 @@ def test_legacy_running_execution_obsoletes_when_chat_user_message_differs_from_
 
     scheduler = scheduler_module.Scheduler()
     try:
+        active = scheduler.get_schedule(schedule_id)
+
+        assert active["running_execution"]["execution_id"] == active_execution_id
+        assert active["execution_count"] == 0
+        entries, total = load_history(schedule_id)
+        assert total == 0
+
+        saved = load_schedule(schedule_id)
+        assert saved["running_execution"]["execution_id"] == active_execution_id
+        stored = store.get_conversation(conversation_id)
+        assert len(stored["messages"]) == 1
+        assert stored["messages"][0]["id"] == scheduled_user["id"]
+    finally:
+        scheduler.delete_schedule(schedule_id)
+        _reset_scheduler_singleton()
+        ChatStore._instance = None
+
+
+def test_legacy_running_execution_message_mismatch_recovers_after_timeout(tmp_path, monkeypatch):
+    _setup_approval_store(tmp_path, monkeypatch)
+    _reset_scheduler_singleton()
+
+    class FakeTimer:
+        def __init__(self, delay, callback, args=None):
+            self.delay = delay
+            self.callback = callback
+            self.args = args or []
+            self.started = False
+            self.cancelled = False
+
+        def start(self):
+            self.started = True
+
+        def cancel(self):
+            self.cancelled = True
+
+        def is_alive(self):
+            return self.started and not self.cancelled
+
+    from domain.agent import scheduler as scheduler_module
+    from domain.agent.schedule_store import load_history, load_schedule, save_schedule
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setattr(scheduler_module.threading, "Timer", FakeTimer)
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="google/gemma-4-31b-it",
+        metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+    )
+    conversation_id = conversation["id"]
+    schedule_id = "sched-legacy-stale-chat"
+    stale_execution_id = "sexec-legacy-stale-chat"
+    scheduled_user = store.add_message(
+        conversation_id,
+        {
+            "role": "user",
+            "content": "Run QA against http://127.0.0.1:18766/chat",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": schedule_id,
+                "schedule_execution_id": stale_execution_id,
+                "trigger": "scheduled",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    save_schedule(
+        {
+            "id": schedule_id,
+            "name": "Legacy stale bare chat QA",
+            "description": "",
+            "type": "interval",
+            "task": {
+                "message": "Run QA against http://127.0.0.1:18766/chat?chat=" + conversation_id,
+                "model": "google/gemma-4-31b-it",
+                "conversation_id": conversation_id,
+                "timeout": 1800,
+                "profile_id": "defaultspack.mimo_coding_company",
+                "agent_id": "browser_qa",
+                "metadata": {"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
+            },
+            "config": {"value": 30, "unit": "minutes"},
+            "status": "active",
+            "execution_count": 0,
+            "last_executed_at": None,
+            "next_execution_at": "2099-01-01T00:00:00Z",
+            "created_at": "2026-06-30T00:00:00Z",
+            "updated_at": "2026-06-30T00:00:00Z",
+            "running_execution": {
+                "execution_id": stale_execution_id,
+                "schedule_id": schedule_id,
+                "started_at": "2000-01-01T00:00:00Z",
+                "trigger": "scheduled",
+                "timeout_seconds": 1800,
+            },
+            "running_started_at": "2000-01-01T00:00:00Z",
+        }
+    )
+
+    scheduler = scheduler_module.Scheduler()
+    try:
         recovered = scheduler.get_schedule(schedule_id)
 
         assert "running_execution" not in recovered
         assert recovered["execution_count"] == 1
         entries, total = load_history(schedule_id)
         assert total == 1
-        assert entries[0]["execution_id"] == active_execution_id
-        assert entries[0]["status"] == "obsolete"
-        assert entries[0]["obsolete_reason"] == "execution_input_message_changed"
-        assert entries[0]["scheduled_user_message_id"] == scheduled_user["id"]
-        assert entries[0]["error"] is None
+        assert entries[0]["execution_id"] == stale_execution_id
+        assert entries[0]["status"] == "error"
+        assert entries[0]["timeout_seconds"] == 1800
+        assert entries[0]["recovered_stale_running_execution"] is True
+        assert "recovered_obsolete_running_execution" not in entries[0]
 
         saved = load_schedule(schedule_id)
         assert "running_execution" not in saved
         stored = store.get_conversation(conversation_id)
-        assert len(stored["messages"]) == 1
+        assert len(stored["messages"]) == 2
         assert stored["messages"][0]["id"] == scheduled_user["id"]
+        assert stored["messages"][1]["finish_reason"] == "error"
+        assert stored["messages"][1]["metadata"]["schedule_execution_id"] == stale_execution_id
     finally:
         scheduler.delete_schedule(schedule_id)
         _reset_scheduler_singleton()
