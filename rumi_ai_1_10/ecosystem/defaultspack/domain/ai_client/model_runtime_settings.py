@@ -441,7 +441,12 @@ class ModelRuntimeSettingsService:
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
         return sanitized
 
-    def refresh_models_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+    def refresh_models_settings(
+        self,
+        values: dict[str, Any],
+        *,
+        resolve_runtime_model_packs: bool = True,
+    ) -> dict[str, Any]:
         models = self._deep_merge(self.default_model_settings(), values if isinstance(values, dict) else {})
         models["google_api_key"] = ""
         models["google_api_key_configured"] = provider_has_api_key("google", pack_root=self._pack_root)
@@ -490,10 +495,17 @@ class ModelRuntimeSettingsService:
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
-        models["model_packs"] = self._ensure_rumi_model_packs(normalize_model_packs(
+        normalized_model_packs = normalize_model_packs(
             models.get("model_packs"),
             composite_models=models.get("composite_models"),
-        ), settings=models)
+        )
+        if resolve_runtime_model_packs:
+            models["model_packs"] = self._ensure_rumi_model_packs(
+                normalized_model_packs,
+                settings=models,
+            )
+        else:
+            models["model_packs"] = normalized_model_packs
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))

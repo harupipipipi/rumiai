@@ -78,7 +78,7 @@ class ChatStore:
             cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
             cls._instance._loaded_storage_signature = cls._instance._storage_signature()
-            if cls._instance._conversations:
+            if cls._instance._conversation_file_migration_needed():
                 try:
                     cls._instance._save_conversation_files()
                 except OSError:
@@ -87,7 +87,7 @@ class ChatStore:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
             cls._instance._loaded_storage_signature = cls._instance._storage_signature()
-            if cls._instance._conversations:
+            if cls._instance._conversation_file_migration_needed():
                 try:
                     cls._instance._save_conversation_files()
                 except OSError:
@@ -135,6 +135,17 @@ class ChatStore:
                 self._sanitize_inline_thought_messages(conversation)
                 loaded[str(conversation_id)] = conversation
             return loaded
+
+    def _conversation_file_migration_needed(self):
+        if not self._conversations:
+            return False
+        conversations_dir = self._storage_path.parent / "conversations"
+        if not conversations_dir.is_dir():
+            return True
+        for conversation_id in self._conversations:
+            if not (conversations_dir / str(conversation_id) / "history.json").is_file():
+                return True
+        return False
 
     def _load_conversation_file(self, conversation_id):
         conversation_id = str(conversation_id or "").strip()

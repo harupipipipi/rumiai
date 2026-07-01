@@ -114,6 +114,8 @@ _OAUTH_RUNTIME_PROVIDER_IDS = {"cloudflare", "google"}
 _PENDING_STATE_TTL_SECONDS = 600
 _ACCESS_TOKEN_SKEW_SECONDS = 60
 _pending_states: dict[str, dict[str, Any]] = {}
+_connection_registry_cache: dict[str, Any] = {}
+_connection_provider_ids_cache: dict[str, set[str]] = {}
 
 
 def _pack_root() -> Path:
@@ -130,10 +132,15 @@ def _connection_manifest_root(pack_root: Path | None = None) -> Path:
 def _connection_registry(pack_root: Path | None = None):
     from core_runtime.connections.registry import ConnectionsRegistry
 
-    registry = ConnectionsRegistry()
     root = _connection_manifest_root(pack_root)
+    cache_key = str(root)
+    cached = _connection_registry_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    registry = ConnectionsRegistry()
     if root.exists():
         registry.load_manifest_dir(root)
+    _connection_registry_cache[cache_key] = registry
     return registry
 
 
@@ -149,6 +156,10 @@ def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
 
 def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
     root = _connection_manifest_root(pack_root)
+    cache_key = str(root)
+    cached = _connection_provider_ids_cache.get(cache_key)
+    if cached is not None:
+        return set(cached)
     ids: set[str] = set()
     if not root.exists():
         return ids
@@ -160,6 +171,7 @@ def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
         provider_id = str(payload.get("provider_id") or "").strip()
         if provider_id:
             ids.add(provider_id)
+    _connection_provider_ids_cache[cache_key] = set(ids)
     return ids
 
 

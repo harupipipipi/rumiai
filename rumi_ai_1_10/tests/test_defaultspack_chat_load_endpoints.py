@@ -231,12 +231,20 @@ def test_http_safe_get_chat_ui_routes_use_block_fallback(monkeypatch):
         {"_actual_method": "GET", "conversation_id": "c1"},
         {},
     )
+    settings = server._invoke_fallback_block(
+        "blocks.ui.settings",
+        {"_actual_method": "GET"},
+        {},
+    )
 
     assert detail["status"] == "ok"
     assert preview["status"] == "ok"
+    assert settings["status"] == "ok"
     assert [call[0] for call in calls] == [
         "blocks.chat.get_conversation",
         "blocks.ui.conversation_preview",
+        "blocks.ui.settings",
     ]
     assert calls[0][2]["_defaultspack_http_route_adapter"] is True
     assert calls[1][2]["_defaultspack_http_route_adapter"] is True
+    assert calls[2][2]["_defaultspack_http_route_adapter"] is True

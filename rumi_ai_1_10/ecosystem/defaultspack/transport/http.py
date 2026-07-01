@@ -81,9 +81,7 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
     "blocks.sandbox.api",
 }
 
-_DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
-    "blocks.ui.conversation_preview",
-}
+_DIRECT_SAFE_GET_FALLBACK_BLOCKS = set(_SAFE_GET_FALLBACK_BLOCKS)
 
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
