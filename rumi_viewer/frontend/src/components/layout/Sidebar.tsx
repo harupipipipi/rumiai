@@ -3,7 +3,7 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
-import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
+import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route, UserRoundCog } from 'lucide-react';
 
 type NavGroup = {
   id: 'workspace' | 'advanced';
@@ -25,6 +25,7 @@ export function Sidebar() {
       id: 'workspace',
       items: [
         { to: panelRoutes.home, icon: Home, label: t('nav.home') },
+        { to: panelRoutes.startup, icon: UserRoundCog, label: 'Profiles' },
         { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
         { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
         { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },

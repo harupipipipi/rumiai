@@ -3362,6 +3362,7 @@ dependencies = [
  "flate2",
  "hex",
  "hmac",
+ "indexmap 1.9.3",
  "log",
  "open",
  "rand 0.8.5",

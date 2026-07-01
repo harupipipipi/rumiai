@@ -3,12 +3,17 @@ import test from 'node:test';
 
 import type { ApiStartupCatalog, ApiStartupProfile } from './apiTypes';
 import {
+  buildAddStartupProfilePackPatch,
+  buildRemoveStartupProfilePackPatch,
+  buildSetStartupProfileBasePackPatch,
   buildStartupProfileView,
   compatibleNodesForPort,
   defaultBasePack,
   describeStartupActionError,
   describeStartupIssue,
   filterAndSortStartupProfiles,
+  startupPacksByRole,
+  startupPacksForRole,
 } from './startupProfiles';
 
 const catalog: ApiStartupCatalog = {
@@ -48,6 +53,17 @@ const catalog: ApiStartupCatalog = {
       ],
     },
     {
+      pack_id: 'graphpack',
+      name: 'Graph Pack',
+      description: 'Alternative startup graph',
+      pack_identity: 'rumi:ecosystem/graphpack',
+      available: true,
+      enabled: true,
+      approval_issues: [],
+      graphs: [{ graph_id: 'graphpack.startup', display_name: { en: 'Graph Startup' } }],
+      nodes: [],
+    },
+    {
       pack_id: 'coolpack',
       name: 'Cool Pack',
       description: 'Alternative AI',
@@ -70,6 +86,25 @@ const catalog: ApiStartupCatalog = {
           component_id: 'ai_client',
           component_type: 'ai_client',
           ports: [{ id: 'client', direction: 'output', standards: ['rumi.ai.client'] }],
+        },
+      ],
+    },
+    {
+      pack_id: 'bundlepack',
+      name: 'Bundle Pack',
+      description: 'Tool bundle without a tool component type',
+      pack_identity: 'rumi:ecosystem/bundlepack',
+      available: true,
+      enabled: true,
+      approval_issues: [],
+      graphs: [],
+      nodes: [
+        {
+          node_id: 'bundlepack.actions',
+          kind: 'component',
+          component_id: 'actions',
+          component_type: 'capability',
+          ports: [{ id: 'tools', direction: 'output', standards: ['rumi.tool.bundle'] }],
         },
       ],
     },
@@ -109,6 +144,25 @@ const catalog: ApiStartupCatalog = {
         },
       ],
     },
+    {
+      pack_id: 'surfacepack',
+      name: 'Surface Pack',
+      description: 'Alternative surface',
+      pack_identity: 'rumi:ecosystem/surfacepack',
+      available: true,
+      enabled: true,
+      approval_issues: [],
+      graphs: [],
+      nodes: [
+        {
+          node_id: 'surfacepack.surface',
+          kind: 'ecosystem.surface',
+          component_id: 'surface',
+          component_type: 'component',
+          ports: [{ id: 'surface', direction: 'output', standards: ['rumi.surface'] }],
+        },
+      ],
+    },
   ],
 };
 
@@ -144,6 +198,29 @@ function makeProfile(
     created_at: updatedAt,
     updated_at: updatedAt,
   };
+}
+
+function makeFrontendProfile(
+  profileId: string,
+  packs = ['defaultspack'],
+  overrides: Record<string, string> = {},
+): ApiStartupProfile {
+  const profile = makeProfile(profileId, 'Frontend Profile', 50, overrides, packs);
+  profile.graph_ports = [
+    {
+      port_key: 'frontend.surface',
+      node_id: 'frontend',
+      port_id: 'surface',
+      target_node_ref: 'defaultspack.frontend',
+      target_port: { id: 'surface', direction: 'input', standards: ['rumi.surface'] },
+      source_node_id: 'cli',
+      source_node_ref: 'defaultspack.cli_surface',
+      source_port_id: 'surface',
+      source_port: { id: 'surface', direction: 'output', standards: ['rumi.surface'] },
+      source_ref: 'cli.surface',
+    },
+  ];
+  return profile;
 }
 
 test('describeStartupIssue translates approval and filesystem failures', () => {
@@ -269,4 +346,61 @@ test('filterAndSortStartupProfiles prefers active and ready profiles for recomme
 
 test('defaultBasePack picks the first available pack with graphs', () => {
   assert.equal(defaultBasePack(catalog)?.pack_id, 'defaultspack');
+});
+
+test('startupPacksByRole groups available base, frontend, and tool packs', () => {
+  const options = startupPacksByRole(catalog);
+
+  assert.deepEqual(options.basePacks.map((pack) => pack.pack_id), ['defaultspack', 'graphpack']);
+  assert.deepEqual(options.frontendPacks.map((pack) => pack.pack_id), ['frontendpack', 'surfacepack']);
+  assert.deepEqual(options.toolPacks.map((pack) => pack.pack_id), ['defaultspack', 'bundlepack']);
+  assert.deepEqual(startupPacksForRole(catalog, 'frontend').map((pack) => pack.pack_id), ['frontendpack', 'surfacepack']);
+});
+
+test('buildAddStartupProfilePackPatch adds pack IDs once and selects compatible frontend override', () => {
+  const profile = makeFrontendProfile('frontend-add');
+  const patch = buildAddStartupProfilePackPatch(catalog, profile, 'frontendpack');
+
+  assert.deepEqual(patch.packs, ['defaultspack', 'frontendpack']);
+  assert.deepEqual(patch.node_overrides, { 'frontend.surface': 'frontendpack.web_surface' });
+
+  const duplicatePatch = buildAddStartupProfilePackPatch(
+    catalog,
+    { ...profile, packs: patch.packs ?? profile.packs, node_overrides: patch.node_overrides ?? {} },
+    'frontendpack',
+  );
+  assert.deepEqual(duplicatePatch.packs, ['defaultspack', 'frontendpack']);
+});
+
+test('buildRemoveStartupProfilePackPatch removes stale overrides and repairs frontend overrides', () => {
+  const profile = makeFrontendProfile(
+    'frontend-remove',
+    ['defaultspack', 'frontendpack', 'surfacepack', 'coolpack'],
+    {
+      'frontend.surface': 'frontendpack.web_surface',
+      'agent.ai': 'coolpack.ai_client',
+    },
+  );
+  profile.graph_ports.push(makeProfile('ai-port', 'AI Profile', 60).graph_ports[0]);
+
+  const withoutCoolPack = buildRemoveStartupProfilePackPatch(catalog, profile, 'coolpack');
+  assert.deepEqual(withoutCoolPack.packs, ['defaultspack', 'frontendpack', 'surfacepack']);
+  assert.deepEqual(withoutCoolPack.node_overrides, { 'frontend.surface': 'frontendpack.web_surface' });
+
+  const withoutFrontendPack = buildRemoveStartupProfilePackPatch(catalog, {
+    ...profile,
+    packs: withoutCoolPack.packs ?? profile.packs,
+    node_overrides: withoutCoolPack.node_overrides ?? {},
+  }, 'frontendpack');
+  assert.deepEqual(withoutFrontendPack.packs, ['defaultspack', 'surfacepack']);
+  assert.deepEqual(withoutFrontendPack.node_overrides, { 'frontend.surface': 'surfacepack.surface' });
+});
+
+test('buildSetStartupProfileBasePackPatch switches graph and keeps base pack selected', () => {
+  const profile = makeProfile('base-switch', 'Base Switch', 70, {}, ['defaultspack', 'coolpack']);
+  const patch = buildSetStartupProfileBasePackPatch(catalog, profile, 'graphpack');
+
+  assert.equal(patch.base_pack, 'graphpack');
+  assert.equal(patch.graph_id, 'graphpack.startup');
+  assert.deepEqual(patch.packs, ['graphpack', 'defaultspack', 'coolpack']);
 });

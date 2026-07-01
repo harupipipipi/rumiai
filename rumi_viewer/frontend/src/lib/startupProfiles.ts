@@ -42,6 +42,19 @@ export interface StartupProfileView {
   subtitle: string;
 }
 
+export type StartupPackRole = 'base' | 'frontend' | 'tool';
+
+export interface StartupPackRoleOptions {
+  basePacks: ApiStartupPack[];
+  frontendPacks: ApiStartupPack[];
+  toolPacks: ApiStartupPack[];
+}
+
+export type StartupProfilePatch = Partial<Pick<
+  ApiStartupProfile,
+  'base_pack' | 'graph_id' | 'packs' | 'node_overrides'
+>>;
+
 function sentenceCase(value: string): string {
   if (!value) return value;
   return value.charAt(0).toUpperCase() + value.slice(1);
@@ -68,6 +81,80 @@ function nodeOutputPorts(node: ApiStartupNodeDefinition): ApiStartupNodePort[] {
   return (node.ports ?? []).filter((port) => port.direction === 'output');
 }
 
+function nodeMetadataString(node: ApiStartupNodeDefinition, key: string): string {
+  const value = node.metadata?.[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function nodeComponentType(node: ApiStartupNodeDefinition): string {
+  return (node.component_type || nodeMetadataString(node, 'component_type')).toLowerCase();
+}
+
+function nodeKind(node: ApiStartupNodeDefinition): string {
+  return (node.kind || '').toLowerCase();
+}
+
+function nodeOutputStandards(node: ApiStartupNodeDefinition): string[] {
+  return nodeOutputPorts(node).flatMap((port) => portStandards(port));
+}
+
+function hasOutputStandard(node: ApiStartupNodeDefinition, predicate: (standard: string) => boolean): boolean {
+  return nodeOutputStandards(node).some((standard) => predicate(standard.toLowerCase()));
+}
+
+function isFrontendStandard(standard: string): boolean {
+  return standard === 'rumi.surface' || standard.startsWith('rumi.surface.') || standard === 'rumi.frontend';
+}
+
+function isToolBundleStandard(standard: string): boolean {
+  return standard === 'rumi.tool.bundle';
+}
+
+export function isStartupBasePack(pack: ApiStartupPack): boolean {
+  return pack.graphs.length > 0;
+}
+
+export function isStartupFrontendNode(node: ApiStartupNodeDefinition): boolean {
+  const componentType = nodeComponentType(node);
+  const kind = nodeKind(node);
+  return (
+    componentType === 'frontend' ||
+    componentType === 'surface' ||
+    kind.includes('surface') ||
+    hasOutputStandard(node, isFrontendStandard)
+  );
+}
+
+export function isStartupFrontendPack(pack: ApiStartupPack): boolean {
+  return pack.nodes.some(isStartupFrontendNode);
+}
+
+export function isStartupToolNode(node: ApiStartupNodeDefinition): boolean {
+  const componentType = nodeComponentType(node);
+  const kind = nodeKind(node);
+  return componentType === 'tool' || kind.includes('tool') || hasOutputStandard(node, isToolBundleStandard);
+}
+
+export function isStartupToolPack(pack: ApiStartupPack): boolean {
+  return pack.nodes.some(isStartupToolNode);
+}
+
+export function startupPacksByRole(catalog: ApiStartupCatalog | null): StartupPackRoleOptions {
+  const packs = catalog?.packs.filter((pack) => pack.available) ?? [];
+  return {
+    basePacks: packs.filter(isStartupBasePack),
+    frontendPacks: packs.filter(isStartupFrontendPack),
+    toolPacks: packs.filter(isStartupToolPack),
+  };
+}
+
+export function startupPacksForRole(catalog: ApiStartupCatalog | null, role: StartupPackRole): ApiStartupPack[] {
+  const options = startupPacksByRole(catalog);
+  if (role === 'base') return options.basePacks;
+  if (role === 'frontend') return options.frontendPacks;
+  return options.toolPacks;
+}
+
 export function isNodeCompatibleWithGraphPort(node: ApiStartupNodeDefinition, graphPort: ApiStartupGraphPort): boolean {
   const required = new Set(portStandards(graphPort.target_port));
   if (required.size === 0) return false;
@@ -92,6 +179,160 @@ export function compatibleNodesForPort(
       }
     });
   return [...compatibleById.values()].sort((left, right) => left.node_id.localeCompare(right.node_id));
+}
+
+function graphPortStandards(graphPort: ApiStartupGraphPort): string[] {
+  return portStandards(graphPort.target_port).map((standard) => standard.toLowerCase());
+}
+
+export function isStartupFrontendGraphPort(graphPort: ApiStartupGraphPort): boolean {
+  return (
+    graphPortStandards(graphPort).some(isFrontendStandard) ||
+    /(^|[._-])(frontend|surface)([._-]|$)/i.test(graphPort.port_key)
+  );
+}
+
+function uniquePackIds(packIds: string[]): string[] {
+  return [...new Set(packIds.filter(Boolean))];
+}
+
+function packContainsNode(pack: ApiStartupPack, nodeId: string): boolean {
+  return pack.nodes.some((node) => node.node_id === nodeId);
+}
+
+function selectedPackContainsNode(catalog: ApiStartupCatalog, profile: ApiStartupProfile, nodeId: string): boolean {
+  const selected = new Set(profile.packs);
+  return catalog.packs.some((pack) => selected.has(pack.pack_id) && pack.available && packContainsNode(pack, nodeId));
+}
+
+function compatibleFrontendNodesForPort(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  graphPort: ApiStartupGraphPort,
+): ApiStartupNodeDefinition[] {
+  return compatibleNodesForPort(catalog, profile, graphPort).filter(isStartupFrontendNode);
+}
+
+function compatibleFrontendNodeFromPack(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  graphPort: ApiStartupGraphPort,
+  packId: string,
+): ApiStartupNodeDefinition | null {
+  const pack = catalog.packs.find((item) => item.pack_id === packId && item.available);
+  if (!pack || !profile.packs.includes(packId)) return null;
+  return (
+    pack.nodes
+      .filter(isStartupFrontendNode)
+      .find((node) => isNodeCompatibleWithGraphPort(node, graphPort)) ?? null
+  );
+}
+
+function reconcileNodeOverridesForSelectedPacks(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  preferredFrontendPackId: string | null,
+): Record<string, string> {
+  const overrides = { ...profile.node_overrides };
+  const preferredFrontendPack = preferredFrontendPackId
+    ? catalog.packs.find((pack) => pack.pack_id === preferredFrontendPackId && isStartupFrontendPack(pack))
+    : null;
+
+  profile.graph_ports.forEach((graphPort) => {
+    const portKey = graphPort.port_key;
+    const currentOverride = overrides[portKey];
+    const compatibleNodes = compatibleNodesForPort(catalog, profile, graphPort);
+    const currentIsCompatible =
+      Boolean(currentOverride) &&
+      selectedPackContainsNode(catalog, profile, currentOverride) &&
+      compatibleNodes.some((node) => node.node_id === currentOverride);
+
+    if (!currentIsCompatible && currentOverride) {
+      delete overrides[portKey];
+    }
+
+    if (!isStartupFrontendGraphPort(graphPort)) {
+      return;
+    }
+
+    const preferredNode = preferredFrontendPack
+      ? compatibleFrontendNodeFromPack(catalog, profile, graphPort, preferredFrontendPack.pack_id)
+      : null;
+    if (preferredNode) {
+      overrides[portKey] = preferredNode.node_id;
+      return;
+    }
+
+    if (currentOverride && !currentIsCompatible) {
+      const fallbackNode = compatibleFrontendNodesForPort(catalog, profile, graphPort)[0];
+      if (fallbackNode) {
+        overrides[portKey] = fallbackNode.node_id;
+      }
+    }
+  });
+
+  return overrides;
+}
+
+export function buildStartupProfilePackSelectionPatch(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  selectedPackIds: string[],
+  options: { preferredFrontendPackId?: string | null } = {},
+): StartupProfilePatch {
+  const packs = uniquePackIds([profile.base_pack, ...selectedPackIds]);
+  const nextProfile = { ...profile, packs };
+  return {
+    packs,
+    node_overrides: reconcileNodeOverridesForSelectedPacks(
+      catalog,
+      nextProfile,
+      options.preferredFrontendPackId ?? null,
+    ),
+  };
+}
+
+export function buildAddStartupProfilePackPatch(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  packId: string,
+): StartupProfilePatch {
+  const pack = catalog.packs.find((item) => item.pack_id === packId);
+  return buildStartupProfilePackSelectionPatch(catalog, profile, [...profile.packs, packId], {
+    preferredFrontendPackId: pack && isStartupFrontendPack(pack) ? packId : null,
+  });
+}
+
+export function buildRemoveStartupProfilePackPatch(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  packId: string,
+): StartupProfilePatch {
+  if (packId === profile.base_pack) {
+    return buildStartupProfilePackSelectionPatch(catalog, profile, profile.packs);
+  }
+  return buildStartupProfilePackSelectionPatch(
+    catalog,
+    profile,
+    profile.packs.filter((selectedPackId) => selectedPackId !== packId),
+  );
+}
+
+export function buildSetStartupProfileBasePackPatch(
+  catalog: ApiStartupCatalog,
+  profile: ApiStartupProfile,
+  basePackId: string,
+): StartupProfilePatch {
+  const basePack = catalog.packs.find((pack) => pack.pack_id === basePackId);
+  const graphId = basePack?.graphs[0]?.graph_id ?? profile.graph_id;
+  const packs = uniquePackIds([basePackId, ...profile.packs]);
+  const nextProfile = { ...profile, base_pack: basePackId, graph_id: graphId, packs };
+  return {
+    base_pack: basePackId,
+    graph_id: graphId,
+    packs,
+    node_overrides: reconcileNodeOverridesForSelectedPacks(catalog, nextProfile, null),
+  };
 }
 
 function describeApprovalIssue(issue: string): string | null {

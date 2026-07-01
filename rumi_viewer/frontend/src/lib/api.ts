@@ -123,12 +123,18 @@ async function exchangePanelBootstrapCode(code: string): Promise<void> {
 }
 
 function getTauriInvoke(): TauriInvoke | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
   const maybeWindow = window as TauriWindow;
   const invoke = maybeWindow.__TAURI__?.core?.invoke;
   return typeof invoke === 'function' ? invoke : null;
 }
 
 function isLikelyTauriShell(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
   const maybeWindow = window as TauriWindow;
   return Boolean(maybeWindow.__TAURI__ || maybeWindow.__TAURI_INTERNALS__);
 }
@@ -427,7 +433,19 @@ export function fetchStartupProfiles(): Promise<StartupProfilesResponseData> {
 }
 
 export function createStartupProfile(
-  data: { name?: string; base_pack: string; graph_id?: string; packs?: string[]; node_overrides?: Record<string, string> },
+  data: {
+    name?: string;
+    base_pack: string;
+    graph_id?: string;
+    packs?: string[];
+    node_overrides?: Record<string, string>;
+    default_graph?: string | null;
+    capability_profile_id?: string | null;
+    launch_capability_graph?: boolean;
+    policy?: Record<string, unknown>;
+    permissions?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  },
 ): Promise<StartupProfileMutationResponseData> {
   return apiFetch<StartupProfileMutationResponseData>('/api/panel/startup/profiles', {
     method: 'POST',

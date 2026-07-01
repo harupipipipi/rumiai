@@ -344,11 +344,12 @@ def _apply_startup_runtime_selection(
             continue
         current_tools = agent_config.get("tools")
         if isinstance(current_tools, list) and current_tools:
-            agent_config["tools"] = [
+            retained_tools = [
                 str(item).strip()
                 for item in current_tools
                 if str(item or "").strip() in selected_tools
             ]
+            agent_config["tools"] = retained_tools or list(tools)
         else:
             agent_config["tools"] = list(tools)
         agents[agent_key] = agent_config
