@@ -6,8 +6,8 @@
     "ja": "Cloudflare"
   },
   "description": {
-    "en": "Continue Rumi tasks in your Cloudflare account when this computer is offline.",
-    "ja": "PCがオフラインでもCloudflareアカウントでRumiの作業を継続します。"
+    "en": "Run cloud-capable sandbox work in your Cloudflare account and bridge PC-bound tools through a named Tunnel.",
+    "ja": "Cloudflareアカウントで実行できるsandbox作業を動かし、PC依存toolはnamed Tunnel経由でPCに委譲します。"
   },
   "icon": "cloudflare",
   "service_kind": "cloud",
