@@ -1,7 +1,7 @@
 {
-  "function_id": "open_movie_surface",
-  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
-  "tags": ["surface", "movie"],
+  "function_id": "movie_trim_clip",
+  "description": "Trim a movie timeline clip by updating in/out points or duration.",
+  "tags": ["surface", "movie", "timeline", "trim"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

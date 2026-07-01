@@ -1344,7 +1344,7 @@ export function ChatMessagesRenderer({
 
               return (
               <div key={message.id} className={cn("rumi-message-row group/message flex min-w-0 gap-3 select-text", message.role === "user" ? "flex-row-reverse lg:pr-6 xl:pr-8 2xl:pr-10" : "lg:pl-8 xl:pl-12 2xl:pl-16")}>
-                <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
+                <div className={cn("flex min-w-0 flex-col pt-1", message.role === "user" ? "rumi-user-message-stack max-w-[82%] items-end lg:max-w-[70%] 2xl:max-w-[64%]" : "flex-1 items-start")}>
                   {message.role === "agent" && (
                     <div className="mb-1.5 flex max-w-full min-w-0 flex-nowrap items-center gap-2 overflow-hidden">
                       <span className="shrink-0 text-xs font-semibold tracking-wide text-zinc-300">Assistant</span>

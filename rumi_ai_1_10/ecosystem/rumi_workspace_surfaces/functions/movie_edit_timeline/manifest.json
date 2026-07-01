@@ -1,7 +1,7 @@
 {
-  "function_id": "open_movie_surface",
-  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
-  "tags": ["surface", "movie"],
+  "function_id": "movie_edit_timeline",
+  "description": "Reorder or replace the editable movie timeline clips.",
+  "tags": ["surface", "movie", "timeline"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

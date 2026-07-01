@@ -2720,7 +2720,10 @@ function ChatApp() {
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
   const isActivityPreviewVisible = showRegion("activity_preview") && Boolean(activeSidecarSurface || effectiveShowPreview) && !isCanvasWorkspace && !isDesktopsWorkspace;
-  const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
+  const isWorkspaceSidecarSurface = Boolean(activeSidecarSurface && ["write", "image", "slide", "movie"].includes(activeSidecarSurface.kind));
+  const activityPreviewMaxWidth = isWorkspaceSidecarSurface ? 540 : 720;
+  const activityPreviewDefaultWidth = isWorkspaceSidecarSurface ? 520 : 340;
+  const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, activityPreviewMaxWidth, activityPreviewDefaultWidth);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
 
@@ -2731,7 +2734,7 @@ function ChatApp() {
       const startX = event.clientX;
       const startWidth = activityPreviewWidthPx;
       const handlePointerMove = (moveEvent: PointerEvent) => {
-        const nextWidth = clampNumber(startWidth + (startX - moveEvent.clientX), 220, 720, startWidth);
+        const nextWidth = clampNumber(startWidth + (startX - moveEvent.clientX), 220, activityPreviewMaxWidth, startWidth);
         setActivityPreviewWidth(nextWidth);
       };
       const handlePointerUp = () => {
@@ -2745,7 +2748,7 @@ function ChatApp() {
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", handlePointerUp, { once: true });
     },
-    [activityPreviewWidthPx, setActivityPreviewWidth],
+    [activityPreviewMaxWidth, activityPreviewWidthPx, setActivityPreviewWidth],
   );
 
   useEffect(() => {
@@ -3958,8 +3961,8 @@ function ChatApp() {
         case "surface.open":
           if (effect.surface && typeof effect.surface.id === "string" && typeof effect.surface.kind === "string") {
             setActiveSidecarSurface(effect.surface);
-            if (effect.surface.kind === "write" || effect.surface.kind === "slide" || effect.surface.kind === "movie") {
-              setActivityPreviewWidth((current) => Math.max(current, 620));
+            if (effect.surface.kind === "write" || effect.surface.kind === "image" || effect.surface.kind === "slide" || effect.surface.kind === "movie") {
+              setActivityPreviewWidth((current) => Math.min(540, Math.max(current, 520)));
             }
             if (effect.surface.kind === "tool_timeline" || effect.surface.kind === "canvas") {
               setShowPreview(true);
@@ -5606,7 +5609,7 @@ function ChatApp() {
     const title = surface.title || surface.kind.replace(/[_-]+/g, " ");
     const payload = surface.payload && typeof surface.payload === "object" ? surface.payload : {};
     const draft = surfaceDrafts[surface.id] ?? String(payload.initial_text ?? payload.text ?? "");
-    const isWorkspaceSurface = surface.kind === "write" || surface.kind === "slide" || surface.kind === "movie";
+    const isWorkspaceSurface = surface.kind === "write" || surface.kind === "image" || surface.kind === "slide" || surface.kind === "movie";
     const setDraft = (value: string) => {
       setSurfaceDrafts((current) => ({ ...current, [surface.id]: value }));
     };

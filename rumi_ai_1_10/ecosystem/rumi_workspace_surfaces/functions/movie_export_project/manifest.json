@@ -1,7 +1,7 @@
 {
-  "function_id": "open_movie_surface",
-  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
-  "tags": ["surface", "movie"],
+  "function_id": "movie_export_project",
+  "description": "Export movie project JSON, captions, and timeline EDL data.",
+  "tags": ["surface", "movie", "export"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

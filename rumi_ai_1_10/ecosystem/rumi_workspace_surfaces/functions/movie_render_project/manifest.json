@@ -1,7 +1,7 @@
 {
-  "function_id": "open_movie_surface",
-  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
-  "tags": ["surface", "movie"],
+  "function_id": "movie_render_project",
+  "description": "Prepare a local movie render plan and report ffmpeg availability.",
+  "tags": ["surface", "movie", "render"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],

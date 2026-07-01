@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkspaceSurfacePanel } from "./WorkspaceSurfacePanel";
 import type { SurfaceDescriptor } from "../../lib/api";
 
-function renderSurface(kind: "write" | "slide" | "movie", draft: string): string {
+function renderSurface(kind: "write" | "image" | "slide" | "movie", draft: string): string {
   const surface: SurfaceDescriptor = {
     id: `${kind}:test`,
     kind,
@@ -44,7 +44,17 @@ test("slide surface renders a deck editor shape", () => {
   assert.match(html, /Quarterly review/);
 });
 
-test("movie surface renders a video editor timeline", () => {
+test("image surface renders a dedicated image editor instead of generic draft", () => {
+  const html = renderSurface("image", "Product photo on a clean desk");
+
+  assert.match(html, /data-surface-kind="image"/);
+  assert.match(html, /Image prompt/);
+  assert.match(html, /Variants/);
+  assert.match(html, /Generate/);
+  assert.doesNotMatch(html, /Start writing/);
+});
+
+test("movie surface renders an editable video project timeline", () => {
   const html = renderSurface("movie", "# Launch movie\n\nTrim intro and add captions");
 
   assert.match(html, /data-surface-kind="movie"/);
@@ -53,4 +63,9 @@ test("movie surface renders a video editor timeline", () => {
   assert.match(html, /Video/);
   assert.match(html, /Audio/);
   assert.match(html, /Captions/);
+  assert.match(html, /Import/);
+  assert.match(html, /Save/);
+  assert.match(html, /Export/);
+  assert.match(html, /Render/);
+  assert.match(html, /Selected clip duration/);
 });

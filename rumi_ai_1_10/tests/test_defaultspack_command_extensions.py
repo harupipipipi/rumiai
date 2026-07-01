@@ -7,9 +7,22 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
+WORKSPACE_SURFACES_ROOT = ROOT / "ecosystem" / "rumi_workspace_surfaces"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+sys.path.insert(0, str(WORKSPACE_SURFACES_ROOT))
+
+MOVIE_OPERATION_FUNCTIONS = {
+    "movie_import_media",
+    "movie_edit_timeline",
+    "movie_trim_clip",
+    "movie_split_clip",
+    "movie_update_captions",
+    "movie_save_project",
+    "movie_export_project",
+    "movie_render_project",
+}
 
 
 def test_workspace_surface_commands_load_from_sibling_pack():
@@ -71,3 +84,94 @@ def test_workspace_surface_command_executes_as_owning_pack_and_returns_effects()
     assert args["conversation_id"] == "conv-1"
     assert invoke_function.call_args.kwargs["principal_id"] == "rumi_workspace_surfaces"
     assert Path(invoke_function.call_args.kwargs["function_pack_root"]).name == "rumi_workspace_surfaces"
+
+
+class _RegistryContainer:
+    def __init__(self, registry):
+        self.registry = registry
+
+    def get_or_none(self, name):
+        if name == "function_registry":
+            return self.registry
+        return None
+
+
+def test_workspace_surface_pack_registers_movie_operation_functions():
+    from core_runtime.function_registry import FunctionRegistry
+    from domain.function_runtime.bridge import ensure_pack_functions_registered
+
+    registry = FunctionRegistry()
+    registered = ensure_pack_functions_registered(
+        "rumi_workspace_surfaces",
+        WORKSPACE_SURFACES_ROOT,
+        _RegistryContainer(registry),
+    )
+
+    assert registered >= len(MOVIE_OPERATION_FUNCTIONS)
+    for function_id in MOVIE_OPERATION_FUNCTIONS:
+        entry = registry.get(f"rumi_workspace_surfaces:{function_id}")
+        assert entry is not None
+        assert entry.calling_convention == "subprocess"
+        assert entry.host_execution is False
+
+
+def test_movie_surface_payload_and_operations_are_editable():
+    from surface_helpers import (
+        MOVIE_OPERATIONS,
+        movie_export_project,
+        movie_import_media,
+        movie_render_project,
+        movie_save_project,
+        movie_split_clip,
+        movie_trim_clip,
+        movie_update_captions,
+        open_surface,
+    )
+
+    opened = open_surface("movie", {"text": "Product intro", "conversation_id": "conv-1"}, {})
+    surface = opened["data"]["surface"]
+    project = surface["payload"]["movie_project"]
+
+    assert set(MOVIE_OPERATION_FUNCTIONS).issubset(set(MOVIE_OPERATIONS))
+    assert surface["payload"]["operations"] == MOVIE_OPERATIONS
+    assert project["timeline"]["tracks"] == ["video", "audio", "captions"]
+    assert project["clips"]
+
+    imported = movie_import_media(
+        {
+            "project": project,
+            "media": {"name": "B-roll demo", "kind": "video", "duration": 2.5},
+        },
+        {},
+    )
+    project = imported["data"]["project"]
+    assert project["assets"][-1]["name"] == "B-roll demo"
+
+    trimmed = movie_trim_clip(
+        {"project": project, "clip_id": project["clips"][0]["id"], "duration": 2.0},
+        {},
+    )
+    project = trimmed["data"]["project"]
+    assert project["clips"][0]["duration"] == 2.0
+
+    split = movie_split_clip(
+        {"project": project, "clip_id": project["clips"][0]["id"], "split_at": 1.0},
+        {},
+    )
+    project = split["data"]["project"]
+    assert len(project["clips"]) >= 5
+    assert project["clips"][1]["id"].endswith("-split")
+
+    captioned = movie_update_captions(
+        {"project": project, "text": "A precise caption", "start": 0.5, "duration": 1.5},
+        {},
+    )
+    project = captioned["data"]["project"]
+    assert project["captions"][-1]["text"] == "A precise caption"
+
+    saved = movie_save_project({"project": project}, {})
+    assert saved["data"]["project_json"]
+    exported = movie_export_project({"project": saved["data"]["project"]}, {})
+    assert "timeline_edl" in exported["data"]["export"]
+    rendered = movie_render_project({"project": saved["data"]["project"]}, {})
+    assert rendered["data"]["render"]["status"] in {"ready", "disabled"}

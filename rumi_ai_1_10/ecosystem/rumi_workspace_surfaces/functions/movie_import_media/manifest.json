@@ -1,7 +1,7 @@
 {
-  "function_id": "open_movie_surface",
-  "description": "Open the editable movie sidecar surface with timeline, media, caption, save, export, and render operation descriptors.",
-  "tags": ["surface", "movie"],
+  "function_id": "movie_import_media",
+  "description": "Import media into a local movie project and append it to the editable timeline.",
+  "tags": ["surface", "movie", "media", "timeline"],
   "risk": "low",
   "requires": [],
   "caller_requires": [],
