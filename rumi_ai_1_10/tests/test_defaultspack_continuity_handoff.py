@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import multiprocessing
+import json
 import os
+import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -13,26 +13,50 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+def _ensure_test_import_paths() -> None:
+    for path in (str(ROOT), str(DEFAULTSPACK_ROOT)):
+        if path not in sys.path:
+            sys.path.insert(0, path)
 
 
-def _json_store_increment_worker(path: str, barrier, queue) -> None:
-    from ecosystem.defaultspack.backend.continuity.store import JsonFileStore
+_ensure_test_import_paths()
 
-    store = JsonFileStore(path)
-    try:
-        barrier.wait(timeout=10)
 
-        def _increment(data):
-            current = int(data.get("value") or 0)
-            time.sleep(0.1)
-            data["value"] = current + 1
-            return data, data["value"]
+JSON_STORE_INCREMENT_SCRIPT = r"""
+import json
+import sys
+import time
+from pathlib import Path
 
-        queue.put(("ok", store.update(_increment)))
-    except BaseException as exc:  # pragma: no cover - surfaced through parent process assertion
-        queue.put(("error", repr(exc)))
+repo_root = sys.argv[1]
+defaultspack_root = sys.argv[2]
+path = Path(sys.argv[3])
+start_path = Path(sys.argv[4])
+out_path = Path(sys.argv[5])
+
+sys.path.insert(0, repo_root)
+sys.path.insert(0, defaultspack_root)
+
+from ecosystem.defaultspack.backend.continuity.store import JsonFileStore
+
+deadline = time.time() + 10
+while not start_path.exists():
+    if time.time() > deadline:
+        raise TimeoutError("start signal not received")
+    time.sleep(0.01)
+
+store = JsonFileStore(path)
+
+def _increment(data):
+    current = int(data.get("value") or 0)
+    time.sleep(0.1)
+    data["value"] = current + 1
+    return data, data["value"]
+
+result = store.update(_increment)
+out_path.write_text(json.dumps(["ok", result]), encoding="utf-8")
+"""
 
 
 @pytest.fixture()
@@ -191,26 +215,43 @@ def test_checkpoint_manifest_rejects_secret_looking_state(continuity_env):
 def test_json_file_store_update_is_cross_process_atomic(continuity_env):
     from ecosystem.defaultspack.backend.continuity.store import JsonFileStore
 
+    _ensure_test_import_paths()
     path = Path(os.environ["RUMI_DEFAULTSPACK_CONTINUITY_DIR"]) / "race.json"
+    start_path = path.with_suffix(".start")
+    result_paths = [path.with_suffix(f".worker-{index}.json") for index in range(2)]
     JsonFileStore(path).write({"value": 0})
-    ctx = multiprocessing.get_context("spawn")
-    barrier = ctx.Barrier(2)
-    queue = ctx.Queue()
     processes = [
-        ctx.Process(target=_json_store_increment_worker, args=(str(path), barrier, queue))
-        for _ in range(2)
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                JSON_STORE_INCREMENT_SCRIPT,
+                str(ROOT),
+                str(DEFAULTSPACK_ROOT),
+                str(path),
+                str(start_path),
+                str(result_path),
+            ],
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for result_path in result_paths
     ]
+    start_path.parent.mkdir(parents=True, exist_ok=True)
+    start_path.write_text("go", encoding="utf-8")
+    completed = []
     for process in processes:
-        process.start()
-    for process in processes:
-        process.join(timeout=15)
-    for process in processes:
-        if process.is_alive():
-            process.terminate()
-            process.join(timeout=5)
-    results = [queue.get(timeout=5) for _ in processes]
+        try:
+            stdout, stderr = process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate(timeout=5)
+        completed.append((process.returncode, stdout, stderr))
 
-    assert all(process.exitcode == 0 for process in processes)
+    assert all(returncode == 0 for returncode, _stdout, _stderr in completed), completed
+    results = [json.loads(result_path.read_text(encoding="utf-8")) for result_path in result_paths]
     assert all(status == "ok" for status, _ in results)
     assert JsonFileStore(path).read()["value"] == 2
 

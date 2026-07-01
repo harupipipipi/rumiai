@@ -3369,6 +3369,36 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.tool.task.board.agent.session
+  defaults.goal.refresh:
+    owner: goal
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.goal.refresh
+  defaults.goal.start:
+    owner: goal
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.goal.start
+  defaults.local_hook.create:
+    owner: local_hook
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.local_hook.create
+  defaults.local_hook.delete:
+    owner: local_hook
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.local_hook.delete
+  defaults.local_hook.list:
+    owner: local_hook
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.local_hook.list
+  defaults.local_hook.test:
+    owner: local_hook
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.local_hook.test
 canonical_prefix: defaultspack.
 compat_prefixes:
 - defaults.
