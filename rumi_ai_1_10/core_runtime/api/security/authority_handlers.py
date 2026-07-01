@@ -69,6 +69,7 @@ class AuthorityHandlersMixin:
                 graph_id=graph_id,
                 request_id=body.get("request_id"),
                 approval_token=body.get("approval_token"),
+                consume_approval_token=bool(body.get("consume_approval_token") is True),
             )
             return decision.to_dict()
         except Exception as exc:
@@ -122,7 +123,11 @@ class AuthorityHandlersMixin:
 
     def _authority_delete_grant(self, principal_id: str, permission_id: str) -> dict:
         try:
-            return _authority_service().delete_grant(principal_id, permission_id)
+            return _authority_service().delete_grant(
+                principal_id,
+                permission_id,
+                actor_principal=getattr(self, "_authenticated_principal", None),
+            )
         except Exception as exc:
             _log_internal_error("authority_delete_grant", exc)
             return {"success": False, "error": _SAFE_ERROR_MSG}

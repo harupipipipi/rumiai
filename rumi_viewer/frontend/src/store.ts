@@ -90,6 +90,12 @@ export interface Pack {
   type: 'core' | 'community';
   enabled: boolean;
   description: string;
+  approvalStatus: string;
+  approvalReason: string | null;
+  approved: boolean;
+  hashValid: boolean | null;
+  criticalChanged: boolean | null;
+  approvalIssues: string[];
   capabilities: { name: string; description: string }[];
   flows: string[];
   dependencies: string[];
