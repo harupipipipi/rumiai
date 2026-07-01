@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { selectedSetupPackIds, setupPackSelectionUrl } from './setupPacks';
+import {
+  activeTargetPackId,
+  hasActiveSetupPackSelection,
+  selectedSetupPackIds,
+  setupPackSelectionUrl,
+} from './setupPacks';
 
 test('selectedSetupPackIds normalizes selected setup-pack ids', () => {
   assert.deepEqual(
@@ -10,6 +15,25 @@ test('selectedSetupPackIds normalizes selected setup-pack ids', () => {
   );
   assert.deepEqual(selectedSetupPackIds({ selected_setup_pack_ids: 'defaultspack' }), []);
   assert.deepEqual(selectedSetupPackIds(null), []);
+});
+
+test('active setup-pack selection requires an active target pack', () => {
+  assert.equal(
+    activeTargetPackId({ selected_setup_pack_ids: ['defaultspack'], active_target_pack_id: ' defaultspack ' }),
+    'defaultspack',
+  );
+  assert.equal(
+    hasActiveSetupPackSelection({ selected_setup_pack_ids: ['defaultspack'], active_target_pack_id: 'defaultspack' }),
+    true,
+  );
+  assert.equal(
+    hasActiveSetupPackSelection({ selected_setup_pack_ids: ['defaultspack'], active_target_pack_id: '' }),
+    false,
+  );
+  assert.equal(
+    hasActiveSetupPackSelection({ selected_setup_pack_ids: [], active_target_pack_id: 'defaultspack' }),
+    false,
+  );
 });
 
 test('setupPackSelectionUrl returns to panel setup for verification', () => {

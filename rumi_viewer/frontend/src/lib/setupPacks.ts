@@ -3,6 +3,7 @@ import { panelRoutes } from './routes';
 
 type SetupPacksPayload = {
   selected_setup_pack_ids?: unknown;
+  active_target_pack_id?: unknown;
 };
 
 const PANEL_BASE_PATH = '/panel';
@@ -17,9 +18,18 @@ export function selectedSetupPackIds(payload: unknown): string[] {
     .filter(Boolean);
 }
 
+export function activeTargetPackId(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return '';
+  return String((payload as SetupPacksPayload).active_target_pack_id || '').trim();
+}
+
+export function hasActiveSetupPackSelection(payload: unknown): boolean {
+  return selectedSetupPackIds(payload).length > 0 && Boolean(activeTargetPackId(payload));
+}
+
 export async function hasSelectedSetupPack(): Promise<boolean> {
   const packs = await apiFetch<SetupPacksPayload>('/api/setup/packs');
-  return selectedSetupPackIds(packs).length > 0;
+  return hasActiveSetupPackSelection(packs);
 }
 
 export function setupPackSelectionUrl(

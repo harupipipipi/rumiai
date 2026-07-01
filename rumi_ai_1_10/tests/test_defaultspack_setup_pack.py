@@ -310,6 +310,35 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(listed["active_setup_pack_id"], "beta")
             self.assertEqual(listed["active_target_pack_id"], "beta")
 
+    def test_list_packs_filters_stale_selection_without_active_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            selection_file = base / "selection.json"
+            self._write_pack(root, "alpha", "alpha", False)
+            manager = SetupPackManager(root=root, selection_file=selection_file)
+            selection_file.write_text(
+                json.dumps(
+                    {
+                        "setup_pack_id": "missing-legacy",
+                        "setup_pack_ids": ["missing", "alpha"],
+                        "active_setup_pack_id": "missing",
+                        "active_target_pack_id": "stale-target",
+                    },
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            listed = manager.list_packs()
+
+            self.assertEqual(listed["selected_setup_pack_ids"], ["alpha"])
+            self.assertEqual(listed["selected_setup_pack_id"], "alpha")
+            self.assertEqual(listed["active_setup_pack_id"], "")
+            self.assertIsNone(listed["active_target_pack_id"])
+            self.assertTrue(listed["packs"][0]["selected"])
+
     def test_list_packs_exposes_overlap_and_promotion_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

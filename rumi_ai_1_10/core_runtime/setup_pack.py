@@ -165,16 +165,30 @@ class SetupPackManager:
         selection = self.get_selection()
         selected_setup_pack_ids: List[str] = []
         selected_ids = set()
-        for setup_pack_id in selection.get("setup_pack_ids") or []:
-            normalized = str(setup_pack_id)
-            if normalized not in selected_ids:
+
+        def add_selected_setup_pack(value: Any) -> None:
+            normalized = str(value or "").strip()
+            if normalized and normalized in definitions and normalized not in selected_ids:
                 selected_setup_pack_ids.append(normalized)
                 selected_ids.add(normalized)
-        if selection.get("setup_pack_id"):
-            legacy_setup_pack_id = str(selection["setup_pack_id"])
-            if legacy_setup_pack_id not in selected_ids:
-                selected_setup_pack_ids.append(legacy_setup_pack_id)
-                selected_ids.add(legacy_setup_pack_id)
+
+        for setup_pack_id in selection.get("setup_pack_ids") or []:
+            add_selected_setup_pack(setup_pack_id)
+        add_selected_setup_pack(selection.get("setup_pack_id"))
+
+        active_setup_pack_id = str(
+            selection.get("active_setup_pack_id")
+            or selection.get("setup_pack_id")
+            or ""
+        ).strip()
+        if active_setup_pack_id not in selected_ids:
+            active_setup_pack_id = ""
+        active_definition = definitions.get(active_setup_pack_id) if active_setup_pack_id else None
+        selected_setup_pack_id = active_setup_pack_id or (
+            selected_setup_pack_ids[0] if selected_setup_pack_ids else None
+        )
+        active_target_pack_id = active_definition.target_pack_id if active_definition else None
+
         packs = []
         for pack_id in sorted(definitions):
             item = definitions[pack_id]
@@ -204,10 +218,10 @@ class SetupPackManager:
         return {
             "packs": packs,
             "count": len(packs),
-            "selected_setup_pack_id": selection.get("setup_pack_id"),
+            "selected_setup_pack_id": selected_setup_pack_id,
             "selected_setup_pack_ids": selected_setup_pack_ids,
-            "active_setup_pack_id": selection.get("active_setup_pack_id"),
-            "active_target_pack_id": selection.get("active_target_pack_id"),
+            "active_setup_pack_id": active_setup_pack_id,
+            "active_target_pack_id": active_target_pack_id,
         }
 
     def get_selection(self) -> Dict[str, Any]:
