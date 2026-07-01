@@ -31,8 +31,9 @@ Cloudflare the tool execution authority.
    npx wrangler deploy
    ```
 
-4. Set `RUMI_PC_ORIGIN` to the named Tunnel HTTPS origin, such as
-   `https://rumi-pc.example.com`.
+4. Set `RUMI_PC_ORIGIN` as a non-secret Worker variable after the named Tunnel
+   hostname exists, such as `https://rumi-pc.example.com`. Do not commit a
+   placeholder origin to `wrangler.jsonc`.
 5. If a browser frontend calls this Worker directly, set
    `RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN` to that exact frontend origin. Leave it
    unset for server-to-server/mobile calls; the Worker does not reflect arbitrary
