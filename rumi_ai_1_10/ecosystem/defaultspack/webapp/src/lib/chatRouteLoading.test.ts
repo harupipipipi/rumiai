@@ -7,7 +7,7 @@ import {
   workspaceKindForPathname,
   workspaceUrlForKind,
 } from "./workspaceRouting";
-import { loadConversationForRefresh } from "./chatRouteLoading";
+import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./chatRouteLoading";
 
 test("refresh conversation loading honors URL chat id missing from the conversation list", async () => {
   const loaded: Array<string | null> = [];
@@ -58,6 +58,36 @@ test("refresh conversation loading prefers an explicit URL chat over existing ac
   });
 
   assert.deepEqual(loaded, ["url-chat"]);
+});
+
+test("superseded conversations redirect to active MiMo company conversation", () => {
+  assert.equal(
+    resolveSupersededConversationRedirect(
+      {
+        id: "stale-chat",
+        metadata: {
+          superseded: true,
+          active_conversation_id: "live-chat",
+        },
+      },
+      "stale-chat",
+    ),
+    "live-chat",
+  );
+
+  assert.equal(
+    resolveSupersededConversationRedirect(
+      {
+        id: "live-chat",
+        metadata: {
+          superseded: true,
+          active_conversation_id: "live-chat",
+        },
+      },
+      "live-chat",
+    ),
+    null,
+  );
 });
 
 test("workspace routing opens desktops route as the desktops workspace", () => {

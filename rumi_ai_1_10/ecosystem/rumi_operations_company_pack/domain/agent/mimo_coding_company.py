@@ -1746,6 +1746,7 @@ class MimoCodingCompanyRuntime:
             "team_workspace": {"synced_messages": 0},
             "provider_health": self._provider_health_baseline(state),
             "schedule_history": {"checked": 0, "latest": [], "signals": []},
+            "scheduled_user_gaps": {"checked": 0, "repaired": [], "stale_count": 0, "stale": []},
             "scheduled_drafts": {"checked": 0, "repaired": [], "stale_count": 0, "stale": []},
             "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": [], "failed_count": 0, "failed": []},
             "legacy_provider_conversations": {"checked": 0, "superseded": []},
@@ -1826,6 +1827,31 @@ class MimoCodingCompanyRuntime:
                     )
                     known_sync_keys.add(sync_key)
                     synced += 1
+
+            scheduled_user_gaps = self._scheduled_user_gaps(state, scheduler)
+            summary["scheduled_user_gaps"]["checked"] = scheduled_user_gaps.get("checked", 0)
+            summary["scheduled_user_gaps"]["repaired"] = scheduled_user_gaps.get("repaired", [])
+            summary["scheduled_user_gaps"]["stale"] = scheduled_user_gaps.get("stale", [])
+            summary["scheduled_user_gaps"]["stale_count"] = len(summary["scheduled_user_gaps"]["stale"])
+            for item in summary["scheduled_user_gaps"]["stale"]:
+                sync_key = "scheduled_user_gap:" + str(item.get("message_id") or "")
+                if sync_key in known_sync_keys:
+                    continue
+                runtime_store.add_message(
+                    COMPANY_ID,
+                    channel_id="ops-company",
+                    sender_id="scheduler",
+                    content=self._scheduled_user_gap_message(item),
+                    metadata={
+                        "sync_source": "mimo_scheduled_user_gap_monitor",
+                        "sync_key": sync_key,
+                        "conversation_id": item.get("conversation_id"),
+                        "message_id": item.get("message_id"),
+                        "signal": "scheduled_user_orphaned",
+                    },
+                )
+                known_sync_keys.add(sync_key)
+                synced += 1
 
             scheduled_drafts = self._scheduled_draft_gaps(state, scheduler)
             summary["scheduled_drafts"]["checked"] = scheduled_drafts.get("checked", 0)
@@ -2539,6 +2565,70 @@ class MimoCodingCompanyRuntime:
         except Exception:
             return {"checked_ids": [], "unanswered": [], "failed": [], "repaired": []}
 
+    def _scheduled_user_gaps(self, state: dict[str, Any], scheduler: Scheduler | None = None) -> dict[str, Any]:
+        conversation_id = str(state.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return {"checked": 0, "stale": [], "repaired": []}
+        try:
+            from domain.chat.store import ChatStore
+
+            scheduler = scheduler or Scheduler()
+            store = ChatStore()
+            parent = store.get_conversation(conversation_id) or {}
+            parent_ids = self._subagent_scan_parent_conversation_ids(store, parent, conversation_id, state)
+            running_conversation_ids = self._running_schedule_conversation_ids(state, scheduler)
+            expected_schedule_ids = {
+                str(schedule_id or "").strip()
+                for schedule_id in (state.get("schedule_ids") if isinstance(state.get("schedule_ids"), dict) else {}).values()
+                if str(schedule_id or "").strip()
+            }
+            checked = 0
+            stale: list[dict[str, Any]] = []
+            repaired: list[str] = []
+            for parent_id in parent_ids:
+                if parent_id in running_conversation_ids:
+                    continue
+                conversation = parent if parent_id == conversation_id else (store.get_conversation(parent_id) or {})
+                if str(conversation.get("conversation_kind") or "") not in {"mimo_coding_company_loop", CONVERSATION_KIND}:
+                    continue
+                messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+                current_id = str(conversation.get("current_node_id") or "").strip()
+                children_by_parent: dict[str, list[dict[str, Any]]] = {}
+                for message in messages:
+                    if not isinstance(message, dict):
+                        continue
+                    parent_message_id = str(message.get("parent_id") or "").strip()
+                    if parent_message_id:
+                        children_by_parent.setdefault(parent_message_id, []).append(message)
+                for message in messages:
+                    if not self._is_stale_scheduled_user_message(
+                        message,
+                        current_id=current_id,
+                        children_by_parent=children_by_parent,
+                        expected_schedule_ids=expected_schedule_ids,
+                    ):
+                        continue
+                    checked += 1
+                    age_seconds = self._message_age_seconds(message)
+                    if age_seconds is not None and age_seconds < SCHEDULED_DRAFT_GAP_GRACE_SECONDS:
+                        continue
+                    repaired_message = self._mark_scheduled_user_orphan_failed(store, parent_id, conversation, message)
+                    item = {
+                        "conversation_id": parent_id,
+                        "message_id": str(message.get("id") or ""),
+                        "title": str(conversation.get("title") or "MiMo scheduled loop"),
+                        "age_seconds": age_seconds,
+                        "schedule_id": (message.get("metadata") if isinstance(message.get("metadata"), dict) else {}).get("schedule_id"),
+                        "execution_id": (message.get("metadata") if isinstance(message.get("metadata"), dict) else {}).get("schedule_execution_id"),
+                    }
+                    if repaired_message is not None:
+                        repaired.append(str(repaired_message.get("id") or message.get("id") or ""))
+                        item["repaired"] = True
+                    stale.append(item)
+            return {"checked": checked, "stale": stale, "repaired": repaired}
+        except Exception:
+            return {"checked": 0, "stale": [], "repaired": []}
+
     def _scheduled_draft_gaps(self, state: dict[str, Any], scheduler: Scheduler | None = None) -> dict[str, Any]:
         conversation_id = str(state.get("conversation_id") or "").strip()
         if not conversation_id:
@@ -2622,6 +2712,30 @@ class MimoCodingCompanyRuntime:
         )
 
     @staticmethod
+    def _is_stale_scheduled_user_message(
+        message: Any,
+        *,
+        current_id: str,
+        children_by_parent: dict[str, list[dict[str, Any]]],
+        expected_schedule_ids: set[str],
+    ) -> bool:
+        if not isinstance(message, dict) or str(message.get("role") or "") != "user":
+            return False
+        message_id = str(message.get("id") or "").strip()
+        if not message_id or message_id != str(current_id or "").strip():
+            return False
+        if children_by_parent.get(message_id):
+            return False
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        source = str(metadata.get("source") or "").strip()
+        if source not in {"scheduler", "scheduler_approval_followup"}:
+            return False
+        schedule_id = str(metadata.get("schedule_id") or "").strip()
+        if expected_schedule_ids and schedule_id not in expected_schedule_ids:
+            return False
+        return bool(schedule_id)
+
+    @staticmethod
     def _message_age_seconds(message: dict[str, Any]) -> float | None:
         candidates = [message.get("updated_at"), message.get("created_at")]
         newest: float | None = None
@@ -2663,6 +2777,55 @@ class MimoCodingCompanyRuntime:
                 "events": message.get("events") if isinstance(message.get("events"), list) else [],
                 "tool_logs": message.get("tool_logs") if isinstance(message.get("tool_logs"), list) else [],
                 "model": message.get("model"),
+            },
+        )
+
+    @staticmethod
+    def _mark_scheduled_user_orphan_failed(
+        store: Any,
+        conversation_id: str,
+        conversation: dict[str, Any],
+        message: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        message_id = str(message.get("id") or "").strip()
+        if not message_id:
+            return None
+        source_metadata = dict(message.get("metadata") if isinstance(message.get("metadata"), dict) else {})
+        text = (
+            "Scheduled MiMo loop stopped on a scheduler user message before an assistant response. "
+            "The monitor added this failure marker so later scheduler ticks can continue visibly."
+        )
+        metadata = {
+            "source": "mimo_scheduled_user_gap_monitor",
+            "status": "error",
+            "error_code": "SCHEDULED_MIMO_USER_ORPHANED",
+            "durable_scheduler_error": True,
+            "repaired_at": timestamp(),
+            "schedule_id": str(source_metadata.get("schedule_id") or ""),
+            "schedule_execution_id": str(source_metadata.get("schedule_execution_id") or ""),
+            "loop_key": str(source_metadata.get("loop_key") or ""),
+            "thinking": {"state": "failed"},
+        }
+        return store.add_message(
+            conversation_id,
+            {
+                "role": "assistant",
+                "parent_id": message_id,
+                "content": [{"type": "text", "text": text}],
+                "raw_text": text,
+                "finish_reason": "error",
+                "usage": {},
+                "metadata": metadata,
+                "events": [
+                    {
+                        "type": "task_failed",
+                        "message": text,
+                        "terminal": True,
+                        "source": "mimo_scheduled_user_gap_monitor",
+                    }
+                ],
+                "tool_logs": [],
+                "model": conversation.get("model") or DEFAULT_FAST_MODEL,
             },
         )
 
@@ -3041,6 +3204,20 @@ class MimoCodingCompanyRuntime:
                 f"- Title: `{item.get('title') or 'MiMo scheduled loop'}`",
                 "",
                 "A stale streaming assistant draft was marked failed so the loop is visible and future ticks can continue.",
+            ]
+        )
+
+    @staticmethod
+    def _scheduled_user_gap_message(item: dict[str, Any]) -> str:
+        return "\n".join(
+            [
+                "**MiMo scheduled user message repaired**",
+                f"- Conversation: `{item.get('conversation_id') or ''}`",
+                f"- Message: `{item.get('message_id') or ''}`",
+                f"- Schedule: `{item.get('schedule_id') or ''}`",
+                f"- Execution: `{item.get('execution_id') or ''}`",
+                "",
+                "A current scheduler user message had no assistant response, so a failure marker was added and later ticks can continue.",
             ]
         )
 

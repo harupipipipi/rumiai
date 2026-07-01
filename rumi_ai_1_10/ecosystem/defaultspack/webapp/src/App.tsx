@@ -54,7 +54,7 @@ import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToke
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
-import { loadConversationForRefresh } from "./lib/chatRouteLoading";
+import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -3126,6 +3126,11 @@ function ChatApp() {
       return;
     }
     const conversation = await api.getConversation(conversationId);
+    const supersededTargetId = resolveSupersededConversationRedirect(conversation, conversationId);
+    if (supersededTargetId) {
+      await loadConversation(supersededTargetId, updateUrl);
+      return;
+    }
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
