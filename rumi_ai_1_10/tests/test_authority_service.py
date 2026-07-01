@@ -496,6 +496,57 @@ def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_
     assert network_allowed.allowed is True
 
 
+def test_authority_once_approval_revokes_token_when_related_approval_fails(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+    )
+    original_issue_one_shot = store.issue_one_shot
+    issued_tokens = []
+
+    def record_issue_one_shot(*args, **kwargs):
+        token = original_issue_one_shot(*args, **kwargs)
+        issued_tokens.append(token)
+        return token
+
+    def fail_related_once(*args, **kwargs):
+        raise RuntimeError("related approval failed")
+
+    monkeypatch.setattr(store, "issue_one_shot", record_issue_one_shot)
+    monkeypatch.setattr(service, "_approve_related_once", fail_related_once)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        related_permissions=["api_key.use"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "one_shot_settlement_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert len(issued_tokens) == 1
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        token=issued_tokens[0]["token"],
+    ) is False
+
+
 def test_authority_persistent_approval_can_bundle_model_api_key_and_network_grants(tmp_path, monkeypatch):
     service, grants, _ = _service(tmp_path, monkeypatch)
     resource = {

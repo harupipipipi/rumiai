@@ -281,7 +281,13 @@ class AuthorityRequestStore:
             self.audit("authority_request_status", {"request_id": request_id, "status": status})
             return AuthorityRequest.from_dict(data)
 
-    def settle_pending_request(self, request_id: str, status: str, settle_callback=None) -> dict[str, Any]:
+    def settle_pending_request(
+        self,
+        request_id: str,
+        status: str,
+        settle_callback=None,
+        rollback_callback=None,
+    ) -> dict[str, Any]:
         if status not in {"approved", "denied"}:
             raise ValueError("invalid authority terminal status")
         with self._lock:
@@ -309,9 +315,15 @@ class AuthorityRequestStore:
                     "reason": "expired",
                 }
 
-            result = settle_callback(request) if callable(settle_callback) else None
-            data["status"] = status
-            self._write_json(path, data)
+            result = None
+            try:
+                result = settle_callback(request) if callable(settle_callback) else None
+                data["status"] = status
+                self._write_json(path, data)
+            except Exception:
+                if callable(rollback_callback):
+                    rollback_callback(request, result)
+                raise
             self.audit("authority_request_status", {"request_id": request_id, "status": status})
             return {
                 "settled": True,
@@ -337,6 +349,27 @@ class AuthorityRequestStore:
             self._write_json(self._one_shot_dir / f"{token_id}.json", record)
             self.audit("authority_one_shot_issued", {"request_id": request.request_id, "token_id": token_id})
         return {"token": token, "token_id": token_id, "expires_at": record["expires_at"]}
+
+    def revoke_one_shots(self, token_ids: list[str] | tuple[str, ...], *, reason: str = "rollback") -> int:
+        revoked = 0
+        with self._lock:
+            for token_id in token_ids or ():
+                normalized = str(token_id or "").strip().lower()
+                if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+                    continue
+                path = self._one_shot_dir / f"{normalized}.json"
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    continue
+                revoked += 1
+                self.audit(
+                    "authority_one_shot_revoked",
+                    {"token_id": normalized, "reason": reason},
+                )
+        return revoked
 
     def consume_one_shot(
         self,

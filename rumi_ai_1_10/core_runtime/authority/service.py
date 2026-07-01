@@ -447,20 +447,56 @@ class AuthorityService:
         )
         if scope == "once":
             def settle_once(settled_request: AuthorityRequest) -> dict[str, Any]:
-                token = self._request_store.issue_one_shot(settled_request, expires_in_seconds=expires)
-                related = self._approve_related_once(
-                    settled_request,
-                    related_permissions=related_permissions,
-                    expires_in_seconds=expires,
-                    operator_audit=operator_audit,
-                )
-                return {"token": token, "related": related}
+                issued_token_ids: list[str] = []
+                try:
+                    token = self._request_store.issue_one_shot(settled_request, expires_in_seconds=expires)
+                    issued_token_ids.append(token["token_id"])
+                    related = self._approve_related_once(
+                        settled_request,
+                        related_permissions=related_permissions,
+                        expires_in_seconds=expires,
+                        operator_audit=operator_audit,
+                        issued_token_ids=issued_token_ids,
+                    )
+                except Exception:
+                    self._request_store.revoke_one_shots(
+                        issued_token_ids,
+                        reason="approval_settlement_failed",
+                    )
+                    self._request_store.audit(
+                        "authority_request_approval_failed",
+                        {
+                            "request_id": settled_request.request_id,
+                            "scope": "once",
+                            "principal_id": settled_request.principal_id,
+                            "permission_id": settled_request.permission_id,
+                            "error": "one_shot_settlement_failed",
+                            **operator_audit,
+                        },
+                    )
+                    raise
+                return {"token": token, "related": related, "issued_token_ids": issued_token_ids}
 
-            settlement = self._request_store.settle_pending_request(
-                request.request_id,
-                "approved",
-                settle_once,
-            )
+            def rollback_once(_settled_request: AuthorityRequest, result: dict[str, Any] | None) -> None:
+                self._request_store.revoke_one_shots(
+                    (result or {}).get("issued_token_ids") or [],
+                    reason="approval_settlement_failed",
+                )
+
+            try:
+                settlement = self._request_store.settle_pending_request(
+                    request.request_id,
+                    "approved",
+                    settle_once,
+                    rollback_once,
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "error": "One-shot authority approval failed",
+                    "status_code": 500,
+                    "reason": "one_shot_settlement_failed",
+                }
             if not settlement.get("settled"):
                 return self._settlement_failure_response(settlement)
             request = settlement["request"]
@@ -709,11 +745,14 @@ class AuthorityService:
         related_permissions: list[str] | tuple[str, ...] | None,
         expires_in_seconds: int,
         operator_audit: dict[str, Any],
+        issued_token_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         approvals: list[dict[str, Any]] = []
         for permission_id in self._normalized_related_permissions(request, related_permissions):
             related_request = self._create_related_request(request, permission_id)
             token = self._request_store.issue_one_shot(related_request, expires_in_seconds=expires_in_seconds)
+            if issued_token_ids is not None:
+                issued_token_ids.append(token["token_id"])
             self._request_store.set_request_status(related_request.request_id, "approved")
             self._request_store.audit(
                 "authority_request_approved",
