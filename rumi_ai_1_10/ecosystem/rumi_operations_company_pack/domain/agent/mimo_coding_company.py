@@ -1880,14 +1880,23 @@ class MimoCodingCompanyRuntime:
                 synced += 1
 
             subagent_gaps = self._subagent_reply_gaps(state)
+            unresolved_subagent_gaps = [
+                item
+                for item in subagent_gaps.get("unanswered", [])
+                if isinstance(item, dict) and not item.get("failed")
+            ]
             summary["subagents"]["checked"] = len(subagent_gaps.get("checked_ids", []))
             summary["subagents"]["repaired"] = subagent_gaps.get("repaired", [])
             summary["subagents"]["repaired_count"] = len(summary["subagents"]["repaired"])
-            summary["subagents"]["unanswered"] = subagent_gaps.get("unanswered", [])
+            summary["subagents"]["unanswered"] = unresolved_subagent_gaps
             summary["subagents"]["unanswered_count"] = len(summary["subagents"]["unanswered"])
             summary["subagents"]["failed"] = subagent_gaps.get("failed", [])
             summary["subagents"]["failed_count"] = len(summary["subagents"]["failed"])
-            resolved_gap_messages = self._resolve_stale_subagent_gap_messages(runtime_store, state, subagent_gaps)
+            resolved_gap_messages = self._resolve_stale_subagent_gap_messages(
+                runtime_store,
+                state,
+                {**subagent_gaps, "unanswered": unresolved_subagent_gaps},
+            )
             summary["subagents"]["resolved_messages"] = resolved_gap_messages[:10]
             summary["subagents"]["resolved_message_count"] = len(resolved_gap_messages)
             for gap in summary["subagents"]["unanswered"]:
@@ -2559,6 +2568,7 @@ class MimoCodingCompanyRuntime:
                             "failure_reason": self._message_text(failed_message)[:300],
                         }
                     )
+                    unanswered.append(gap)
                     failed.append(gap)
                     continue
                 unanswered.append(gap)

@@ -6,6 +6,34 @@ from domain.company.store import CompanyStore
 from ._helpers import company_id_from, invalid, missing_company, require_dict
 
 
+MIMO_CODING_COMPANY_ID = "mimo-coding-company"
+MIMO_OPS_CHANNEL_ID = "ops-company"
+
+
+def _runtime_message_total(company_id, channel_id, runtime_store):
+    try:
+        _latest_messages, total = runtime_store.list_messages(
+            company_id,
+            channel_id=channel_id,
+            limit=1,
+            offset=0,
+            order="desc",
+        )
+        return int(total)
+    except Exception:
+        return 0
+
+
+def _sync_for_runtime_counts(company_id, runtime_store, channel_id=None):
+    sync_mimo_company_workspace(company_id, sync_observability=False)
+    if str(company_id or "").strip() != MIMO_CODING_COMPANY_ID:
+        return
+    probe_channel_id = str(channel_id or MIMO_OPS_CHANNEL_ID)
+    if _runtime_message_total(company_id, probe_channel_id, runtime_store) > 0:
+        return
+    sync_mimo_company_workspace(company_id, force=True, sync_observability=True)
+
+
 def _with_runtime_counts(company_id, channel, runtime_store):
     enriched = dict(channel)
     channel_id = str(enriched.get("id") or enriched.get("channel_id") or "ops-company")
@@ -37,7 +65,7 @@ def run(input_data, context):
     runtime_store = CompanyRuntimeStore()
     try:
         if action == "list":
-            sync_mimo_company_workspace(company_id, sync_observability=False)
+            _sync_for_runtime_counts(company_id, runtime_store)
             channels = store.list_channels(company_id)
             if channels is None:
                 return missing_company(company_id)
@@ -52,7 +80,7 @@ def run(input_data, context):
             channel_id = input_data.get("channel_id") or input_data.get("id")
             if not channel_id:
                 return invalid("channel_id is required")
-            sync_mimo_company_workspace(company_id, sync_observability=False)
+            _sync_for_runtime_counts(company_id, runtime_store, channel_id=channel_id)
             if store.get_company(company_id) is None:
                 return missing_company(company_id)
             channel = store.get_channel(company_id, str(channel_id))
