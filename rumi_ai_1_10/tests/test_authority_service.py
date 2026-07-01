@@ -528,6 +528,105 @@ def test_authority_persistent_approval_can_bundle_model_api_key_and_network_gran
     assert "network.egress" in grant.permissions
 
 
+def test_authority_persistent_approval_rolls_back_grants_when_related_grant_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    original_grant_permission = grants.grant_permission
+    grant_calls = []
+
+    def fail_related_grant(principal_id, permission_id, config=None):
+        grant_calls.append(permission_id)
+        if permission_id == "api_key.use":
+            raise RuntimeError("related grant failed")
+        return original_grant_permission(principal_id, permission_id, config)
+
+    monkeypatch.setattr(grants, "grant_permission", fail_related_grant)
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "persistent_grant_failed"
+    assert grant_calls == ["model.invoke", "api_key.use"]
+    assert grants.get_grant("conversation:c1") is None
+    assert store.get_request(decision.request_id).status == "pending"
+    assert [request.permission_id for request in store.list_requests("all")] == ["model.invoke"]
+
+
+def test_authority_persistent_approval_restores_existing_grant_when_related_grant_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    grants.grant_permission(
+        "conversation:c1",
+        "model.invoke",
+        {"provider_ids": ["anthropic"], "api_ids": ["personal"], "model_ids": ["claude"]},
+    )
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    original_grant_permission = grants.grant_permission
+
+    def fail_related_grant(principal_id, permission_id, config=None):
+        if permission_id == "api_key.use":
+            raise RuntimeError("related grant failed")
+        return original_grant_permission(principal_id, permission_id, config)
+
+    monkeypatch.setattr(grants, "grant_permission", fail_related_grant)
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    restored = grants.get_grant("conversation:c1")
+
+    assert approval["success"] is False
+    assert restored is not None
+    assert restored.permissions["model.invoke"].enabled is True
+    assert restored.permissions["model.invoke"].config == {
+        "provider_ids": ["anthropic"],
+        "api_ids": ["personal"],
+        "model_ids": ["claude"],
+    }
+    assert "api_key.use" not in restored.permissions
+    assert store.get_request(decision.request_id).status == "pending"
+
+
 def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {
