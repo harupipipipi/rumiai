@@ -11,12 +11,14 @@ import {
   CompanyWorkspacePanel,
   MIMO_CODING_COMPANY_ID,
   companyIdFromConversationTitle,
+  enrichCompanyRecordWithLoadedResources,
   resolveActiveChannelId,
   resolveCompanyMessageListOptions,
   resolveCompanyWorkspaceHint,
   resolveCompanyWorkspaceHintFromGroup,
   resolveEffectiveCompanies,
   resolveSelectedCompanyId,
+  resolveSelectedCompanyRecord,
 } from "../components/company/CompanyWorkspacePanel";
 import { buildCompactHistoryRailItems, buildGroupsFromChats } from "../components/HistoryBoard";
 import { defaultspackRendererIds, defaultspackRenderers, resolveDefaultspackRenderers } from "./defaultspackRenderers";
@@ -258,6 +260,65 @@ test("company workspace prefers global MiMo company over empty conversation-scop
   });
 
   assert.equal(selectedId, MIMO_CODING_COMPANY_ID);
+});
+
+test("company workspace uses status company id when conversation status is thin", () => {
+  const selectedId = resolveSelectedCompanyId({
+    activeConversationId: "chat-1",
+    activeCompanyId: null,
+    hintedCompanyId: null,
+    statusCompany: null,
+    statusCompanyId: MIMO_CODING_COMPANY_ID,
+    companies: [],
+  });
+
+  assert.equal(selectedId, MIMO_CODING_COMPANY_ID);
+});
+
+test("company workspace keeps active MiMo company visible when only runtime resources load", () => {
+  const selectedCompany = resolveSelectedCompanyRecord({
+    selectedId: MIMO_CODING_COMPANY_ID,
+    selectedCompanyDetails: null,
+    statusCompany: null,
+    listedSelectedCompany: null,
+  });
+
+  assert.ok(selectedCompany);
+  const enrichedCompany = enrichCompanyRecordWithLoadedResources(selectedCompany, {
+    agents: [
+      { agent_id: "engineer", agent_name: "Engineer", role_key: "coding" },
+    ],
+    channels: [
+      { id: "ops-company", name: "Ops Company", message_count: 301 },
+    ],
+    tasks: [],
+  });
+
+  const html = renderToStaticMarkup(
+    createElement(CompanyTree, {
+      companies: [enrichedCompany],
+      activeCompanyId: MIMO_CODING_COMPANY_ID,
+    }),
+  );
+
+  assert.equal(enrichedCompany.id, MIMO_CODING_COMPANY_ID);
+  assert.match(html, /MiMo Coding Company/);
+  assert.match(html, /1 employees/);
+  assert.doesNotMatch(html, /No employee group loaded/);
+});
+
+test("company tree does not claim the employee group is missing while loading", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyTree, {
+      companies: [],
+      activeCompanyId: null,
+      busy: true,
+      emptyMessage: "No employee group loaded.",
+    }),
+  );
+
+  assert.match(html, /Loading employee group/);
+  assert.doesNotMatch(html, /No employee group loaded/);
 });
 
 test("company workspace resolves MiMo company hints from group and profile context", () => {

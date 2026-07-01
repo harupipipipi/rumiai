@@ -173,18 +173,22 @@ export function resolveSelectedCompanyId({
   activeCompanyId,
   hintedCompanyId,
   statusCompany,
+  statusCompanyId,
   companies,
 }: {
   activeConversationId?: string | null;
   activeCompanyId?: string | null;
   hintedCompanyId?: string | null;
   statusCompany?: CompanyRecord | null;
+  statusCompanyId?: string | null;
   companies: CompanyRecord[];
 }): string | null {
   const normalizedHint = companyIdFromHint(hintedCompanyId);
   if (normalizedHint) return normalizedHint;
   const statusCompanyTitleHint = companyIdFromConversationTitle(statusCompany?.name);
   if (statusCompanyTitleHint) return statusCompanyTitleHint;
+  const normalizedStatusCompanyId = companyIdFromHint(statusCompanyId);
+  if (normalizedStatusCompanyId) return normalizedStatusCompanyId;
   if (activeConversationId) return statusCompany?.id ?? null;
   return activeCompanyId ?? companies[0]?.id ?? statusCompany?.id ?? null;
 }
@@ -260,6 +264,54 @@ function mergeCompanyRecords(primary: CompanyRecord | null, fallback: CompanyRec
   };
 }
 
+function companyNameFromId(companyId: string): string {
+  if (companyId === MIMO_CODING_COMPANY_ID) return "MiMo Coding Company";
+  if (companyId === OPERATIONS_COMPANY_ID) return "Rumi Operations Company";
+  return companyId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || companyId;
+}
+
+export function resolveSelectedCompanyRecord({
+  selectedId,
+  selectedCompanyDetails,
+  statusCompany,
+  listedSelectedCompany,
+}: {
+  selectedId?: string | null;
+  selectedCompanyDetails?: CompanyRecord | null;
+  statusCompany?: CompanyRecord | null;
+  listedSelectedCompany?: CompanyRecord | null;
+}): CompanyRecord | null {
+  if (!selectedId) return null;
+  return mergeCompanyRecords(selectedCompanyDetails ?? null, statusCompany ?? listedSelectedCompany ?? null) ?? {
+    id: selectedId,
+    name: companyNameFromId(selectedId),
+  };
+}
+
+export function enrichCompanyRecordWithLoadedResources(company: CompanyRecord, {
+  agents,
+  channels,
+  tasks,
+  routes,
+}: {
+  agents?: CompanyAgent[];
+  channels?: CompanyChannel[];
+  tasks?: CompanyTask[];
+  routes?: CompanyInboundRoute[];
+}): CompanyRecord {
+  return {
+    ...company,
+    ...(agents ? { agents, agent_count: Math.max(company.agent_count ?? 0, agents.length) } : {}),
+    ...(channels ? { channels, channel_count: Math.max(company.channel_count ?? 0, channels.length) } : {}),
+    ...(tasks ? { tasks, task_count: Math.max(company.task_count ?? 0, tasks.length) } : {}),
+    ...(routes ? { inbound_routes: routes } : {}),
+  };
+}
+
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
@@ -329,12 +381,14 @@ export function CompanyWorkspacePanel({
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
+      const statusCompanyId = statusResult.status === "fulfilled" ? statusResult.value.company_id : null;
       let statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
       const selectedId = resolveSelectedCompanyId({
         activeConversationId,
         activeCompanyId: activeCompanyCandidate,
         hintedCompanyId,
         statusCompany,
+        statusCompanyId,
         companies: listedCompanies,
       });
       if (statusCompany?.id && statusCompany.id !== selectedId) {
@@ -357,11 +411,15 @@ export function CompanyWorkspacePanel({
       const listedSelectedCompany = selectedId
         ? listedCompanies.find((item) => item.id === selectedId) ?? null
         : null;
-      const selectedCompany = selectedId
-        ? mergeCompanyRecords(selectedCompanyDetails, statusCompany ?? listedSelectedCompany)
-        : null;
-      const visibleCompanies = selectedCompany
-        ? [selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompany.id)]
+      let selectedCompany = resolveSelectedCompanyRecord({
+        selectedId,
+        selectedCompanyDetails,
+        statusCompany,
+        listedSelectedCompany,
+      });
+      const selectedCompanyId = selectedCompany?.id;
+      const visibleCompanies = selectedCompany && selectedCompanyId
+        ? [selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompanyId)]
         : listedCompanies;
       setCompanies(visibleCompanies);
       setActiveCompanyId(selectedId);
@@ -401,15 +459,27 @@ export function CompanyWorkspacePanel({
         const resolvedChannelId = resolveActiveChannelId(requestedChannelId ?? activeChannelId, nextChannels);
         setActiveChannelId(resolvedChannelId);
         const fallbackTasks = arrayFromRecord(selectedCompany?.tasks);
-        setTasks(preferLoadedCompanyResource(
+        const nextTasks = preferLoadedCompanyResource(
           taskResult.status === "fulfilled" ? taskResult.value.tasks : null,
           fallbackTasks,
-        ));
+        );
+        setTasks(nextTasks);
         const fallbackRoutes = arrayFromRecord(selectedCompany?.inbound_routes);
-        setRoutes(preferLoadedCompanyResource(
+        const nextRoutes = preferLoadedCompanyResource(
           routeResult.status === "fulfilled" ? routeResult.value.routes : null,
           fallbackRoutes,
-        ));
+        );
+        setRoutes(nextRoutes);
+        if (selectedCompany) {
+          selectedCompany = enrichCompanyRecordWithLoadedResources(selectedCompany, {
+            agents: nextAgents,
+            channels: nextChannels,
+            tasks: nextTasks,
+            routes: nextRoutes,
+          });
+          setCompany(selectedCompany);
+          setCompanies([selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompany?.id)]);
+        }
         const [messageResult] = await Promise.allSettled([
           companyResources.listCompanyMessages(selectedId, resolveCompanyMessageListOptions(nextChannels, resolvedChannelId)),
         ]);
