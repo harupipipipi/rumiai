@@ -38,7 +38,7 @@
       "reasoning": "xiaomi/mimo-v2.5",
       "fast": "zai/glm-4.7-flashx",
       "cheap": "zai/glm-4.7-flashx",
-      "vision": "xiaomi/mimo-v2.5"
+      "vision": "google/gemma-4-31b-it"
     },
     "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
   },
@@ -64,7 +64,7 @@
       "reasoning": "xiaomi/mimo-v2.5",
       "fast": "zai/glm-4.7-flashx",
       "cheap": "zai/glm-4.7-flashx",
-      "vision": "xiaomi/mimo-v2.5"
+      "vision": "google/gemma-4-31b-it"
     },
     "capabilities": {
       "native_tool_calling": true,

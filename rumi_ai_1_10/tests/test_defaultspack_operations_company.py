@@ -2706,6 +2706,7 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
     assert allowlist == {
         "opencode-zen/mimo-v2.5-free",
         "google/gemma-4-31b-it",
+        "vercel-ai-gateway/google/gemma-4-31b-it",
         "stub/default",
     }
 

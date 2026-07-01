@@ -38,8 +38,7 @@
         "chat": true,
         "coding": true,
         "agent": true,
-        "reasoning": true,
-        "vision": true
+        "reasoning": true
       },
       "capabilities": {
         "chat": true,
@@ -75,6 +74,50 @@
       }
     },
     {
+      "id": "vercel-ai-gateway/google/gemma-4-31b-it",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "google/gemma-4-31b-it",
+      "display_name": "Gemma 4 31B IT via Vercel AI Gateway",
+      "type": "vision",
+      "enabled": true,
+      "priority": 4,
+      "defaults": {
+        "vision": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true,
+        "file_input": true
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/google/gemma-4-26b-a4b-it",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "display_name": "Gemma 4 26B A4B IT via Vercel AI Gateway",
+      "type": "vision",
+      "enabled": true,
+      "priority": 5,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true,
+        "file_input": true
+      }
+    },
+    {
       "id": "vercel-ai-gateway/deepseek/deepseek-v4-flash",
       "category": "llm_model",
       "version": "1",
@@ -83,7 +126,7 @@
       "display_name": "DeepSeek V4 Flash via Vercel AI Gateway",
       "type": "chat",
       "enabled": true,
-      "priority": 4,
+      "priority": 6,
       "defaults": {},
       "capabilities": {
         "chat": true,
@@ -103,7 +146,7 @@
       "display_name": "Qwen3 Coder 30B A3B via Vercel AI Gateway",
       "type": "chat",
       "enabled": true,
-      "priority": 5,
+      "priority": 7,
       "defaults": {},
       "capabilities": {
         "chat": true,
@@ -123,7 +166,7 @@
       "display_name": "Qwen 3 14B via Vercel AI Gateway",
       "type": "chat",
       "enabled": true,
-      "priority": 6,
+      "priority": 8,
       "defaults": {},
       "capabilities": {
         "chat": true,
@@ -143,7 +186,7 @@
       "display_name": "GLM 4.7 FlashX via Vercel AI Gateway",
       "type": "chat",
       "enabled": true,
-      "priority": 7,
+      "priority": 9,
       "defaults": {
         "fast": true,
         "cheap": true
@@ -166,10 +209,8 @@
       "display_name": "GLM 4.6V via Vercel AI Gateway",
       "type": "vision",
       "enabled": true,
-      "priority": 8,
-      "defaults": {
-        "vision": true
-      },
+      "priority": 10,
+      "defaults": {},
       "capabilities": {
         "chat": true,
         "streaming": true,

@@ -297,11 +297,13 @@ def test_vercel_ai_gateway_manifest_first_runtime_provider_accepts_either_key(mo
     assert provider["default_model_for"]["reasoning"] == "xiaomi/mimo-v2.5"
     assert provider["default_model_for"]["fast"] == "zai/glm-4.7-flashx"
     assert provider["default_model_for"]["cheap"] == "zai/glm-4.7-flashx"
-    assert provider["default_model_for"]["vision"] == "xiaomi/mimo-v2.5"
+    assert provider["default_model_for"]["vision"] == "google/gemma-4-31b-it"
     assert {
         "vercel-ai-gateway/xiaomi/mimo-v2.5-pro",
         "vercel-ai-gateway/xiaomi/mimo-v2.5",
         "vercel-ai-gateway/xiaomi/mimo-v2-flash",
+        "vercel-ai-gateway/google/gemma-4-31b-it",
+        "vercel-ai-gateway/google/gemma-4-26b-a4b-it",
         "vercel-ai-gateway/deepseek/deepseek-v4-flash",
         "vercel-ai-gateway/alibaba/qwen3-coder-30b-a3b",
         "vercel-ai-gateway/alibaba/qwen-3-14b",
@@ -312,8 +314,13 @@ def test_vercel_ai_gateway_manifest_first_runtime_provider_accepts_either_key(mo
     assert models["vercel-ai-gateway/xiaomi/mimo-v2.5"]["defaults"]["agent"] is True
     assert models["vercel-ai-gateway/xiaomi/mimo-v2.5"]["metadata"]["capabilities"]["vision"] is True
     assert models["vercel-ai-gateway/xiaomi/mimo-v2-flash"]["defaults"] == {}
+    assert models["vercel-ai-gateway/google/gemma-4-31b-it"]["defaults"]["vision"] is True
+    assert models["vercel-ai-gateway/google/gemma-4-31b-it"]["metadata"]["capabilities"]["vision"] is True
+    assert models["vercel-ai-gateway/google/gemma-4-26b-a4b-it"]["defaults"] == {}
+    assert models["vercel-ai-gateway/google/gemma-4-26b-a4b-it"]["metadata"]["capabilities"]["vision"] is True
     assert models["vercel-ai-gateway/deepseek/deepseek-v4-flash"]["defaults"] == {}
     assert models["vercel-ai-gateway/zai/glm-4.7-flashx"]["defaults"]["cheap"] is True
+    assert models["vercel-ai-gateway/zai/glm-4.6v"]["defaults"] == {}
     assert models["vercel-ai-gateway/zai/glm-4.6v"]["metadata"]["capabilities"]["vision"] is True
 
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)

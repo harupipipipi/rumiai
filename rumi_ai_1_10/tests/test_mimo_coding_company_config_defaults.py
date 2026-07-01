@@ -9,8 +9,9 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 MIMO_FREE_MODEL = "opencode-zen/mimo-v2.5-free"
 MIMO_VISION_MODEL = "google/gemma-4-31b-it"
+MIMO_GATEWAY_VISION_MODEL = "vercel-ai-gateway/google/gemma-4-31b-it"
 STUB_MODEL = "stub/default"
-MIMO_CONFIG_MODELS = [MIMO_FREE_MODEL, MIMO_VISION_MODEL, STUB_MODEL]
+MIMO_CONFIG_MODELS = [MIMO_FREE_MODEL, MIMO_VISION_MODEL, MIMO_GATEWAY_VISION_MODEL, STUB_MODEL]
 
 
 def test_mimo_coding_company_profile_defaults_to_opencode_zen_free_mimo() -> None:

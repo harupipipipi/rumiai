@@ -221,6 +221,7 @@ FALLBACK_KNOWLEDGE_DOCS = [
 MODEL_ALLOWLIST = [
     "opencode-zen/mimo-v2.5-free",
     "google/gemma-4-31b-it",
+    "vercel-ai-gateway/google/gemma-4-31b-it",
     "stub/default",
 ]
 

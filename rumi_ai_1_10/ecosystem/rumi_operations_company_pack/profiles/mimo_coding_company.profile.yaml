@@ -49,6 +49,7 @@ node_settings:
       allowlist:
         - opencode-zen/mimo-v2.5-free
         - google/gemma-4-31b-it
+        - vercel-ai-gateway/google/gemma-4-31b-it
         - stub/default
       default_reasoning_effort: high
       max_switches_per_day: 48
@@ -179,6 +180,7 @@ policy:
   model_allowlist:
     - opencode-zen/mimo-v2.5-free
     - google/gemma-4-31b-it
+    - vercel-ai-gateway/google/gemma-4-31b-it
     - stub/default
 
 metadata:
