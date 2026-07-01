@@ -40,3 +40,11 @@ def test_shipped_composer_bundle_keeps_endpoint_allowlist():
     assert "&& !action.requires_approval" in source
     assert "&& isSafeLocalEndpoint(action.endpoint)" in source
     assert "&& COMPOSER_ENDPOINT_ACTION_ALLOWLIST.has(composerEndpointActionKey(action))" in source
+
+
+def test_shipped_shell_bundle_loads_split_chunks_under_static_mount():
+    bundle = SHELL_APP.read_text(encoding="utf-8")
+
+    assert 'from"./shell-' not in bundle
+    assert 'import("./shell-' not in bundle
+    assert 'from"/static/shell-' in bundle or 'import("/static/shell-' in bundle

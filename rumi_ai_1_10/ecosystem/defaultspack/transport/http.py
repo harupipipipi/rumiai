@@ -324,9 +324,20 @@ class DefaultsHttpServer:
             m = compiled.match(path)
             if m is not None:
                 return handler, m.groupdict(), source, path_inject, pattern
+        if self._is_root_shell_chunk_compat_route(method, path):
+            return self._handle_static_file, {"path": str(path or "").lstrip("/")}, "fallback", {}, ""
         if self._is_spa_shell_fallback_route(method, path):
             return self._handle_static, {}, "fallback", {}, ""
         return None, None, None, None, None
+
+    @staticmethod
+    def _is_root_shell_chunk_compat_route(method, path):
+        if str(method or "").upper() != "GET":
+            return False
+        request_path = str(path or "")
+        if "/" in request_path.lstrip("/"):
+            return False
+        return re.fullmatch(r"/shell-[A-Za-z0-9._-]+\.js", request_path) is not None
 
     @staticmethod
     def _is_spa_shell_fallback_route(method, path):

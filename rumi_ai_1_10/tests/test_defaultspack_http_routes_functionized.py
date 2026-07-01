@@ -30,6 +30,25 @@ def test_fallback_http_block_invocation_routes_through_function_bridge():
     assert mocked.call_args.kwargs["timeout_seconds"] is None
 
 
+def test_root_shell_chunk_compat_route_serves_static_asset():
+    from transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._routes = []
+
+    handler, path_params, source, path_inject, route_pattern = server._match_route(
+        "GET",
+        "/shell-icons.js",
+    )
+
+    assert handler == server._handle_static_file
+    assert path_params == {"path": "shell-icons.js"}
+    assert source == "fallback"
+    assert path_inject == {}
+    assert route_pattern == ""
+    assert server._match_route("GET", "/shell.html") == (None, None, None, None, None)
+
+
 def test_fallback_http_chat_send_uses_long_running_timeout():
     from transport.http import DefaultsHttpServer
 
