@@ -8,6 +8,9 @@ from domain.chat.tool_selection_schema import ToolRecommendation, ToolSelectionR
 from domain.tool.loading import split_tools_by_loading
 
 
+_DEFAULT_CALL_MODEL = call_model
+
+
 class ToolSelectionOrchestrator:
     def __init__(self, *, call_handler: Any = None) -> None:
         self._call_handler = call_handler
@@ -48,6 +51,22 @@ class ToolSelectionOrchestrator:
                 stage="tool_loading",
             ).to_dict()
         model_hint = _tool_selector_model_hint(settings)
+        if not _selector_call_available(model_hint, self._call_handler):
+            keyword_ids = candidate_ids
+            if not prefilter:
+                keyword_ids = recommend_tool_ids(user_text, candidates, limit=min(20, max(limit, 1))) or candidate_ids
+            recommendations = [
+                ToolRecommendation(tool_id=tool_id, confidence=0.6, reason="selected by keyword prefilter")
+                for tool_id in keyword_ids[:limit]
+            ]
+            recommendations = [*always_recommendations, *recommendations][:limit]
+            return ToolSelectionResult(
+                recommended_tools=recommendations,
+                not_selected=[],
+                requires_tool_calling_model=bool(recommendations and supports_tools),
+                candidate_count=len(always_tools) + len(candidates),
+                stage="keyword",
+            ).to_dict()
         model_call = call_model(
             {
                 "model_hint": model_hint,
@@ -118,6 +137,14 @@ def _tool_selector_model_hint(settings: dict[str, Any] | None) -> str:
 
 def _tool_selector_required_capabilities(model_hint: str) -> list[str]:
     return [] if str(model_hint or "").strip() else ["model.fast"]
+
+
+def _selector_call_available(model_hint: str, call_handler: Any) -> bool:
+    if str(model_hint or "").strip():
+        return True
+    if call_handler is not None:
+        return True
+    return call_model is not _DEFAULT_CALL_MODEL
 
 
 def _selector_model_from_model_call(model_call: Any) -> str:

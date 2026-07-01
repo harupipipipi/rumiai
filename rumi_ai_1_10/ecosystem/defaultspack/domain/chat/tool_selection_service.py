@@ -126,7 +126,7 @@ class ToolSelectionService:
             )
 
         if strategy == "all_with_hints":
-            hints = self._semantic_candidates(user_text, eligible, context=context)
+            hints = self._semantic_candidates(user_text, eligible, context=context, resolve_embedding_model=False)
             hint_selected_ids, hint_stage, hint_fallbacks, hint_recommendations, hint_selector_model = self._select_with_utility_model(
                 user_text,
                 eligible,
@@ -178,7 +178,7 @@ class ToolSelectionService:
                 permission_entries=permission_entries,
             )
 
-        semantic = self._semantic_candidates(user_text, eligible, context=context)
+        semantic = self._semantic_candidates(user_text, eligible, context=context, resolve_embedding_model=(strategy == "semantic"))
         semantic_ids = list(semantic.get("tool_ids") or [])
         semantic_candidates = self._tools_by_ids(eligible, semantic_ids)
         if strategy == "semantic":
@@ -301,9 +301,16 @@ class ToolSelectionService:
             output.append(tool)
         return output
 
-    def _semantic_candidates(self, user_text: str, tools: list[dict[str, Any]], *, context: dict[str, Any]) -> dict[str, Any]:
+    def _semantic_candidates(
+        self,
+        user_text: str,
+        tools: list[dict[str, Any]],
+        *,
+        context: dict[str, Any],
+        resolve_embedding_model: bool = False,
+    ) -> dict[str, Any]:
         backend = str(self._tool_settings.get("semantic_backend") or "auto").strip().lower() or "auto"
-        embedding_model = self._embedding_model()
+        embedding_model = self._embedding_model(resolve_configured=resolve_embedding_model)
         result = ToolEmbeddingIndex().search(
             user_text,
             tools,
@@ -317,10 +324,12 @@ class ToolSelectionService:
         result["fallbacks"] = fallbacks
         return result
 
-    def _embedding_model(self) -> str:
+    def _embedding_model(self, *, resolve_configured: bool = False) -> str:
         configured = str(self._tool_settings.get("embedding_model") or "").strip()
         if configured:
             return configured
+        if not resolve_configured:
+            return ""
         try:
             result = search_models({"type": "embedding", "configured_only": True, "max_results": 1})
         except Exception:
