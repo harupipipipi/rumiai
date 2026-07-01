@@ -7,12 +7,11 @@
   "display_name": "Tencent Hy3 preview (free)",
   "type": "chat",
   "enabled": true,
-  "priority": 1,
+  "priority": 100,
   "routing": {
     "default_for": [
-      "chat"
-    ],
-    "speed_tier": "fast"
+      "legacy"
+    ]
   },
   "capabilities": {
     "text_input": true,
@@ -25,5 +24,10 @@
     "structured_output": false,
     "image_input": false,
     "audio_input": false
+  },
+  "metadata": {
+    "source": "legacy_openrouter_allowlist",
+    "legacy_default": true,
+    "not_returned_by_openrouter_models_api_on_2026_07_02": true
   }
 }

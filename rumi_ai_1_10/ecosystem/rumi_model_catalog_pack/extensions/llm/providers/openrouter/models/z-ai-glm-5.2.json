@@ -1,0 +1,92 @@
+{
+  "id": "openrouter/z-ai/glm-5.2",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "z-ai/glm-5.2",
+  "display_name": "GLM 5.2 via OpenRouter",
+  "type": "chat",
+  "enabled": true,
+  "priority": 5,
+  "routing": {
+    "default_for": [
+      "long_context"
+    ]
+  },
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": true,
+    "tool_calling": true,
+    "parallel_tool_calls": true,
+    "json_schema": true,
+    "structured_output": true,
+    "image_input": false,
+    "audio_input": false
+  },
+  "request_features": {
+    "json_mode": true,
+    "response_format": true,
+    "tool_choice": true
+  },
+  "context_window": 1048576,
+  "thinking": {
+    "supported": true,
+    "levels": [
+      "high",
+      "xhigh"
+    ],
+    "default_level": "high",
+    "provider_mapping": {
+      "high": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "xhigh": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "none": {}
+    }
+  },
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 32768,
+    "supported_parameters": [
+      "frequency_penalty",
+      "include_reasoning",
+      "logit_bias",
+      "logprobs",
+      "max_tokens",
+      "min_p",
+      "parallel_tool_calls",
+      "presence_penalty",
+      "reasoning",
+      "reasoning_effort",
+      "repetition_penalty",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_logprobs",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.00000093",
+    "completion": "0.000003"
+  }
+}

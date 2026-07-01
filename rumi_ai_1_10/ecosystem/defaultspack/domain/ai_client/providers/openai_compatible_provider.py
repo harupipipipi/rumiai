@@ -363,6 +363,14 @@ class OpenAICompatibleProvider(OpenAIProvider):
             return self._translate_cerebras_model_params(model, params)
         return super()._translate_model_params(model, params)
 
+    def build_request(self, messages):
+        converted = super().build_request(messages)
+        if self.provider_id == "groq":
+            for message in converted:
+                if isinstance(message, dict) and message.get("role") == "tool":
+                    message.pop("name", None)
+        return converted
+
     def list_models(self):
         provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()
         profile_dir = self.profile_dir()

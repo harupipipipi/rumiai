@@ -23,8 +23,18 @@
     "params": {
       "temperature": true,
       "max_tokens": true,
+      "max_completion_tokens": true,
       "top_p": true,
-      "reasoning_effort": true
+      "reasoning": true,
+      "reasoning_effort": true,
+      "include_reasoning": true,
+      "response_format": true,
+      "structured_outputs": true,
+      "tool_choice": true,
+      "parallel_tool_calls": true,
+      "provider": true,
+      "models": true,
+      "web_search_options": true
     }
   },
   "supported_roles": [

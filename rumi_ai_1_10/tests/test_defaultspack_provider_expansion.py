@@ -15,6 +15,34 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
+OPENROUTER_CURATED_ALLOWLIST = [
+    {
+        "id": "openrouter/tencent/hy3-preview:free",
+        "model_id": "tencent/hy3-preview:free",
+        "name": "Tencent Hy3 preview (free)",
+        "display_name": "Tencent Hy3 preview (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "fast": True},
+    },
+    {
+        "id": "openrouter/cohere/north-mini-code:free",
+        "model_id": "cohere/north-mini-code:free",
+        "name": "Cohere North Mini Code (free)",
+        "display_name": "Cohere North Mini Code (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "coding": True, "fast": True},
+    },
+]
+
+
+def _openrouter_catalog_models():
+    return [dict(model) for model in OPENROUTER_CURATED_ALLOWLIST]
+
+
 class TestDefaultspackProviderExpansion(unittest.TestCase):
     def test_detect_available_providers_accepts_new_openai_compatible_provider_keys(self):
         from domain.ai_client.providers import detect_available_providers
@@ -85,25 +113,54 @@ class TestDefaultspackProviderExpansion(unittest.TestCase):
         self.assertIn("mistral/mistral-large-latest", model_ids)
         self.assertIn("mistral/mistral-embed", model_ids)
 
-    def test_ai_client_lists_only_supported_openrouter_model(self):
+    def test_openrouter_provider_lists_curated_allowlist_and_rejects_unknown_models(self):
+        from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
+
+        with patch.object(
+            OpenRouterProvider,
+            "_catalog_models",
+            classmethod(lambda cls: _openrouter_catalog_models()),
+        ):
+            provider = OpenRouterProvider()
+            models = provider.list_models()
+
+            self.assertGreaterEqual(len(models), 2)
+            self.assertEqual({item["id"] for item in models}, {item["id"] for item in OPENROUTER_CURATED_ALLOWLIST})
+            for model in models:
+                provider._assert_supported_model(model["model_id"])
+                provider._assert_supported_model(model["id"])
+
+            with self.assertRaisesRegex(RuntimeError, "unsupported model"):
+                provider._assert_supported_model("openai/gpt-4o-mini")
+
+    def test_ai_client_lists_openrouter_curated_allowlist(self):
         from domain.ai_client.client import AIClient
+        from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
 
         AIClient._instance = None
-        with patch.dict(
-            os.environ,
-            {"OPENROUTER_API_KEY": "or-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
-            clear=True,
+        with (
+            patch.object(
+                OpenRouterProvider,
+                "_catalog_models",
+                classmethod(lambda cls: _openrouter_catalog_models()),
+            ),
+            patch.dict(
+                os.environ,
+                {"OPENROUTER_API_KEY": "or-key", "RUMI_DEFAULTSPACK_ENABLE_CLOUD_PROVIDERS": "1"},
+                clear=True,
+            ),
         ):
             client = AIClient()
 
         try:
             models = client.list_models(provider="openrouter")
-            provider, model_name = client.resolve_provider("openrouter/tencent/hy3-preview:free")
+            provider, model_name = client.resolve_provider("openrouter/cohere/north-mini-code:free")
         finally:
             AIClient._instance = None
 
-        self.assertEqual({item["id"] for item in models}, {"openrouter/tencent/hy3-preview:free"})
-        self.assertEqual(model_name, "tencent/hy3-preview:free")
+        model_ids = {item["id"] for item in models}
+        self.assertTrue({item["id"] for item in OPENROUTER_CURATED_ALLOWLIST}.issubset(model_ids))
+        self.assertEqual(model_name, "cohere/north-mini-code:free")
         self.assertEqual(getattr(provider, "provider_id", ""), "openrouter")
 
     def test_gitlawb_opengateway_includes_mimo_v2_omni(self):
