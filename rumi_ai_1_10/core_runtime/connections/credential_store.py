@@ -57,7 +57,9 @@ class LocalEncryptedCredentialStore:
     def _write_all(self, data: dict[str, dict]) -> None:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        _chmod_private(tmp)
         tmp.replace(self.path)
+        _chmod_private(self.path)
 
     def put(self, provider_id: str, connection_id: str, material_type: str, secret_material: dict) -> CredentialEnvelope:
         credential_id = f"cred_{uuid4().hex}"
@@ -87,3 +89,10 @@ class LocalEncryptedCredentialStore:
         data = self._read_all()
         data.pop(credential_id, None)
         self._write_all(data)
+
+
+def _chmod_private(path: Path) -> None:
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass

@@ -1,3 +1,6 @@
+import stat
+
+from core_runtime.connections.credential_store import LocalEncryptedCredentialStore
 from core_runtime.connections.registry import ConnectionsRegistry
 from core_runtime.connections.oauth_service import InMemoryOAuthStateStore
 from core_runtime.connections.permission_resolver import resolve_connection_permissions
@@ -111,6 +114,31 @@ def test_codex_provider_safe_payload_has_no_token_material():
     assert payload["authTemplate"] == "credential_bundle"
     assert payload["tokenImportSupported"] is True
     assert payload["scopeToCapability"][0]["credential_kind"] == "codex_access_token"
+    assert payload["scopeToCapability"][1]["credential_kind"] == "codex_app_server_secret"
+
+
+def test_codex_app_server_secret_requires_approval_for_connect_capability():
+    resolved = resolve_connection_permissions(
+        CODEX_PROVIDER,
+        {
+            "credential_kind": "codex_app_server_secret",
+            "requested_capabilities": ["codex.app_server.connect"],
+        },
+    )
+
+    assert resolved.capabilities == []
+    assert resolved.approval_required_capabilities == ["codex.app_server.connect"]
+    assert resolved.rejected_capabilities == []
+
+
+def test_local_encrypted_credential_store_writes_private_file(tmp_path):
+    path = tmp_path / "credentials.json"
+    store = LocalEncryptedCredentialStore(path, key=LocalEncryptedCredentialStore.generate_key())
+
+    envelope = store.put("codex", "default", "access_token", {"token": "secret-value"})
+
+    assert store.get(envelope.credential_id) == {"token": "secret-value"}
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_github_provider_template_supports_manifest_driven_import():

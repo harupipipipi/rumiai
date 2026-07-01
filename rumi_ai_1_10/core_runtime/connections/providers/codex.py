@@ -84,7 +84,7 @@ CODEX_PROVIDER = ConnectionProvider(
     scope_presets=[],
     scope_to_capability=[
         {"credential_kind": "codex_access_token", "capabilities": ["codex.access_token.configure"]},
-        {"credential_kind": "app_server_secret", "capabilities": ["codex.app_server.connect"]},
+        {"credential_kind": "codex_app_server_secret", "capabilities": ["codex.app_server.connect"]},
     ],
     adapter={
         "python": "ecosystem.defaultspack.domain.connections.codex:CodexConnectionAdapter",

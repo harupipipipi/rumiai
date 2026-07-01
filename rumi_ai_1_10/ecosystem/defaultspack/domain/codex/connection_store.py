@@ -145,6 +145,18 @@ def _codex_capabilities(*, configured: bool, pack_root: Path | None = None) -> l
 def _stored_token_exists(pack_root: Path | None = None) -> bool:
     if _codex_token_credential_ref(pack_root=pack_root):
         return True
+    try:
+        from domain.connections.store import connection_secret_key
+
+        credential_key = connection_secret_key(
+            "codex",
+            _DEFAULT_CONNECTION_ID,
+            _CODEX_ACCESS_MATERIAL_TYPE,
+        )
+        if _get_store(pack_root).has_secret(credential_key):
+            return True
+    except Exception:
+        pass
     if not _secrets_dir(pack_root).exists():
         return False
     try:
@@ -198,7 +210,7 @@ def codex_connection_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     env_configured = any(bool(os.environ.get(key, "").strip()) for key in _CODEX_TOKEN_ENV_KEYS)
     credential_ref = _codex_token_credential_ref(pack_root=pack_root)
     stored_configured = _stored_token_exists(pack_root)
-    configured = bool(env_configured or stored_configured or _read_secret_value(pack_root))
+    configured = bool(env_configured or stored_configured)
     connection_status = "connected" if configured else "missing_token"
     capabilities = _codex_capabilities(configured=configured, pack_root=pack_root)
     return {

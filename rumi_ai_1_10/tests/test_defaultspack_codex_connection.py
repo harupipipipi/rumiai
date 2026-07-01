@@ -70,6 +70,29 @@ def test_codex_token_status_and_route_responses_redact_raw_token():
                     assert token not in path.read_text(encoding="utf-8", errors="ignore")
 
 
+def test_codex_connection_status_uses_secret_existence_without_decrypting():
+    from domain.codex import connection_store
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        pack_root = Path(tmpdir)
+        secrets_dir = pack_root / "user_data" / "secrets"
+        token = _fresh_token()
+        env = {
+            "RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir),
+            "RUMI_CODEX_ACCESS_TOKEN": "",
+            "CODEX_ACCESS_TOKEN": "",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            saved = connection_store.save_codex_access_token(token, pack_root=pack_root)
+            with patch.object(connection_store, "_read_secret_value", side_effect=AssertionError("status must not decrypt token")):
+                status = connection_store.codex_connection_status(pack_root=pack_root)
+
+    assert saved["success"] is True
+    assert status["configured"] is True
+    assert status["connected"] is True
+    assert status["token_source"] == "secret_store"
+
+
 def test_codex_app_server_remote_endpoint_requires_app_server_auth_not_codex_token():
     from domain.codex.app_server import codex_app_server_status, save_codex_app_server_config
     from domain.codex.connection_store import save_codex_access_token
