@@ -678,6 +678,87 @@ def test_authority_persistent_approval_restores_existing_grant_when_related_gran
     assert store.get_request(decision.request_id).status == "pending"
 
 
+def test_authority_persistent_approval_rolls_back_grant_when_status_write_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    request_path = store._request_path(decision.request_id)
+    original_write_json = store._write_json
+
+    def fail_terminal_status_write(path, payload):
+        if Path(path) == request_path and payload.get("status") == "approved":
+            raise OSError("request status write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_terminal_status_write)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "persistent_grant_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert grants.get_grant("profile:work") is None
+
+
+def test_authority_persistent_deny_rolls_back_deny_when_status_write_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    request_path = store._request_path(decision.request_id)
+    original_write_json = store._write_json
+
+    def fail_terminal_status_write(path, payload):
+        if Path(path) == request_path and payload.get("status") == "denied":
+            raise OSError("request status write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_terminal_status_write)
+
+    denial = service.deny_request(
+        decision.request_id,
+        reason="not now",
+        persist=True,
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert denial["success"] is False
+    assert denial["status_code"] == 500
+    assert denial["reason"] == "deny_settlement_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert store.list_denies() == []
+
+
 def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {

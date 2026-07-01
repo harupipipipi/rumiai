@@ -322,7 +322,17 @@ class AuthorityRequestStore:
                 self._write_json(path, data)
             except Exception:
                 if callable(rollback_callback):
-                    rollback_callback(request, result)
+                    try:
+                        rollback_callback(request, result)
+                    except Exception as rollback_exc:
+                        self.audit(
+                            "authority_request_settlement_rollback_failed",
+                            {
+                                "request_id": request_id,
+                                "status": status,
+                                "error": str(rollback_exc),
+                            },
+                        )
                 raise
             self.audit("authority_request_status", {"request_id": request_id, "status": status})
             return {
@@ -464,6 +474,21 @@ class AuthorityRequestStore:
                 },
             )
         return record
+
+    def remove_deny(self, deny_id: str, *, reason: str = "rollback") -> bool:
+        normalized = str(deny_id or "").strip()
+        if not normalized:
+            return False
+        path = self._deny_dir / f"{_safe_filename(normalized)}.json"
+        with self._lock:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return False
+            except OSError:
+                return False
+            self.audit("authority_deny_removed", {"deny_id": normalized, "reason": reason})
+            return True
 
     def list_denies(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []

@@ -478,6 +478,7 @@ class AuthorityService:
                 return {"token": token, "related": related, "issued_token_ids": issued_token_ids}
 
             def rollback_once(_settled_request: AuthorityRequest, result: dict[str, Any] | None) -> None:
+                self._rollback_related_request_statuses((result or {}).get("related") or [])
                 self._request_store.revoke_one_shots(
                     (result or {}).get("issued_token_ids") or [],
                     reason="approval_settlement_failed",
@@ -578,11 +579,30 @@ class AuthorityService:
                 raise
             return {"related": related}
 
+        def rollback_persistent(
+            _settled_request: AuthorityRequest,
+            result: dict[str, Any] | None,
+        ) -> None:
+            self._rollback_related_request_statuses((result or {}).get("related") or [])
+            self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+            self._request_store.audit(
+                "authority_request_approval_failed",
+                {
+                    "request_id": request.request_id,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": request.permission_id,
+                    "error": "persistent_settlement_failed",
+                    **operator_audit,
+                },
+            )
+
         try:
             settlement = self._request_store.settle_pending_request(
                 request.request_id,
                 "approved",
                 settle_persistent,
+                rollback_persistent,
             )
         except AuthorityConfigError as exc:
             return {"success": False, "error": str(exc), "status_code": 400}
@@ -830,6 +850,15 @@ class AuthorityService:
             )
         return approvals
 
+    def _rollback_related_request_statuses(self, related_approvals: list[dict[str, Any]]) -> None:
+        for item in related_approvals or []:
+            request_id = str(item.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            request = self._request_store.get_request(request_id)
+            if request is not None and request.status == "approved":
+                self._request_store.set_request_status(request_id, "pending")
+
     def deny_request(
         self,
         request_id: str,
@@ -905,11 +934,32 @@ class AuthorityService:
                 )
             return {"deny": deny_record}
 
-        settlement = self._request_store.settle_pending_request(
-            request.request_id,
-            "denied",
-            settle_deny,
-        )
+        def rollback_deny(
+            _settled_request: AuthorityRequest,
+            result: dict[str, Any] | None,
+        ) -> None:
+            deny_record = (result or {}).get("deny")
+            deny_id = str((deny_record or {}).get("deny_id") or "")
+            if deny_id:
+                self._request_store.remove_deny(
+                    deny_id,
+                    reason="deny_settlement_failed",
+                )
+
+        try:
+            settlement = self._request_store.settle_pending_request(
+                request.request_id,
+                "denied",
+                settle_deny,
+                rollback_deny,
+            )
+        except Exception:
+            return {
+                "success": False,
+                "error": "Authority denial failed",
+                "status_code": 500,
+                "reason": "deny_settlement_failed",
+            }
         if not settlement.get("settled"):
             return self._settlement_failure_response(settlement)
         request = settlement["request"]
