@@ -204,7 +204,83 @@ class ControlPanelHandlersMixin:
     # Pack Management
     # ------------------------------------------------------------------
 
-    def _panel_list_packs_internal(self) -> List[Dict[str, Any]]:
+    def _panel_get_approval_manager(self) -> Any:
+        kernel = getattr(self, "kernel", None)
+        return getattr(self, "approval_manager", None) or getattr(kernel, "approval_manager", None)
+
+    def _panel_pack_approval_state(self, pack_id: str, is_core: bool = False) -> Dict[str, Any]:
+        if is_core:
+            return {
+                "approval_status": "approved",
+                "approval_reason": None,
+                "approved": True,
+                "hash_valid": True,
+                "critical_changed": False,
+                "approval_issues": [],
+            }
+
+        manager = self._panel_get_approval_manager()
+        if manager is None:
+            return {
+                "approval_status": "unknown",
+                "approval_reason": "approval_manager_unavailable",
+                "approved": False,
+                "hash_valid": None,
+                "critical_changed": None,
+                "approval_issues": ["approval_manager_unavailable"],
+            }
+
+        issues: List[str] = []
+        approval_status = "unknown"
+        approval_reason: Optional[str] = None
+        approved = False
+        hash_valid: Optional[bool] = None
+        critical_changed: Optional[bool] = None
+
+        try:
+            status = manager.get_status(pack_id)
+            if status is not None:
+                approval_status = getattr(status, "value", status)
+        except Exception as e:
+            approval_reason = "status_unavailable"
+            issues.append("status_unavailable")
+            _log_internal_error("panel_pack_approval.status", e)
+
+        try:
+            approved, reason = manager.is_pack_approved_and_verified(pack_id)
+            if reason:
+                approval_reason = str(reason)
+                issues.append(str(reason))
+        except Exception as e:
+            approval_reason = approval_reason or "approval_check_failed"
+            issues.append("approval_check_failed")
+            _log_internal_error("panel_pack_approval.verified", e)
+
+        has_approval_baseline = approval_status not in ("installed", "pending", "unknown")
+        if has_approval_baseline or approval_reason == "hash_mismatch":
+            try:
+                details = manager.verify_hash_detailed(pack_id, use_cache=False)
+                hash_valid = bool(details.get("valid"))
+                critical_changed = bool(details.get("critical_changed"))
+                if critical_changed:
+                    issues.append("critical_changed")
+            except Exception as e:
+                issues.append("hash_check_failed")
+                _log_internal_error("panel_pack_approval.hash", e)
+
+        if approved and approval_status in ("unknown", "installed", "pending", "modified", "blocked", "error"):
+            approval_status = "approved"
+
+        return {
+            "approval_status": str(approval_status),
+            "approval_reason": approval_reason,
+            "approved": bool(approved),
+            "hash_valid": hash_valid,
+            "critical_changed": critical_changed,
+            "approval_issues": list(dict.fromkeys(issues)),
+        }
+
+    def _panel_list_packs_internal(self, include_approval_state: bool = False) -> List[Dict[str, Any]]:
         """Pack 一覧を内部的に取得する（dashboard からも呼ばれる）"""
         packs: List[Dict[str, Any]] = []
 
@@ -220,14 +296,17 @@ class ControlPanelHandlersMixin:
                 try:
                     with open(eco_path, "r", encoding="utf-8") as f:
                         eco = json.load(f)
-                    packs.append({
+                    pack = {
                         "pack_id": eco.get("pack_id", d.name),
                         "name": eco.get("metadata", {}).get("name", d.name),
                         "version": eco.get("version", "0.0.0"),
                         "description": eco.get("metadata", {}).get("description", ""),
                         "is_core": True,
                         "enabled": True,
-                    })
+                    }
+                    if include_approval_state:
+                        pack.update(self._panel_pack_approval_state(pack["pack_id"], is_core=True))
+                    packs.append(pack)
                 except Exception:
                     pass
 
@@ -240,14 +319,17 @@ class ControlPanelHandlersMixin:
                     with open(loc.ecosystem_json_path, "r", encoding="utf-8") as f:
                         eco = json.load(f)
                     enabled = overrides.get(loc.pack_id, eco.get("enabled", True))
-                    packs.append({
+                    pack = {
                         "pack_id": loc.pack_id,
                         "name": eco.get("metadata", {}).get("name", loc.pack_id),
                         "version": eco.get("version", "0.0.0"),
                         "description": eco.get("metadata", {}).get("description", ""),
                         "is_core": False,
                         "enabled": enabled,
-                    })
+                    }
+                    if include_approval_state:
+                        pack.update(self._panel_pack_approval_state(loc.pack_id))
+                    packs.append(pack)
                 except Exception:
                     pass
         except Exception as e:
@@ -257,7 +339,7 @@ class ControlPanelHandlersMixin:
 
     def _panel_get_packs(self) -> Dict[str, Any]:
         """GET /api/panel/packs — Pack 一覧"""
-        packs = self._panel_list_packs_internal()
+        packs = self._panel_list_packs_internal(include_approval_state=True)
         return {"packs": packs, "count": len(packs)}
 
     def _panel_enable_pack(self, pack_id: str) -> Dict[str, Any]:

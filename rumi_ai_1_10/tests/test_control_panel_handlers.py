@@ -65,6 +65,85 @@ class TestPanelGetPacks(unittest.TestCase):
         self.assertIsInstance(result["packs"], list)
         self.assertEqual(result["count"], len(result["packs"]))
 
+    @patch.object(ControlPanelHandlersMixin, "_panel_read_pack_overrides")
+    @patch("core_runtime.paths.discover_pack_locations", create=True)
+    def test_packs_include_approval_state(self, mock_discover, mock_read_overrides):
+        class FakeApprovalManager:
+            def get_status(self, pack_id):
+                return SimpleNamespace(value="modified")
+
+            def is_pack_approved_and_verified(self, pack_id):
+                return False, "hash_mismatch"
+
+            def verify_hash_detailed(self, pack_id, use_cache=True):
+                return {"valid": False, "critical_changed": True}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            eco_path = root / "ecosystem.json"
+            eco_path.write_text(json.dumps({
+                "pack_id": "pack_a",
+                "enabled": True,
+                "metadata": {"name": "Pack A"},
+            }), encoding="utf-8")
+            mock_read_overrides.return_value = {}
+            mock_discover.return_value = [
+                SimpleNamespace(pack_id="pack_a", ecosystem_json_path=eco_path)
+            ]
+
+            handler = _FakeHandler()
+            handler.approval_manager = FakeApprovalManager()
+            result = handler._panel_get_packs()
+
+            pack = next(p for p in result["packs"] if p["pack_id"] == "pack_a")
+            self.assertEqual(pack["approval_status"], "modified")
+            self.assertFalse(pack["approved"])
+            self.assertEqual(pack["approval_reason"], "hash_mismatch")
+            self.assertFalse(pack["hash_valid"])
+            self.assertTrue(pack["critical_changed"])
+            self.assertIn("hash_mismatch", pack["approval_issues"])
+            self.assertIn("critical_changed", pack["approval_issues"])
+
+    @patch.object(ControlPanelHandlersMixin, "_panel_read_pack_overrides")
+    @patch("core_runtime.paths.discover_pack_locations", create=True)
+    def test_packs_do_not_mark_pending_approval_as_critical_change(
+        self, mock_discover, mock_read_overrides
+    ):
+        class FakeApprovalManager:
+            def get_status(self, pack_id):
+                return SimpleNamespace(value="installed")
+
+            def is_pack_approved_and_verified(self, pack_id):
+                return False, "not_approved"
+
+            def verify_hash_detailed(self, pack_id, use_cache=True):
+                raise AssertionError("pending approval should not run detailed hash verification")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            eco_path = root / "ecosystem.json"
+            eco_path.write_text(json.dumps({
+                "pack_id": "pack_a",
+                "enabled": True,
+                "metadata": {"name": "Pack A"},
+            }), encoding="utf-8")
+            mock_read_overrides.return_value = {}
+            mock_discover.return_value = [
+                SimpleNamespace(pack_id="pack_a", ecosystem_json_path=eco_path)
+            ]
+
+            handler = _FakeHandler()
+            handler.approval_manager = FakeApprovalManager()
+            result = handler._panel_get_packs()
+
+            pack = next(p for p in result["packs"] if p["pack_id"] == "pack_a")
+            self.assertEqual(pack["approval_status"], "installed")
+            self.assertFalse(pack["approved"])
+            self.assertEqual(pack["approval_reason"], "not_approved")
+            self.assertIsNone(pack["hash_valid"])
+            self.assertIsNone(pack["critical_changed"])
+            self.assertEqual(pack["approval_issues"], ["not_approved"])
+
 
 class TestPanelGetFlows(unittest.TestCase):
     """GET /api/panel/flows のレスポンス形式テスト"""

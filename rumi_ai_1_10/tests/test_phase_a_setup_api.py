@@ -186,6 +186,78 @@ class TestCompleteSetup:
         handler._send_response.assert_called_once()
         handler._check_auth.assert_not_called()
 
+    def test_setup_packs_list_no_auth_required_during_initial_setup(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/api/setup/packs"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._handle_builtin_public_get = MagicMock(return_value=False)
+        handler._match_web_mount = MagicMock(return_value=None)
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._parse_query = MagicMock(return_value={})
+        handler._dispatch_api_route = MagicMock(return_value=True)
+        handler._send_response = MagicMock()
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
+            "needs_setup": True,
+        }
+
+        PackAPIHandler.do_GET(handler)
+
+        handler._check_auth.assert_not_called()
+        handler._dispatch_api_route.assert_called_once_with("GET", "/api/setup/packs", query={})
+
+    def test_setup_pack_install_no_auth_required_only_during_initial_setup(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/api/setup/packs/install"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._check_auth = MagicMock(side_effect=AssertionError("auth should not run"))
+        handler._parse_body = MagicMock(return_value={"setup_pack_ids": ["defaultspack"]})
+        handler._parse_query = MagicMock(return_value={})
+        handler._dispatch_api_route = MagicMock(return_value=True)
+        handler._send_response = MagicMock()
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
+            "needs_setup": True,
+        }
+
+        PackAPIHandler.do_POST(handler)
+
+        handler._check_auth.assert_not_called()
+        handler._dispatch_api_route.assert_called_once_with(
+            "POST",
+            "/api/setup/packs/install",
+            {"setup_pack_ids": ["defaultspack"]},
+            query={},
+        )
+
+    def test_setup_pack_install_requires_auth_after_setup_completed(self):
+        from core_runtime.pack_api_server import PackAPIHandler
+
+        handler = object.__new__(PackAPIHandler)
+        handler.path = "/api/setup/packs/install"
+        handler.client_address = ("198.51.100.7", 12345)
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._check_auth = MagicMock(return_value=False)
+        handler._discard_request_body = MagicMock()
+        handler._dispatch_api_route = MagicMock(return_value=True)
+        handler._send_response = MagicMock()
+        PackAPIHandler.app_lifecycle_manager = MagicMock()
+        PackAPIHandler.app_lifecycle_manager.check_setup_status.return_value = {
+            "needs_setup": False,
+        }
+
+        PackAPIHandler.do_POST(handler)
+
+        handler._check_auth.assert_called_once_with("POST", "/api/setup/packs/install")
+        handler._discard_request_body.assert_called_once()
+        handler._dispatch_api_route.assert_not_called()
+
 
 class TestHealthPayload:
     def test_health_reports_runtime_error(self, tmp_path):

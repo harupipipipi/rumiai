@@ -1,13 +1,34 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '@/src/store';
+import { useAppStore, type Pack } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { Input } from '@/src/components/ui/Input';
 import { Badge } from '@/src/components/ui/Badge';
 import { Switch } from '@/src/components/ui/Switch';
 import { Card } from '@/src/components/ui/Card';
 import { panelRoutes } from '@/src/lib/routes';
-import { Search, Package, Loader2 } from 'lucide-react';
+import { AlertTriangle, Search, Package, Loader2, ShieldCheck } from 'lucide-react';
+
+type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning';
+
+function approvalBadgeVariant(pack: Pack): BadgeVariant {
+  if (pack.approved) return 'success';
+  if (pack.approvalStatus === 'pending' || pack.approvalStatus === 'installed') return 'warning';
+  if (pack.criticalChanged || ['blocked', 'error', 'modified'].includes(pack.approvalStatus)) return 'destructive';
+  return 'warning';
+}
+
+function approvalBadgeLabel(pack: Pack): string {
+  if (pack.approved) return 'Approved';
+  if (pack.approvalStatus === 'pending' || pack.approvalStatus === 'installed') return 'Needs approval';
+  if (pack.approvalStatus === 'blocked') return 'Blocked';
+  if (pack.criticalChanged || pack.approvalStatus === 'modified') return 'Modified';
+  return 'Approval unknown';
+}
+
+function approvalIssueText(pack: Pack): string {
+  return pack.approvalReason || pack.approvalIssues[0] || 'Pack approval needs attention.';
+}
 
 export function Packs() {
   const t = useT();
@@ -82,8 +103,22 @@ export function Packs() {
                       <Badge variant={pack.enabled ? 'success' : 'secondary'}>
                         {pack.enabled ? 'Enabled' : 'Disabled'}
                       </Badge>
+                      <Badge variant={approvalBadgeVariant(pack)} className="inline-flex items-center gap-1">
+                        {pack.approved ? (
+                          <ShieldCheck className="h-3 w-3" />
+                        ) : (
+                          <AlertTriangle className="h-3 w-3" />
+                        )}
+                        {approvalBadgeLabel(pack)}
+                      </Badge>
                     </div>
                     <p className="text-sm text-text-muted truncate">{pack.description}</p>
+                    {(!pack.approved || pack.approvalIssues.length > 0) && (
+                      <div className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{approvalIssueText(pack)}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="ml-4 flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
                     <Switch

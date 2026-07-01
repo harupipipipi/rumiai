@@ -425,9 +425,28 @@ class PackAPIHandler(
             include_builtin_core_control_panel=include_builtin_core_control_panel,
         )
 
+    def _setup_pack_pre_auth_allowed(self, method: str, path: str) -> bool:
+        setup_pack_routes = {
+            ("GET", "/api/setup/packs"),
+            ("GET", "/api/setup/migration/status"),
+            ("POST", "/api/setup/packs/install"),
+        }
+        if (method.upper(), path) not in setup_pack_routes:
+            return False
+        alm = self.__class__.app_lifecycle_manager
+        if alm is None:
+            return False
+        try:
+            return bool(alm.check_setup_status().get("needs_setup"))
+        except Exception:
+            logger.debug("Failed to check setup status for setup-pack pre-auth", exc_info=True)
+            return False
+
     def _is_pre_auth_route(self, method: str, path: str) -> bool:
         """method + path が pre_auth_table にマッチするか判定する。"""
         method_upper = method.upper()
+        if self._setup_pack_pre_auth_allowed(method_upper, path):
+            return True
         core_pre_auth_routes = {
             ("POST", "/api/panel/auth/bootstrap"),
             ("POST", "/api/panel/auth/exchange"),

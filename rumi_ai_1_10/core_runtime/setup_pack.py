@@ -164,17 +164,35 @@ class SetupPackManager:
         definitions = self._load_definitions()
         selection = self.get_selection()
         selected_setup_pack_ids: List[str] = []
+        unknown_selected_setup_pack_ids: List[str] = []
         selected_ids = set()
-        for setup_pack_id in selection.get("setup_pack_ids") or []:
-            normalized = str(setup_pack_id)
-            if normalized not in selected_ids:
-                selected_setup_pack_ids.append(normalized)
-                selected_ids.add(normalized)
-        if selection.get("setup_pack_id"):
-            legacy_setup_pack_id = str(selection["setup_pack_id"])
-            if legacy_setup_pack_id not in selected_ids:
-                selected_setup_pack_ids.append(legacy_setup_pack_id)
-                selected_ids.add(legacy_setup_pack_id)
+        unknown_selected_ids = set()
+
+        def add_selected(value: Any) -> None:
+            raw_items = [value] if isinstance(value, str) else value
+            if not isinstance(raw_items, list):
+                return
+            for item in raw_items:
+                setup_pack_id = str(item).strip()
+                if not setup_pack_id:
+                    continue
+                if setup_pack_id not in definitions:
+                    if setup_pack_id not in unknown_selected_ids:
+                        unknown_selected_setup_pack_ids.append(setup_pack_id)
+                        unknown_selected_ids.add(setup_pack_id)
+                    continue
+                if setup_pack_id not in selected_ids:
+                    selected_setup_pack_ids.append(setup_pack_id)
+                    selected_ids.add(setup_pack_id)
+
+        add_selected(selection.get("setup_pack_ids"))
+        add_selected(selection.get("setup_pack_id"))
+
+        active_setup_pack_id = str(selection.get("active_setup_pack_id") or "").strip()
+        active_target_pack_id = str(selection.get("active_target_pack_id") or "").strip()
+        if active_setup_pack_id not in definitions:
+            active_setup_pack_id = ""
+            active_target_pack_id = ""
         packs = []
         for pack_id in sorted(definitions):
             item = definitions[pack_id]
@@ -206,8 +224,9 @@ class SetupPackManager:
             "count": len(packs),
             "selected_setup_pack_id": selection.get("setup_pack_id"),
             "selected_setup_pack_ids": selected_setup_pack_ids,
-            "active_setup_pack_id": selection.get("active_setup_pack_id"),
-            "active_target_pack_id": selection.get("active_target_pack_id"),
+            "unknown_selected_setup_pack_ids": unknown_selected_setup_pack_ids,
+            "active_setup_pack_id": active_setup_pack_id or None,
+            "active_target_pack_id": active_target_pack_id or None,
         }
 
     def get_selection(self) -> Dict[str, Any]:
@@ -512,15 +531,37 @@ class SetupPackManager:
             "failed_count": result.failed_count,
         }
 
-    def _approve_target_pack(self, target_pack_id: str) -> None:
+    def _approve_target_pack(self, target_pack_id: str) -> Dict[str, Any]:
         try:
             from .approval_manager import get_approval_manager
 
             am = get_approval_manager()
-            if getattr(am, "_initialized", False):
-                am.approve(target_pack_id)
-        except Exception:
+            if not getattr(am, "_initialized", False):
+                return {
+                    "approved": False,
+                    "skipped": True,
+                    "reason": "approval_manager_uninitialized",
+                }
+            scan_packs = getattr(am, "scan_packs", None)
+            if callable(scan_packs):
+                scan_packs()
+            result = am.approve(target_pack_id)
+            if not getattr(result, "success", False):
+                return {
+                    "approved": False,
+                    "skipped": False,
+                    "reason": "target_pack_approval_failed",
+                    "error": getattr(result, "error", "approval_failed"),
+                }
+            return {"approved": True, "skipped": False, "reason": None}
+        except Exception as exc:
             logger.debug("Failed to auto-approve setup pack target", exc_info=True)
+            return {
+                "approved": False,
+                "skipped": False,
+                "reason": "target_pack_approval_failed",
+                "error": str(exc),
+            }
 
     def _set_active_pack_identity(self, ecosystem_json_path: Path) -> Optional[str]:
         try:
@@ -623,6 +664,23 @@ class SetupPackManager:
                 continue
             installable_definitions.append(definition)
 
+        if errors:
+            return {
+                "success": False,
+                "installed": False,
+                "installed_setup_pack_ids": [],
+                "installed_target_pack_ids": [],
+                "installed_setup_target_map": {},
+                "granted_all_ok_target_pack_ids": [],
+                "skipped_all_ok_setup_pack_ids": [],
+                "active_setup_pack_id": None,
+                "active_target_pack_id": None,
+                "selection": {},
+                "errors": errors,
+                "error": "Setup pack selection contains unavailable packs",
+                "status_code": 400,
+            }
+
         contract_errors = self._validate_install_contracts(installable_definitions, locations)
         if contract_errors:
             errors.extend(contract_errors)
@@ -649,6 +707,44 @@ class SetupPackManager:
                 "selection": {},
                 "errors": errors,
                 "error": "Setup pack compatibility validation failed",
+                "status_code": 400,
+            }
+
+        for definition in installable_definitions:
+            approval_result = self._approve_target_pack(definition.target_pack_id)
+            if not approval_result.get("approved") and not approval_result.get("skipped"):
+                errors.append({
+                    "setup_pack_id": definition.pack_id,
+                    "target_pack_id": definition.target_pack_id,
+                    "error": approval_result.get("error") or "Failed to approve target pack",
+                    "reason": "target_pack_approval_failed",
+                    "approval": approval_result,
+                })
+
+        if errors:
+            self._log_system_event(
+                "setup_pack.install",
+                False,
+                details={
+                    "setup_pack_ids": [definition.pack_id for definition in installable_definitions],
+                    "target_pack_ids": [definition.target_pack_id for definition in installable_definitions],
+                    "errors": errors,
+                },
+                error="target_pack_approval_failed",
+            )
+            return {
+                "success": False,
+                "installed": False,
+                "installed_setup_pack_ids": [],
+                "installed_target_pack_ids": [],
+                "installed_setup_target_map": {},
+                "granted_all_ok_target_pack_ids": [],
+                "skipped_all_ok_setup_pack_ids": [],
+                "active_setup_pack_id": None,
+                "active_target_pack_id": None,
+                "selection": {},
+                "errors": errors,
+                "error": "Setup pack target approval failed",
                 "status_code": 400,
             }
 
@@ -680,7 +776,6 @@ class SetupPackManager:
                     error="unsupported_all_ok",
                 )
             installed_definitions.append(definition)
-            self._approve_target_pack(definition.target_pack_id)
 
         if not installed_definitions:
             return {
@@ -768,6 +863,27 @@ class SetupPackManager:
                 "error": f"setup_pack does not support all_ok: {setup_pack_id}",
                 "status_code": 400,
                 "reason": "unsupported_all_ok",
+            }
+        locations = {
+            loc.pack_id: loc for loc in discover_pack_locations(str(self.ecosystem_dir))
+        }
+        if definition.target_pack_id not in locations:
+            self._log_permission_event(
+                "grant_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": setup_pack_id,
+                    "target_pack_id": definition.target_pack_id,
+                },
+                error="target_pack_not_found",
+            )
+            return {
+                "error": f"Target pack not found: {definition.target_pack_id}",
+                "status_code": 404,
+                "reason": "target_pack_not_found",
+                "principal_id": definition.target_pack_id,
             }
         return self._grant_all_ok_for_definition(definition)
 

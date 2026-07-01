@@ -374,7 +374,7 @@ class ApprovalManager:
                     if self._should_skip_hash_file(file_path, local_dir):
                         continue
                     
-                    relative_path = str(file_path.relative_to(local_dir))
+                    relative_path = file_path.relative_to(local_dir).as_posix()
                     hash_value = self._compute_file_hash(file_path)
                     hashes[relative_path] = hash_value
         
@@ -1013,7 +1013,7 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
                 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = file_path.relative_to(pack_dir).as_posix()
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
         
@@ -1031,7 +1031,7 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = file_path.relative_to(pack_dir).as_posix()
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
 
