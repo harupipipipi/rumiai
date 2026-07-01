@@ -1082,6 +1082,16 @@ test("settings tools prelude renders Codex App Server status and controls", () =
             auth_kind: "ws_token",
             ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
             shared_secret_file: "",
+            account: {
+              provider_id: "codex",
+              provider_kind: "codex",
+              type: "chatgpt",
+              auth_method: "chatgpt_account",
+              auth_method_label: "ChatGPT account",
+              account_label: "rumi-user@example.test",
+              email: "rumi-user@example.test",
+              plan_type: "prolite",
+            },
             tool_source: { status: "configured" },
             automation_endpoint: { status: "configured" },
           },
@@ -1099,9 +1109,11 @@ test("settings tools prelude renders Codex App Server status and controls", () =
   assert.match(html, /ws:\/\/127\.0\.0\.1:7331\/ws/);
   assert.match(html, /websocket_loopback/);
   assert.match(html, /ws_token via file/);
+  assert.match(html, /Connected Codex provider via ChatGPT account: rumi-user@example.test/);
   assert.match(html, /Save config/);
   assert.match(html, /Probe/);
   assert.doesNotMatch(html, new RegExp(rawToken));
+  assert.doesNotMatch(html, /Connected ChatGPT account/);
 });
 
 test("settings help pane uses reported active profile with fallback when absent", () => {

@@ -8,10 +8,33 @@ CODEX_PROVIDER = ConnectionProvider(
     description="Connect a Codex local/programmatic workflow access token and optional Codex App Server endpoint.",
     icon="terminal",
     service_kind="dev",
-    auth_type="api_key",
+    auth_type="codex",
     official_broker_supported=False,
     self_host_client_supported=False,
     auth_template="credential_bundle",
+    auth_methods=[
+        {
+            "id": "chatgpt_account",
+            "displayName": "ChatGPT account via Codex App Server",
+            "description": "Read the signed-in Codex App Server account without storing a Rumi Platform API key.",
+            "credential_kind": "chatgpt_account",
+            "secret_material": False,
+        },
+        {
+            "id": "codex_access_token",
+            "displayName": "Codex access token",
+            "description": "Optional local/programmatic workflow token stored separately from Codex App Server auth.",
+            "credential_kind": "codex_access_token",
+            "secret_material": True,
+        },
+        {
+            "id": "app_server_secret",
+            "displayName": "Codex App Server secret",
+            "description": "Optional WS token or shared secret for non-loopback App Server endpoints.",
+            "credential_kind": "codex_app_server_secret",
+            "secret_material": True,
+        },
+    ],
     token_import_supported=True,
     priority=50,
     capabilities=[
@@ -70,6 +93,8 @@ CODEX_PROVIDER = ConnectionProvider(
     metadata={
         "credential_kind": "codex_access_token",
         "app_server_auth_kind": "codex_app_server_secret",
+        "provider_kind": "codex",
+        "platform_api_key_required": False,
         "not_platform_api_key": True,
         "not_workspace_agent_token": True,
         "secret_handling": "Never expose the raw Codex token or Codex App Server secret in Settings payloads, logs, snapshots, repository files, or CLI arguments.",

@@ -46,6 +46,10 @@ export type AccountConnectionScopeModeOption = {
 
 export type AccountConnectionPreludeCard = {
   providerId: string;
+  providerKind: string;
+  authType: string;
+  authMethods: Array<Record<string, unknown>>;
+  platformApiKeyRequired: boolean;
   label: string;
   description: string;
   connected: boolean;
@@ -83,6 +87,10 @@ export type AccountConnectionPreludeCard = {
 };
 
 export type CodexAppServerPrelude = {
+  providerId: string;
+  providerKind: string;
+  authType: string;
+  authMethods: Array<Record<string, unknown>>;
   configured: boolean;
   enabled: boolean;
   transport: "off" | "stdio" | "unix" | "websocket_loopback" | "websocket_remote";
@@ -103,6 +111,9 @@ export type CodexAppServerPrelude = {
   automationEndpointStatus: string;
   accountLabel: string;
   accountType: string;
+  accountProviderId: string;
+  accountAuthMethod: string;
+  accountAuthMethodLabel: string;
   accountEmail: string;
   accountPlanType: string;
   requiresOpenaiAuth: boolean;
@@ -606,6 +617,10 @@ export function buildAccountConnectionPrelude(settingsValues: SettingsValues = {
     const credentialRef = recordValue(status.credential_ref);
     return {
       providerId: definition.providerId,
+      providerKind: String(status.provider_kind || definition.providerId),
+      authType: String(status.auth_type || ""),
+      authMethods: Array.isArray(status.auth_methods) ? status.auth_methods.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [],
+      platformApiKeyRequired: Boolean(status.platform_api_key_required),
       label: definition.label,
       description: definition.description,
       connected,
@@ -660,6 +675,10 @@ export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}):
     || transport === "websocket_remote"
   ) ? transport : "off";
   return {
+    providerId: String(appServer.provider_id || account.provider_id || "codex"),
+    providerKind: String(appServer.provider_kind || account.provider_kind || "codex"),
+    authType: String(appServer.auth_type || "codex"),
+    authMethods: Array.isArray(appServer.auth_methods) ? appServer.auth_methods.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object") : [],
     configured,
     enabled,
     transport: normalizedTransport,
@@ -680,6 +699,9 @@ export function buildCodexAppServerPrelude(settingsValues: SettingsValues = {}):
     automationEndpointStatus: String(automationEndpoint.status || "disabled"),
     accountLabel: String(account.account_label || account.email || ""),
     accountType: String(account.type || ""),
+    accountProviderId: String(account.provider_id || appServer.provider_id || "codex"),
+    accountAuthMethod: String(account.auth_method || ""),
+    accountAuthMethodLabel: String(account.auth_method_label || ""),
     accountEmail: String(account.email || ""),
     accountPlanType: String(account.plan_type || account.planType || ""),
     requiresOpenaiAuth: Boolean(account.requires_openai_auth ?? account.requiresOpenaiAuth),

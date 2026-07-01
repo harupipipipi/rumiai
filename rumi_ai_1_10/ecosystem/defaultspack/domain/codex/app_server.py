@@ -176,6 +176,43 @@ def _normalize_path(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _codex_auth_method_for_account_type(account_type: str) -> str:
+    if account_type == "chatgpt":
+        return "chatgpt_account"
+    if account_type == "apiKey":
+        return "platform_api_key"
+    if account_type == "amazonBedrock":
+        return "amazon_bedrock"
+    return account_type or "unknown"
+
+
+def _codex_auth_method_label(auth_method: str) -> str:
+    return {
+        "chatgpt_account": "ChatGPT account",
+        "platform_api_key": "OpenAI API key",
+        "amazon_bedrock": "Amazon Bedrock",
+    }.get(auth_method, auth_method or "account")
+
+
+def _codex_app_server_auth_methods(*, account_configured: bool = False, app_server_auth_configured: bool = False) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "chatgpt_account",
+            "label": "ChatGPT account via Codex App Server",
+            "credential_kind": "chatgpt_account",
+            "configured": account_configured,
+            "secret_material": False,
+        },
+        {
+            "id": "app_server_secret",
+            "label": "Codex App Server secret",
+            "credential_kind": "codex_app_server_secret",
+            "configured": app_server_auth_configured,
+            "secret_material": True,
+        },
+    ]
+
+
 def _safe_account_metadata(value: Any) -> dict[str, Any]:
     account = value if isinstance(value, dict) else {}
     account_type = str(account.get("type") or account.get("account_type") or "").strip()
@@ -186,18 +223,23 @@ def _safe_account_metadata(value: Any) -> dict[str, Any]:
     requires_openai_auth = account.get("requiresOpenaiAuth")
     if requires_openai_auth is None:
         requires_openai_auth = account.get("requires_openai_auth")
+    auth_method = str(account.get("auth_method") or _codex_auth_method_for_account_type(account_type)).strip()
     label = str(account.get("account_label") or "").strip()
     if not label:
-        if account_type == "chatgpt":
+        if auth_method == "chatgpt_account":
             label = email or "ChatGPT account"
-        elif account_type == "apiKey":
+        elif auth_method == "platform_api_key":
             label = "OpenAI API key"
-        elif account_type == "amazonBedrock":
+        elif auth_method == "amazon_bedrock":
             label = "Amazon Bedrock"
         else:
             label = account_type
     result: dict[str, Any] = {
+        "provider_id": "codex",
+        "provider_kind": "codex",
         "type": account_type,
+        "auth_method": auth_method,
+        "auth_method_label": _codex_auth_method_label(auth_method),
         "account_label": label,
     }
     if email:
@@ -482,6 +524,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
     config = _read_config(pack_root)
     base_url = str(config.get("base_url") or "")
     websocket_url = str(config.get("websocket_url") or "")
+    account = _safe_account_metadata(config.get("account"))
     configured = _config_is_configured(config)
     auth_required = _endpoint_requires_auth(config)
     auth = _codex_app_server_auth(config, pack_root=pack_root)
@@ -516,6 +559,12 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         status_label = "Not configured"
     return {
         "provider_id": "codex",
+        "provider_kind": "codex",
+        "auth_type": "codex",
+        "auth_methods": _codex_app_server_auth_methods(
+            account_configured=bool(account),
+            app_server_auth_configured=auth_configured,
+        ),
         "configured": configured,
         "enabled": bool(config.get("enabled")),
         "transport": str(config.get("transport") or "off"),
@@ -541,7 +590,7 @@ def codex_app_server_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "ws_token_file": str(config.get("ws_token_file") or ""),
         "shared_secret_file": str(config.get("shared_secret_file") or ""),
         "command": build_codex_app_server_command(config),
-        "account": _safe_account_metadata(config.get("account")),
+        "account": account,
         "tool_source": {
             "enabled": bool(config.get("tool_source_enabled")),
             "status": connection_status

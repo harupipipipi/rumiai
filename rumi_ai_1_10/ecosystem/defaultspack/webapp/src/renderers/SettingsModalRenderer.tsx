@@ -3306,11 +3306,14 @@ export function SettingsModalRenderer({
         ? result.account as Record<string, unknown>
         : {};
       const accountLabel = String(account.account_label || account.email || "");
+      const accountAuthMethodLabel = String(account.auth_method_label || account.auth_method || "");
       setConnectionMessages((current) => ({
         ...current,
         codex_app_server: {
           tone: probeStatus === "ok" ? "success" : "error",
-          text: accountLabel ? `Probe: ${probeStatus}; account: ${accountLabel}` : `Probe: ${probeStatus}`,
+          text: accountLabel
+            ? `Probe: ${probeStatus}; Codex provider via ${accountAuthMethodLabel || "account"}: ${accountLabel}`
+            : `Probe: ${probeStatus}`,
         },
       }));
       refreshConnectionStatus("codex");
@@ -3666,7 +3669,7 @@ export function SettingsModalRenderer({
                 </p>
                 {codexAppServerPrelude.accountLabel && (
                   <p className="mt-1 max-w-full break-all text-xs leading-5 text-emerald-300/90">
-                    Connected {codexAppServerPrelude.accountType === "chatgpt" ? "ChatGPT account" : "account"}: {codexAppServerPrelude.accountLabel}
+                    Connected Codex provider via {codexAppServerPrelude.accountAuthMethodLabel || "account"}: {codexAppServerPrelude.accountLabel}
                     {codexAppServerPrelude.accountPlanType && (
                       <span className="text-emerald-300/65"> ({codexAppServerPrelude.accountPlanType})</span>
                     )}

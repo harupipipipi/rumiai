@@ -52,6 +52,15 @@ def test_codex_token_status_and_route_responses_redact_raw_token():
 
             assert saved["success"] is True
             assert status["configured"] is True
+            assert status["provider_kind"] == "codex"
+            assert status["auth_type"] == "codex"
+            assert status["platform_api_key_required"] is False
+            assert [method["id"] for method in status["auth_methods"]] == [
+                "chatgpt_account",
+                "codex_access_token",
+                "app_server_secret",
+            ]
+            assert status["active_auth_methods"] == ["codex_access_token"]
             assert routed["status"] == "ok"
             assert token not in _text(saved)
             assert token not in _text(status)
@@ -633,13 +642,20 @@ def test_codex_app_server_probe_reads_and_caches_chatgpt_account(monkeypatch):
     assert result["success"] is True
     assert result["probe"]["status"] == "ok"
     assert result["account"] == {
+        "provider_id": "codex",
+        "provider_kind": "codex",
         "type": "chatgpt",
+        "auth_method": "chatgpt_account",
+        "auth_method_label": "ChatGPT account",
         "account_label": "rumi-user@example.test",
         "email": "rumi-user@example.test",
         "plan_type": "prolite",
         "requires_openai_auth": True,
     }
     assert status["account"] == result["account"]
+    assert status["provider_kind"] == "codex"
+    assert status["auth_type"] == "codex"
+    assert [method["id"] for method in status["auth_methods"]] == ["chatgpt_account", "app_server_secret"]
     assert created["command"] == ["codex", "app-server", *SAFE_APP_SERVER_ARGS, "--listen", "stdio://"]
     assert result["sent_methods"] == ["initialize", "initialized", "account/read"]
     sent_messages = process.stdin.messages

@@ -225,6 +225,14 @@ test("account connection prelude treats Codex as a redacted credential", () => {
     accounts_connections: {
       providers: {
         codex: {
+          provider_kind: "codex",
+          auth_type: "codex",
+          platform_api_key_required: false,
+          auth_methods: [
+            { id: "chatgpt_account", configured: false },
+            { id: "codex_access_token", configured: true },
+            { id: "app_server_secret", configured: false },
+          ],
           connected: true,
           configured: true,
           token_configured: true,
@@ -239,6 +247,10 @@ test("account connection prelude treats Codex as a redacted credential", () => {
 
   const codex = cards.find((card) => card.providerId === "codex");
   assert.equal(codex?.label, "Codex");
+  assert.equal(codex?.providerKind, "codex");
+  assert.equal(codex?.authType, "codex");
+  assert.equal(codex?.platformApiKeyRequired, false);
+  assert.deepEqual(codex?.authMethods.map((method) => method.id), ["chatgpt_account", "codex_access_token", "app_server_secret"]);
   assert.equal(codex?.canConnect, false);
   assert.equal(codex?.connectAction, undefined);
   assert.equal(codex?.credential?.kind, "codex_access_token");
@@ -265,10 +277,20 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
         auth_configured: false,
         auth_source: "missing",
         auth_kind: "",
+        auth_type: "codex",
+        provider_kind: "codex",
+        auth_methods: [
+          { id: "chatgpt_account", configured: true },
+          { id: "app_server_secret", configured: false },
+        ],
         ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
         shared_secret_file: "",
         account: {
+          provider_id: "codex",
+          provider_kind: "codex",
           type: "chatgpt",
+          auth_method: "chatgpt_account",
+          auth_method_label: "ChatGPT account",
           account_label: "rumi-user@example.test",
           email: "rumi-user@example.test",
           plan_type: "prolite",
@@ -281,6 +303,10 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
   });
 
   assert.equal(prelude.configured, true);
+  assert.equal(prelude.providerId, "codex");
+  assert.equal(prelude.providerKind, "codex");
+  assert.equal(prelude.authType, "codex");
+  assert.deepEqual(prelude.authMethods.map((method) => method.id), ["chatgpt_account", "app_server_secret"]);
   assert.equal(prelude.enabled, true);
   assert.equal(prelude.transport, "websocket_remote");
   assert.equal(prelude.status, "blocked_auth_required");
@@ -290,6 +316,9 @@ test("Codex App Server prelude maps safe Tools & MCP status", () => {
   assert.equal(prelude.authSource, "missing");
   assert.equal(prelude.wsTokenFile, "/Users/haru/.config/rumi/codex-app-server.token");
   assert.equal(prelude.authConfigured, false);
+  assert.equal(prelude.accountProviderId, "codex");
+  assert.equal(prelude.accountAuthMethod, "chatgpt_account");
+  assert.equal(prelude.accountAuthMethodLabel, "ChatGPT account");
   assert.equal(prelude.accountType, "chatgpt");
   assert.equal(prelude.accountLabel, "rumi-user@example.test");
   assert.equal(prelude.accountEmail, "rumi-user@example.test");

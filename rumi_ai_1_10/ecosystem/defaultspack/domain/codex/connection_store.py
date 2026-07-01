@@ -11,6 +11,32 @@ _CODEX_ACCESS_MATERIAL_TYPE = "access_token"
 _DEFAULT_CONNECTION_ID = "default"
 
 
+def _codex_auth_methods(*, access_token_configured: bool = False, app_server_configured: bool = False) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "chatgpt_account",
+            "label": "ChatGPT account via Codex App Server",
+            "credential_kind": "chatgpt_account",
+            "configured": app_server_configured,
+            "secret_material": False,
+        },
+        {
+            "id": "codex_access_token",
+            "label": "Codex access token",
+            "credential_kind": "codex_access_token",
+            "configured": access_token_configured,
+            "secret_material": True,
+        },
+        {
+            "id": "app_server_secret",
+            "label": "Codex App Server secret",
+            "credential_kind": "codex_app_server_secret",
+            "configured": app_server_configured,
+            "secret_material": True,
+        },
+    ]
+
+
 def _pack_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
@@ -179,9 +205,13 @@ def codex_connection_status(*, pack_root: Path | None = None) -> dict[str, Any]:
         "supported": True,
         "backend_supported": True,
         "provider_id": "codex",
+        "provider_kind": "codex",
         "display_label": "Codex",
         "service_kind": "dev",
-        "auth_type": "access_token",
+        "auth_type": "codex",
+        "platform_api_key_required": False,
+        "auth_methods": _codex_auth_methods(access_token_configured=configured),
+        "active_auth_methods": ["codex_access_token"] if configured else [],
         "credential_kind": "codex_access_token",
         "credential_ref": credential_ref,
         "scopes": [],

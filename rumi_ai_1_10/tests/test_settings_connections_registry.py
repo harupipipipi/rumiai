@@ -38,10 +38,17 @@ def test_codex_provider_safe_payload_has_no_token_material():
     assert "secret_value" not in payload_text
     assert "token_value" not in payload_text
     assert payload["providerId"] == "codex"
-    assert payload["authType"] == "api_key"
+    assert payload["authType"] == "codex"
+    assert [method["id"] for method in payload["authMethods"]] == [
+        "chatgpt_account",
+        "codex_access_token",
+        "app_server_secret",
+    ]
     assert payload["officialBrokerSupported"] is False
     assert payload["selfHostClientSupported"] is False
     assert payload["metadata"]["credential_kind"] == "codex_access_token"
+    assert payload["metadata"]["provider_kind"] == "codex"
+    assert payload["metadata"]["platform_api_key_required"] is False
     assert payload["metadata"]["not_platform_api_key"] is True
     assert payload["metadata"]["not_workspace_agent_token"] is True
     assert payload["authTemplate"] == "credential_bundle"

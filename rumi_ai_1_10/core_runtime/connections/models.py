@@ -4,7 +4,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Literal, Mapping
 
 LocalizedText = str | Mapping[str, str]
-AuthType = Literal["oauth2", "api_key", "device_code", "none"]
+AuthType = Literal["oauth2", "api_key", "device_code", "codex", "none"]
 ServiceKind = Literal["cloud", "google", "storage", "email", "mcp", "dev", "custom"]
 ConnectionStatus = Literal[
     "connected",
@@ -71,6 +71,7 @@ class ConnectionProvider:
     capabilities: list[ProviderCapability]
     priority: int
     auth_template: str = ""
+    auth_methods: list[dict[str, Any]] = field(default_factory=list)
     token_import_supported: bool = False
     oauth: OAuthConfig | None = None
     services: list[dict[str, Any]] = field(default_factory=list)
@@ -94,6 +95,7 @@ class ConnectionProvider:
             capabilities=[ProviderCapability.from_dict(item) for item in raw.get("capabilities", [])],
             priority=int(raw.get("settings", {}).get("priority", raw.get("priority", 100))),
             auth_template=str(auth.get("template") or ""),
+            auth_methods=list(auth.get("methods", raw.get("auth_methods", []))),
             token_import_supported=bool(auth.get("token_import_supported", False)),
             oauth=OAuthConfig.from_dict(auth["oauth"]) if "oauth" in auth else None,
             services=list(raw.get("services", [])),
@@ -112,6 +114,7 @@ class ConnectionProvider:
         data["officialBrokerSupported"] = data.pop("official_broker_supported")
         data["selfHostClientSupported"] = data.pop("self_host_client_supported")
         data["authTemplate"] = data.pop("auth_template")
+        data["authMethods"] = data.pop("auth_methods")
         data["tokenImportSupported"] = data.pop("token_import_supported")
         data["scopePresets"] = data.pop("scope_presets")
         data["scopeToCapability"] = data.pop("scope_to_capability")
