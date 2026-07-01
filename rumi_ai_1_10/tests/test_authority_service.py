@@ -802,6 +802,57 @@ def test_authority_once_approval_succeeds_when_post_commit_audit_fails(
     )
 
 
+def test_authority_single_token_consume_succeeds_when_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    original_audit = store.audit
+
+    def fail_consume_audit(action, details=None):
+        if action == "authority_one_shot_consumed":
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_consume_audit)
+
+    consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+
+    assert consumed.allowed is True
+    assert consumed.reason == "One-shot approval consumed"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        token=approval["token"],
+    ) is False
+
+
 def test_authority_persistent_approval_succeeds_when_post_commit_audit_fails(
     tmp_path,
     monkeypatch,

@@ -412,7 +412,10 @@ class AuthorityRequestStore:
             record["consumed"] = True
             record["consumed_at"] = _now_ts()
             self._write_json(path, record)
-            self.audit("authority_one_shot_consumed", {"request_id": request_id, "token_id": token_id})
+            self._audit_best_effort(
+                "authority_one_shot_consumed",
+                {"request_id": request_id, "token_id": token_id},
+            )
             return True
 
     def one_shot_matches_request(
