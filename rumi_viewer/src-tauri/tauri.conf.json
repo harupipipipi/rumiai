@@ -4,8 +4,8 @@
   "version": "1.0.0-beta.1",
   "identifier": "dev.rumiai.app",
   "build": {
-    "beforeBuildCommand": "cd ../frontend && npm run build",
-    "beforeDevCommand": "cd ../frontend && npm run build",
+    "beforeBuildCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build",
+    "beforeDevCommand": "cd ../frontend && node scripts/preflight-viewer-build.mjs && npm run build",
     "frontendDist": "./splash"
   },
   "app": {
