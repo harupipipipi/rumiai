@@ -326,20 +326,15 @@ class ChatStore:
 
     def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
         conversation_id = str(conversation_id or "")
-        self._refresh_if_storage_changed()
         indexed_conv = self._conversations.get(conversation_id)
         file_conv = self._load_conversation_file(conversation_id)
         if file_conv is not None:
             conv = self._freshest_conversation(indexed_conv, file_conv)
             with self._lock:
-                missing_from_index = conversation_id not in self._conversations
                 self._conversations[conversation_id] = conv
-                if missing_from_index:
-                    try:
-                        self._save_conversation_index()
-                    except OSError:
-                        pass
         else:
+            self._refresh_if_storage_changed()
+            indexed_conv = self._conversations.get(conversation_id)
             conv = indexed_conv
             if conv is None:
                 conv = self._recover_conversation_from_file(conversation_id)

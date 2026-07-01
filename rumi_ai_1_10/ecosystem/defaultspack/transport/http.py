@@ -83,6 +83,7 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
 
 _DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ui.conversation_preview",
+    "blocks.ui.settings",
 }
 
 _CHAT_TURN_HTTP_FALLBACKS = {
@@ -352,7 +353,7 @@ class DefaultsHttpServer:
         if "." in leaf:
             return False
         first_segment = request_path.strip("/").split("/", 1)[0]
-        return first_segment in {"chat", "coding", "prompts", "defaultspack", "pack"}
+        return first_segment in {"chat", "coding", "desktops", "prompts", "defaultspack", "pack"}
 
     def _active_profile_policy(self):
         try:

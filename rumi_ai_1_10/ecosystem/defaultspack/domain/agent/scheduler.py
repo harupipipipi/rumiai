@@ -51,6 +51,7 @@ _SCHEDULE_ONCE_ALREADY_RUNNING_RETRY_SECONDS = 30.0
 _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS = 1.0
 _SCHEDULED_CONVERSATION_LOCK_MAX_WAIT_SECONDS = 5.0
 _SCHEDULED_CHAT_ERROR_TEXT_LIMIT = 700
+_SCHEDULED_CHAT_ERROR_USER_COMMIT_WAIT_SECONDS = 0.5
 _SCHEDULED_CHAT_SECRET_VALUE_RE = re.compile(
     r"\b(AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z_]{20,})\b"
 )
@@ -280,28 +281,32 @@ def _ensure_scheduled_chat_error_message(
     except Exception:
         return None
 
-    store = ChatStore()
-    conversation = store.get_conversation(conversation_id)
-    if not isinstance(conversation, dict):
-        return None
-    messages = conversation.get("messages")
-    if not isinstance(messages, list):
-        return None
-
     scheduled_user: dict[str, Any] | None = None
-    for message in reversed(messages):
-        if not isinstance(message, dict) or str(message.get("role") or "") != "user":
-            continue
-        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
-        source = str(metadata.get("source") or "").strip()
-        if source not in {"scheduler", "scheduler_approval_followup"}:
-            continue
-        if str(metadata.get("schedule_id") or "").strip() != schedule_id:
-            continue
-        if str(metadata.get("schedule_execution_id") or "").strip() != exec_id:
-            continue
-        scheduled_user = message
-        break
+    store = ChatStore()
+    deadline = time.monotonic() + _SCHEDULED_CHAT_ERROR_USER_COMMIT_WAIT_SECONDS
+    while True:
+        conversation = store.get_conversation(conversation_id)
+        if isinstance(conversation, dict):
+            messages = conversation.get("messages")
+            if isinstance(messages, list):
+                for message in reversed(messages):
+                    if not isinstance(message, dict) or str(message.get("role") or "") != "user":
+                        continue
+                    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+                    source = str(metadata.get("source") or "").strip()
+                    if source not in {"scheduler", "scheduler_approval_followup"}:
+                        continue
+                    if str(metadata.get("schedule_id") or "").strip() != schedule_id:
+                        continue
+                    if str(metadata.get("schedule_execution_id") or "").strip() != exec_id:
+                        continue
+                    scheduled_user = message
+                    break
+        if isinstance(scheduled_user, dict):
+            break
+        if time.monotonic() >= deadline:
+            return None
+        time.sleep(0.01)
     if not isinstance(scheduled_user, dict):
         return None
 
@@ -2171,6 +2176,7 @@ class Scheduler:
                 history_entry["error_code"] = "CONVERSATION_RUNNING"
                 history_entry["skipped_reason"] = "conversation_running"
             if conversation_id and not isinstance(exc, _SchedulerConversationBusy):
+                history_entry["conversation_id"] = str(conversation_id)
                 stored_error = _ensure_scheduled_chat_error_message(
                     conversation_id=str(conversation_id),
                     schedule_id=schedule_id,
@@ -2180,7 +2186,6 @@ class Scheduler:
                     error_text=history_entry["error"],
                 )
                 if isinstance(stored_error, dict):
-                    history_entry["conversation_id"] = str(conversation_id)
                     history_entry["assistant_error_message_id"] = stored_error.get("id")
         finally:
             if conversation_lock_acquired and conversation_lock is not None:
