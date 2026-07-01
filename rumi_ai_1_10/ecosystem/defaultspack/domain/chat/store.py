@@ -112,9 +112,10 @@ class ChatStore:
         with self._lock:
             current_signature = self._storage_signature()
             if getattr(self, "_loaded_storage_signature", None) == current_signature:
-                return
+                return False
             self._conversations = self._load_conversations()
             self._loaded_storage_signature = current_signature
+            return True
 
     def _load_conversations(self):
         with self._lock:
@@ -302,13 +303,21 @@ class ChatStore:
 
     def get_conversation(self, conversation_id):
         conversation_id = str(conversation_id or "")
-        conv = self._load_conversation_file(conversation_id)
-        if conv is not None:
-            with self._lock:
-                self._conversations[conversation_id] = conv
-            return copy.deepcopy(conv)
         self._refresh_if_storage_changed()
-        conv = self._conversations.get(conversation_id)
+        indexed_conv = self._conversations.get(conversation_id)
+        file_conv = self._load_conversation_file(conversation_id)
+        if file_conv is not None:
+            conv = self._freshest_conversation(indexed_conv, file_conv)
+            with self._lock:
+                missing_from_index = conversation_id not in self._conversations
+                self._conversations[conversation_id] = conv
+                if missing_from_index:
+                    try:
+                        self._save_conversation_index()
+                    except OSError:
+                        pass
+            return copy.deepcopy(conv)
+        conv = indexed_conv
         if conv is None:
             conv = self._recover_conversation_from_file(conversation_id)
             if conv is None:
@@ -317,17 +326,25 @@ class ChatStore:
 
     def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
         conversation_id = str(conversation_id or "")
-        conv = self._load_conversation_file(conversation_id)
-        if conv is None:
-            self._refresh_if_storage_changed()
-            conv = self._conversations.get(conversation_id)
+        self._refresh_if_storage_changed()
+        indexed_conv = self._conversations.get(conversation_id)
+        file_conv = self._load_conversation_file(conversation_id)
+        if file_conv is not None:
+            conv = self._freshest_conversation(indexed_conv, file_conv)
+            with self._lock:
+                missing_from_index = conversation_id not in self._conversations
+                self._conversations[conversation_id] = conv
+                if missing_from_index:
+                    try:
+                        self._save_conversation_index()
+                    except OSError:
+                        pass
+        else:
+            conv = indexed_conv
             if conv is None:
                 conv = self._recover_conversation_from_file(conversation_id)
                 if conv is None:
                     return None, None
-        else:
-            with self._lock:
-                self._conversations[conversation_id] = conv
         messages = conv.get("messages", [])
         if not isinstance(messages, list):
             messages = []
@@ -1069,6 +1086,18 @@ class ChatStore:
                 pinned_at = updated_at
             return (1, pinned_at, updated_at)
         return (0, updated_at, updated_at)
+
+    @staticmethod
+    def _freshest_conversation(indexed_conversation, file_conversation):
+        if not isinstance(indexed_conversation, dict):
+            return file_conversation
+        if not isinstance(file_conversation, dict):
+            return indexed_conversation
+        indexed_updated_at = ChatStore._sort_timestamp(indexed_conversation.get("updated_at"))
+        file_updated_at = ChatStore._sort_timestamp(file_conversation.get("updated_at"))
+        if indexed_updated_at > file_updated_at:
+            return indexed_conversation
+        return file_conversation
 
     @staticmethod
     def _sort_timestamp(value):

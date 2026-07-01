@@ -2559,6 +2559,7 @@ class MimoCodingCompanyRuntime:
                             "failure_reason": self._message_text(failed_message)[:300],
                         }
                     )
+                    unanswered.append(gap)
                     failed.append(gap)
                     continue
                 unanswered.append(gap)

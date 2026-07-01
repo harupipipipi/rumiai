@@ -81,7 +81,9 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
     "blocks.sandbox.api",
 }
 
-_DIRECT_SAFE_GET_FALLBACK_BLOCKS = set(_SAFE_GET_FALLBACK_BLOCKS)
+_DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.conversation_preview",
+}
 
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
@@ -347,7 +349,10 @@ class DefaultsHttpServer:
         if request_path == "/" or request_path.startswith(("/api", "/static/")):
             return False
         leaf = request_path.rsplit("/", 1)[-1]
-        return "." not in leaf
+        if "." in leaf:
+            return False
+        first_segment = request_path.strip("/").split("/", 1)[0]
+        return first_segment in {"chat", "coding", "prompts", "defaultspack", "pack"}
 
     def _active_profile_policy(self):
         try:
