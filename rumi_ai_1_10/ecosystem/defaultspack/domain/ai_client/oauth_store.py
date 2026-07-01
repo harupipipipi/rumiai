@@ -1416,7 +1416,8 @@ def provider_oauth_status(
                 "true",
                 "yes",
             }
-            cloudflare_environment = cloudflare_environment_status(active=active)
+            cloudflare_api_token = get_provider_access_token(provider_id, pack_root=pack_root) if active else None
+            cloudflare_environment = cloudflare_environment_status(active=active, api_token=cloudflare_api_token)
         except Exception:
             cloudflare_environment = {
                 "schema": "rumi.cloudflare.environment.v1",

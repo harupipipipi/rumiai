@@ -3,17 +3,21 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import ipaddress
+import json
 import os
 import re
 import shlex
 import shutil
 import subprocess
 from typing import Any, Sequence
+import urllib.error
+import urllib.request
 
 from .sdk_client import cloudflare_sdk_status
 
 
 CommandRunner = Callable[[Sequence[str], float], "CommandResult"]
+CloudflareAPIFetcher = Callable[[str, str, float], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -27,6 +31,8 @@ def cloudflare_environment_status(
     *,
     active: bool = False,
     command_runner: CommandRunner | None = None,
+    api_fetcher: CloudflareAPIFetcher | None = None,
+    api_token: str | None = None,
     env: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Return a redacted Cloudflare readiness report for Rumi continuation.
@@ -38,6 +44,7 @@ def cloudflare_environment_status(
 
     environ = env or os.environ
     runner = command_runner or _run_command
+    fetcher = api_fetcher or _cloudflare_api_get_json
     wrangler_cmd = _wrangler_command(environ)
     cloudflared_cmd = _tool_command("cloudflared")
     docker_cmd = _tool_command("docker")
@@ -49,6 +56,7 @@ def cloudflare_environment_status(
         "docker": _command_presence("docker", docker_cmd),
         "pages": _not_checked(),
         "containers": _not_checked(),
+        "zones": _not_checked(),
         "named_tunnel": _not_checked(),
         "pc_tunnel_env": _check_pc_tunnel_env(environ),
         "pc_tool_bridge_env": _check_pc_tool_bridge_env(environ),
@@ -58,15 +66,17 @@ def cloudflare_environment_status(
         checks["wrangler"] = _check_wrangler(wrangler_cmd, runner)
         checks["pages"] = _check_pages(wrangler_cmd, runner)
         checks["containers"] = _check_containers(wrangler_cmd, runner)
+        checks["zones"] = _check_zones(_cloudflare_api_token(environ, api_token), fetcher)
         checks["cloudflared"] = _check_cloudflared_version(cloudflared_cmd, runner)
         checks["named_tunnel"] = _check_named_tunnel(cloudflared_cmd, wrangler_cmd, runner)
         checks["docker"] = _check_docker(docker_cmd, runner)
 
     sandbox_ready = checks["containers"].get("status") == "ready" and checks["docker"].get("status") == "ready"
     pages_ready = checks["pages"].get("status") == "ready"
+    zones_ready = checks["zones"].get("status") == "ready"
     named_tunnel_ready = checks["named_tunnel"].get("status") == "ready"
     pc_tunnel_env_ready = checks["pc_tunnel_env"].get("status") == "configured"
-    stable_pc_tunnel_ready = named_tunnel_ready and pc_tunnel_env_ready
+    stable_pc_tunnel_ready = named_tunnel_ready and pc_tunnel_env_ready and zones_ready
     pc_tool_bridge_env_ready = checks["pc_tool_bridge_env"].get("status") == "configured"
     pc_tool_bridge_ready = stable_pc_tunnel_ready and pc_tool_bridge_env_ready
     blockers = _blockers(checks, active=active)
@@ -78,6 +88,7 @@ def cloudflare_environment_status(
         "runner_deploy_ready": bool(active and sandbox_ready),
         "sandbox_ready": bool(active and sandbox_ready),
         "pages_ready": bool(active and pages_ready),
+        "zones_ready": bool(active and zones_ready),
         "named_tunnel_ready": bool(active and named_tunnel_ready),
         "stable_pc_tunnel_ready": bool(active and stable_pc_tunnel_ready),
         "pc_tool_bridge_ready": bool(active and pc_tool_bridge_ready),
@@ -92,6 +103,7 @@ def cloudflare_environment_status(
             "pc_tunnel_hostname_env": "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME",
             "pc_tunnel_origin_url_env": "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL",
             "pc_tunnel_config_env": "RUMI_CLOUDFLARE_PC_TUNNEL_CONFIG",
+            "pc_tunnel_zone_id_env": "RUMI_CLOUDFLARE_ZONE_ID",
             "stable_pc_tunnel": "named_cloudflare_tunnel_with_dns_hostname",
             "pc_tool_bridge_scaffold": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge",
             "pc_tool_bridge_url_env": "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL",
@@ -232,6 +244,68 @@ def _check_containers(command: Sequence[str], runner: CommandRunner) -> dict[str
         "available": result.returncode == 0,
         "status": "ready" if result.returncode == 0 else "unavailable",
         "detail": "Cloudflare Containers are accessible." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Cloudflare Containers check failed."),
+    }
+
+
+def _cloudflare_api_token(env: Mapping[str, str], explicit: str | None) -> str:
+    for value in (
+        explicit,
+        env.get("CLOUDFLARE_API_TOKEN"),
+        env.get("CF_API_TOKEN"),
+        env.get("RUMI_CLOUDFLARE_API_TOKEN"),
+    ):
+        token = str(value or "").strip()
+        if token:
+            return token
+    return ""
+
+
+def _check_zones(api_token: str, fetcher: CloudflareAPIFetcher) -> dict[str, Any]:
+    if not api_token:
+        return {
+            "available": None,
+            "status": "not_checked",
+            "zone_count": None,
+            "detail": "Import a Cloudflare token or set CLOUDFLARE_API_TOKEN to verify that the account has a Cloudflare-managed DNS zone for the permanent PC Tunnel hostname.",
+        }
+    try:
+        payload = fetcher("/zones?per_page=1", api_token, 20)
+    except Exception as exc:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "zone_count": None,
+            "detail": _scrub_cloudflare_error(str(exc), api_token) or "Cloudflare zones check failed.",
+        }
+    if not bool(payload.get("success", False)):
+        return {
+            "available": False,
+            "status": "unavailable",
+            "zone_count": None,
+            "detail": _cloudflare_errors_summary(payload) or "Cloudflare zones check failed.",
+        }
+    result = payload.get("result")
+    result_info = payload.get("result_info")
+    zone_count = 0
+    if isinstance(result_info, Mapping):
+        try:
+            zone_count = int(result_info.get("total_count") or result_info.get("count") or 0)
+        except (TypeError, ValueError):
+            zone_count = 0
+    if zone_count <= 0 and isinstance(result, list):
+        zone_count = len(result)
+    if zone_count <= 0:
+        return {
+            "available": False,
+            "status": "missing_cloudflare_zone",
+            "zone_count": 0,
+            "detail": "No Cloudflare-managed DNS zones are available on this account. Add or transfer a domain to Cloudflare before creating a permanent named Tunnel hostname.",
+        }
+    return {
+        "available": True,
+        "status": "ready",
+        "zone_count": zone_count,
+        "detail": "Cloudflare-managed DNS zones are available for a named Tunnel public hostname.",
     }
 
 
@@ -559,7 +633,7 @@ def _blockers(checks: Mapping[str, Mapping[str, Any]], *, active: bool) -> list[
             }
         ]
     blockers: list[dict[str, str]] = []
-    for key in ("wrangler", "pages", "containers", "cloudflared", "named_tunnel", "pc_tunnel_env", "pc_tool_bridge_env", "docker"):
+    for key in ("wrangler", "pages", "containers", "zones", "cloudflared", "named_tunnel", "pc_tunnel_env", "pc_tool_bridge_env", "docker"):
         status = str(checks.get(key, {}).get("status") or "")
         if status in {"ready", "available", "configured"}:
             continue
@@ -586,6 +660,59 @@ def _run_command(argv: Sequence[str], timeout: float) -> CommandResult:
     except subprocess.TimeoutExpired:
         return CommandResult(124, "", "command timed out")
     return CommandResult(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+
+def _cloudflare_api_get_json(path: str, api_token: str, timeout: float) -> dict[str, Any]:
+    if not path.startswith("/"):
+        path = f"/{path}"
+    request = urllib.request.Request(
+        f"https://api.cloudflare.com/client/v4{path}",
+        headers={
+            "Accept": "application/json",
+            "Authorization": f"Bearer {api_token}",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            raw = response.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as exc:
+        raw = exc.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError:
+            payload = {"success": False, "errors": [{"message": exc.reason, "code": exc.code}]}
+        if isinstance(payload, dict):
+            return payload
+        return {"success": False, "errors": [{"message": exc.reason, "code": exc.code}]}
+    payload = json.loads(raw)
+    if isinstance(payload, dict):
+        return payload
+    return {"success": False, "errors": [{"message": "Cloudflare API returned a non-object payload."}]}
+
+
+def _cloudflare_errors_summary(payload: Mapping[str, Any]) -> str:
+    errors = payload.get("errors")
+    if not isinstance(errors, list) or not errors:
+        return ""
+    messages: list[str] = []
+    for item in errors[:3]:
+        if not isinstance(item, Mapping):
+            continue
+        code = str(item.get("code") or "").strip()
+        message = str(item.get("message") or "").strip()
+        if code and message:
+            messages.append(f"{code}: {message}")
+        elif message:
+            messages.append(message)
+    return "; ".join(messages)[:240]
+
+
+def _scrub_cloudflare_error(message: str, api_token: str) -> str:
+    text = str(message or "")
+    token = str(api_token or "").strip()
+    if token:
+        text = text.replace(token, "[redacted]")
+    return text[:240]
 
 
 def _public_command(command: Sequence[str]) -> str:

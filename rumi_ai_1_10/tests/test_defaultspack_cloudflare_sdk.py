@@ -63,8 +63,8 @@ def test_cloudflare_oauth_status_can_run_active_diagnostics(monkeypatch):
 
     monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
 
-    def fake_environment_status(*, active=False, command_runner=None, env=None):
-        del command_runner, env
+    def fake_environment_status(*, active=False, command_runner=None, api_fetcher=None, api_token=None, env=None):
+        del command_runner, api_fetcher, api_token, env
         calls.append(bool(active))
         return {
             "schema": "rumi.cloudflare.environment.v1",
@@ -73,6 +73,7 @@ def test_cloudflare_oauth_status_can_run_active_diagnostics(monkeypatch):
             "runner_deploy_ready": False,
             "sandbox_ready": False,
             "pages_ready": False,
+            "zones_ready": False,
             "named_tunnel_ready": False,
             "stable_pc_tunnel_ready": False,
             "pc_tool_bridge_ready": False,
@@ -89,6 +90,42 @@ def test_cloudflare_oauth_status_can_run_active_diagnostics(monkeypatch):
     assert status["provisioning"]["blockers"] == [
         {"code": "CLOUDFLARE_ACTIVE_TEST", "message": "active diagnostics ran"}
     ]
+
+
+def test_cloudflare_oauth_active_diagnostics_passes_imported_token(monkeypatch):
+    from core_runtime.cloudflare import diagnostics, sdk_client
+    from domain.ai_client import oauth_store
+
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+    monkeypatch.setattr(oauth_store, "get_provider_access_token", lambda provider_id, *, pack_root=None: "cloudflare-secret-token")
+
+    def fake_environment_status(*, active=False, command_runner=None, api_fetcher=None, api_token=None, env=None):
+        del command_runner, api_fetcher, env
+        captured["active"] = active
+        captured["api_token"] = api_token
+        return {
+            "schema": "rumi.cloudflare.environment.v1",
+            "active": bool(active),
+            "status": "blocked",
+            "runner_deploy_ready": False,
+            "sandbox_ready": False,
+            "pages_ready": False,
+            "zones_ready": False,
+            "named_tunnel_ready": False,
+            "stable_pc_tunnel_ready": False,
+            "pc_tool_bridge_ready": False,
+            "blockers": [],
+            "constraints": {},
+        }
+
+    monkeypatch.setattr(diagnostics, "cloudflare_environment_status", fake_environment_status)
+
+    status = oauth_store.provider_oauth_status("cloudflare", active_diagnostics=True)
+
+    assert captured == {"active": True, "api_token": "cloudflare-secret-token"}
+    assert "cloudflare-secret-token" not in str(status)
 
 
 def test_cloudflare_environment_prefers_local_wrangler_before_npx(monkeypatch):
@@ -163,6 +200,7 @@ def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_
     assert status["pc_tool_bridge_ready"] is False
     assert status["free_plan_supported"] is False
     assert status["checks"]["containers"]["status"] == "paid_plan_required"
+    assert status["checks"]["zones"]["status"] == "not_checked"
     assert status["checks"]["named_tunnel"]["status"] == "origin_cert_missing"
     assert status["checks"]["pc_tunnel_env"]["status"] == "not_configured"
     assert status["checks"]["pc_tool_bridge_env"]["status"] == "not_configured"
@@ -178,6 +216,7 @@ def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_
     assert status["constraints"]["pc_tool_bridge_preserves_pc_approval_authority"] is True
     assert {item["code"] for item in status["blockers"]} >= {
         "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED",
+        "CLOUDFLARE_ZONES_NOT_CHECKED",
         "CLOUDFLARE_NAMED_TUNNEL_ORIGIN_CERT_MISSING",
         "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED",
         "CLOUDFLARE_PC_TOOL_BRIDGE_ENV_NOT_CONFIGURED",
@@ -231,13 +270,41 @@ def test_cloudflare_environment_accepts_wrangler_managed_named_tunnel(monkeypatc
     assert status["checks"]["named_tunnel"]["status"] == "ready"
     assert status["checks"]["named_tunnel"]["manager"] == "wrangler"
     assert status["checks"]["named_tunnel"]["tunnel_count"] == 1
+    assert status["checks"]["zones"]["status"] == "not_checked"
     assert "CLOUDFLARE_NAMED_TUNNEL_ORIGIN_CERT_MISSING" not in {
         item["code"] for item in status["blockers"]
     }
     assert {item["code"] for item in status["blockers"]} >= {
         "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED",
+        "CLOUDFLARE_ZONES_NOT_CHECKED",
         "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED",
         "CLOUDFLARE_PC_TOOL_BRIDGE_ENV_NOT_CONFIGURED",
+    }
+
+
+def test_cloudflare_environment_reports_missing_cloudflare_zone(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _name: None)
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        api_fetcher=lambda _path, _token, _timeout: {
+            "success": True,
+            "result": [],
+            "result_info": {"count": 0, "total_count": 0},
+        },
+        api_token="cloudflare-secret-token",
+        env={},
+    )
+
+    assert status["zones_ready"] is False
+    assert status["checks"]["zones"]["status"] == "missing_cloudflare_zone"
+    assert status["checks"]["zones"]["zone_count"] == 0
+    assert "cloudflare-secret-token" not in str(status)
+    assert "CLOUDFLARE_ZONES_MISSING_CLOUDFLARE_ZONE" in {
+        item["code"] for item in status["blockers"]
     }
 
 
@@ -334,6 +401,12 @@ def test_cloudflare_environment_accepts_configured_pc_tool_bridge_env(monkeypatc
     status = diagnostics.cloudflare_environment_status(
         active=True,
         command_runner=runner,
+        api_fetcher=lambda _path, _token, _timeout: {
+            "success": True,
+            "result": [{"id": "zone-id"}],
+            "result_info": {"count": 1, "total_count": 1},
+        },
+        api_token="cloudflare-secret-token",
         env={
             "RUMI_WRANGLER_COMMAND": "/usr/local/bin/npx wrangler",
             "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "rumi-pc.example.com",
@@ -346,6 +419,7 @@ def test_cloudflare_environment_accepts_configured_pc_tool_bridge_env(monkeypatc
     )
 
     assert status["status"] == "ready"
+    assert status["zones_ready"] is True
     assert status["pc_tool_bridge_ready"] is True
     assert status["stable_pc_tunnel_ready"] is True
     assert status["checks"]["pc_tool_bridge_env"]["status"] == "configured"
@@ -448,10 +522,16 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
             calls.append(("accounts.list", dict(kwargs)))
             return [Resource(id="account-id", name="Test Account")]
 
+    class Zones:
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("zones.list", dict(kwargs)))
+            return [Resource(id="zone-id", name="example.com")]
+
     class FakeCloudflare:
         def __init__(self, **kwargs: object) -> None:
             calls.append(("Cloudflare", dict(kwargs)))
             self.accounts = Accounts()
+            self.zones = Zones()
             self.pages = SimpleNamespace(projects=Projects())
 
     monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: object())
@@ -459,6 +539,7 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
 
     adapter = sdk_client.CloudflareSDKAdapter(api_token="cloudflare-secret-token", account_id="account-id")
     accounts = adapter.list_accounts(per_page=1)
+    zones = adapter.list_zones(per_page=50)
     project = adapter.create_pages_project(name="rumi-pr440-smoke-pages-test")
     projects = adapter.list_pages_projects(per_page=50)
     updated = adapter.update_pages_project("rumi-pr440-smoke-pages-test", production_branch="main")
@@ -468,6 +549,7 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
     deleted_project = adapter.delete_pages_project("rumi-pr440-smoke-pages-test")
 
     assert accounts == [{"id": "account-id", "name": "Test Account"}]
+    assert zones == [{"id": "zone-id", "name": "example.com"}]
     assert project["name"] == "rumi-pr440-smoke-pages-test"
     assert projects == [{"name": "rumi-pr440-smoke-pages-test"}]
     assert updated["updated"] is True
@@ -478,6 +560,8 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
     assert [name for name, _payload in calls] == [
         "Cloudflare",
         "accounts.list",
+        "Cloudflare",
+        "zones.list",
         "Cloudflare",
         "pages.projects.create",
         "Cloudflare",
@@ -494,8 +578,9 @@ def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch)
         "pages.projects.delete",
     ]
     assert calls[0][1] == {"api_token": "cloudflare-secret-token"}
-    assert calls[5][1]["per_page"] == 10
-    assert calls[11][1]["per_page"] == 10
+    assert calls[3][1]["per_page"] == 50
+    assert calls[7][1]["per_page"] == 10
+    assert calls[13][1]["per_page"] == 10
     assert "cloudflare-secret-token" not in str(
         [accounts, project, projects, updated, deployment, deployments, deleted_deployment, deleted_project]
     )
