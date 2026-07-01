@@ -1378,6 +1378,48 @@ class TestPackAPIServer:
         assert count > 0
         assert ("GET", "/api/panel/startup/profiles") in PackAPIHandler._api_route_exact
         assert ("GET", "/api/panel/api-map") in PackAPIHandler._api_route_exact
+        assert ("GET", "/api/setup/packs") in PackAPIHandler._api_route_exact
+        assert ("GET", "/api/setup/migration/status") in PackAPIHandler._api_route_exact
+        assert ("POST", "/api/setup/packs/install") in PackAPIHandler._api_route_exact
+        assert any(
+            entry.get("handler") == "_setup_grant_all_ok"
+            for _, _, _, entry in PackAPIHandler._api_route_patterns
+        )
+
+    def test_scoped_token_cannot_dispatch_core_setup_direct_grant_route(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        fake_registry = SimpleNamespace(packs={})
+        PackAPIHandler.load_api_routes(
+            fake_registry,
+            include_builtin_core_control_panel=True,
+        )
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+        handler._setup_grant_all_ok = MagicMock(return_value={"granted": True})
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/setup/packs/defaultspack/grant-all-ok",
+            body={},
+            query={},
+        )
+
+        assert dispatched is True
+        handler._setup_grant_all_ok.assert_not_called()
+        response, status = handler._send_response.call_args.args
+        assert status == 403
+        assert response.error == "Route is not available to scoped tokens"
 
     @patch("core_runtime.pack_api_server.get_hmac_key_manager")
     def test_long_response_does_not_block_concurrent_get(

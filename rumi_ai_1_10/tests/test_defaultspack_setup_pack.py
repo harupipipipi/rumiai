@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core_runtime.setup_pack import SetupPackManager
+from core_runtime.setup_pack import SETUP_PACK_ALL_OK_PERMISSIONS, SetupPackManager
 
 
 class _FakeGrantResult:
@@ -503,6 +503,67 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(fake_grants.batch_calls, [])
             self.assertFalse((base / "selection.json").exists())
 
+    def test_install_rolls_back_approval_and_partial_grants_when_all_ok_grant_fails(self):
+        class FakeApprovalManager:
+            _initialized = True
+
+            def __init__(self):
+                self.calls = []
+
+            def scan_packs(self):
+                self.calls.append("scan_packs")
+
+            def get_status(self, pack_id):
+                return SimpleNamespace(value="installed")
+
+            def approve(self, pack_id):
+                self.calls.append(f"approve:{pack_id}")
+                return SimpleNamespace(success=True, error=None)
+
+            def remove_approval(self, pack_id):
+                self.calls.append(f"remove_approval:{pack_id}")
+                return True
+
+        class PartialGrantManager(_FakeGrantManager):
+            def batch_grant(self, grants):
+                self.batch_calls.append(grants)
+                return _FakeGrantResult(granted_count=1, failed_count=len(grants) - 1)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake_approval = FakeApprovalManager()
+            fake_grants = PartialGrantManager()
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+                fake_grants=fake_grants,
+                fake_approval=fake_approval,
+            )
+            _, _, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("defaultspack")
+
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["errors"][0]["reason"], "all_ok_grant_failed")
+            self.assertEqual(
+                fake_approval.calls,
+                ["scan_packs", "approve:defaultspack", "remove_approval:defaultspack"],
+            )
+            self.assertEqual(len(fake_grants.batch_calls), 1)
+            self.assertEqual(
+                fake_grants.revocations,
+                [
+                    ("defaultspack", permission_id)
+                    for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+                ],
+            )
+            self.assertFalse((base / "selection.json").exists())
+
     def test_install_rejects_invalid_setup_pack_metadata_schema_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -586,6 +647,36 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["status_code"], 404)
             self.assertEqual(result["reason"], "target_pack_not_found")
             self.assertEqual(result["principal_id"], "ghost")
+            self.assertEqual(fake.batch_calls, [])
+
+    def test_grant_all_ok_rejects_invalid_contract_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(
+                root,
+                "risky",
+                "risky",
+                True,
+                marketplace={"status": "blacklisted", "registry": "test"},
+            )
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake = _FakeGrantManager()
+            setup_pack_module = sys.modules[SetupPackManager.__module__]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                return_value=[self._target(base, "risky", "rumi:ecosystem/risky")],
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake,
+            ):
+                result = manager.grant_all_ok("risky")
+
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["reason"], "setup_pack_contract_validation_failed")
+            self.assertEqual(result["errors"][0]["reason"], "marketplace_blacklisted")
             self.assertEqual(fake.batch_calls, [])
 
     def test_install_rejects_missing_setup_pack_dependency_before_grants(self):

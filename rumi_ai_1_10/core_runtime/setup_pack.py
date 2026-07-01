@@ -545,6 +545,11 @@ class SetupPackManager:
             scan_packs = getattr(am, "scan_packs", None)
             if callable(scan_packs):
                 scan_packs()
+            previous_status = None
+            get_status = getattr(am, "get_status", None)
+            if callable(get_status):
+                status = get_status(target_pack_id)
+                previous_status = getattr(status, "value", status)
             result = am.approve(target_pack_id)
             if not getattr(result, "success", False):
                 return {
@@ -553,7 +558,12 @@ class SetupPackManager:
                     "reason": "target_pack_approval_failed",
                     "error": getattr(result, "error", "approval_failed"),
                 }
-            return {"approved": True, "skipped": False, "reason": None}
+            return {
+                "approved": True,
+                "skipped": False,
+                "reason": None,
+                "changed": previous_status != "approved",
+            }
         except Exception as exc:
             logger.debug("Failed to auto-approve setup pack target", exc_info=True)
             return {
@@ -562,6 +572,49 @@ class SetupPackManager:
                 "reason": "target_pack_approval_failed",
                 "error": str(exc),
             }
+
+    def _rollback_target_pack_approval(
+        self,
+        target_pack_id: str,
+        approval_result: Dict[str, Any],
+    ) -> None:
+        if not approval_result.get("changed"):
+            return
+        try:
+            from .approval_manager import get_approval_manager
+
+            am = get_approval_manager()
+            remove_approval = getattr(am, "remove_approval", None)
+            if callable(remove_approval):
+                remove_approval(target_pack_id)
+        except Exception:
+            logger.debug("Failed to roll back setup pack target approval", exc_info=True)
+
+    def _revoke_all_ok_for_definition(self, definition: SetupPackDefinition) -> int:
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+
+            gm = get_capability_grant_manager()
+            revoked = [
+                gm.revoke_permission(definition.target_pack_id, permission_id)
+                for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+            ]
+            revoked_count = sum(1 for item in revoked if item)
+            self._log_permission_event(
+                "revoke_all_ok",
+                True,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": definition.pack_id,
+                    "revoked_count": revoked_count,
+                    "reason": "setup_pack_install_rollback",
+                },
+            )
+            return revoked_count
+        except Exception:
+            logger.debug("Failed to roll back setup pack all_ok grants", exc_info=True)
+            return 0
 
     def _set_active_pack_identity(self, ecosystem_json_path: Path) -> Optional[str]:
         try:
@@ -710,8 +763,10 @@ class SetupPackManager:
                 "status_code": 400,
             }
 
+        approval_results: Dict[str, Dict[str, Any]] = {}
         for definition in installable_definitions:
             approval_result = self._approve_target_pack(definition.target_pack_id)
+            approval_results[definition.pack_id] = approval_result
             if not approval_result.get("approved") and not approval_result.get("skipped"):
                 errors.append({
                     "setup_pack_id": definition.pack_id,
@@ -762,6 +817,11 @@ class SetupPackManager:
                         "reason": "all_ok_grant_failed",
                         "grant": grant_result,
                     })
+                    self._revoke_all_ok_for_definition(definition)
+                    self._rollback_target_pack_approval(
+                        definition.target_pack_id,
+                        approval_results.get(definition.pack_id, {}),
+                    )
                     continue
                 if definition.target_pack_id not in granted_targets:
                     granted_targets.append(definition.target_pack_id)
@@ -883,6 +943,27 @@ class SetupPackManager:
                 "error": f"Target pack not found: {definition.target_pack_id}",
                 "status_code": 404,
                 "reason": "target_pack_not_found",
+                "principal_id": definition.target_pack_id,
+            }
+        contract_errors = self._validate_install_contracts([definition], locations)
+        if contract_errors:
+            self._log_permission_event(
+                "grant_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": setup_pack_id,
+                    "target_pack_id": definition.target_pack_id,
+                    "errors": contract_errors,
+                },
+                error="setup_pack_contract_validation_failed",
+            )
+            return {
+                "error": "Setup pack compatibility validation failed",
+                "status_code": 400,
+                "reason": "setup_pack_contract_validation_failed",
+                "errors": contract_errors,
                 "principal_id": definition.target_pack_id,
             }
         return self._grant_all_ok_for_definition(definition)
