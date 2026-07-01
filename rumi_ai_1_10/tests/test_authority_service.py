@@ -434,6 +434,83 @@ def test_authority_non_consuming_check_does_not_spend_one_shot_token(tmp_path, m
     assert after_consumed.approval_required is True
 
 
+def test_authority_batch_consume_one_shots_is_atomic(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    model_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+    )
+    api_decision = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+    )
+    model_approval = service.approve_request(
+        model_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(model_decision.request_id),
+    )
+    api_approval = service.approve_request(
+        api_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(api_decision.request_id),
+    )
+
+    consumed_api = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+        request_id=api_decision.request_id,
+        approval_token=api_approval["token"],
+    )
+    batch = service.consume_one_shot_approvals_atomically(
+        [
+            {
+                "request_id": model_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": model_resource,
+                "approval_token": model_approval["token"],
+            },
+            {
+                "request_id": api_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "api_key.use",
+                "resource": api_resource,
+                "approval_token": api_approval["token"],
+            },
+        ]
+    )
+    model_still_valid = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+        request_id=model_decision.request_id,
+        approval_token=model_approval["token"],
+        consume_approval_token=False,
+    )
+
+    assert consumed_api.allowed is True
+    assert batch.allowed is False
+    assert batch.permission_id == "api_key.use"
+    assert batch.approval_required is True
+    assert "token_already_consumed" in batch.reason
+    assert model_still_valid.allowed is True
+    assert model_still_valid.reason == "One-shot approval verified"
+
+
 def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     model_resource = {

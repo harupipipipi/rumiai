@@ -223,6 +223,69 @@ class AuthorityService:
             consume_approval_token=False,
         )
 
+    def consume_one_shot_approvals_atomically(
+        self,
+        items: list[dict[str, Any]],
+    ) -> AuthorityDecision:
+        normalized: list[dict[str, Any]] = []
+        for item in items or []:
+            permission_id = str(item.get("permission_id") or "").strip()
+            principal_id = str(item.get("principal_id") or "").strip()
+            resource = self._normalize_resource(
+                item.get("resource") if isinstance(item.get("resource"), dict) else {}
+            )
+            risk_level = self._risk_level(permission_id, resource)
+            if permission_id not in AUTHORITY_PERMISSION_IDS:
+                return self._decision(
+                    False,
+                    permission_id,
+                    principal_id,
+                    resource,
+                    "Unknown authority permission",
+                    risk_level,
+                    request_id=str(item.get("request_id") or "") or None,
+                    approval_required=True,
+                )
+            normalized.append(
+                {
+                    "request_id": str(item.get("request_id") or "").strip(),
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "resource": resource,
+                    "token": str(item.get("approval_token") or item.get("token") or "").strip(),
+                }
+            )
+
+        if not normalized:
+            return self._decision(True, "", "", {}, "No one-shot approvals to consume", "low")
+
+        result = self._request_store.consume_one_shots_atomically(normalized)
+        first = normalized[0]
+        if result.get("success"):
+            return self._decision(
+                True,
+                first["permission_id"],
+                first["principal_id"],
+                first["resource"],
+                "One-shot approvals consumed",
+                self._risk_level(first["permission_id"], first["resource"]),
+            )
+
+        failed_index = int(result.get("failed_index") or 0)
+        failed_index = max(0, min(failed_index, len(normalized) - 1))
+        failed = normalized[failed_index]
+        reason = str(result.get("reason") or "one_shot_consume_failed")
+        return self._decision(
+            False,
+            failed["permission_id"],
+            failed["principal_id"],
+            failed["resource"],
+            f"One-shot approval could not be consumed: {reason}",
+            self._risk_level(failed["permission_id"], failed["resource"]),
+            request_id=failed["request_id"] or None,
+            approval_required=True,
+        )
+
     def _check(
         self,
         *,

@@ -334,6 +334,81 @@ class AuthorityRequestStore:
             self.audit("authority_one_shot_consumed", {"request_id": request_id, "token_id": token_id})
             return True
 
+    def consume_one_shots_atomically(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Consume multiple one-shot approvals only if every token is still valid."""
+        if not isinstance(items, list):
+            return {"success": False, "reason": "invalid_items", "failed_index": 0}
+        if not items:
+            return {"success": True, "consumed_count": 0}
+
+        with self._lock:
+            seen_token_ids: set[str] = set()
+            records: list[tuple[Path, str, dict[str, Any], dict[str, Any]]] = []
+            for index, item in enumerate(items):
+                token = str(item.get("token") or "")
+                if not token:
+                    return {"success": False, "reason": "missing_token", "failed_index": index}
+                token_id = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                if token_id in seen_token_ids:
+                    return {"success": False, "reason": "duplicate_token", "failed_index": index}
+                seen_token_ids.add(token_id)
+
+                path = self._one_shot_dir / f"{token_id}.json"
+                record = self._read_json(path)
+                reason = self._one_shot_validation_error(
+                    record,
+                    request_id=str(item.get("request_id") or ""),
+                    principal_id=str(item.get("principal_id") or ""),
+                    permission_id=str(item.get("permission_id") or ""),
+                    resource=item.get("resource") if isinstance(item.get("resource"), dict) else {},
+                )
+                if reason:
+                    return {
+                        "success": False,
+                        "reason": reason,
+                        "failed_index": index,
+                        "request_id": str(item.get("request_id") or ""),
+                        "permission_id": str(item.get("permission_id") or ""),
+                    }
+                records.append((path, token_id, record, item))
+
+            now = _now_ts()
+            for path, token_id, record, item in records:
+                record["consumed"] = True
+                record["consumed_at"] = now
+                self._write_json(path, record)
+                self.audit(
+                    "authority_one_shot_consumed",
+                    {"request_id": str(item.get("request_id") or ""), "token_id": token_id},
+                )
+            return {"success": True, "consumed_count": len(records)}
+
+    def _one_shot_validation_error(
+        self,
+        record: dict[str, Any],
+        *,
+        request_id: str,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+    ) -> str:
+        if not record:
+            return "missing_token"
+        if record.get("consumed"):
+            return "token_already_consumed"
+        expires_at = _parse_ts(str(record.get("expires_at") or ""))
+        if expires_at and expires_at <= _now_utc():
+            return "token_expired"
+        if str(record.get("request_id") or "") != str(request_id or ""):
+            return "request_mismatch"
+        if str(record.get("principal_id") or "") != str(principal_id or ""):
+            return "principal_mismatch"
+        if str(record.get("permission_id") or "") != str(permission_id or ""):
+            return "permission_mismatch"
+        if str(record.get("resource_hash") or "") != self.resource_hash(resource):
+            return "resource_mismatch"
+        return ""
+
     def one_shot_matches_request(
         self,
         *,
