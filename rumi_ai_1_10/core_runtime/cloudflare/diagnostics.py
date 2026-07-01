@@ -330,14 +330,23 @@ def _check_named_tunnel(
     if wrangler_command:
         wrangler = runner([*wrangler_command, "tunnel", "list"], 30)
         if wrangler.returncode == 0:
-            tunnel_count = _count_tunnel_ids(wrangler.stdout)
+            tunnel_counts = _tunnel_status_counts(wrangler.stdout)
+            tunnel_count = tunnel_counts["tunnel_count"]
             if tunnel_count > 0:
+                if tunnel_counts["active_count"] <= 0:
+                    return {
+                        "available": True,
+                        "status": "not_running",
+                        "manager": "wrangler",
+                        **tunnel_counts,
+                        "detail": "Named Cloudflare Tunnel resources exist, but none are active. Run the PC tunnel before treating the stable hostname as reachable.",
+                    }
                 return {
                     "available": True,
                     "status": "ready",
                     "manager": "wrangler",
-                    "tunnel_count": tunnel_count,
-                    "detail": "Named Cloudflare Tunnel resources are listable through Wrangler OAuth.",
+                    **tunnel_counts,
+                    "detail": "At least one named Cloudflare Tunnel is active through Wrangler OAuth.",
                 }
             return {
                 "available": True,
@@ -357,16 +366,70 @@ def _check_named_tunnel(
             "status": "origin_cert_missing",
             "detail": "cloudflared is installed, but a tunnel origin certificate is missing. Run cloudflared tunnel login before creating named tunnel DNS routes.",
         }
+    if result.returncode != 0:
+        return {
+            "available": False,
+            "status": "unavailable",
+            "manager": "cloudflared",
+            "detail": _summarize_output(result.stdout, result.stderr, "Named tunnel check failed."),
+        }
+    tunnel_counts = _tunnel_status_counts(result.stdout)
+    if tunnel_counts["tunnel_count"] > 0 and tunnel_counts["active_count"] <= 0:
+        return {
+            "available": True,
+            "status": "not_running",
+            "manager": "cloudflared",
+            **tunnel_counts,
+            "detail": "Named tunnel credentials are available, but no tunnel is currently active.",
+        }
     return {
         "available": result.returncode == 0,
         "status": "ready" if result.returncode == 0 else "unavailable",
         "manager": "cloudflared",
-        "detail": "Named tunnel credentials are available." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Named tunnel check failed."),
+        **tunnel_counts,
+        "detail": "Named tunnel credentials are available and at least one tunnel is active."
+        if tunnel_counts["active_count"] > 0
+        else "Named tunnel credentials are available.",
     }
 
 
-def _count_tunnel_ids(output: str) -> int:
-    return len(set(re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", output, re.IGNORECASE)))
+def _tunnel_status_counts(output: str) -> dict[str, int]:
+    tunnel_ids: set[str] = set()
+    active_count = 0
+    inactive_count = 0
+    unknown_count = 0
+    uuid_re = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.IGNORECASE)
+    for line in str(output or "").splitlines():
+        match = uuid_re.search(line)
+        if match is None:
+            continue
+        tunnel_ids.add(match.group(0).lower())
+        status = _tunnel_status_from_line(line)
+        if status == "active":
+            active_count += 1
+        elif status == "inactive":
+            inactive_count += 1
+        else:
+            unknown_count += 1
+    return {
+        "tunnel_count": len(tunnel_ids),
+        "active_count": active_count,
+        "inactive_count": inactive_count,
+        "unknown_status_count": unknown_count,
+    }
+
+
+def _tunnel_status_from_line(line: str) -> str:
+    parts = [part.strip().lower() for part in line.split("│")]
+    if len(parts) >= 4:
+        candidate = parts[3]
+        if candidate in {"active", "inactive", "degraded", "healthy", "down"}:
+            return candidate
+    uuid_re = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    match = re.search(rf"\b{uuid_re}\b\s+\S+\s+(\S+)", line, re.IGNORECASE)
+    if match:
+        return match.group(1).strip().lower()
+    return ""
 
 
 def _check_pc_tunnel_env(env: Mapping[str, str]) -> dict[str, Any]:

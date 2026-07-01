@@ -224,7 +224,7 @@ def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_
     }
 
 
-def test_cloudflare_environment_accepts_wrangler_managed_named_tunnel(monkeypatch):
+def test_cloudflare_environment_reports_inactive_wrangler_managed_named_tunnel(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 
     monkeypatch.setattr(
@@ -265,11 +265,13 @@ def test_cloudflare_environment_accepts_wrangler_managed_named_tunnel(monkeypatc
         env={"RUMI_WRANGLER_COMMAND": "/usr/local/bin/npx wrangler"},
     )
 
-    assert status["named_tunnel_ready"] is True
+    assert status["named_tunnel_ready"] is False
     assert status["stable_pc_tunnel_ready"] is False
-    assert status["checks"]["named_tunnel"]["status"] == "ready"
+    assert status["checks"]["named_tunnel"]["status"] == "not_running"
     assert status["checks"]["named_tunnel"]["manager"] == "wrangler"
     assert status["checks"]["named_tunnel"]["tunnel_count"] == 1
+    assert status["checks"]["named_tunnel"]["active_count"] == 0
+    assert status["checks"]["named_tunnel"]["inactive_count"] == 1
     assert status["checks"]["zones"]["status"] == "not_checked"
     assert "CLOUDFLARE_NAMED_TUNNEL_ORIGIN_CERT_MISSING" not in {
         item["code"] for item in status["blockers"]
@@ -277,6 +279,7 @@ def test_cloudflare_environment_accepts_wrangler_managed_named_tunnel(monkeypatc
     assert {item["code"] for item in status["blockers"]} >= {
         "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED",
         "CLOUDFLARE_ZONES_NOT_CHECKED",
+        "CLOUDFLARE_NAMED_TUNNEL_NOT_RUNNING",
         "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED",
         "CLOUDFLARE_PC_TOOL_BRIDGE_ENV_NOT_CONFIGURED",
     }
@@ -422,6 +425,9 @@ def test_cloudflare_environment_accepts_configured_pc_tool_bridge_env(monkeypatc
     assert status["zones_ready"] is True
     assert status["pc_tool_bridge_ready"] is True
     assert status["stable_pc_tunnel_ready"] is True
+    assert status["checks"]["named_tunnel"]["status"] == "ready"
+    assert status["checks"]["named_tunnel"]["active_count"] == 1
+    assert status["checks"]["named_tunnel"]["inactive_count"] == 0
     assert status["checks"]["pc_tool_bridge_env"]["status"] == "configured"
     assert status["checks"]["pc_tool_bridge_env"]["bridge_token_configured"] is True
     assert status["checks"]["pc_tool_bridge_env"]["pc_runtime_bearer_configured"] is True
