@@ -52,6 +52,9 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
             "endpoint_path": spec["endpoint_path"],
             "source": spec["source"],
             "pricing": "free_promotion_or_account_policy",
+            "quirks": {
+                "supports_stream_tool_calls": False,
+            },
             "min_output_tokens": spec["min_output_tokens"],
             "token_floor_reason": "MiniMax M3 can emit reasoning before final text; short caps may return thinking-only output.",
         },

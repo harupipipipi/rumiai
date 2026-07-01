@@ -422,6 +422,114 @@ function ModelStatusIndicatorButton({
   );
 }
 
+function GlobalDismissButton({
+  ariaLabel,
+  className,
+  onClick,
+  tabIndex,
+}: {
+  ariaLabel: string;
+  className: string;
+  onClick: () => void;
+  tabIndex?: number;
+}) {
+  const button = (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      tabIndex={tabIndex}
+      className={className}
+      onClick={onClick}
+    />
+  );
+
+  return typeof document !== "undefined"
+    ? createPortal(button, document.body)
+    : button;
+}
+
+type ComposerMentionDescriptor = {
+  kind: "tool" | "skill" | "file";
+  label: string;
+};
+
+function humanizeMentionLabel(token: string, descriptor?: ComposerMentionDescriptor): string {
+  const source = descriptor?.label || token;
+  const clean = source.replace(/^@/, "").trim() || token;
+  const tail = clean.split("/").filter(Boolean).pop() ?? clean;
+  return `@${tail.replace(/[_-]+/g, " ")}`;
+}
+
+function renderComposerMentionText(
+  value: string,
+  mentionLookup: Map<string, ComposerMentionDescriptor>,
+  keyPrefix = "",
+): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const mentionPattern = /(^|\s)@([A-Za-z0-9_./:-]+)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = mentionPattern.exec(value))) {
+    const leading = match[1] ?? "";
+    const token = match[2] ?? "";
+    const mentionStart = match.index + leading.length;
+    const mentionEnd = mentionStart + token.length + 1;
+    const descriptor = mentionLookup.get(token.toLowerCase());
+
+    if (!descriptor) continue;
+    if (mentionStart > lastIndex) {
+      nodes.push(value.slice(lastIndex, mentionStart));
+    }
+
+    const Icon = descriptor.kind === "tool" ? Wrench : descriptor.kind === "skill" ? BrainCircuit : FileText;
+    nodes.push(
+      <span
+        key={`${keyPrefix}${mentionStart}-${token}`}
+        className="mx-[1px] inline-flex h-[20px] translate-y-[2px] items-center gap-1 rounded-full bg-sky-500/15 px-1.5 text-sky-200 ring-1 ring-sky-400/25"
+      >
+        <Icon size={11} className="flex-shrink-0 text-sky-300" />
+        <span>{humanizeMentionLabel(token, descriptor)}</span>
+      </span>,
+    );
+    lastIndex = mentionEnd;
+  }
+
+  if (lastIndex < value.length) {
+    nodes.push(value.slice(lastIndex));
+  }
+  return nodes;
+}
+
+function ComposerMentionOverlay({
+  value,
+  mentionLookup,
+  cursorPosition = value.length,
+  showCaret = false,
+  className = "",
+}: {
+  value: string;
+  mentionLookup: Map<string, ComposerMentionDescriptor>;
+  cursorPosition?: number;
+  showCaret?: boolean;
+  className?: string;
+}) {
+  if (!value) return null;
+  const caretIndex = Math.max(0, Math.min(cursorPosition, value.length));
+  const beforeCaret = value.slice(0, caretIndex);
+  const afterCaret = value.slice(caretIndex);
+  return (
+    <div
+      aria-hidden="true"
+      className={`rumi-composer-mention-overlay pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-zinc-100 ${className}`}
+    >
+      {renderComposerMentionText(beforeCaret, mentionLookup, "before-")}
+      {showCaret && <span className="rumi-composer-fake-caret" />}
+      {renderComposerMentionText(afterCaret, mentionLookup, "after-")}
+    </div>
+  );
+}
+
 function composerChromeWidgetsForSlot(
   widgets: ComposerChromeWidgetSpec[],
   slot: ComposerChromeSlot,
@@ -865,7 +973,7 @@ function ProviderApiKeyPrompt({
 
   return (
     <>
-      <button type="button" aria-label="close api key prompt" className="fixed inset-0 rumi-layer-global-overlay cursor-default" onClick={onCancel} />
+      <GlobalDismissButton ariaLabel="close api key prompt" className="fixed inset-0 rumi-layer-global-overlay cursor-default" onClick={onCancel} />
       <div className="absolute bottom-full right-3 rumi-layer-global-overlay mb-2 w-[min(430px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-4 py-3">
           <div className="flex items-center gap-2 text-sm font-medium text-zinc-100">
@@ -995,7 +1103,7 @@ function ModelDropdown({
 
   return (
     <>
-      <button type="button" aria-label="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <GlobalDismissButton ariaLabel="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
         className={`absolute rumi-layer-command-palette w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl ${
           modelDropdownPlacementClassName(placement)
@@ -1092,7 +1200,7 @@ function ModeSelector({
 }) {
   return (
     <>
-      <button type="button" aria-label="close mode selector" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
+      <GlobalDismissButton ariaLabel="close mode selector" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div className="absolute bottom-full left-0 mb-2 rumi-layer-modal w-[220px] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
         <div className="border-b border-zinc-800 px-3 py-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">モード選択</p>
@@ -1148,7 +1256,7 @@ function AtMentionMenu({
 }) {
   if (candidates.length === 0) return null;
 
-  return (
+  const menu = (
     <>
       <button type="button" aria-label="close mention menu" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
@@ -1156,7 +1264,7 @@ function AtMentionMenu({
         aria-label="Composer mentions"
         data-testid="composer-at-mention-candidates"
         style={style}
-        className="fixed rumi-layer-modal w-[min(440px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+        className="fixed rumi-layer-modal flex w-[min(440px,calc(100vw-32px))] flex-col overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
       >
         <div className="border-b border-zinc-800 px-3 py-2 flex items-center justify-between gap-2">
           <span className="inline-flex min-w-0 items-center gap-2">
@@ -1165,7 +1273,7 @@ function AtMentionMenu({
           </span>
           <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
-        <div className="max-h-56 overflow-y-auto py-1">
+        <div className="min-h-0 flex-1 overflow-y-auto py-1">
           {candidates.map((candidate, index) => {
             const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
             return (
@@ -1203,6 +1311,10 @@ function AtMentionMenu({
       </div>
     </>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(menu, document.body)
+    : menu;
 }
 
 export function filterAtMentionFiles(files: string[], query: string): string[] {
@@ -1288,7 +1400,7 @@ function modelCandidateApiKeyBadge(candidate: ModelCommandCandidate): string | n
   return null;
 }
 
-type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top">;
+type PopupAnchorRect = Pick<DOMRect, "left" | "right" | "top"> & Partial<Pick<DOMRect, "bottom">>;
 
 export function modelCandidatePopupStyleForAnchor(
   anchorRect: PopupAnchorRect | null,
@@ -1304,6 +1416,41 @@ export function modelCandidatePopupStyleForAnchor(
     top,
     width,
     transform: "translateY(-100%)",
+  };
+}
+
+export function composerMentionPopupStyleForAnchor(
+  anchorRect: PopupAnchorRect | null,
+  viewportWidth: number,
+  viewportHeight: number,
+  preferredWidth = 440,
+  preferredHeight = 256,
+): CSSProperties | undefined {
+  if (!anchorRect || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
+  const margin = 8;
+  const width = Math.min(preferredWidth, Math.max(260, viewportWidth - margin * 2));
+  const left = Math.max(margin, Math.min(anchorRect.left, viewportWidth - width - margin));
+  const anchorBottom = anchorRect.bottom ?? anchorRect.top;
+  const spaceAbove = Math.max(0, anchorRect.top - margin * 2);
+  const spaceBelow = Math.max(0, viewportHeight - anchorBottom - margin * 2);
+  const placeAbove = spaceAbove >= Math.min(preferredHeight, 220) || spaceAbove >= spaceBelow;
+
+  if (placeAbove) {
+    return {
+      left,
+      top: Math.max(margin, anchorRect.top - margin),
+      width,
+      maxHeight: Math.max(160, Math.min(preferredHeight, spaceAbove - margin)),
+      transform: "translateY(-100%)",
+    };
+  }
+
+  const maxHeight = Math.max(160, Math.min(preferredHeight, spaceBelow - margin));
+  return {
+    left,
+    top: Math.min(viewportHeight - margin - maxHeight, anchorBottom + margin),
+    width,
+    maxHeight,
   };
 }
 
@@ -1324,7 +1471,7 @@ function ModelCommandCandidatePopup({
 }) {
   if (candidates.length === 0) return null;
 
-  return (
+  const popup = (
     <div
       role="listbox"
       aria-label="Model candidates"
@@ -1380,6 +1527,10 @@ function ModelCommandCandidatePopup({
       </div>
     </div>
   );
+
+  return typeof document !== "undefined"
+    ? createPortal(popup, document.body)
+    : popup;
 }
 
 export function ComposerRenderer({
@@ -1468,7 +1619,10 @@ export function ComposerRenderer({
   const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
+  const [composerMentionPopoverStyle, setComposerMentionPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [textareaSelection, setTextareaSelection] = useState({ start: input.length, end: input.length });
+  const [textareaFocused, setTextareaFocused] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1671,6 +1825,30 @@ export function ComposerRenderer({
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
 
+  const updateComposerMentionPopoverAnchor = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const anchorRect = textareaRef.current?.getBoundingClientRect() ?? null;
+    setComposerMentionPopoverStyle(composerMentionPopupStyleForAnchor(anchorRect, window.innerWidth, window.innerHeight));
+  }, []);
+
+  const syncTextareaSelection = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const next = {
+      start: textarea.selectionStart ?? input.length,
+      end: textarea.selectionEnd ?? textarea.selectionStart ?? input.length,
+    };
+    setTextareaSelection((current) => (
+      current.start === next.start && current.end === next.end ? current : next
+    ));
+  }, [input.length]);
+
+  const syncTextareaFocusAndSelection = useCallback(() => {
+    const textarea = textareaRef.current;
+    setTextareaFocused(Boolean(textarea && typeof document !== "undefined" && document.activeElement === textarea));
+    syncTextareaSelection();
+  }, [syncTextareaSelection]);
+
   const resizeNewConversationTextarea = useCallback(
     (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
       if (!textarea) return;
@@ -1815,6 +1993,17 @@ export function ComposerRenderer({
   }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
+    if (!atMentionOpen) return;
+    updateComposerMentionPopoverAnchor();
+    window.addEventListener("resize", updateComposerMentionPopoverAnchor);
+    window.addEventListener("scroll", updateComposerMentionPopoverAnchor, true);
+    return () => {
+      window.removeEventListener("resize", updateComposerMentionPopoverAnchor);
+      window.removeEventListener("scroll", updateComposerMentionPopoverAnchor, true);
+    };
+  }, [atMentionOpen, updateComposerMentionPopoverAnchor]);
+
+  useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
     const focusTimer = window.setTimeout(() => {
       textareaRef.current?.focus({ preventScroll: true });
@@ -1900,13 +2089,13 @@ export function ComposerRenderer({
       if (atMatch && !isSteerMode && hasMentionTargets) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
-        updateComposerPopoverAnchor();
+        updateComposerMentionPopoverAnchor();
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerPopoverAnchor],
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerMentionPopoverAnchor],
   );
 
   useEffect(() => {
@@ -2618,14 +2807,14 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
+              style={composerMentionPopoverStyle}
             />
           )}
 
           {menuOpen && (
             <>
-                      <button
-                        type="button"
-                        aria-label="close composer menu"
+                      <GlobalDismissButton
+                        ariaLabel="close composer menu"
                         tabIndex={chromeButtonTabIndex}
                         className="fixed inset-0 rumi-layer-local-popover cursor-default"
                         onClick={() => setMenuOpen(false)}

@@ -23,6 +23,7 @@ from core_runtime.api.safe_headers import (
 )
 
 from bridge.block_adapter import invoke_block
+from domain.extensions.activation import selected_extension_pack_ids
 from domain.safety.local_guard import (
     METHOD_SENSITIVE_CODING_PATHS,
     SENSITIVE_CODING_PATHS,
@@ -1302,6 +1303,10 @@ class DefaultsHttpServer:
             "",
         )
         if not os.path.isfile(file_path):
+            pack_static_file = self._resolve_pack_static_file(pack_root, safe_path)
+            if pack_static_file:
+                file_path = str(pack_static_file)
+        if not os.path.isfile(file_path):
             return error("file not found: " + rel_path)
         ext = os.path.splitext(file_path)[1].lower()
         content_types = {
@@ -1325,6 +1330,46 @@ class DefaultsHttpServer:
             with open(file_path, "rb") as f:
                 body = f.read()
         return {"_static": True, "content_type": ct, "body": body}
+
+    @staticmethod
+    def _resolve_pack_static_file(pack_root, safe_path):
+        normalized = safe_path.replace("\\", "/")
+        if not normalized.startswith("packs/"):
+            return None
+        parts = normalized.split("/", 2)
+        if len(parts) != 3:
+            return None
+        _, pack_id, pack_rel_path = parts
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+", pack_id or ""):
+            return None
+        if not (
+            pack_rel_path.startswith("renderers/")
+            or pack_rel_path.startswith("assets/renderers/")
+        ):
+            return None
+        defaultspack_root = Path(pack_root).resolve()
+        ecosystem_root = defaultspack_root.parent if defaultspack_root.parent.name == "ecosystem" else defaultspack_root.parent.parent
+        if not ecosystem_root.is_dir():
+            return None
+        selected_pack_ids = selected_extension_pack_ids(defaultspack_root)
+        if selected_pack_ids is not None and pack_id not in selected_pack_ids:
+            return None
+        candidate_pack = (ecosystem_root / pack_id).resolve()
+        try:
+            candidate_pack.relative_to(ecosystem_root.resolve())
+        except ValueError:
+            return None
+        if not candidate_pack.is_dir() or not (candidate_pack / "ecosystem.json").is_file():
+            return None
+        static_root = (candidate_pack / "static").resolve()
+        candidate = (static_root / pack_rel_path).resolve()
+        try:
+            candidate.relative_to(static_root)
+        except ValueError:
+            return None
+        if candidate.is_file():
+            return candidate
+        return None
 
 
 _SENSITIVE_CODING_PATHS = set(SENSITIVE_CODING_PATHS) | set(METHOD_SENSITIVE_CODING_PATHS)

@@ -48,7 +48,8 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert "opencode-zen/minimax-m3-free" in models
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
-    assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
+    assert models["opencode-zen/minimax-m3-free"]["metadata"]["quirks"]["supports_stream_tool_calls"] is False
+    assert models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"] is False
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
 
 
@@ -87,7 +88,7 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
-def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
+def test_opencode_zen_stream_drops_tools_and_applies_token_floor(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}
     response = _FakeSseResponse(

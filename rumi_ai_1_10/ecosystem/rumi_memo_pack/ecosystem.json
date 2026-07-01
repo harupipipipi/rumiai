@@ -1,0 +1,16 @@
+{
+  "pack_id": "rumi_memo_pack",
+  "pack_identity": "rumi:ecosystem/rumi_memo_pack",
+  "version": "0.1.0",
+  "metadata": {
+    "name": "Rumi Memo Pack",
+    "description": "Pack-owned Memo workspace shell, renderers, and profile template.",
+    "author": "Rumi AI Team",
+    "license": "MIT"
+  },
+  "vocabulary": {
+    "types": ["frontend", "profile"]
+  },
+  "components": {},
+  "load_order": []
+}

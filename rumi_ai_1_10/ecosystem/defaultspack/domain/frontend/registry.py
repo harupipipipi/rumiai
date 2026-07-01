@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import importlib
 import json
 import re
@@ -38,6 +39,11 @@ from transport.registry import (
 )
 
 
+_TRUSTED_PACK_RENDERER_RE = re.compile(
+    r"^/static/packs/([A-Za-z0-9_.-]+)/((?:renderers|assets/renderers)/[^?#]+\.js)(?:[?#].*)?$"
+)
+
+
 class FrontendRegistry:
     """Registry for frontend catalog, settings, and chat preview metadata."""
 
@@ -52,9 +58,15 @@ class FrontendRegistry:
         template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
-        selected_frontend_ids = self._profile_frontend_selection(profile_id)
+        profile_preferences = self._profile_frontend_preferences(profile_id)
+        selected_frontend_ids = profile_preferences["selected_frontend_ids"]
         shell = self._merge_template_shell_catalog(
-            self._shell(ui_surfaces, extensions),
+            self._shell(
+                ui_surfaces,
+                extensions,
+                profile_id=profile_id,
+                shell_variant_id=profile_preferences["shell_variant_id"],
+            ),
             template_catalog,
         )
         shell = self._filter_shell(shell, selected_frontend_ids)
@@ -270,6 +282,9 @@ class FrontendRegistry:
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
+        *,
+        profile_id: str | None = None,
+        shell_variant_id: str | None = None,
     ) -> dict[str, Any]:
         shell = {
             "layout": {
@@ -295,9 +310,12 @@ class FrontendRegistry:
                 {"id": "right_sidebar", "component": "RightSidebar", "regions": ["right_sidebar"], "fallback": "hidden"},
                 {"id": "settings_modal", "component": "SettingsModal", "regions": ["settings_modal"], "fallback": "hidden"},
             ],
+            "variants": [],
+            "active_variant_id": "default_chat_shell",
         }
         user_shell = self._load_shell_config()
-        for manifest in [*ui_surfaces, user_shell, *extensions]:
+        profile_shell = self._load_profile_shell_config(profile_id)
+        for manifest in [*ui_surfaces, user_shell, *extensions, profile_shell]:
             config = manifest.get("config", manifest)
             if not isinstance(config, dict):
                 continue
@@ -305,10 +323,20 @@ class FrontendRegistry:
                 shell["layout"] = self._deep_merge(shell["layout"], config["shell_layout"])
             renderers = config.get("shell_renderers")
             if isinstance(renderers, list):
+                renderer_items = self._config_list([manifest], "shell_renderers")
                 shell["renderers"] = self._dedupe_by_key(
-                    [*shell["renderers"], *(item for item in renderers if isinstance(item, dict))],
+                    [*shell["renderers"], *renderer_items],
                     "id",
                 )
+            variants = config.get("shell_variants")
+            if isinstance(variants, list):
+                shell["variants"] = self._dedupe_by_key(
+                    [*shell["variants"], *(item for item in variants if isinstance(item, dict))],
+                    "id",
+                )
+        shell["active_variant_id"] = str(shell.get("layout", {}).get("id") or "default_chat_shell")
+        if shell_variant_id:
+            shell = self._apply_shell_variant(shell, shell_variant_id)
         return shell
 
     def _merge_template_shell_catalog(
@@ -489,21 +517,41 @@ class FrontendRegistry:
         bindings.extend(self._config_list(extensions, "component_bindings"))
         return self._dedupe_by_key(bindings, "part_id")
 
-    def _profile_frontend_selection(self, profile_id: str | None) -> set[str]:
+    def _profile_frontend_preferences(self, profile_id: str | None) -> dict[str, Any]:
         candidate = str(profile_id or "").strip()
         if not candidate:
-            return set()
+            return {"selected_frontend_ids": set(), "shell_variant_id": None}
         try:
             profile = ProfileWorkspaceManager().load_profile_yaml(candidate)
         except Exception:
-            return set()
+            return {"selected_frontend_ids": set(), "shell_variant_id": None}
         metadata = profile.get("metadata") if isinstance(profile, dict) and isinstance(profile.get("metadata"), dict) else {}
         selected = normalize_profile_graph_selected(metadata.get("selected"))
-        return {
+        selected_frontend_ids = {
             item_id
             for item_id in (selected.get("frontend") if isinstance(selected.get("frontend"), list) else [])
             if isinstance(item_id, str) and item_id.strip()
         }
+        shell_variant_id = self._profile_shell_variant_id(metadata)
+        return {"selected_frontend_ids": selected_frontend_ids, "shell_variant_id": shell_variant_id}
+
+    def _profile_shell_variant_id(self, metadata: dict[str, Any]) -> str | None:
+        direct = str(metadata.get("shell_variant") or "").strip()
+        if direct:
+            return direct
+        selected = metadata.get("selected") if isinstance(metadata.get("selected"), dict) else {}
+        raw = selected.get("shell_variant") if isinstance(selected, dict) else None
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+        if isinstance(raw, list):
+            for value in raw:
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+        if isinstance(raw, dict):
+            candidate = str(raw.get("id") or raw.get("variant_id") or "").strip()
+            if candidate:
+                return candidate
+        return None
 
     def _filter_shell(self, shell: dict[str, Any], selected_frontend_ids: set[str]) -> dict[str, Any]:
         if not selected_frontend_ids:
@@ -1799,6 +1847,11 @@ class FrontendRegistry:
                 "path": "extensions/ui/*/manifest.json config.shell_renderers or packs/frontend_extensions/*.ui.json",
                 "description": "Renderer IDs and component names bound to shell regions.",
             },
+            {
+                "id": "shell_variants",
+                "path": "packs/frontend_extensions/*.ui.json config.shell_variants or profile metadata.shell_variant",
+                "description": "Profile-selectable shell variants that can preserve chrome/sidebar while replacing workspace regions.",
+            },
         ]
 
     def _preview_from_log(self, log: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2246,6 +2299,108 @@ class FrontendRegistry:
             return {}
         return config
 
+    def _load_profile_shell_config(self, profile_id: str | None) -> dict[str, Any]:
+        candidate = str(profile_id or "").strip()
+        if not candidate:
+            return {}
+        try:
+            shell_path = ProfileWorkspaceManager().paths_for_profile(candidate).root / "frontend_shell.json"
+        except Exception:
+            return {}
+        if not shell_path.exists():
+            return {}
+        try:
+            config = json.loads(shell_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            self._add_diagnostic("warning", "profile_frontend_shell_invalid_json", str(exc), str(shell_path))
+            return {}
+        if not isinstance(config, dict):
+            self._add_diagnostic(
+                "warning",
+                "profile_frontend_shell_not_object",
+                "profile frontend_shell.json must contain a JSON object.",
+                str(shell_path),
+            )
+            return {}
+        config["_source"] = str(shell_path)
+        return config
+
+    def _apply_shell_variant(self, shell: dict[str, Any], shell_variant_id: str) -> dict[str, Any]:
+        variant_id = str(shell_variant_id or "").strip()
+        if not variant_id:
+            return shell
+        variants = shell.get("variants") if isinstance(shell.get("variants"), list) else []
+        variant = next(
+            (
+                item
+                for item in variants
+                if isinstance(item, dict) and str(item.get("id") or "").strip() == variant_id
+            ),
+            None,
+        )
+        if variant is None:
+            self._add_diagnostic(
+                "warning",
+                "shell_variant_not_found",
+                f"Profile selected shell variant '{variant_id}' but no matching shell_variants entry exists.",
+                "profile.metadata.shell_variant",
+            )
+            return shell
+
+        updated = deepcopy(shell)
+        layout = deepcopy(updated.get("layout") if isinstance(updated.get("layout"), dict) else {})
+        for key in ("layout", "shell_layout"):
+            if isinstance(variant.get(key), dict):
+                layout = self._deep_merge(layout, variant[key])
+        regions = layout.get("regions") if isinstance(layout.get("regions"), list) else []
+        layout["regions"] = self._apply_shell_variant_regions(regions, variant)
+        layout["id"] = variant_id
+        if isinstance(variant.get("label"), str):
+            layout["label"] = variant["label"]
+        if isinstance(variant.get("extends"), str):
+            layout["extends"] = variant["extends"]
+        updated["layout"] = layout
+        updated["active_variant_id"] = variant_id
+        return updated
+
+    def _apply_shell_variant_regions(self, regions: list[Any], variant: dict[str, Any]) -> list[dict[str, Any]]:
+        next_regions = [deepcopy(region) for region in regions if isinstance(region, dict)]
+        preserve_region_ids = {
+            str(value).strip()
+            for value in variant.get("preserve_regions", [])
+            if isinstance(value, str) and value.strip()
+        }
+        if str(variant.get("mode") or "").strip() == "replace_main":
+            for region in next_regions:
+                region_id = str(region.get("id") or "").strip()
+                slot = str(region.get("slot") or "").strip()
+                if region_id not in preserve_region_ids and slot in {"main", "bottom"}:
+                    region["enabled"] = False
+
+        disabled_region_ids = {
+            str(value).strip()
+            for value in variant.get("disable_regions", [])
+            if isinstance(value, str) and value.strip()
+        }
+        if disabled_region_ids:
+            existing_ids = {str(region.get("id") or "").strip() for region in next_regions}
+            for region in next_regions:
+                if str(region.get("id") or "").strip() in disabled_region_ids:
+                    region["enabled"] = False
+            for region_id in sorted(disabled_region_ids - existing_ids):
+                next_regions.append({"id": region_id, "enabled": False})
+
+        add_regions = variant.get("add_regions")
+        if isinstance(add_regions, list):
+            next_regions = self._dedupe_by_key(
+                [
+                    *next_regions,
+                    *(deepcopy(region) for region in add_regions if isinstance(region, dict)),
+                ],
+                "id",
+            )
+        return next_regions
+
     def _template_catalog_metadata(self) -> dict[str, Any]:
         try:
             template_projectors = importlib.import_module("domain.templates.projectors")
@@ -2504,15 +2659,45 @@ class FrontendRegistry:
             module = renderer.get("module")
             if module is not None and not self._is_trusted_renderer_module(module):
                 diagnostics.append(self._diagnostic("warning", "shell_renderer_untrusted_module", f"shell renderer '{renderer_id or index}' module must be a trusted static renderer path.", source))
+            module_pack_id = self._trusted_renderer_module_pack_id(module)
+            source_pack_id = str(renderer.get("source_pack_id") or "").strip()
+            if module_pack_id and source_pack_id and source_pack_id not in {"defaultspack", "user_data"} and module_pack_id != source_pack_id:
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_pack_mismatch", f"shell renderer '{renderer_id or index}' module must be served from its declaring pack.", source))
+            if module_pack_id and renderer.get("trust") == "local" and not str(renderer.get("integrity") or "").startswith("sha256-"):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_integrity", f"shell renderer '{renderer_id or index}' module requires a static file digest.", source))
             if module is not None and renderer.get("trust") != "local":
                 diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_local_trust", f"shell renderer '{renderer_id or index}' module requires trust='local'.", source))
+
+        variants = shell.get("variants", [])
+        if variants and not isinstance(variants, list):
+            diagnostics.append(self._diagnostic("warning", "shell_variants_not_list", "shell.variants must be a list.", "catalog.shell.variants"))
+            variants = []
+        for index, variant in enumerate(variants):
+            if not isinstance(variant, dict):
+                diagnostics.append(self._diagnostic("warning", "shell_variant_not_object", f"shell.variants[{index}] must be an object.", "catalog.shell.variants"))
+                continue
+            variant_id = str(variant.get("id", "")).strip()
+            source = str(variant.get("_source", "catalog.shell.variants"))
+            if not variant_id:
+                diagnostics.append(self._diagnostic("warning", "shell_variant_missing_id", f"shell.variants[{index}] is missing id.", source))
+            if "add_regions" in variant and not isinstance(variant.get("add_regions"), list):
+                diagnostics.append(self._diagnostic("warning", "shell_variant_invalid_add_regions", f"shell variant '{variant_id or index}' add_regions must be a list.", source))
+            for key in ("preserve_regions", "disable_regions"):
+                if key in variant and not isinstance(variant.get(key), list):
+                    diagnostics.append(self._diagnostic("warning", f"shell_variant_invalid_{key}", f"shell variant '{variant_id or index}' {key} must be a list.", source))
 
         return diagnostics
 
     def _is_trusted_renderer_module(self, module: Any) -> bool:
+        return self._trusted_renderer_module_pack_id(module) is not None
+
+    def _trusted_renderer_module_pack_id(self, module: Any) -> str | None:
         if not isinstance(module, str):
-            return False
-        return module.startswith(("/static/renderers/", "/static/assets/renderers/", "/static/user_renderers/"))
+            return None
+        match = _TRUSTED_PACK_RENDERER_RE.match(module)
+        if not match:
+            return None
+        return match.group(1)
 
     def _add_diagnostic(self, level: str, code: str, message: str, source: str) -> None:
         if not hasattr(self, "_load_diagnostics"):
@@ -2531,8 +2716,68 @@ class FrontendRegistry:
             items = config.get(key, [])
             if not isinstance(items, list):
                 continue
-            values.extend(item for item in items if isinstance(item, dict))
+            values.extend(self._copy_config_item(manifest, item, key) for item in items if isinstance(item, dict))
         return values
+
+    def _copy_config_item(self, manifest: dict[str, Any], item: dict[str, Any], key: str) -> dict[str, Any]:
+        copied = deepcopy(item)
+        source = manifest.get("_source")
+        source_pack_id = manifest.get("source_pack_id")
+        if source and "_source" not in copied:
+            copied["_source"] = str(source)
+        if source_pack_id and "source_pack_id" not in copied:
+            copied["source_pack_id"] = str(source_pack_id)
+        if key == "shell_renderers":
+            copied = self._normalize_shell_renderer_static_module(copied)
+        return copied
+
+    def _normalize_shell_renderer_static_module(self, renderer: dict[str, Any]) -> dict[str, Any]:
+        module = renderer.get("module")
+        source_pack_id = str(renderer.get("source_pack_id") or "").strip()
+        if renderer.get("trust") != "local" or not isinstance(module, str) or not source_pack_id:
+            return renderer
+        if source_pack_id in {"defaultspack", "user_data"}:
+            return renderer
+        rest_path = self._renderer_static_rest_path(module, source_pack_id)
+        if not rest_path:
+            return renderer
+        renderer["module"] = f"/static/packs/{source_pack_id}/{rest_path}"
+        renderer["module_pack_id"] = source_pack_id
+        digest = self._renderer_static_integrity(source_pack_id, rest_path)
+        if digest:
+            renderer["integrity"] = digest
+        return renderer
+
+    def _renderer_static_rest_path(self, module: str, source_pack_id: str) -> str | None:
+        match = _TRUSTED_PACK_RENDERER_RE.match(module)
+        if match:
+            module_pack_id, rest_path = match.group(1), match.group(2)
+            return rest_path if module_pack_id == source_pack_id else None
+        for prefix, target_prefix in (
+            ("/static/renderers/", "renderers/"),
+            ("/static/assets/renderers/", "assets/renderers/"),
+        ):
+            if module.startswith(prefix) and module.endswith(".js"):
+                file_name = module.removeprefix(prefix).split("?", 1)[0].split("#", 1)[0]
+                if file_name and "/" not in file_name and "\\" not in file_name:
+                    return f"{target_prefix}{file_name}"
+        return None
+
+    def _renderer_static_integrity(self, source_pack_id: str, rest_path: str) -> str | None:
+        pack_root = (self._ecosystem_root() / source_pack_id).resolve()
+        static_root = (pack_root / "static").resolve()
+        candidate = (static_root / rest_path).resolve()
+        try:
+            candidate.relative_to(static_root)
+        except ValueError:
+            return None
+        if not candidate.is_file():
+            return None
+        try:
+            digest = hashlib.sha256(candidate.read_bytes()).digest()
+        except OSError:
+            return None
+        return "sha256-" + base64.b64encode(digest).decode("ascii")
 
     def _hydrate_sidebar_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         hydrated: list[dict[str, Any]] = []

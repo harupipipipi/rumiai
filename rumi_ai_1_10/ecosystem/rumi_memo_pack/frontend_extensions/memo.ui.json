@@ -1,0 +1,85 @@
+{
+  "parts": [
+    {
+      "id": "memo_notes",
+      "kind": "navigation",
+      "label": "Memo Notes",
+      "uses": ["frontend", "profile"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "pages": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    },
+    {
+      "id": "memo_workspace",
+      "kind": "workspace",
+      "label": "Memo Workspace",
+      "uses": ["frontend", "profile", "tool"],
+      "schema": {
+        "type": "object",
+        "properties": {
+          "page": {"type": "object"},
+          "blocks": {"type": "array", "items": {"type": "object"}}
+        }
+      }
+    }
+  ],
+  "component_bindings": [
+    {
+      "part_id": "memo_workspace",
+      "component": "memo",
+      "requires": ["frontend"],
+      "optional": ["tool", "ai_client"]
+    }
+  ],
+  "shell_renderers": [
+    {
+      "id": "memo_nav",
+      "component": "MemoNav",
+      "regions": ["memo_nav"],
+      "fallback": "hidden",
+      "module": "/static/packs/rumi_memo_pack/renderers/rumi-memo-nav.js",
+      "export": "default",
+      "trust": "local"
+    },
+    {
+      "id": "memo_workspace",
+      "component": "MemoWorkspace",
+      "regions": ["memo_workspace"],
+      "fallback": "hidden",
+      "module": "/static/packs/rumi_memo_pack/renderers/rumi-memo-workspace.js",
+      "export": "default",
+      "trust": "local"
+    }
+  ],
+  "shell_variants": [
+    {
+      "id": "memo.workspace",
+      "label": "Memo Workspace",
+      "extends": "default_chat_shell",
+      "mode": "replace_main",
+      "preserve_regions": ["title_bar", "right_sidebar", "settings_modal"],
+      "disable_regions": ["history", "chat_header", "chat_messages", "composer", "activity_preview"],
+      "add_regions": [
+        {
+          "id": "memo_nav",
+          "part_id": "memo_notes",
+          "renderer": "memo_nav",
+          "slot": "left",
+          "order": 20,
+          "enabled": true
+        },
+        {
+          "id": "memo_workspace",
+          "part_id": "memo_workspace",
+          "renderer": "memo_workspace",
+          "slot": "main",
+          "order": 40,
+          "enabled": true
+        }
+      ]
+    }
+  ]
+}

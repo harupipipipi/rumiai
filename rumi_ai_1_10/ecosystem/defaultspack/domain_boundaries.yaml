@@ -317,6 +317,9 @@ domains:
     - domain/coding
     path: domain/workspace
 exceptions:
+- from: chat
+  import: domain/tool_policy
+  file: domain/chat/run_request.py
 - file: domain/ambient/router.py
   from: ambient
   import: domain/chat

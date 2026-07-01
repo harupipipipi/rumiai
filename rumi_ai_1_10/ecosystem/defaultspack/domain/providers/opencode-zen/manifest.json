@@ -19,6 +19,7 @@
   "capabilities": {
     "chat": true,
     "streaming": true,
+    "tool_calls": false,
     "anthropic_compatible": true,
     "vision": true,
     "reasoning": true

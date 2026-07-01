@@ -89,6 +89,86 @@ _COMPUTER_USE_REQUEST_RE = re.compile(
     r"(google\s*chrome|chrome|chatgpt|vivaldi|vivladi|line|ブラウザ|browser).{0,80}(操作|送信|入力|クリック|開いて|開く)",
     re.IGNORECASE,
 )
+
+
+def _is_unexpected_profiles_type_error(exc: TypeError) -> bool:
+    return "unexpected keyword argument 'profiles'" in str(exc)
+
+
+def _route_model_request_with_profiles(request: ModelRoutingRequest, profiles):
+    if profiles is None:
+        return route_model_request(request)
+    try:
+        return route_model_request(request, profiles=profiles)
+    except TypeError as exc:
+        if not _is_unexpected_profiles_type_error(exc):
+            raise
+        return route_model_request(request)
+
+
+def _get_model_capabilities_with_profiles(model: str, profiles):
+    if profiles is None:
+        return get_model_capabilities(model)
+    try:
+        return get_model_capabilities(model, profiles=profiles)
+    except TypeError as exc:
+        if not _is_unexpected_profiles_type_error(exc):
+            raise
+        return get_model_capabilities(model)
+
+
+def _stub_default_profile() -> dict[str, Any]:
+    return {
+        "id": "stub/default",
+        "profile_id": "stub/default",
+        "qualified_model_id": "stub/default",
+        "provider_id": "stub",
+        "provider": "stub",
+        "provider_display_name": "Stub",
+        "model_id": "default",
+        "model": "default",
+        "display_name": "Stub Default",
+        "name": "Stub Default",
+        "type": "chat",
+        "configured": True,
+        "local": True,
+        "supports_tool_calling": True,
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high", "xhigh"],
+        "capability_tags": ["tools", "thinking"],
+        "allowed_roles": ["deep_reasoning", "primary_chat", "subagent_default", "tool_selector"],
+        "recommended_roles": ["primary_chat", "deep_reasoning"],
+        "max_context": -1,
+        "defaults": {"chat": True},
+        "availability": {
+            "active": False,
+            "available": False,
+            "configured": True,
+            "catalog_only": False,
+            "supports_invoke": True,
+            "status": "configured",
+            "configuration_source": "builtin",
+        },
+        "metadata": {
+            "capabilities": {
+                "text": True,
+                "tool_calls": True,
+                "tool_calling": True,
+                "thinking": True,
+                "streaming": True,
+            },
+            "supports_tool_calling": True,
+            "supports_thinking": True,
+            "thinking_levels": ["low", "medium", "high", "xhigh"],
+            "capability_tags": ["tools", "thinking"],
+        },
+    }
+
+
+def _lightweight_profiles_for_model(model: str) -> list[dict[str, Any]]:
+    return [_stub_default_profile()] if str(model or "").strip() == "stub/default" else []
+
+
 _COMPUTER_USE_CHROME_TARGET_RE = re.compile(
     r"google\s*chrome|chrome|グーグル\s*クローム|クローム", re.IGNORECASE
 )
@@ -102,6 +182,48 @@ _COMPUTER_USE_VIVALDI_TARGET_RE = re.compile(
 )
 _COMPUTER_USE_LINE_TARGET_RE = re.compile(r"(?<![A-Za-z])line(?![A-Za-z])|ライン", re.IGNORECASE)
 _COMPUTER_USE_CHATGPT_TARGET_RE = re.compile(r"chat\s*gpt|chatgpt", re.IGNORECASE)
+_CLIENT_TOOL_POLICY_ALLOWED_KEYS = {
+    "allow_file_write",
+    "allow_network",
+    "allow_shell",
+    "allowed_tools",
+    "disabled_tools",
+    "enabled_tools",
+    "max_tool_calls",
+    "model_allowlist",
+    "model_denylist",
+    "parallel_tool_calls",
+    "profile_id",
+    "selected_tools",
+    "tool_allowlist",
+    "tool_blocklist",
+    "tool_choice",
+    "tool_denylist",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
+    "_tool_server_approval_token_valid",
+    "_tool_server_approved",
+    "allow_client_supplied_approved",
+    "approval_bypass",
+    "approval_granted",
+    "approval_token",
+    "approved",
+    "bypass_approval",
+    "grant_approval",
+    "is_approved",
+    "server_approved",
+    "tool_approval_tokens",
+    "yolo_mode",
+}
+_CLIENT_TOOL_POLICY_APPROVAL_REQUIRE_KEYS = {
+    "delete_actions_require_approval",
+    "destructive_actions_require_approval",
+    "git_push_requires_approval",
+    "high_risk_tools_require_approval",
+    "open_world_require_approval",
+    "terminal_actions_require_approval",
+    "write_actions_require_approval",
+}
 _TOOL_MENTION_RE = re.compile(r"@([A-Za-z0-9_.:-]+)")
 _COMPUTER_USE_TOOL_IDS = {"computer_use", "browser_computer", "browser_use"}
 _CODING_PR_REQUEST_RE = re.compile(
@@ -301,7 +423,6 @@ def prepare_chat_run(
     if requested_model:
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
-    model_settings = model_settings_service.get_settings()
     route_override = _consume_turn_model_route_override(
         store, conversation_id, conversation, metadata
     )
@@ -317,6 +438,9 @@ def prepare_chat_run(
     )
     if requested_route_model and not requested_model:
         model = requested_route_model
+    resolve_runtime_settings = not str(model or "").strip().startswith("stub/")
+    routing_profiles = None if resolve_runtime_settings else _lightweight_profiles_for_model(model)
+    model_settings = model_settings_service.get_settings(resolve_api_keys=resolve_runtime_settings)
     if "thinking_level" not in params:
         params["thinking_level"] = (
             str(route_override.get("requested_thinking_level") or "").strip()
@@ -325,6 +449,7 @@ def prepare_chat_run(
             else model_settings_service.get_effective_thinking_level(
                 profile_id=model,
                 conversation_id=conversation_id,
+                settings=model_settings,
             )["level"]
         )
     if "deepthink_enabled" not in params:
@@ -385,7 +510,8 @@ def prepare_chat_run(
     raw_tool_policy = params.get("tool_policy")
     if isinstance(raw_tool_policy, dict):
         sanitized_tool_policy, ignored_tool_policy_keys = _sanitize_untrusted_chat_tool_policy(
-            raw_tool_policy
+            raw_tool_policy,
+            allow_approval_bypass=_client_tool_policy_bypass_authorized(request_context),
         )
         if ignored_tool_policy_keys:
             params["tool_policy"] = sanitized_tool_policy
@@ -412,6 +538,9 @@ def prepare_chat_run(
             )
     tool_policy = params.get("tool_policy")
     if isinstance(tool_policy, dict):
+        tool_policy = _sanitize_client_tool_policy(tool_policy, request_context)
+        prepared_input = _with_client_tool_policy(prepared_input, tool_policy)
+        params["tool_policy"] = tool_policy
         request_context["profile_policy"] = {
             **(
                 request_context.get("profile_policy")
@@ -459,6 +588,11 @@ def prepare_chat_run(
     if effective_system_prompt:
         system_prompt = effective_system_prompt
         _replace_system_prompt_message(standard_messages, effective_system_prompt)
+    profile_system_prompt = _profile_system_prompt_from_metadata(metadata)
+    if profile_system_prompt:
+        system_prompt = _join_system_prompts(system_prompt, profile_system_prompt)
+        request_context["agent_profile_system_prompt"] = profile_system_prompt
+        _replace_system_prompt_message(standard_messages, system_prompt)
     temporal_context = current_datetime_context(request_context)
     request_context["current_datetime_context"] = temporal_context
     request_context.setdefault("current_datetime", temporal_context["iso"])
@@ -487,7 +621,7 @@ def prepare_chat_run(
         _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
-    routing_decision = route_model_request(
+    routing_decision = _route_model_request_with_profiles(
         ModelRoutingRequest(
             conversation_id=conversation_id,
             user_text=user_text,
@@ -515,17 +649,20 @@ def prepare_chat_run(
                 "modalities": modalities,
             },
             settings=model_settings,
-        )
+        ),
+        routing_profiles,
     )
     model = routing_decision.selected_model
-    selected_capabilities = get_model_capabilities(model) or {}
+    selected_capabilities = _get_model_capabilities_with_profiles(model, routing_profiles) or {}
+    selected_metadata = selected_capabilities.get("metadata") if isinstance(selected_capabilities.get("metadata"), dict) else {}
     provider_capabilities = get_model_provider_capabilities(
         model,
         {
+            **selected_capabilities,
             "id": model,
-            "provider_id": model.split("/", 1)[0] if "/" in model else "",
-            "capabilities": selected_capabilities,
-            "metadata": {"capabilities": selected_capabilities},
+            "provider_id": str(selected_capabilities.get("provider_id") or (model.split("/", 1)[0] if "/" in model else "")),
+            "capabilities": selected_metadata.get("capabilities", selected_capabilities),
+            "metadata": selected_metadata,
             "supports_thinking": bool(selected_capabilities.get("supports_thinking")),
         },
     )
@@ -867,6 +1004,14 @@ def _replace_system_prompt_message(messages: list[dict[str, Any]], system_prompt
         messages[0]["content"] = system_prompt
         return
     messages.insert(0, {"role": "system", "content": system_prompt})
+
+
+def _profile_system_prompt_from_metadata(metadata: dict[str, Any]) -> str:
+    return str(metadata.get("agent_profile_system_prompt") or "").strip() if isinstance(metadata, dict) else ""
+
+
+def _join_system_prompts(*parts: str) -> str:
+    return "\n\n".join(part.strip() for part in parts if str(part or "").strip())
 
 
 def _append_system_context_message(messages: list[dict[str, Any]], content: str) -> None:
@@ -1250,6 +1395,9 @@ _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS = {
     "yolo_mode",
 }
 _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
+    "_tool_server_approval_token_valid",
+    "_tool_server_approved",
+    "allow_client_supplied_approved",
     "approval_token",
     "approval_bypass",
     "approval_granted",
@@ -1258,6 +1406,8 @@ _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS = {
     "grant_approval",
     "is_approved",
     "server_approved",
+    "tool_approval_tokens",
+    "yolo_mode",
 }
 _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS = {
     "delete_actions_require_approval",
@@ -1312,7 +1462,7 @@ def _client_policy_value_false(value: Any) -> bool:
     return str(value).strip().lower() in {"0", "false", "no", "off"}
 
 
-def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any], *, allow_approval_bypass: bool = False) -> tuple[dict[str, Any], list[str]]:
     sanitized: dict[str, Any] = {}
     ignored: list[str] = []
     for key, value in policy.items():
@@ -1323,16 +1473,16 @@ def _sanitize_untrusted_chat_tool_policy(policy: dict[str, Any]) -> tuple[dict[s
         if lower_key in _CLIENT_TOOL_POLICY_UNTRUSTED_STRUCTURAL_KEYS:
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value):
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS and _client_policy_value_truthy(value) and not allow_approval_bypass:
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value):
+        if lower_key in _CLIENT_TOOL_POLICY_PRIVILEGED_TRUE_KEYS and _client_policy_value_truthy(value) and not allow_approval_bypass:
             ignored.append(key_text)
             continue
-        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value):
+        if lower_key in _CLIENT_TOOL_POLICY_APPROVAL_WEAKENING_FALSE_KEYS and _client_policy_value_false(value) and not allow_approval_bypass:
             ignored.append(key_text)
             continue
-        if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full":
+        if lower_key == "action_approval_mode" and str(value or "").strip().lower() == "full" and not allow_approval_bypass:
             ignored.append(key_text)
             continue
         sanitized[key] = value
@@ -1637,6 +1787,75 @@ def _approval_followup_tool_context(metadata: dict[str, Any] | None) -> dict[str
         for alias in ("computer_use", "browser_use", "browser_computer"):
             token_map[alias] = token
     return {"tool_approval_tokens": token_map}
+
+
+def _sanitize_client_tool_policy(policy: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    """Keep client-selected tools advisory; never trust client approval bypass flags."""
+    if not isinstance(policy, dict):
+        return {}
+    allow_approval_bypass = _client_tool_policy_bypass_authorized(request_context)
+    sanitized: dict[str, Any] = {}
+    for key, value in policy.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        lowered = key_text.lower()
+        if lowered in _CLIENT_TOOL_POLICY_APPROVAL_BYPASS_KEYS:
+            if allow_approval_bypass:
+                sanitized[key_text] = value
+            continue
+        if lowered in _CLIENT_TOOL_POLICY_APPROVAL_REQUIRE_KEYS:
+            if value is False and not allow_approval_bypass:
+                continue
+            sanitized[key_text] = value
+            continue
+        if lowered in _CLIENT_TOOL_POLICY_ALLOWED_KEYS:
+            sanitized[key_text] = value
+    return sanitized
+
+
+def _client_tool_policy_bypass_authorized(request_context: dict[str, Any]) -> bool:
+    if not isinstance(request_context, dict):
+        return False
+    if request_context.get("_tool_server_approval_token_valid") is True:
+        return True
+    if request_context.get("_tool_server_approved") is True and any(
+        str(request_context.get(key) or "").strip()
+        for key in ("principal_id", "pack_id", "_source_pack_id", "owner_pack")
+    ):
+        return True
+    try:
+        from domain.tool_policy.internal_context import internal_tool_decision_allows
+
+        return internal_tool_decision_allows(request_context)
+    except Exception:
+        return False
+
+
+def _with_client_tool_policy(input_data: dict[str, Any], tool_policy: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(input_data, dict):
+        return input_data
+    params = input_data.get("params") if isinstance(input_data.get("params"), dict) else {}
+    if not isinstance(params, dict):
+        return input_data
+    updated = dict(input_data)
+    updated_params = dict(params)
+    if tool_policy:
+        updated_params["tool_policy"] = dict(tool_policy)
+    else:
+        updated_params.pop("tool_policy", None)
+    updated["params"] = updated_params
+    return updated
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _apply_authority_context(

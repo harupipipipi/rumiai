@@ -39,6 +39,31 @@ def test_provider_capability_registry_cerebras_quirks_and_google_native():
     assert google.api_family == "google_native"
 
 
+def test_provider_capability_registry_uses_transport_metadata_for_anthropic_messages_models():
+    from domain.ai_client.capabilities.registry import default_registry
+
+    caps = default_registry().for_model(
+        "opencode-zen/minimax-m3-free",
+        {
+            "provider_id": "opencode-zen",
+            "capabilities": ["tool_calls", "vision", "reasoning"],
+            "metadata": {
+                "transport": "anthropic_messages",
+                "quirks": {"supports_stream_tool_calls": False},
+            },
+        },
+    )
+
+    assert caps.provider_id == "opencode-zen"
+    assert caps.api_family == "anthropic_messages"
+    assert caps.supports_tool_calling is True
+    assert caps.supports_parallel_tool_calls is False
+    assert "tool_call" in caps.supported_content_blocks
+    assert caps.tool_choice_modes == ["auto", "none"]
+    assert caps.quirks["tool_schema_subset"] == "input_schema"
+    assert caps.quirks["supports_stream_tool_calls"] is False
+
+
 def test_ai_client_runtime_model_includes_provider_capabilities():
     from domain.ai_client.client import AIClient
     from domain.ai_client.providers.stub_provider import StubProvider

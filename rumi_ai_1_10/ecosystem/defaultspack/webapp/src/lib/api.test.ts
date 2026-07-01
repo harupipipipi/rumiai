@@ -5,7 +5,7 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import { catalogProfileIdForSelection, frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -748,6 +748,49 @@ test("listModelProfiles bypasses browser cache", async () => {
 
   assert.equal(requestUrl, "/api/ai/profiles");
   assert.equal(requestCache, "no-store");
+});
+
+test("uiCatalog serializes selected memo and non-memo profile ids", async () => {
+  const seen: string[] = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    seen.push(String(input));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.uiCatalog("memo-profile");
+    await api.uiCatalog("stub/default");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(seen, [
+    "/api/ui/catalog?profile_id=memo-profile",
+    "/api/ui/catalog?profile_id=stub%2Fdefault",
+  ]);
+});
+
+test("catalogProfileIdForSelection follows memo profile before falling back to model id", () => {
+  assert.equal(
+    catalogProfileIdForSelection("memo-profile", {
+      profile_id: "memo-profile",
+      qualified_model_id: "memo-pack/memo-profile",
+      display_name: "Memo",
+      provider_id: "memo-pack",
+      model_id: "memo-profile",
+    }),
+    "memo-profile",
+  );
+  assert.equal(catalogProfileIdForSelection("stub/default", null), "stub/default");
 });
 
 test("kanban API methods use first-class board and card routes", async () => {

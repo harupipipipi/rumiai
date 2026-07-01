@@ -8,6 +8,7 @@ import {
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
+  composerMentionPopupStyleForAnchor,
   composerHelperCopy,
   composerModelControlWidth,
   composerPlaceholderCopy,
@@ -41,6 +42,29 @@ test("composer file mention insertion keeps @ text for workspace attachment flow
     value: "please @README.md  now",
     cursor: 18,
   });
+});
+
+test("composer mention popup anchors above the bottom composer without clipping", () => {
+  assert.deepEqual(
+    composerMentionPopupStyleForAnchor({ left: 449, right: 1069, top: 465, bottom: 522 }, 1280, 720),
+    {
+      left: 449,
+      top: 457,
+      width: 440,
+      maxHeight: 256,
+      transform: "translateY(-100%)",
+    },
+  );
+
+  assert.deepEqual(
+    composerMentionPopupStyleForAnchor({ left: 12, right: 300, top: 40, bottom: 80 }, 320, 720),
+    {
+      left: 8,
+      top: 88,
+      width: 304,
+      maxHeight: 256,
+    },
+  );
 });
 
 test("composer tool mentions resolve searchable tools and JSON metadata", () => {

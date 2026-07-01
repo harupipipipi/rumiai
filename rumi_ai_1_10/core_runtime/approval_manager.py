@@ -374,7 +374,7 @@ class ApprovalManager:
                     if self._should_skip_hash_file(file_path, local_dir):
                         continue
                     
-                    relative_path = str(file_path.relative_to(local_dir))
+                    relative_path = self._relative_hash_path(file_path, local_dir)
                     hash_value = self._compute_file_hash(file_path)
                     hashes[relative_path] = hash_value
         
@@ -649,7 +649,7 @@ class ApprovalManager:
                 
                 file_hashes = self._compute_pack_hashes(pack_dir)
             
-            previous_hashes = dict(approval.file_hashes)
+            previous_hashes = self._normalize_hash_map(approval.file_hashes)
 
             approval.status = PackStatus.APPROVED
             approval.approved_at = self._now_ts()
@@ -888,7 +888,7 @@ class ApprovalManager:
                     "added_files": [],
                     "removed_files": [],
                 }
-            stored_hashes = dict(approval.file_hashes)
+            stored_hashes = self._normalize_hash_map(approval.file_hashes)
 
         # ロック外でファイル I/O
         if pack_id == LOCAL_PACK_ID:
@@ -969,7 +969,7 @@ class ApprovalManager:
             approval = self._approvals.get(pack_id)
             if not approval or not approval.file_hashes:
                 return False
-            stored_hashes = dict(approval.file_hashes)  # コピー
+            stored_hashes = self._normalize_hash_map(approval.file_hashes)  # コピー
         
         # ロック外でファイルI/O
         if pack_id == LOCAL_PACK_ID:
@@ -1013,7 +1013,7 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
                 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = self._relative_hash_path(file_path, pack_dir)
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
         
@@ -1031,11 +1031,19 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = self._relative_hash_path(file_path, pack_dir)
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
 
         return hashes
+
+    @staticmethod
+    def _relative_hash_path(file_path: Path, base_dir: Path) -> str:
+        return file_path.relative_to(base_dir).as_posix()
+
+    @staticmethod
+    def _normalize_hash_map(hashes: Dict[str, str]) -> Dict[str, str]:
+        return {str(path).replace("\\", "/"): value for path, value in hashes.items()}
 
     @staticmethod
     def _should_skip_hash_file(file_path: Path, base_dir: Path | None = None) -> bool:
@@ -1125,7 +1133,8 @@ class ApprovalManager:
             if not approval:
                 return ApprovalResult(success=False, pack_id=pack_id, error="Pack not found")
 
-            old_hashes = dict(approval.file_hashes)
+            old_hashes = self._normalize_hash_map(approval.file_hashes)
+            new_hashes = self._normalize_hash_map(new_hashes)
             hashes_match = (old_hashes == new_hashes)
 
             if hashes_match:
@@ -1213,7 +1222,7 @@ class ApprovalManager:
                 )
 
             target_version = approval.version_history[version_index]
-            target_hashes = target_version.get("file_hashes", {})
+            target_hashes = self._normalize_hash_map(target_version.get("file_hashes", {}))
 
         # Phase 2: ロック外で現在のファイルハッシュを計算し検証
         if pack_id == LOCAL_PACK_ID:

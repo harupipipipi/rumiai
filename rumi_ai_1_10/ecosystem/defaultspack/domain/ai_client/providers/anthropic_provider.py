@@ -337,14 +337,34 @@ class AnthropicProvider(BaseProvider):
         if "metadata" in params:
             body["metadata"] = params["metadata"]
 
+    @staticmethod
+    def _normalize_tools(tools):
+        normalized = []
+        for tool in tools or []:
+            if not isinstance(tool, dict):
+                continue
+            function_def = tool.get("function") if isinstance(tool.get("function"), dict) else None
+            if function_def is not None:
+                normalized.append(
+                    {
+                        "name": function_def.get("name", ""),
+                        "description": function_def.get("description", ""),
+                        "input_schema": function_def.get("parameters", {"type": "object", "properties": {}}),
+                    }
+                )
+                continue
+            normalized.append(dict(tool))
+        return normalized
+
     def complete(self, model, messages, tools, params):
         params = self._translate_params(params)
         system_parts, converted = self.build_request(messages)
         body = {"model": model, "messages": converted, "max_tokens": params.get("max_tokens", 4096)}
         if system_parts:
             body["system"] = system_parts
-        if tools:
-            body["tools"] = tools
+        normalized_tools = self._normalize_tools(tools)
+        if normalized_tools:
+            body["tools"] = normalized_tools
         self._copy_chat_params(body, params)
         raw = self._request_json("/v1/messages", body)
         return self.parse_response(raw)
@@ -355,8 +375,9 @@ class AnthropicProvider(BaseProvider):
         body = {"model": model, "messages": converted, "max_tokens": params.get("max_tokens", 4096)}
         if system_parts:
             body["system"] = system_parts
-        if tools:
-            body["tools"] = tools
+        normalized_tools = self._normalize_tools(tools)
+        if normalized_tools:
+            body["tools"] = normalized_tools
         self._copy_chat_params(body, params)
         resp = self._request_stream("/v1/messages", body)
         usage_accum = {"input_tokens": 0, "output_tokens": 0}

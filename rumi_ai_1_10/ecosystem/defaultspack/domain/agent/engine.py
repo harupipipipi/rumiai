@@ -32,6 +32,9 @@ from domain.tool.schema_adapter import (
 from domain.chat.loop_guard import emergency_budget_from_context, explicit_param_max_tool_calls
 
 
+_DEFAULT_ROUTE_MODEL_REQUEST = route_model_request
+
+
 def _truthy(value):
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
@@ -112,12 +115,22 @@ def _route_agent_model(
     )
     if not route_needed:
         return model if model else "default"
-    settings = ModelRuntimeSettingsService().get_settings()
-    preferred_model = str(
-        model
-        if model and model != "default"
-        else settings.get("preferred_model") or model or "stub/default"
-    ).strip() or "stub/default"
+    if (
+        route_model_request is _DEFAULT_ROUTE_MODEL_REQUEST
+        and str(model or "").startswith("stub/")
+        and not any(model_requirements.values())
+        and not modalities.get("has_images")
+        and not modalities.get("has_files")
+        and thinking_level in {"", "none"}
+    ):
+        return str(model or "stub/default")
+    explicit_model = str(model or "").strip()
+    if explicit_model and explicit_model != "default":
+        settings = context.get("model_runtime_settings") if isinstance(context, dict) and isinstance(context.get("model_runtime_settings"), dict) else {}
+        preferred_model = explicit_model
+    else:
+        settings = ModelRuntimeSettingsService().get_settings()
+        preferred_model = str(settings.get("preferred_model") or model or "stub/default").strip() or "stub/default"
     decision = route_model_request(
         ModelRoutingRequest(
             user_text=str(task or ""),
@@ -141,6 +154,17 @@ def _route_agent_model(
     if isinstance(context, dict):
         context["model_routing"] = decision.to_dict()
     return decision.selected_model or preferred_model
+
+
+def _agent_model_capabilities(model):
+    if str(model or "").startswith("stub/"):
+        return {
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_thinking": True,
+        }
+    return get_model_capabilities(model if model else "default") or {}
 
 
 class AgentEngine:
@@ -569,7 +593,7 @@ class AgentEngine:
             modalities=modalities,
             context=execution_context,
         )
-        selected_capabilities = get_model_capabilities(model if model else "default") or {}
+        selected_capabilities = _agent_model_capabilities(model)
         missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
         if missing_capabilities:
             execution = AgentExecution(

@@ -39,9 +39,10 @@ class ModelRuntimeSettingsService:
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._base_profile_catalog_cache: list[dict[str, Any]] | None = None
 
-    def get_settings(self) -> dict[str, Any]:
-        return self.refresh_models_settings(self._read_all().get("models", {}))
+    def get_settings(self, *, resolve_api_keys: bool = True) -> dict[str, Any]:
+        return self._read_all(resolve_api_keys=resolve_api_keys).get("models", {})
 
     def update_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
         all_settings = self._read_all()
@@ -234,8 +235,11 @@ class ModelRuntimeSettingsService:
         self,
         profile_id: str | None = None,
         conversation_id: str | None = None,
+        *,
+        settings: dict[str, Any] | None = None,
+        resolve_api_keys: bool = True,
     ) -> dict[str, Any]:
-        settings = self.get_settings()
+        settings = settings if isinstance(settings, dict) else self.get_settings(resolve_api_keys=resolve_api_keys)
         if conversation_id:
             by_conversation = settings.get("thinking_level_by_conversation", {})
             if isinstance(by_conversation, dict):
@@ -293,7 +297,7 @@ class ModelRuntimeSettingsService:
             result["provider_params"] = {"thinking_level": normalized}
         return result
 
-    def default_model_settings(self) -> dict[str, Any]:
+    def default_model_settings(self, *, resolve_api_keys: bool = True) -> dict[str, Any]:
         return {
             "preferred_model": DEFAULT_MODEL,
             "preferred_model_group": "default",
@@ -314,9 +318,9 @@ class ModelRuntimeSettingsService:
             "composite_models": [],
             "model_notes": {},
             "google_api_key": "",
-            "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root),
+            "google_api_key_configured": provider_has_api_key("google", pack_root=self._pack_root) if resolve_api_keys else False,
             "openrouter_api_key": "",
-            "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root),
+            "openrouter_api_key_configured": provider_has_api_key("openrouter", pack_root=self._pack_root) if resolve_api_keys else False,
         }
 
     def _runtime_rumi_base_model(self, settings: dict[str, Any] | None = None) -> str:
@@ -341,20 +345,21 @@ class ModelRuntimeSettingsService:
             provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
             if provider_id:
                 available_providers.add(provider_id)
-        try:
-            from domain.ai_client.providers import detect_available_providers, get_all_known_models
+        if not available_models and not available_providers:
+            try:
+                from domain.ai_client.providers import detect_available_providers, get_all_known_models
 
-            provider_map = detect_available_providers()
-            available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
-            for model in get_all_known_models():
-                if not isinstance(model, dict):
-                    continue
-                provider_id = str(model.get("provider") or model.get("provider_id") or "").strip()
-                model_id = str(model.get("id") or model.get("qualified_model_id") or "").strip()
-                if provider_id and provider_id in available_providers and model_id:
-                    available_models.append(model_id)
-        except Exception:
-            pass
+                provider_map = detect_available_providers()
+                available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
+                for model in get_all_known_models():
+                    if not isinstance(model, dict):
+                        continue
+                    provider_id = str(model.get("provider") or model.get("provider_id") or "").strip()
+                    model_id = str(model.get("id") or model.get("qualified_model_id") or "").strip()
+                    if provider_id and provider_id in available_providers and model_id:
+                        available_models.append(model_id)
+            except Exception:
+                pass
         return resolve_rumi_base_model(
             available_models,
             available_providers=available_providers,
@@ -374,6 +379,7 @@ class ModelRuntimeSettingsService:
         ):
             raw_key = sanitized.pop(field_id, None)
             if isinstance(raw_key, str) and raw_key.strip():
+                self._base_profile_catalog_cache = None
                 result = set_provider_api_key(provider_id, raw_key, pack_root=self._pack_root)
                 sanitized[configured_field] = bool(result.get("success"))
             else:
@@ -415,12 +421,23 @@ class ModelRuntimeSettingsService:
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
         return sanitized
 
-    def refresh_models_settings(self, values: dict[str, Any]) -> dict[str, Any]:
-        models = self._deep_merge(self.default_model_settings(), values if isinstance(values, dict) else {})
+    def refresh_models_settings(self, values: dict[str, Any], *, resolve_api_keys: bool = True) -> dict[str, Any]:
+        models = self._deep_merge(
+            self.default_model_settings(resolve_api_keys=resolve_api_keys),
+            values if isinstance(values, dict) else {},
+        )
         models["google_api_key"] = ""
-        models["google_api_key_configured"] = provider_has_api_key("google", pack_root=self._pack_root)
+        models["google_api_key_configured"] = (
+            provider_has_api_key("google", pack_root=self._pack_root)
+            if resolve_api_keys
+            else bool(models.get("google_api_key_configured", False))
+        )
         models["openrouter_api_key"] = ""
-        models["openrouter_api_key_configured"] = provider_has_api_key("openrouter", pack_root=self._pack_root)
+        models["openrouter_api_key_configured"] = (
+            provider_has_api_key("openrouter", pack_root=self._pack_root)
+            if resolve_api_keys
+            else bool(models.get("openrouter_api_key_configured", False))
+        )
 
         favorite_profiles = models.get("favorite_profiles")
         if isinstance(favorite_profiles, str):
@@ -437,7 +454,7 @@ class ModelRuntimeSettingsService:
             if profile_id and profile_id not in normalized_favorites:
                 normalized_favorites.append(profile_id)
         preferred_model = str(models.get("preferred_model") or DEFAULT_MODEL).strip() or DEFAULT_MODEL
-        if preferred_model == LEGACY_CLOUD_DEFAULT_MODEL and not provider_has_api_key(
+        if resolve_api_keys and preferred_model == LEGACY_CLOUD_DEFAULT_MODEL and not provider_has_api_key(
             "openrouter",
             pack_root=self._pack_root,
         ):
@@ -464,10 +481,15 @@ class ModelRuntimeSettingsService:
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
-        models["model_packs"] = self._ensure_rumi_model_packs(normalize_model_packs(
+        normalized_model_packs = normalize_model_packs(
             models.get("model_packs"),
             composite_models=models.get("composite_models"),
-        ), settings=models)
+        )
+        models["model_packs"] = (
+            self._ensure_rumi_model_packs(normalized_model_packs, settings=models)
+            if resolve_api_keys
+            else normalized_model_packs
+        )
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
@@ -653,15 +675,20 @@ class ModelRuntimeSettingsService:
             seen.add(composite_id)
         return normalized
 
-    def _read_all(self) -> dict[str, Any]:
-        values: dict[str, Any] = {"models": self.default_model_settings()}
+    def _read_all(self, *, resolve_api_keys: bool = True) -> dict[str, Any]:
+        values: dict[str, Any] = {
+            "models": self.default_model_settings(resolve_api_keys=resolve_api_keys),
+        }
         try:
             saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
             if isinstance(saved, dict):
                 values = self._deep_merge(values, saved)
         except (OSError, json.JSONDecodeError):
             pass
-        values["models"] = self.refresh_models_settings(values.get("models", {}))
+        values["models"] = self.refresh_models_settings(
+            values.get("models", {}),
+            resolve_api_keys=resolve_api_keys,
+        )
         return values
 
     def _write_all(self, values: dict[str, Any]) -> None:
@@ -860,6 +887,9 @@ class ModelRuntimeSettingsService:
 
     def _base_profile_catalog(self, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         del settings
+        if self._base_profile_catalog_cache is not None:
+            return [dict(profile) for profile in self._base_profile_catalog_cache]
+        profiles: list[dict[str, Any]]
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -871,10 +901,14 @@ class ModelRuntimeSettingsService:
             try:
                 profiles = list_profile_catalog()
                 if isinstance(profiles, list) and profiles:
-                    return [profile for profile in profiles if isinstance(profile, dict)]
+                    result = [profile for profile in profiles if isinstance(profile, dict)]
+                    self._base_profile_catalog_cache = [dict(profile) for profile in result]
+                    return [dict(profile) for profile in result]
             except Exception:
                 pass
-        return [self._fallback_stub_profile()]
+        profiles = [self._fallback_stub_profile()]
+        self._base_profile_catalog_cache = [dict(profile) for profile in profiles]
+        return [dict(profile) for profile in profiles]
 
     def _api_bound_profile_availability(self, provider_id: str, api_id: str) -> dict[str, Any]:
         named_key = next(

@@ -27,6 +27,103 @@ class _Manager:
         return None
 
 
+class _ModelSettingsService:
+    def get_settings(self, *, resolve_api_keys=True):
+        del resolve_api_keys
+        return {
+            "deepthink_enabled": False,
+            "preferred_model_group": "default",
+            "auto_route_within_group": False,
+        }
+
+    def get_effective_thinking_level(
+        self,
+        *,
+        profile_id=None,
+        conversation_id=None,
+        settings=None,
+        resolve_api_keys=True,
+    ):
+        del profile_id, conversation_id, settings, resolve_api_keys
+        return {"level": "none"}
+
+
+class _RoutingDecision:
+    def __init__(self, selected_model):
+        self.selected_model = selected_model or "stub/default"
+        self.original_model = self.selected_model
+        self.selected_group = "default"
+        self.reason_codes = []
+        self.warnings = []
+        self.bridge_required = False
+        self.bridge_plan = {}
+        self.utility_models = {}
+        self.explanation = "test stub"
+
+    def to_dict(self):
+        return {
+            "selected_model": self.selected_model,
+            "original_model": self.original_model,
+            "selected_group": self.selected_group,
+            "reason_codes": self.reason_codes,
+            "warnings": self.warnings,
+            "bridge_required": self.bridge_required,
+            "bridge_plan": self.bridge_plan,
+            "utility_models": self.utility_models,
+            "explanation": self.explanation,
+        }
+
+
+def _test_model_capabilities(model, *, profiles=None):
+    del profiles
+    model_id = str(model or "stub/default")
+    if model_id.startswith("opencode-zen/") or model_id.startswith("opencode/"):
+        return {
+            "provider_id": "opencode-zen",
+            "model_id": "minimax-m3-free",
+            "supports_tool_calling": False,
+            "supports_vision": True,
+            "supports_thinking": True,
+            "metadata": {
+                "transport": "anthropic_messages",
+                "endpoint_path": "/v1/messages",
+                "capabilities": {"tool_calls": False, "vision": True, "reasoning": True},
+                "quirks": {"supports_stream_tool_calls": False},
+            },
+        }
+    provider_id = model_id.split("/", 1)[0] if "/" in model_id else "stub"
+    return {
+        "provider_id": provider_id,
+        "model_id": model_id.split("/", 1)[-1],
+        "supports_tool_calling": True,
+        "supports_vision": False,
+        "supports_thinking": False,
+        "metadata": {"capabilities": {"tool_calls": True}},
+    }
+
+
+def _test_provider_capabilities(model, raw):
+    model_id = str(model or "")
+    if model_id.startswith("opencode-zen/") or model_id.startswith("opencode/"):
+        return {
+            "provider_id": "opencode-zen",
+            "api_family": "anthropic_messages",
+            "supports_tool_calling": False,
+            "supports_parallel_tool_calls": False,
+            "tool_choice_modes": ["auto", "none"],
+            "metadata": {"endpoint_path": "/v1/messages"},
+        }
+    provider_id = str(raw.get("provider_id") or (model_id.split("/", 1)[0] if "/" in model_id else "stub"))
+    return {
+        "provider_id": provider_id,
+        "api_family": "openai_compatible",
+        "supports_tool_calling": True,
+        "supports_parallel_tool_calls": True,
+        "tool_choice_modes": ["auto", "none", "required"],
+        "metadata": {},
+    }
+
+
 def _setup_store(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
 
@@ -48,6 +145,17 @@ def _setup_store(tmp_path, monkeypatch):
             "enriched_prompt": system_prompt,
         },
     )
+    monkeypatch.setattr("domain.chat.run_request.ModelRuntimeSettingsService", _ModelSettingsService)
+    monkeypatch.setattr(
+        "domain.chat.run_request._read_frontend_settings",
+        lambda: {"tools": {"selection_strategy": "lexical"}},
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.route_model_request",
+        lambda request, **kwargs: _RoutingDecision(getattr(request, "preferred_model", "stub/default")),
+    )
+    monkeypatch.setattr("domain.chat.run_request.get_model_capabilities", _test_model_capabilities)
+    monkeypatch.setattr("domain.chat.run_request.get_model_provider_capabilities", _test_provider_capabilities)
     return store
 
 
@@ -140,6 +248,65 @@ def test_top_level_tools_raw_definition_preserves_provider_tool(tmp_path, monkey
     assert "attacker_tool" in _external_provider_tool_names(prepared)
     assert prepared.tool_context["tool_selection"]["provider_compat_tool_ids"] == ["attacker_tool"]
     assert "attacker_tool" not in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_appends_agent_stack_system_prompt(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {
+                "content": "new",
+                "metadata": {
+                    "agent_profile_system_prompt": "Profile prompt",
+                },
+            },
+        },
+        {},
+    )
+
+    assert prepared.system_prompt == "System prompt\n\nProfile prompt"
+    assert prepared.standard_messages[0]["role"] == "system"
+    assert prepared.standard_messages[0]["content"].startswith("System prompt\n\nProfile prompt")
+    assert prepared.request_context["agent_profile_system_prompt"] == "Profile prompt"
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_uses_anthropic_transport_for_opencode_zen(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="opencode-zen/minimax-m3-free")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "say ok"},
+            "tools": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "noop",
+                        "description": "Do nothing",
+                        "parameters": {"type": "object", "properties": {}, "required": []},
+                    },
+                }
+            ],
+        },
+        {},
+    )
+
+    assert prepared.provider_capabilities["provider_id"] == "opencode-zen"
+    assert prepared.provider_capabilities["api_family"] == "anthropic_messages"
+    assert prepared.provider_capabilities["tool_choice_modes"] == ["auto", "none"]
+    assert prepared.provider_planning["provider_capabilities"]["api_family"] == "anthropic_messages"
     ChatStore._instance = None
 
 
@@ -423,6 +590,48 @@ def test_prepare_chat_run_merges_workspace_profile_with_catalog_profile(tmp_path
     ChatStore._instance = None
 
 
+def test_prepare_chat_run_strips_client_tool_policy_approval_bypass_keys(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "run it"},
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_terminal_exec"],
+                    "yolo_mode": True,
+                    "allow_shell": True,
+                    "allow_file_write": True,
+                    "write_actions_require_approval": False,
+                    "high_risk_tools_require_approval": False,
+                    "allow_client_supplied_approved": True,
+                    "_tool_server_approved": True,
+                }
+            },
+        },
+        {},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["selected_tools"] == ["coding_terminal_exec"]
+    assert "yolo_mode" not in policy
+    assert "allow_shell" not in policy
+    assert "allow_file_write" not in policy
+    assert "write_actions_require_approval" not in policy
+    assert "high_risk_tools_require_approval" not in policy
+    assert "allow_client_supplied_approved" not in policy
+    assert "_tool_server_approved" not in policy
+    assert prepared.params["tool_policy"] == {
+        "selected_tools": ["coding_terminal_exec"],
+    }
+    ChatStore._instance = None
+
+
 def test_prepare_chat_run_marks_selected_terminal_unattached_when_profile_excludes_it(tmp_path, monkeypatch):
     from domain.chat.run_request import prepare_chat_run
     from domain.chat.store import ChatStore
@@ -603,6 +812,35 @@ def test_prepare_chat_run_allows_explicit_shell_tool_request_to_attach(tmp_path,
     tool_names = _external_provider_tool_names(prepared)
     assert "coding_terminal_exec" not in tool_names
     assert "coding_terminal_exec" not in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
+def test_prepare_chat_run_keeps_client_yolo_only_with_server_authorization(tmp_path, monkeypatch):
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    store = _setup_store(tmp_path, monkeypatch)
+    conv = store.create_conversation(model="stub/default")
+
+    prepared = prepare_chat_run(
+        {
+            "conversation_id": conv["id"],
+            "message": {"content": "continue approved operation"},
+            "params": {
+                "tool_policy": {
+                    "selected_tools": ["coding_file_write"],
+                    "yolo_mode": True,
+                    "write_actions_require_approval": False,
+                }
+            },
+        },
+        {"_tool_server_approval_token_valid": True},
+    )
+
+    policy = prepared.request_context.get("profile_policy", {})
+    assert policy["yolo_mode"] is True
+    assert policy["write_actions_require_approval"] is False
+    assert prepared.params["tool_policy"]["yolo_mode"] is True
     ChatStore._instance = None
 
 

@@ -30,6 +30,9 @@
         "endpoint_path": "/v1/messages",
         "source": "opencode_zen_minimax_m3_free",
         "pricing": "free_promotion_or_account_policy",
+        "quirks": {
+          "supports_stream_tool_calls": false
+        },
         "min_output_tokens": 96,
         "token_floor_reason": "MiniMax M3 can emit reasoning before final text; short caps may return thinking-only output."
       }
