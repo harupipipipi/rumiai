@@ -421,6 +421,180 @@ def current_scheduled_approval_from_conversation(
     return {"result": result, "source_metadata": dict(source_metadata)}
 
 
+def _pending_approval_from_message(message: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    for key in ("pending_approval", "pendingAuthorityApproval", "pending_authority_approval"):
+        pending = metadata.get(key)
+        if isinstance(pending, dict):
+            return pending
+    return pending_scheduled_approval_from_chat_result({"status": "ok", "data": message})
+
+
+def _conversation_active_message_ids(conversation: dict[str, Any]) -> tuple[set[str], dict[str, dict[str, Any]]]:
+    messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+    by_id = {
+        str(message.get("id")): message
+        for message in messages
+        if isinstance(message, dict) and message.get("id") is not None
+    }
+    active: set[str] = set()
+    current_id = str(conversation.get("current_node_id") or "").strip()
+    while current_id and current_id in by_id and current_id not in active:
+        active.add(current_id)
+        current_id = str(by_id[current_id].get("parent_id") or "").strip()
+    return active, by_id
+
+
+def _message_approval_followup_request_id(message: dict[str, Any]) -> str:
+    metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+    followup = metadata.get("approval_followup") if isinstance(metadata.get("approval_followup"), dict) else {}
+    return str(followup.get("request_id") or followup.get("approval_request_id") or "").strip()
+
+
+def _message_references_approval_request(message: dict[str, Any], request_id: str) -> set[str]:
+    refs: set[str] = set()
+    pending = _pending_approval_from_message(message)
+    if isinstance(pending, dict):
+        pending_id = str(pending.get("approval_request_id") or pending.get("request_id") or "").strip()
+        if pending_id == request_id:
+            refs.add("pending")
+    if _message_approval_followup_request_id(message) == request_id:
+        refs.add("followup")
+    return refs
+
+
+def _mimo_conversation(conversation: dict[str, Any]) -> bool:
+    metadata = conversation.get("metadata") if isinstance(conversation.get("metadata"), dict) else {}
+    tags = conversation.get("tags") if isinstance(conversation.get("tags"), list) else []
+    tag_values = {str(tag or "").strip() for tag in tags}
+    return (
+        str(metadata.get("profile_id") or "") == _MIMO_CODING_COMPANY_PROFILE_ID
+        or str(metadata.get("company_id") or "") == _MIMO_CODING_COMPANY_ID
+        or str(conversation.get("conversation_kind") or "") == "mimo_coding_company"
+        or _MIMO_CODING_COMPANY_PROFILE_ID in tag_values
+        or _MIMO_CODING_COMPANY_ID in tag_values
+    )
+
+
+def _approved_scheduled_request_is_obsolete(
+    request: dict[str, Any],
+    conversation: dict[str, Any],
+    current_request_ids: set[str],
+) -> bool:
+    request_id = str(request.get("request_id") or "").strip()
+    if not request_id or request_id in current_request_ids:
+        return False
+    active_ids, by_id = _conversation_active_message_ids(conversation)
+    current = by_id.get(str(conversation.get("current_node_id") or "").strip())
+    current_is_running = False
+    if isinstance(current, dict):
+        current_finish = str(current.get("finish_reason") or "").strip().lower()
+        current_is_running = (
+            str(current.get("role") or "").strip().lower() == "assistant"
+            and current_finish in {"", "streaming", "running"}
+        )
+
+    refs: list[tuple[str, str]] = []
+    children_by_parent: dict[str, list[dict[str, Any]]] = {}
+    messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        parent_id = str(message.get("parent_id") or "").strip()
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(message)
+        message_id = str(message.get("id") or "").strip()
+        for kind in _message_references_approval_request(message, request_id):
+            refs.append((message_id, kind))
+
+    if not refs:
+        return False
+
+    current_id = str(conversation.get("current_node_id") or "").strip()
+    for message_id, kind in refs:
+        if message_id == current_id:
+            return False
+        if message_id in active_ids and current_is_running:
+            return False
+        if kind == "pending":
+            children = children_by_parent.get(message_id, [])
+            if any(
+                _message_approval_followup_request_id(child) == request_id
+                for child in children
+                if isinstance(child, dict)
+            ):
+                return True
+            if message_id not in active_ids:
+                return True
+            continue
+        if kind == "followup":
+            return True
+    return False
+
+
+def obsolete_superseded_scheduled_approvals(
+    conversation_ids: list[str],
+    current_request_ids: set[str] | None = None,
+) -> dict[str, Any]:
+    """Mark approved MiMo scheduled approvals obsolete after their branch moves on."""
+    try:
+        from domain.chat.store import ChatStore
+        from domain.safety.approval import list_approval_requests, mark_obsolete
+    except Exception as exc:
+        return {"obsolete_count": 0, "error": str(exc)}
+
+    current_ids = {str(item or "").strip() for item in (current_request_ids or set()) if str(item or "").strip()}
+    conversation_set = {str(item or "").strip() for item in conversation_ids if str(item or "").strip()}
+    try:
+        approved_requests = list_approval_requests(status="approved", include_expired=False, limit=500)
+    except Exception as exc:
+        return {"obsolete_count": 0, "error": str(exc)}
+
+    obsolete: list[dict[str, str]] = []
+    skipped = 0
+    store = ChatStore()
+    conversations: dict[str, dict[str, Any]] = {}
+    for request in approved_requests:
+        if not isinstance(request, dict):
+            skipped += 1
+            continue
+        request_id = str(request.get("request_id") or "").strip()
+        details = request.get("details") if isinstance(request.get("details"), dict) else {}
+        conversation_id = str(details.get("conversation_id") or "").strip()
+        if not request_id or not conversation_id:
+            skipped += 1
+            continue
+        if conversation_set and conversation_id not in conversation_set:
+            skipped += 1
+            continue
+        if conversation_id not in conversations:
+            try:
+                conversation = store.get_conversation(conversation_id)
+            except Exception:
+                conversation = None
+            conversations[conversation_id] = conversation if isinstance(conversation, dict) else {}
+        conversation = conversations.get(conversation_id) or {}
+        if not _mimo_conversation(conversation):
+            skipped += 1
+            continue
+        if not _approved_scheduled_request_is_obsolete(request, conversation, current_ids):
+            skipped += 1
+            continue
+        decision = mark_obsolete(request_id, reason="superseded_scheduled_approval_followup")
+        if decision.get("status") == "obsolete":
+            obsolete.append(
+                {
+                    "request_id": request_id,
+                    "operation": str(request.get("operation") or ""),
+                    "tool_name": str(details.get("tool_name") or ""),
+                    "conversation_id": conversation_id,
+                }
+            )
+        else:
+            skipped += 1
+    return {"obsolete_count": len(obsolete), "skipped_count": skipped, "obsolete": obsolete}
+
+
 def _approval_summary_operation(
     *,
     tool_name: str,

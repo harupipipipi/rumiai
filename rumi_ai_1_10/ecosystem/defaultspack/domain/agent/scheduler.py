@@ -36,7 +36,10 @@ from domain.agent.schedule_store import (
     append_history,
     load_history,
 )
-from domain.tool.scheduled_approval import approve_schedule_pending_approval
+from domain.tool.scheduled_approval import (
+    approve_schedule_pending_approval,
+    obsolete_superseded_scheduled_approvals,
+)
 
 
 _APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_required"}
@@ -626,6 +629,14 @@ def _resume_scheduled_chat_approvals(
             ),
             _scheduler_chat_context(task_cfg, cancel_event=cancel_event),
         )
+    current_request_ids: set[str] = set()
+    if _chat_result_finish_reason(result) in _APPROVAL_REQUIRED_FINISH_REASONS:
+        pending = _pending_approval_from_chat_result(result)
+        if isinstance(pending, dict):
+            request_id = str(pending.get("approval_request_id") or pending.get("request_id") or "").strip()
+            if request_id:
+                current_request_ids.add(request_id)
+    obsolete_superseded_scheduled_approvals([conversation_id], current_request_ids)
     return result, auto_approvals
 
 

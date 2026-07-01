@@ -3396,6 +3396,205 @@ def test_scheduler_auto_approval_renews_expired_request_before_followup_replay(t
     assert filtered == []
 
 
+def test_scheduled_approval_obsoletes_superseded_followup_token(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    from domain.chat.store import ChatStore
+    from domain.tool.scheduled_approval import obsolete_superseded_scheduled_approvals
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        conversation_kind="mimo_coding_company",
+        metadata={
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    )
+    conversation_id = conversation["id"]
+    approval_args = {}
+    request = approval.create_approval_request(
+        "tool.desktop_list",
+        "medium",
+        approval_args,
+        details={
+            "tool_name": "desktop_list",
+            "action": "tool.desktop_list",
+            "function_id": "tool.desktop_list",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": approval_args,
+        },
+    )
+    token = approval.approve(request["request_id"])["token"]
+    scheduler_user = store.add_message(
+        conversation_id,
+        {
+            "id": "user-scheduler",
+            "role": "user",
+            "content": "Run managed desktop QA.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": "sched-mimo",
+                "schedule_execution_id": "exec-1",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    approval_assistant = store.add_message(
+        conversation_id,
+        {
+            "id": "assistant-approval",
+            "role": "assistant",
+            "parent_id": scheduler_user["id"],
+            "content": "approval required",
+            "finish_reason": "approval_required",
+            "metadata": {
+                "pending_approval": {
+                    "tool_name": "desktop_list",
+                    "operation": "tool.desktop_list",
+                    "approval_required": True,
+                    "request_id": request["request_id"],
+                    "approval_request_id": request["request_id"],
+                }
+            },
+        },
+    )
+    followup_user = store.add_message(
+        conversation_id,
+        {
+            "id": "user-followup",
+            "role": "user",
+            "parent_id": approval_assistant["id"],
+            "content": "Continue approved scheduled task.",
+            "metadata": {
+                "source": "scheduler_approval_followup",
+                "schedule_id": "sched-mimo",
+                "schedule_execution_id": "exec-1",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "approval_followup": {
+                    "request_id": request["request_id"],
+                    "approval_request_id": request["request_id"],
+                    "approval_token": token,
+                    "tool_name": "desktop_list",
+                },
+            },
+        },
+    )
+    new_scheduler_user = store.add_message(
+        conversation_id,
+        {
+            "id": "user-new-scheduler-turn",
+            "role": "user",
+            "parent_id": followup_user["id"],
+            "content": "Run managed desktop QA again.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": "sched-mimo",
+                "schedule_execution_id": "exec-2",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    store.update_conversation(conversation_id, {"current_node_id": new_scheduler_user["id"]})
+
+    result = obsolete_superseded_scheduled_approvals([conversation_id], set())
+
+    assert result["obsolete_count"] == 1
+    stored = approval.get_approval_request(request["request_id"])
+    assert stored["status"] == "obsolete"
+    assert stored["details"]["obsolete_reason"] == "superseded_scheduled_approval_followup"
+    verification = approval.verify_execution_token(
+        token,
+        "tool.desktop_list",
+        approval.hash_arguments(approval_args),
+        consume=False,
+    )
+    assert verification.valid is False
+    assert verification.code == "APPROVAL_NOT_APPROVED"
+    ChatStore._instance = None
+
+
+def test_scheduled_approval_keeps_current_approved_request_recoverable(tmp_path, monkeypatch):
+    approval = _setup_approval_store(tmp_path, monkeypatch)
+    from domain.chat.store import ChatStore
+    from domain.tool.scheduled_approval import obsolete_superseded_scheduled_approvals
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(
+        model="stub/default",
+        conversation_kind="mimo_coding_company",
+        metadata={
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    )
+    conversation_id = conversation["id"]
+    approval_args = {"action": "list"}
+    request = approval.create_approval_request(
+        "tool.todo",
+        "medium",
+        approval_args,
+        details={
+            "tool_name": "todo",
+            "action": "tool.todo",
+            "function_id": "tool.todo",
+            "pack_id": "defaultspack",
+            "conversation_id": conversation_id,
+            "arguments": approval_args,
+        },
+    )
+    approval.approve(request["request_id"])
+    scheduler_user = store.add_message(
+        conversation_id,
+        {
+            "id": "user-scheduler",
+            "role": "user",
+            "content": "Run todo heartbeat.",
+            "metadata": {
+                "source": "scheduler",
+                "schedule_id": "sched-mimo",
+                "schedule_execution_id": "exec-1",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+            },
+        },
+    )
+    approval_assistant = store.add_message(
+        conversation_id,
+        {
+            "id": "assistant-current-approval",
+            "role": "assistant",
+            "parent_id": scheduler_user["id"],
+            "content": "approval required",
+            "finish_reason": "approval_required",
+            "metadata": {
+                "pending_approval": {
+                    "tool_name": "todo",
+                    "operation": "tool.todo",
+                    "approval_required": True,
+                    "request_id": request["request_id"],
+                    "approval_request_id": request["request_id"],
+                }
+            },
+        },
+    )
+    store.update_conversation(conversation_id, {"current_node_id": approval_assistant["id"]})
+
+    result = obsolete_superseded_scheduled_approvals(
+        [conversation_id],
+        {request["request_id"]},
+    )
+
+    assert result["obsolete_count"] == 0
+    assert approval.get_approval_request(request["request_id"])["status"] == "approved"
+    ChatStore._instance = None
+
+
 def test_mimo_schedule_auto_approves_camelcase_ai_gateway_authority_request(tmp_path, monkeypatch):
     from core_runtime.authority import AuthorityService
     from core_runtime.authority.request_store import AuthorityRequestStore

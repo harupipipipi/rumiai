@@ -210,6 +210,45 @@ def deny(request_id: str, reason: str = "") -> dict[str, Any]:
         return asdict(ApprovalDecision(request.request_id, request.status, False, reason=reason))
 
 
+def mark_obsolete(request_id: str, reason: str = "") -> dict[str, Any]:
+    with _LOCK:
+        request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
+            get_approval_store().get_request(str(request_id))
+        )
+        if request is None:
+            return asdict(
+                ApprovalDecision(str(request_id), "missing", False, reason="approval request not found")
+            )
+        if request.status == "consumed":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request already consumed")
+            )
+        if request.status == "denied":
+            return asdict(
+                ApprovalDecision(request.request_id, request.status, False, reason="approval request denied")
+            )
+        if request.status == "obsolete":
+            return asdict(ApprovalDecision(request.request_id, request.status, False, reason=reason))
+        if request.status not in {"pending", "approved", "expired"}:
+            return asdict(
+                ApprovalDecision(
+                    request.request_id,
+                    request.status,
+                    False,
+                    reason="approval request cannot be obsoleted from status '{}'".format(request.status),
+                )
+            )
+        request.status = "obsolete"
+        request.decision_at = _now()
+        details = request.details if isinstance(request.details, dict) else {}
+        if reason:
+            request.details = {**details, "obsolete_reason": str(reason)}
+        _REQUESTS[request.request_id] = request
+        get_approval_store().save_request(request)
+        _refresh_approval_state_mirrors_from_store()
+        return asdict(ApprovalDecision(request.request_id, request.status, False, reason=reason))
+
+
 def approve(request_id: str) -> dict[str, Any]:
     with _LOCK:
         request = _REQUESTS.get(str(request_id)) or _request_from_mapping(
