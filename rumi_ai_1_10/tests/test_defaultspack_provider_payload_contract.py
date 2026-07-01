@@ -168,7 +168,7 @@ def test_openrouter_chat_body_preserves_curated_gateway_params(monkeypatch):
 
     monkeypatch.setattr(provider, "_request_json", fake_request_json)
 
-    params = {
+    gateway_params = {
         "reasoning": {"effort": "high", "max_tokens": 1024},
         "include_reasoning": True,
         "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": False},
@@ -176,12 +176,28 @@ def test_openrouter_chat_body_preserves_curated_gateway_params(monkeypatch):
         "web_search_options": {"search_context_size": "low"},
         "structured_outputs": True,
     }
-    provider.complete("cohere/north-mini-code:free", [{"role": "user", "content": "hi"}], [], params)
+    params = {
+        **gateway_params,
+        "tools": [
+            {
+                "type": "function",
+                "function": {"name": "param_shadow", "parameters": {"type": "object"}},
+            }
+        ],
+    }
+    tools = [
+        {
+            "type": "function",
+            "function": {"name": "real_tool", "parameters": {"type": "object"}},
+        }
+    ]
+    provider.complete("cohere/north-mini-code:free", [{"role": "user", "content": "hi"}], tools, params)
 
     body = captured["request"]["body"]
     assert captured["request"]["path"] == "/chat/completions"
-    for key, value in params.items():
+    for key, value in gateway_params.items():
         assert body[key] == value
+    assert body["tools"] == tools
 
 
 def test_groq_tool_messages_omit_name_in_chat_body(monkeypatch):

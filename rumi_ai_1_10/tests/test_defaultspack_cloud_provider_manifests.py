@@ -58,6 +58,39 @@ def test_bundled_provider_model_json_uses_strict_canonical_schema():
             validate_model_catalog_source({"models": [payload]}, path=path)
 
 
+def test_openrouter_domain_catalog_matches_model_catalog_pack_models():
+    from domain.ai_client.metadata_json import load_strict_metadata_json
+
+    def keys_from_model_payload(payload):
+        models = payload.get("models") if isinstance(payload, dict) and "models" in payload else [payload]
+        return {
+            (str(model.get("provider_id") or ""), str(model.get("model_id") or ""))
+            for model in models
+            if isinstance(model, dict)
+        }
+
+    domain_payload = load_strict_metadata_json(
+        DEFAULTSPACK_ROOT / "domain" / "providers" / "openrouter" / "models.json"
+    )
+    domain_keys = keys_from_model_payload(domain_payload)
+    catalog_dir = (
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "extensions"
+        / "llm"
+        / "providers"
+        / "openrouter"
+        / "models"
+    )
+    catalog_keys = set()
+    for path in sorted(catalog_dir.glob("*.json")):
+        catalog_keys.update(keys_from_model_payload(load_strict_metadata_json(path)))
+
+    assert domain_keys
+    assert domain_keys == catalog_keys
+
+
 def test_model_catalog_validation_rejects_duplicate_ids_and_context_drift():
     from domain.ai_client.model_metadata_schema import (
         ModelMetadataSchemaError,

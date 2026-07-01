@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import os
-import json
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..metadata_json import MetadataJsonError, load_strict_metadata_json
+from ..model_metadata_schema import ModelMetadataSchemaError, validate_model_catalog_source
 from .openai_compatible_provider import OpenAICompatibleProvider
 
 
@@ -20,7 +21,6 @@ class OpenRouterProvider(OpenAICompatibleProvider):
         "stop",
         "response_format",
         "structured_outputs",
-        "tools",
         "tool_choice",
         "parallel_tool_calls",
         "reasoning",
@@ -86,8 +86,9 @@ class OpenRouterProvider(OpenAICompatibleProvider):
     def _catalog_models(cls) -> List[Dict[str, Any]]:
         path = Path(__file__).resolve().parents[2] / "providers" / "openrouter" / "models.json"
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, ValueError):
+            payload = load_strict_metadata_json(path)
+            validate_model_catalog_source(payload, path=path)
+        except (MetadataJsonError, ModelMetadataSchemaError):
             return [dict(model) for model in cls.KNOWN_MODELS]
         raw_models = payload.get("models") if isinstance(payload, dict) else []
         if not isinstance(raw_models, list):
