@@ -15,6 +15,7 @@ def sync_mimo_company_workspace(
     company_id: str | None,
     *,
     force: bool = False,
+    sync_observability: bool = True,
     include_desktop_monitoring: bool = False,
 ) -> dict[str, Any] | None:
     """Best-effort MiMo schedule/activity sync for Company Workspace reads."""
@@ -36,7 +37,7 @@ def sync_mimo_company_workspace(
         )
 
         status = MimoCodingCompanyRuntime().status(
-            sync_observability=True,
+            sync_observability=sync_observability,
             include_desktop_monitoring=include_desktop_monitoring,
         )
         _last_sync_at = time.monotonic()
@@ -47,4 +48,3 @@ def sync_mimo_company_workspace(
         return {"status": "error", "error": f"{type(exc).__name__}: {str(exc)[:200]}"}
     finally:
         _lock.release()
-

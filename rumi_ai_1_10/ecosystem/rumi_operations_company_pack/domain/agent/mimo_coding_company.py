@@ -2575,8 +2575,15 @@ class MimoCodingCompanyRuntime:
 
             scheduler = scheduler or Scheduler()
             store = ChatStore()
-            parent = store.get_conversation(conversation_id) or {}
-            parent_ids = self._subagent_scan_parent_conversation_ids(store, parent, conversation_id, state)
+            load_conversation = lambda raw_id: self._conversation_history_snapshot(store, raw_id)
+            parent = load_conversation(conversation_id) or {}
+            parent_ids = self._subagent_scan_parent_conversation_ids(
+                store,
+                parent,
+                conversation_id,
+                state,
+                load_conversation=load_conversation,
+            )
             running_conversation_ids = self._running_schedule_conversation_ids(state, scheduler)
             expected_schedule_ids = {
                 str(schedule_id or "").strip()
@@ -2589,7 +2596,7 @@ class MimoCodingCompanyRuntime:
             for parent_id in parent_ids:
                 if parent_id in running_conversation_ids:
                     continue
-                conversation = parent if parent_id == conversation_id else (store.get_conversation(parent_id) or {})
+                conversation = parent if parent_id == conversation_id else (load_conversation(parent_id) or {})
                 if str(conversation.get("conversation_kind") or "") not in {"mimo_coding_company_loop", CONVERSATION_KIND}:
                     continue
                 messages = conversation.get("messages") if isinstance(conversation.get("messages"), list) else []
@@ -2629,6 +2636,37 @@ class MimoCodingCompanyRuntime:
             return {"checked": checked, "stale": stale, "repaired": repaired}
         except Exception:
             return {"checked": 0, "stale": [], "repaired": []}
+
+    @staticmethod
+    def _conversation_history_snapshot(store: Any, conversation_id: Any) -> dict[str, Any] | None:
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return None
+        try:
+            history_path = store.conversation_dir(conversation_id) / "history.json"
+            payload = json.loads(history_path.read_text(encoding="utf-8"))
+            conversation = payload.get("conversation") if isinstance(payload, dict) else None
+            if not isinstance(conversation, dict):
+                return None
+            if str(conversation.get("id") or conversation_id) != conversation_id:
+                return None
+            if not isinstance(conversation.get("messages"), list):
+                conversation["messages"] = []
+            try:
+                lock = getattr(store, "_lock", None)
+                if lock is None:
+                    store._conversations[conversation_id] = conversation
+                else:
+                    with lock:
+                        store._conversations[conversation_id] = conversation
+            except Exception:
+                pass
+            return conversation
+        except Exception:
+            try:
+                return store.get_conversation(conversation_id)
+            except Exception:
+                return None
 
     def _scheduled_draft_gaps(self, state: dict[str, Any], scheduler: Scheduler | None = None) -> dict[str, Any]:
         conversation_id = str(state.get("conversation_id") or "").strip()
@@ -2836,6 +2874,8 @@ class MimoCodingCompanyRuntime:
         parent: dict[str, Any],
         conversation_id: str,
         state: dict[str, Any],
+        *,
+        load_conversation: Any | None = None,
     ) -> list[str]:
         parent_ids: list[str] = []
         seen: set[str] = set()
@@ -2858,7 +2898,10 @@ class MimoCodingCompanyRuntime:
             if not child_id:
                 continue
             try:
-                child = store.get_conversation(child_id) or {}
+                if load_conversation is not None:
+                    child = load_conversation(child_id) or {}
+                else:
+                    child = store.get_conversation(child_id) or {}
             except Exception:
                 continue
             metadata = child.get("metadata") if isinstance(child.get("metadata"), dict) else {}

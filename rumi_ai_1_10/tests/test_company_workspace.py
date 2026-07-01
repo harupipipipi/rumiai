@@ -378,6 +378,51 @@ def test_company_channels_include_runtime_message_counts(tmp_path, monkeypatch):
     assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
 
 
+def test_mimo_company_channels_use_lightweight_sync_and_keep_runtime_counts(tmp_path, monkeypatch):
+    from blocks.company import channels, messages
+    from domain.company.store import CompanyStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = "mimo-coding-company"
+    CompanyStore().ensure_company(
+        company_id=company_id,
+        name="MiMo Coding Company",
+        description="Test MiMo company",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+        conversation_group_id="company:mimo-coding-company",
+    )
+    sync_calls = []
+
+    def fake_sync_mimo_company_workspace(company_id_arg, **kwargs):
+        sync_calls.append((company_id_arg, kwargs))
+        return {"status": "ok"}
+
+    monkeypatch.setattr(channels, "sync_mimo_company_workspace", fake_sync_mimo_company_workspace)
+    created = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "scheduler",
+            "content": "MiMo lightweight channel count check",
+        },
+        {},
+    )
+    listed = channels.run({"company_id": company_id}, {})
+    fetched = channels.run({"action": "get", "company_id": company_id, "channel_id": "ops-company"}, {})
+
+    assert created["status"] == "ok"
+    assert [call[1].get("sync_observability") for call in sync_calls] == [False, False]
+    ops_channel = next(channel for channel in listed["data"]["channels"] if channel["id"] == "ops-company")
+    assert ops_channel["message_count"] == 1
+    assert ops_channel["last_message_at"] == created["data"]["message"]["created_at"]
+    assert fetched["data"]["message_count"] == 1
+    assert fetched["data"]["last_message_at"] == ops_channel["last_message_at"]
+
+
 def test_company_messages_accept_string_limit_and_offset(tmp_path, monkeypatch):
     from blocks.company import bootstrap, messages
 

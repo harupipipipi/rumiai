@@ -2024,6 +2024,121 @@ def test_mimo_coding_company_observability_repairs_stale_scheduled_user_message(
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_scheduled_user_gaps_reads_history_snapshot_without_chatstore_load(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.chat.store import ChatStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    storage_path = tmp_path / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+
+    parent_id = "mimo-parent-history-only"
+    loop_id = "mimo-loop-history-only"
+    schedule_id = "sched-history-only"
+    user_id = "scheduled-user-history-only"
+    old_timestamp = int((datetime.now(timezone.utc) - timedelta(minutes=10)).timestamp() * 1000)
+    storage_path.parent.mkdir(parents=True, exist_ok=True)
+    storage_path.write_text(json.dumps({"schema_version": 1, "updated_at": 0, "conversations": {}}), encoding="utf-8")
+
+    def write_history(conversation):
+        history_path = storage_path.parent / "conversations" / conversation["id"] / "history.json"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+        history_path.write_text(
+            json.dumps({"schema_version": 1, "updated_at": 1, "conversation": conversation}),
+            encoding="utf-8",
+        )
+        return history_path
+
+    write_history(
+        {
+            "id": parent_id,
+            "title": "MiMo parent",
+            "created_at": old_timestamp,
+            "updated_at": old_timestamp,
+            "model": "stub/default",
+            "conversation_kind": "mimo_coding_company",
+            "current_node_id": None,
+            "child_conversation_ids": [],
+            "messages": [],
+        }
+    )
+    loop_history_path = write_history(
+        {
+            "id": loop_id,
+            "title": "MiMo QA loop",
+            "created_at": old_timestamp,
+            "updated_at": old_timestamp,
+            "model": "stub/default",
+            "conversation_kind": "mimo_coding_company_loop",
+            "parent_conversation_id": parent_id,
+            "current_node_id": user_id,
+            "child_conversation_ids": [],
+            "metadata": {
+                "company_id": "mimo-coding-company",
+                "profile_id": "defaultspack.mimo_coding_company",
+                "parent_conversation_id": parent_id,
+                "loop_key": "qa_loop",
+            },
+            "messages": [
+                {
+                    "id": user_id,
+                    "conversation_id": loop_id,
+                    "role": "user",
+                    "parent_id": None,
+                    "children_ids": [],
+                    "content": [{"type": "text", "text": "Continue this approved scheduled task."}],
+                    "raw_text": "Continue this approved scheduled task.",
+                    "created_at": old_timestamp,
+                    "updated_at": old_timestamp,
+                    "metadata": {
+                        "source": "scheduler_approval_followup",
+                        "schedule_id": schedule_id,
+                        "schedule_execution_id": "sexec-history-only",
+                        "loop_key": "qa_loop",
+                        "company_id": "mimo-coding-company",
+                        "profile_id": "defaultspack.mimo_coding_company",
+                    },
+                }
+            ],
+        }
+    )
+
+    chat_loads = []
+
+    def fail_if_chat_loaded(self, requested_conversation_id):
+        del self
+        chat_loads.append(requested_conversation_id)
+        raise AssertionError("scheduled user gap scan should use history.json snapshots")
+
+    class NoRunningSchedules:
+        def get_schedule(self, requested_schedule_id):
+            assert requested_schedule_id == schedule_id
+            return None
+
+    monkeypatch.setattr(ChatStore, "get_conversation", fail_if_chat_loaded)
+    summary = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")._scheduled_user_gaps(
+        {
+            "conversation_id": parent_id,
+            "loop_conversation_ids": {"qa_loop": loop_id},
+            "schedule_ids": {"qa_loop": schedule_id},
+        },
+        scheduler=NoRunningSchedules(),
+    )
+    repaired_loop = json.loads(loop_history_path.read_text(encoding="utf-8"))["conversation"]
+    repaired = repaired_loop["messages"][-1]
+
+    assert chat_loads == []
+    assert summary["checked"] == 1
+    assert summary["repaired"] == [repaired["id"]]
+    assert repaired["role"] == "assistant"
+    assert repaired["parent_id"] == user_id
+    assert repaired["metadata"]["error_code"] == "SCHEDULED_MIMO_USER_ORPHANED"
+    assert repaired_loop["current_node_id"] == repaired["id"]
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_scheduled_draft_monitor_skips_running_schedule(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
     from domain.agent.schedule_store import save_schedule
