@@ -1,0 +1,44 @@
+{
+  "function_id": "adaptive_activity_snapshot",
+  "description": "Get Activity Center snapshot.",
+  "tags": [
+    "adaptive",
+    "activity"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.activity_snapshot",
+    "defaultspack.adaptive.activity_snapshot",
+    "defaults.adaptive.activity.snapshot",
+    "defaultspack.adaptive.activity.snapshot"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "activity_snapshot"
+      }
+    }
+  }
+}

@@ -4,7 +4,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
-from domain.research.providers import ExternalWebProvider
+from domain.research.providers import ExternalWebProvider, compact_provider_result
 
 
 def run(input_data, context=None):
@@ -20,5 +20,10 @@ def run(input_data, context=None):
         domains=input_data.get("domains"),
         official_only=bool(input_data.get("official_only", False)),
         fetch_pages=bool(input_data.get("fetch_pages", False)),
+    )
+    result = compact_provider_result(
+        result,
+        max_chars=input_data.get("max_chars") or input_data.get("max_output_chars"),
+        max_tokens=input_data.get("max_tokens") or input_data.get("max_output_tokens"),
     )
     return ok(result.as_dict())

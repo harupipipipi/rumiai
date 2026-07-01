@@ -19,6 +19,8 @@ def flatten_capability_fields(model: dict[str, Any]) -> dict[str, Any]:
     return {
         "supports_vision": bool(capabilities.get("vision")),
         "supports_image_input": bool(capabilities.get("image_input")),
+        "supports_audio": bool(capabilities.get("audio_input")),
+        "supports_audio_input": bool(capabilities.get("audio_input")),
         "supports_tool_calling": bool(capabilities.get("tool_calling")),
         "supports_fast": routing.get("speed_tier") == "fast",
         "supports_thinking": bool(capabilities.get("thinking")),

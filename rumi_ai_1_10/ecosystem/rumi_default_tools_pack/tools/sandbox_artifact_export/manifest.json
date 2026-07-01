@@ -1,0 +1,37 @@
+{
+  "id": "sandbox_artifact_export",
+  "category": "tool",
+  "version": "1",
+  "display_name": "Sandbox Export",
+  "description": "Export files from a sandbox-only workspace as artifacts.",
+  "enabled": true,
+  "config": {
+    "name": "sandbox_artifact_export",
+    "summary": "Export sandbox artifacts",
+    "tags": ["sandbox", "coding", "artifact"],
+    "ui": {
+      "group_id": "sandbox/coding/artifacts",
+      "group_label": "Sandbox Artifacts",
+      "group_icon": "archive",
+      "widget_kind": "tool_toggle"
+    },
+    "tool_category": "sandbox",
+    "action_type": "sandbox_export",
+    "risk": "low",
+    "approval_policy": "allow",
+    "capability_grants": ["sandbox.artifact.export"],
+    "requires_approval": false,
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "workspace_id": {"type": "string"},
+          "paths": {"type": "array", "items": {"type": "string"}},
+          "include_paths": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "execution": {"type": "rumi_function", "qualified_name": "defaultspack:sandbox_artifact_export"}
+  }
+}

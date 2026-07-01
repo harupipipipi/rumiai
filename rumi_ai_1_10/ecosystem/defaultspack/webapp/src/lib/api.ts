@@ -1,8 +1,13 @@
 import type { ToolPreviewItem } from "../components/ToolPreview";
 import type { AuthorityApprovalScope } from "./authorityApproval";
+import { defaultspackUrlWithLocalAuthToken } from "./defaultspackLocalAuth";
 
 const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
 const DEFAULTSPACK_CSRF_STORAGE_KEY = "rumi-defaultspack-csrf";
+const DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY = "rumi-defaultspack-local-auth";
+const DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY = "rumi_local_auth";
+let defaultspackLocalAuthMemoryToken = "";
+let defaultspackLocalAuthBootstrapped = false;
 
 export type ChatContentBlock = {
   type?: string;
@@ -27,6 +32,184 @@ export type ChatMessage = {
   events?: ChatActivityEvent[] | null;
   tool_logs?: ToolLogEntry[] | null;
   model?: string | null;
+};
+
+export type TokenizerInfo = {
+  available?: boolean;
+  fallback?: boolean;
+  status?: string;
+  source?: string;
+  warning?: string;
+  warning_code?: string;
+  tokenizer_id?: string;
+  tokenizer_profile_id?: string;
+  tokenizer_provider_id?: string;
+  tokenizer_model?: string;
+  provider_id?: string;
+  model_profile_id?: string;
+  model?: string;
+};
+
+export type PromptUsageSegment = {
+  id: string;
+  edge_id?: string;
+  prompt_id?: string;
+  label?: string;
+  kind?: string;
+  port?: string;
+  status?: "active" | "disabled" | "gated" | "budget-dropped" | string;
+  enabled?: boolean;
+  source?: string;
+  source_type?: string;
+  source_chain?: Record<string, unknown>[];
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  reason?: string;
+  allow_disable?: boolean;
+  editable?: boolean;
+  readonly_reason?: string;
+  preview?: string;
+  text?: string;
+  explanation?: string;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptUsageSummary = {
+  trace_id?: string;
+  profile_id?: string;
+  conversation_id?: string;
+  run_id?: string;
+  active_count?: number;
+  disabled_count?: number;
+  token_estimate?: {
+    total?: number;
+    by_port?: Record<string, number>;
+    by_node?: Record<string, number>;
+    tokenizer?: TokenizerInfo;
+  };
+  segments?: PromptUsageSegment[];
+  active_segments?: PromptUsageSegment[];
+  disabled_segments?: PromptUsageSegment[];
+  source_counts?: Record<string, number>;
+};
+
+export type PromptStudioPrompt = {
+  id: string;
+  name: string;
+  prompt_id?: string;
+  description?: string;
+  body?: string;
+  content?: string;
+  body_hash?: string;
+  variables?: Record<string, unknown>[];
+  metadata?: Record<string, unknown>;
+  source_type?: string;
+  source?: string;
+  effective_source?: string;
+  effective_source_type?: string;
+  read_only?: boolean;
+  editable?: boolean;
+  tokens?: number;
+  tokenizer?: TokenizerInfo;
+  preview?: string;
+  activation_state?: string;
+  active_edge_id?: string;
+  active_reason?: string;
+  allow_disable?: boolean;
+  override_allowed?: boolean;
+  source_chain?: Record<string, unknown>[];
+  validation?: Record<string, unknown>;
+  lint?: Record<string, unknown>;
+  versions?: PromptVersionRecord[];
+  safety?: Record<string, unknown>;
+  input_role?: string;
+  source_priority?: string;
+  activation_detail?: Record<string, unknown>;
+  tool_signal?: Record<string, unknown>;
+  skill_signal?: Record<string, unknown>;
+};
+
+export type PromptVersionRecord = {
+  version_id: string;
+  profile_id?: string;
+  prompt_id?: string;
+  scope?: string;
+  created_at?: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type PromptStudioData = {
+  profile_id: string;
+  model_profile_id?: string;
+  model?: string;
+  tokenizer?: TokenizerInfo;
+  profile_workspace?: Record<string, string>;
+  prompts: PromptStudioPrompt[];
+  selected_prompt?: PromptStudioPrompt | null;
+  active_summary?: PromptUsageSummary;
+};
+
+export type PromptStudioTestResult = {
+  profile_id: string;
+  prompt_id?: string;
+  conversation_id?: string;
+  input?: {
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+  };
+  model_profile_id?: string;
+  model?: string;
+  summary?: PromptUsageSummary;
+  segments?: PromptUsageSegment[];
+  matched_skills?: Record<string, unknown>[];
+  skill_instructions?: string;
+  selected_tool_records?: Record<string, unknown>[];
+  selected_tool_segments?: PromptUsageSegment[];
+  candidate_tool_segments?: PromptUsageSegment[];
+  tool_candidates?: {
+    combined?: Record<string, unknown>[];
+    from_prompt?: Record<string, unknown>[];
+    from_input?: Record<string, unknown>[];
+  };
+  prompt_tool_analysis?: Record<string, unknown>;
+  template_tool_policy_resolution?: Record<string, unknown>;
+  safety_boundary?: Record<string, unknown>;
+  verdicts?: Record<string, string>[];
+};
+
+export type PromptTraceSummary = {
+  trace_id?: string;
+  created_at?: number;
+  conversation_id?: string;
+  run_id?: string;
+  profile_id?: string;
+  token_estimate?: PromptUsageSummary["token_estimate"];
+  provider_payload_summary?: Record<string, unknown>;
+  blocked_count?: number;
+};
+
+export type PromptTraceDetail = {
+  profile_id: string;
+  trace: Record<string, unknown>;
+  prompt_usage: PromptUsageSummary;
+};
+
+export type PromptToggleResponse = {
+  profile_id: string;
+  edge_id: string;
+  enabled: boolean;
+  preview?: boolean;
+  ai_input?: Record<string, unknown>;
+  summary: PromptUsageSummary;
 };
 
 export type ChatAttachment = {
@@ -191,6 +374,11 @@ export type AuthorityUiOperator = {
   signature: string;
 };
 
+export type AuthorityApprovalContext = {
+  request_id: string;
+  ui_operator: AuthorityUiOperator;
+};
+
 export type AuthorityRequestDisplayMetadata = {
   title?: string;
   summary?: string;
@@ -209,7 +397,16 @@ export type AuthorityRequestDisplayMetadata = {
   endpoint_path?: string | null;
   credential_label?: string | null;
   access_summary?: string | null;
+  host_execution_summary?: {
+    executable?: string;
+    argument_count?: number;
+    cwd?: string;
+    target_paths?: string[];
+    target_urls?: string[];
+  } | null;
   risk_level?: string;
+  typed_confirmation_required?: boolean;
+  confirmation_phrase?: string | null;
   audit_text?: string;
 };
 
@@ -734,6 +931,8 @@ export type ConversationListOptions = {
   company_id?: string;
   workspace_id?: string;
   conversation_kind?: string;
+  group_id?: string;
+  include_messages?: boolean;
   limit?: number;
   offset?: number;
 };
@@ -799,8 +998,14 @@ export type MimoCodingCompanyStatus = OperationsCompanyStatus;
 
 export type ChatActivityEvent = {
   type: string;
+  run_id?: string;
+  seq?: number;
   message?: string;
   phase?: string;
+  status?: string;
+  summary?: string;
+  next_action?: string;
+  nextAction?: string;
   timestamp?: number | string;
   tool_name?: string;
   tool_call_id?: string;
@@ -847,6 +1052,9 @@ export type ModelProfile = {
   recommended_roles?: string[];
   allowed_roles?: string[];
   availability?: Record<string, unknown>;
+  tokenizer?: Record<string, unknown>;
+  tokenizer_profile_id?: string;
+  tokenizer_model_profile_id?: string;
   metadata?: Record<string, unknown>;
   defaults?: Record<string, unknown>;
   pricing?: Record<string, unknown>;
@@ -1015,7 +1223,7 @@ export type SidebarFieldOption = {
 export type SidebarField = {
   id: string;
   label: string;
-  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes";
+  type: "text" | "textarea" | "number" | "toggle" | "select" | "color" | "readonly" | "secret" | "api_keys" | "external_tokens" | "public_url" | "model_api_routes" | "continuity";
   default?: unknown;
   required?: boolean;
   help?: string;
@@ -1026,6 +1234,109 @@ export type SidebarField = {
   configured_field?: string;
   advanced?: boolean;
   api_keys?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityNode = {
+  node_id: string;
+  display_name?: string;
+  destination_kind?: string;
+  platform?: string;
+  architecture?: string;
+  online?: boolean;
+  last_seen_at?: string;
+  app_version?: string;
+  runtime_providers?: string[];
+  sandbox_capabilities?: string[];
+  network_reachability_classes?: string[];
+  desktop_capacity?: number;
+  [key: string]: unknown;
+};
+
+export type ContinuityProviderRoute = {
+  route_id: string;
+  provider_id: string;
+  api_id: string;
+  model_id: string;
+  qualified_route?: string;
+  adapter_id?: string;
+  provider_extension_ref?: string | null;
+  base_url?: string | null;
+  auth_scheme?: string;
+  header_profile?: string | null;
+  allowed_models?: string[];
+  capability_hash?: string;
+  endpoint_class?: string;
+  credential_ref?: string;
+  fallback_routes?: string[];
+  portable?: boolean;
+  blocked_reason?: string | null;
+  [key: string]: unknown;
+};
+
+export type ContinuityPreflightResult = {
+  ok: boolean;
+  route?: ContinuityProviderRoute | Record<string, unknown> | null;
+  destination?: ContinuityNode | Record<string, unknown> | null;
+  checks?: Array<Record<string, unknown>>;
+  errors?: Array<Record<string, unknown>>;
+};
+
+export type ContinuityHandoffPlan = {
+  plan_id: string;
+  mode: string;
+  sandbox_id: string;
+  destination_node_id: string;
+  provider_route_ref: ContinuityProviderRoute | Record<string, unknown>;
+  fallback_route_refs?: Array<ContinuityProviderRoute | Record<string, unknown>>;
+  credential_delegation?: Record<string, unknown>;
+  checkpoint_estimate?: Record<string, unknown>;
+  resource_preflight?: ContinuityPreflightResult | Record<string, unknown>;
+  cutover?: Record<string, unknown>;
+  status: string;
+  created_at?: string;
+  [key: string]: unknown;
+};
+
+export type ContinuityHandoffOperation = {
+  operation_id: string;
+  status: string;
+  mode?: string;
+  sandbox_id?: string;
+  destination_node_id?: string;
+  plan?: ContinuityHandoffPlan | Record<string, unknown>;
+  message?: string;
+  checkpoint_id?: string;
+  credential_envelope_id?: string | null;
+  destination_primary?: boolean;
+  source_primary?: boolean;
+  primary_lease?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+  events?: Array<Record<string, unknown>>;
+  [key: string]: unknown;
+};
+
+export type ContinuityPairingStartResponse = {
+  request_id: string;
+  code: string;
+  display_name?: string;
+  created_at?: string;
+};
+
+export type ContinuityHandoffRequest = {
+  sandbox_id?: string;
+  seat_id?: string;
+  destination_node_id?: string;
+  node_id?: string;
+  route_id?: string;
+  provider_id?: string;
+  api_id?: string;
+  model_id?: string;
+  provider_route?: Record<string, unknown>;
+  mode?: string;
+  credential_ttl_seconds?: number;
+  credential_max_requests?: number;
+  state?: Record<string, unknown>;
 };
 
 export type SidebarAction = {
@@ -1140,7 +1451,8 @@ export type ComposerCommandExecution =
   | { type: "model_command"; action: string }
   | { type: "settings_patch"; section: string; field: string }
   | { type: "rumi_function"; qualified_name: string }
-  | { type: "chat_action"; action: string };
+  | { type: "chat_action"; action: string }
+  | { type: "pack_block"; qualified_name: string };
 
 export type ComposerCommandItem = {
   id: string;
@@ -1156,6 +1468,9 @@ export type ComposerCommandItem = {
   active?: boolean;
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
+  source?: string;
+  template_id?: string;
+  piece_id?: string;
 };
 
 export type ComposerCommandExecuteResult = {
@@ -1168,6 +1483,89 @@ export type ComposerCommandExecuteResult = {
   message?: string;
   candidates?: ModelCommandCandidate[];
   selected_model?: string | ModelCommandCandidate | null;
+};
+
+export type TemplateComposerInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  placeholder?: string;
+  help?: string;
+  accepted_modalities?: string[];
+  feature_flags?: Record<string, boolean | string | number | null | undefined>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  component?: string;
+  renderer?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateContextPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateToolPolicy = {
+  id: string;
+  label?: string;
+  description?: string;
+  toggleable?: boolean;
+  default_enabled_tools?: string[];
+  default_disabled_tools?: string[];
+  allowed_tools?: string[];
+  denied_tools?: string[];
+  tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
+  parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateAiInput = {
+  id: string;
+  label?: string;
+  description?: string;
+  composer_input?: string;
+  composer_input_id?: string;
+  context_policy?: string;
+  context_policy_id?: string;
+  tool_policy?: string;
+  tool_policy_id?: string;
+  widgets?: string[];
+  params?: Record<string, unknown>;
+  modes?: ComposerCommandMode[];
+  enabled?: boolean;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
+export type TemplateCatalogMetadataItem = {
+  id?: string;
+  label?: string;
+  description?: string;
+  template_id?: string;
+  piece_id?: string;
+  origin?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 export type ShellRegion = {
@@ -1186,6 +1584,9 @@ export type ShellRenderer = {
   regions?: string[];
   fallback?: string;
   module?: string;
+  module_pack_id?: string;
+  source_pack_id?: string;
+  integrity?: string;
   export?: string;
   trust?: "local";
   [key: string]: unknown;
@@ -1292,6 +1693,20 @@ export type UICatalog = {
     }>;
   };
   skills?: SkillCatalogItem[];
+  commands?: ComposerCommandItem[];
+  composer_inputs?: TemplateComposerInput[];
+  ai_inputs?: TemplateAiInput[];
+  tool_policies?: TemplateToolPolicy[];
+  context_policies?: TemplateContextPolicy[];
+  composer_widgets?: TemplateCatalogMetadataItem[];
+  external_io_templates?: TemplateCatalogMetadataItem[];
+  templates?: TemplateCatalogMetadataItem[];
+  actions?: TemplateCatalogMetadataItem[];
+  data_sources?: TemplateCatalogMetadataItem[];
+  api_routes?: TemplateCatalogMetadataItem[];
+  permissions?: TemplateCatalogMetadataItem[];
+  shell_regions?: ShellRegion[];
+  shell_renderers?: ShellRenderer[];
   extension_points: Array<{
     id: string;
     path: string;
@@ -1304,6 +1719,71 @@ export type UICatalog = {
     source: string;
   }>;
 };
+
+function normalizedCommandIdentity(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function commandIdentityKeys(command: ComposerCommandItem): string[] {
+  const keys = [
+    normalizedCommandIdentity(command.id),
+    normalizedCommandIdentity(command.name),
+  ].filter(Boolean);
+  return [...new Set(keys)];
+}
+
+export function mergeComposerCommands(
+  backendCommands: ComposerCommandItem[] = [],
+  catalogCommands: ComposerCommandItem[] = [],
+): ComposerCommandItem[] {
+  const merged: ComposerCommandItem[] = [];
+  const indexByKey = new Map<string, number>();
+
+  const upsert = (command: ComposerCommandItem, source: "backend" | "catalog") => {
+    const keys = commandIdentityKeys(command);
+    const existingIndex = keys.map((key) => indexByKey.get(key)).find((index) => index !== undefined);
+    if (existingIndex !== undefined) {
+      if (source === "catalog") {
+        return;
+      }
+      return;
+    }
+    merged.push(command);
+    const nextIndex = merged.length - 1;
+    keys.forEach((key) => indexByKey.set(key, nextIndex));
+  };
+
+  backendCommands.forEach((command) => upsert(command, "backend"));
+  catalogCommands.forEach((command) => upsert(command, "catalog"));
+  return merged;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function nonEmptyString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function composerCommandResultMessage(result: ComposerCommandExecuteResult): string | null {
+  const directMessage = nonEmptyString(result.message);
+  if (directMessage) return directMessage;
+
+  const resultPayload = objectRecord(result.result);
+  if (!resultPayload) return null;
+
+  const payloadMessage = nonEmptyString(resultPayload.message);
+  const path = nonEmptyString(resultPayload.path)
+    || nonEmptyString(resultPayload.file_path)
+    || nonEmptyString(resultPayload.artifact_path);
+  if (payloadMessage && path) return `${payloadMessage}\n${path}`;
+  if (payloadMessage) return payloadMessage;
+  if (path) return `Command wrote ${path}`;
+  return null;
+}
 
 type ApiOk<T> = {
   status: "ok";
@@ -1320,12 +1800,72 @@ type ApiError = {
 
 type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
+export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
+export type ToolSelectionScope = "turn" | "conversation";
+export type ToolSelectionStrategy = "hybrid" | "semantic" | "catalog_ai" | "all_with_hints" | "all_schemas" | "lexical";
+export type ToolTarget = { kind: "tool" | "service"; id: string };
+
+export type ToolSelectionRequest = {
+  mode?: ToolSelectionMode;
+  strategy?: ToolSelectionStrategy | null;
+  include?: Array<string | ToolTarget>;
+  exclude?: Array<string | ToolTarget>;
+  scope?: ToolSelectionScope;
+  must_use?: boolean;
+  preview_id?: string | null;
+};
+
+export type ToolCatalogService = {
+  service_id: string;
+  label: string;
+  summary?: string;
+  connection_status?: string;
+  tool_count?: number;
+  action_classes?: string[];
+};
+
+export type ToolCatalogTool = {
+  tool_id: string;
+  service_id: string;
+  service_label: string;
+  name: string;
+  summary?: string;
+  action_class: string;
+  risk?: string;
+  requires_explicit_intent?: boolean;
+  connection_status?: string;
+  minimum_permission?: string;
+  tags?: string[];
+  permission?: Record<string, unknown>;
+};
+
+export type ToolCatalogResponse = {
+  services: ToolCatalogService[];
+  tools: ToolCatalogTool[];
+  count: number;
+};
+
+export type ToolSelectionPreviewResponse = {
+  preview_id: string;
+  expires_at: string;
+  decision: {
+    selected_tools: string[];
+    selected_services: ToolCatalogService[];
+    recommendations: Array<{ tool_id: string; confidence?: number; reason?: string }>;
+    permission_summary: Record<string, number>;
+    fallbacks?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  };
+};
+
 type SendMessageOptions = {
   thinking_level?: string | null;
   deepthink_enabled?: boolean;
   tool_choice?: "auto" | "none" | "required" | Record<string, unknown>;
   parallel_tool_calls?: boolean;
+  params?: Record<string, unknown>;
   tool_policy?: Record<string, unknown>;
+  tool_selection?: ToolSelectionRequest;
   attachments?: ChatAttachment[];
   tools?: string[];
   metadata?: Record<string, unknown>;
@@ -1347,6 +1887,10 @@ export type ChatToolStreamEvent = ChatActivityEvent & {
     | "browser_screenshot"
     | "approval_requested"
     | "ai_retry_scheduled"
+    | "tool_selection_started"
+    | "tool_selection_completed"
+    | "tool_selection_fallback"
+    | "tool_selection_reviewed"
     | "task_failed";
 };
 
@@ -1523,16 +2067,66 @@ function getDefaultspackCsrfToken(): string {
   return token;
 }
 
+function consumeDefaultspackLocalAuthFromLocation(): string {
+  if (typeof window === "undefined") return "";
+  const storage = sessionStorageOrNull();
+  try {
+    const rawHash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
+    if (!rawHash) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    const params = new URLSearchParams(rawHash);
+    const token = params.get(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY)?.trim() ?? "";
+    if (!token) return defaultspackLocalAuthMemoryToken || storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+    defaultspackLocalAuthMemoryToken = token;
+    storage?.setItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY, token);
+    params.delete(DEFAULTSPACK_LOCAL_AUTH_FRAGMENT_KEY);
+    const nextHash = params.toString();
+    const nextUrl = `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`;
+    window.history.replaceState(window.history.state, document.title, nextUrl);
+    return token;
+  } catch {
+    return storage?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() ?? "";
+  }
+}
+
+export function bootstrapDefaultspackLocalAuth(): string {
+  const stored = sessionStorageOrNull()?.getItem(DEFAULTSPACK_LOCAL_AUTH_STORAGE_KEY)?.trim() || "";
+  if (defaultspackLocalAuthBootstrapped) {
+    if (defaultspackLocalAuthMemoryToken || stored) return defaultspackLocalAuthMemoryToken || stored;
+  }
+  defaultspackLocalAuthBootstrapped = true;
+  const consumed = consumeDefaultspackLocalAuthFromLocation();
+  if (consumed) {
+    defaultspackLocalAuthMemoryToken = consumed;
+    return consumed;
+  }
+  defaultspackLocalAuthMemoryToken = stored;
+  return defaultspackLocalAuthMemoryToken;
+}
+
+function getDefaultspackLocalAuthToken(): string {
+  return bootstrapDefaultspackLocalAuth();
+}
+
+bootstrapDefaultspackLocalAuth();
+
 export function defaultspackApiHeaders(method: string, headers?: HeadersInit): Headers {
   const nextHeaders = new Headers(headers);
   if (!nextHeaders.has("Content-Type")) {
     nextHeaders.set("Content-Type", "application/json");
+  }
+  if (!nextHeaders.has("Authorization")) {
+    const token = getDefaultspackLocalAuthToken();
+    if (token) nextHeaders.set("Authorization", `Bearer ${token}`);
   }
   const csrfHeader = nextHeaders.get("X-Rumi-CSRF");
   if (isUnsafeHttpMethod(method) && (!csrfHeader || !csrfHeader.trim())) {
     nextHeaders.set("X-Rumi-CSRF", getDefaultspackCsrfToken());
   }
   return nextHeaders;
+}
+
+export function defaultspackUrlWithLocalAuth(pathOrUrl: string): string {
+  return defaultspackUrlWithLocalAuthToken(pathOrUrl, getDefaultspackLocalAuthToken());
 }
 
 export function defaultspackApiFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
@@ -1550,7 +2144,25 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
   return `${text.slice(0, limit).trim()}...`;
 }
 
-function defaultspackApiStatusHint(status: number): string {
+function defaultspackApiCodeHint(code: string | undefined): string | null {
+  if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
+    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
+  }
+  if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
+    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
+  }
+  if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
+    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+  }
+  return null;
+}
+
+function defaultspackApiStatusHint(status: number, code?: string): string {
+  const codeHint = defaultspackApiCodeHint(code);
+  if (codeHint) return codeHint;
   if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
   if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
   if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
@@ -1571,7 +2183,7 @@ export function explainDefaultspackApiError(
   const detail = error?.message ? truncateApiErrorDetail(error.message) : "";
   return [
     `${label}${code}`,
-    defaultspackApiStatusHint(status),
+    defaultspackApiStatusHint(status, error?.code),
     detail ? `詳細: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }
@@ -1670,11 +2282,13 @@ function messageRequestBody(
     },
     tools: Array.isArray(options?.tools) ? options.tools : undefined,
     params: {
+      ...(options?.params ?? {}),
       thinking_level: options?.thinking_level ?? undefined,
       deepthink_enabled: options?.deepthink_enabled ?? undefined,
       tool_choice: options?.tool_choice ?? undefined,
       parallel_tool_calls: options?.parallel_tool_calls ?? undefined,
       tool_policy: options?.tool_policy ?? undefined,
+      tool_selection: options?.tool_selection ?? undefined,
     },
   };
 }
@@ -1776,6 +2390,33 @@ async function readStreamEvents(
   return finalMessage;
 }
 
+export type CodexAppServerConfig = {
+  transport?: "off" | "stdio" | "unix" | "websocket_loopback" | "websocket_remote";
+  enabled?: boolean;
+  baseUrl?: string;
+  websocketUrl?: string;
+  unixSocketPath?: string;
+  wsTokenFile?: string;
+  sharedSecretFile?: string;
+  toolSourceEnabled?: boolean;
+  automationEndpointEnabled?: boolean;
+};
+
+export type CodexConnectionStatusResponse = {
+  provider: Record<string, unknown>;
+  app_server: Record<string, unknown>;
+};
+
+export type CodexConnectionActionResponse = Partial<CodexConnectionStatusResponse> & {
+  provider_id?: string;
+  configured?: boolean;
+  cleared?: boolean;
+  created?: boolean;
+  status?: Record<string, unknown>;
+  account?: Record<string, unknown>;
+  probe?: Record<string, unknown>;
+};
+
 export const api = {
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
@@ -1829,6 +2470,119 @@ export const api = {
   deleteConversation(id: string) {
     return request<{ deleted: boolean }>(`/api/chat/conversations/${id}`, {
       method: "DELETE",
+    });
+  },
+
+  getPromptActive(params?: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) {
+    return request<{
+      profile_id: string;
+      conversation_id?: string;
+      summary: PromptUsageSummary;
+      segments?: PromptUsageSegment[];
+      active_segments?: PromptUsageSegment[];
+      disabled_segments?: PromptUsageSegment[];
+      token_estimate?: PromptUsageSummary["token_estimate"];
+    }>(withQuery("/api/prompts/active", params));
+  },
+
+  listPromptTraces(params?: { profile_id?: string; conversation_id?: string; limit?: number }) {
+    return request<{ profile_id: string; traces: PromptTraceSummary[]; count: number }>(
+      withQuery("/api/prompts/traces", params),
+    );
+  },
+
+  getPromptTrace(traceId: string, params?: { profile_id?: string; include_text?: boolean }) {
+    return request<PromptTraceDetail>(
+      withQuery(`/api/prompts/traces/${encodeURIComponent(traceId)}`, params),
+    );
+  },
+
+  getPromptStudio(params?: { profile_id?: string; prompt_id?: string; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptStudioData>(withQuery("/api/prompts/editor", params));
+  },
+
+  testPromptStudio(payload: {
+    profile_id?: string;
+    prompt_id?: string;
+    conversation_id?: string;
+    draft?: string;
+    user_text?: string;
+    selected_tools?: string[];
+    model_profile_id?: string;
+    model?: string;
+    request_context?: Record<string, unknown>;
+    template_policy?: Record<string, unknown>;
+  }) {
+    return request<PromptStudioTestResult>("/api/prompts/test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  savePrompt(payload: {
+    profile_id?: string;
+    prompt_id: string;
+    body: string;
+    description?: string;
+    variables?: Record<string, unknown>[];
+    metadata?: Record<string, unknown>;
+    create_override?: boolean;
+    expected_body_hash?: string;
+    expected_exists?: boolean;
+    reason?: string;
+  }) {
+    return request<Record<string, unknown>>("/api/prompts/editor/save", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", ...payload }),
+    });
+  },
+
+  createPromptOverride(payload: { profile_id?: string; prompt_id: string; body?: string; expected_body_hash?: string; expected_exists?: boolean; reason?: string }) {
+    return request<Record<string, unknown>>("/api/prompts/override", {
+      method: "POST",
+      body: JSON.stringify({ action: "override", ...payload }),
+    });
+  },
+
+  togglePromptEdge(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/toggle", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  previewPromptToggle(payload: { profile_id?: string; edge_id: string; enabled: boolean; conversation_id?: string; model_profile_id?: string; model?: string }) {
+    return request<PromptToggleResponse>("/api/prompts/preview-toggle", {
+      method: "POST",
+      body: JSON.stringify({ preview: true, ...payload }),
+    });
+  },
+
+  diffPrompt(payload: { profile_id?: string; prompt_id: string; base?: string; draft?: string }) {
+    return request<{ profile_id: string; prompt_id: string; diff: string; changed: boolean }>("/api/prompts/diff", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  lintPrompt(payload: { prompt?: string; text?: string; body?: string; token_budget?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/lint", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  compactPrompt(payload: { prompt?: string; text?: string; body?: string; target_chars?: number }) {
+    return request<Record<string, unknown>>("/api/prompts/compact", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rollbackPrompt(payload: { profile_id?: string; prompt_id: string; version_id: string; expected_body_hash?: string; expected_exists?: boolean }) {
+    return request<Record<string, unknown>>(`/api/prompts/${encodeURIComponent(payload.prompt_id)}/rollback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -1928,6 +2682,45 @@ export const api = {
     return request<{ commands: ComposerCommandItem[] }>("/api/ui/commands");
   },
 
+  toolCatalog() {
+    return request<ToolCatalogResponse>("/api/tools/catalog", { cache: "no-store" });
+  },
+
+  previewToolSelection(payload: {
+    conversation_id?: string | null;
+    user_text?: string;
+    text?: string;
+    attachment_metadata?: unknown[];
+    tool_selection?: ToolSelectionRequest;
+    model?: string | null;
+  }) {
+    return request<ToolSelectionPreviewResponse>("/api/tools/selection/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  rebuildToolEmbeddingIndex(payload: { model?: string | null }) {
+    return request<Record<string, unknown>>("/api/tools/embedding-index/rebuild", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  getConversationToolPreferences(conversationId: string) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { cache: "no-store" },
+    );
+  },
+
+  updateConversationToolPreferences(conversationId: string, preferences: Record<string, unknown>) {
+    return request<{ conversation_id: string; preferences: Record<string, unknown> }>(
+      `/api/conversations/${encodeURIComponent(conversationId)}/tool-preferences`,
+      { method: "PUT", body: JSON.stringify({ preferences }) },
+    );
+  },
+
   executeUiCommand(payload: {
     command: string;
     args?: Record<string, unknown>;
@@ -1944,6 +2737,102 @@ export const api = {
     return request<{ values: Record<string, Record<string, unknown>> }>("/api/ui/settings", {
       method: "PUT",
       body: JSON.stringify({ values }),
+    });
+  },
+
+  listContinuityNodes() {
+    return request<{ nodes: ContinuityNode[]; local_node: ContinuityNode }>("/api/continuity/nodes", { cache: "no-store" });
+  },
+
+  startContinuityPairing(payload?: { display_name?: string }) {
+    return request<ContinuityPairingStartResponse>("/api/continuity/pairing/start", {
+      method: "POST",
+      body: JSON.stringify(payload ?? {}),
+    });
+  },
+
+  acceptContinuityPairing(payload: {
+    request_id: string;
+    code: string;
+    display_name?: string;
+    descriptor?: Record<string, unknown>;
+    simulate_local_destination?: boolean;
+    destination_kind?: string;
+  }) {
+    return request<{ node: ContinuityNode }>("/api/continuity/pairing/accept", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  removeContinuityNode(nodeId: string) {
+    return request<{ removed: boolean; node_id: string }>(`/api/continuity/nodes/${encodeURIComponent(nodeId)}`, {
+      method: "DELETE",
+    });
+  },
+
+  probeContinuityNode(nodeId: string, payload?: Record<string, unknown>) {
+    return request<{ node: ContinuityNode; checks: Array<Record<string, unknown>>; ok: boolean }>(
+      `/api/continuity/nodes/${encodeURIComponent(nodeId)}/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      },
+    );
+  },
+
+  listContinuityProviderRoutes() {
+    return request<{ routes: ContinuityProviderRoute[] }>("/api/continuity/provider-routes", { cache: "no-store" });
+  },
+
+  probeContinuityProviderRoute(routeId: string, payload?: { destination_node_id?: string; node_id?: string }) {
+    return request<ContinuityPreflightResult>(`/api/continuity/provider-routes/${encodeURIComponent(routeId)}/probe`, {
+      method: "POST",
+      body: JSON.stringify({ ...(payload ?? {}), route_id: routeId }),
+    });
+  },
+
+  setContinuityProviderFallbacks(routeId: string, fallbackRouteIds: string[]) {
+    return request<{ route_id: string; fallback_route_ids: string[] }>(
+      `/api/continuity/provider-routes/${encodeURIComponent(routeId)}/set-fallbacks`,
+      {
+        method: "POST",
+        body: JSON.stringify({ route_id: routeId, fallback_route_ids: fallbackRouteIds }),
+      },
+    );
+  },
+
+  listContinuityProviderExtensions() {
+    return request<{ extensions: Array<Record<string, unknown>> }>("/api/continuity/provider-extensions", { cache: "no-store" });
+  },
+
+  planContinuityHandoff(payload: ContinuityHandoffRequest) {
+    return request<{ plan: ContinuityHandoffPlan }>("/api/continuity/plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+
+  listContinuityHandoffs() {
+    return request<{ operations: ContinuityHandoffOperation[] }>("/api/continuity/handoffs", { cache: "no-store" });
+  },
+
+  getContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}`, {
+      cache: "no-store",
+    });
+  },
+
+  cancelContinuityHandoff(operationId: string) {
+    return request<{ operation: ContinuityHandoffOperation }>(`/api/continuity/handoffs/${encodeURIComponent(operationId)}/cancel`, {
+      method: "POST",
+    });
+  },
+
+  createContinuityCheckpoint(payload: ContinuityHandoffRequest) {
+    return request<{ operation: ContinuityHandoffOperation; checkpoint: Record<string, unknown> }>("/api/continuity/checkpoints", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 
@@ -2058,12 +2947,54 @@ export const api = {
     });
   },
 
-  startProviderOAuth(providerId: string) {
-    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scopes: string[] }>("/api/ai/oauth", {
+  importConnectionBundle(credentialBundle: string | Record<string, unknown>, providerId?: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/connections/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
+  importProviderConnection(providerId: string, credentialBundle: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/connections/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
+  startProviderOAuth(providerId: string, options: { scopeMode?: string; services?: string[] } = {}) {
+    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scope_mode?: string; services?: string[]; scopes: string[] }>("/api/ai/oauth", {
       method: "POST",
       body: JSON.stringify({
         action: "start",
         provider_id: providerId,
+        scope_mode: options.scopeMode,
+        services: options.services,
       }),
     });
   },
@@ -2084,6 +3015,67 @@ export const api = {
       body: JSON.stringify({
         action: "clear_client",
         provider_id: providerId,
+      }),
+    });
+  },
+
+  getCodexConnectionStatus() {
+    return request<CodexConnectionStatusResponse>("/api/connections/codex", { cache: "no-store" });
+  },
+
+  saveCodexAccessToken(accessToken: string) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_token",
+        access_token: accessToken,
+      }),
+    });
+  },
+
+  clearCodexAccessToken() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_token",
+      }),
+    });
+  },
+
+  saveCodexAppServerConfig(config: CodexAppServerConfig) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_app_server",
+        app_server: {
+          transport: config.transport,
+          enabled: config.enabled,
+          base_url: config.baseUrl,
+          websocket_url: config.websocketUrl,
+          unix_socket_path: config.unixSocketPath,
+          ws_token_file: config.wsTokenFile,
+          shared_secret_file: config.sharedSecretFile,
+          tool_source_enabled: config.toolSourceEnabled,
+          automation_endpoint_enabled: config.automationEndpointEnabled,
+        },
+      }),
+    });
+  },
+
+  clearCodexAppServerConfig() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_app_server",
+      }),
+    });
+  },
+
+  probeCodexAppServer() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "probe_app_server",
       }),
     });
   },
@@ -2271,12 +3263,16 @@ export const api = {
     heartbeat_minutes?: number;
     review_interval_minutes?: number;
     qa_interval_minutes?: number;
+    max_tool_calls?: number;
     model?: string;
     vision_model?: string;
     fast_model?: string;
     qa_targets?: string[];
     docker_worker_count?: number;
     docker_personas?: string[];
+    workspace_id?: string | null;
+    workspace_label?: string | null;
+    workspace_root?: string | null;
     run_initial_review_now?: boolean;
     seed_tasks?: boolean;
     seed_knowledge?: boolean;
@@ -2913,6 +3909,21 @@ export const api = {
       `/api/authority/requests/${encodeURIComponent(requestId)}`,
       { cache: "no-store" },
     );
+  },
+
+  browserAuthorityUiOperator(requestId: string, browserApprovalToken: string) {
+    return request<AuthorityApprovalContext>(withQuery("/api/authority/browser-ui-operator", {
+      browser_approval_token: browserApprovalToken,
+    }), {
+      method: "POST",
+      headers: {
+        "X-Rumi-Approval-Browser-Token": browserApprovalToken,
+      },
+      body: JSON.stringify({
+        request_id: requestId,
+        browser_approval_token: browserApprovalToken,
+      }),
+    });
   },
 
   approveAuthorityApproval(

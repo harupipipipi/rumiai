@@ -15,12 +15,13 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindowBuilder};
 
 use crate::config::AppConfig;
+use crate::kernel_manager::{detect_port_listener, terminate_external_listener, PortListener};
 use crate::process_utils;
 
 const DEFAULTSPACK_DEFAULT_PORT: u16 = 8766;
 const DEFAULTSPACK_READY_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULTSPACK_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack";
+const DEFAULTSPACK_WINDOW_LABEL: &str = "defaultspack-main";
 const DEFAULTSPACK_WINDOW_TITLE: &str = "Rumi Defaultspack";
 
 #[derive(Debug, Clone)]
@@ -160,12 +161,82 @@ fn kernel_command_for_python(python: &Path) -> String {
     format!("{} -m app", shell_quote_path(python))
 }
 
-fn defaultspack_browser_url(port: u16) -> String {
-    format!("http://localhost:{port}/chat")
+fn defaultspack_window_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/chat")
+}
+
+fn encode_url_fragment_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(byte as char)
+            }
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
+fn defaultspack_window_url_with_local_auth(port: u16, api_token: &str) -> AnyResult<String> {
+    let mut url = Url::parse(&defaultspack_window_url(port))
+        .with_context(|| format!("invalid defaultspack window port: {port}"))?;
+    url.set_fragment(Some(&format!(
+        "rumi_local_auth={}",
+        encode_url_fragment_value(api_token)
+    )));
+    Ok(url.to_string())
+}
+
+fn defaultspack_window_url_with_path(authenticated_url: &str, path: &str) -> AnyResult<String> {
+    let mut url = Url::parse(authenticated_url)
+        .with_context(|| format!("invalid authenticated Defaultspack URL: {authenticated_url}"))?;
+    let fragment = url.fragment().map(str::to_owned);
+    let trimmed = path.trim();
+    let path = if trimmed.is_empty() { "/chat" } else { trimmed };
+    if path.contains("://") || path.starts_with("//") || path.contains('\\') {
+        bail!("Defaultspack window path must be a same-origin path");
+    }
+    let path_without_fragment = path.split('#').next().unwrap_or(path);
+    let (pathname, query) = match path_without_fragment.split_once('?') {
+        Some((pathname, query)) => (pathname, Some(query)),
+        None => (path_without_fragment, None),
+    };
+    if !pathname.starts_with('/') {
+        bail!("Defaultspack window path must start with /");
+    }
+    url.set_path(pathname);
+    url.set_query(query);
+    url.set_fragment(fragment.as_deref());
+    Ok(url.to_string())
+}
+
+pub(crate) fn add_defaultspack_local_auth(config: &AppConfig, mut url: Url) -> AnyResult<Url> {
+    let api_token = read_desktop_api_token_from_config(config)
+        .context("failed to read Viewer local auth token")?;
+    url.set_fragment(Some(&format!(
+        "rumi_local_auth={}",
+        encode_url_fragment_value(&api_token)
+    )));
+    Ok(url)
+}
+
+fn defaultspack_window_url_for_log(url: &str) -> String {
+    match Url::parse(url) {
+        Ok(mut parsed) => {
+            parsed.set_fragment(None);
+            parsed.to_string()
+        }
+        Err(_) => "<invalid defaultspack url>".to_string(),
+    }
 }
 
 fn defaultspack_health_url(port: u16) -> String {
     format!("http://127.0.0.1:{port}/api/health")
+}
+
+fn defaultspack_auth_probe_url(port: u16) -> String {
+    format!("http://127.0.0.1:{port}/api/integrations/secrets")
 }
 
 fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
@@ -179,11 +250,32 @@ fn read_defaultspack_port(env_vars: &[(String, String)]) -> AnyResult<u16> {
     Ok(DEFAULTSPACK_DEFAULT_PORT)
 }
 
-fn check_defaultspack_http_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
+fn check_defaultspack_health_ready(client: &reqwest::blocking::Client, port: u16) -> bool {
     client
         .get(defaultspack_health_url(port))
         .send()
         .is_ok_and(|response| response.status().is_success())
+}
+
+fn check_defaultspack_auth_ready(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    api_token: &str,
+) -> bool {
+    client
+        .get(defaultspack_auth_probe_url(port))
+        .bearer_auth(api_token)
+        .send()
+        .is_ok_and(|response| response.status().is_success())
+}
+
+fn check_defaultspack_http_ready(
+    client: &reqwest::blocking::Client,
+    port: u16,
+    api_token: &str,
+) -> bool {
+    check_defaultspack_health_ready(client, port)
+        && check_defaultspack_auth_ready(client, port, api_token)
 }
 
 fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
@@ -193,20 +285,24 @@ fn defaultspack_health_client() -> AnyResult<reqwest::blocking::Client> {
         .context("failed to build defaultspack health client")
 }
 
-fn is_defaultspack_http_ready(port: u16) -> bool {
+fn is_defaultspack_http_ready(port: u16, api_token: &str) -> bool {
     defaultspack_health_client()
-        .map(|client| check_defaultspack_http_ready(&client, port))
+        .map(|client| check_defaultspack_http_ready(&client, port, api_token))
         .unwrap_or(false)
 }
 
-fn wait_for_defaultspack_http_ready(port: u16, child: &mut Child) -> AnyResult<()> {
+fn wait_for_defaultspack_http_ready(
+    port: u16,
+    api_token: &str,
+    child: &mut Child,
+) -> AnyResult<()> {
     let client = defaultspack_health_client()?;
     let deadline = Instant::now() + DEFAULTSPACK_READY_TIMEOUT;
     let mut poll_count: u32 = 0;
 
     loop {
         poll_count += 1;
-        if check_defaultspack_http_ready(&client, port) {
+        if check_defaultspack_http_ready(&client, port, api_token) {
             info!(
                 "wait_for_defaultspack_http_ready: ready after {poll_count} polls on port {port}"
             );
@@ -365,6 +461,8 @@ export RUMI_USER_DATA
 
 RUMI_API_TOKEN=$(cat "$TOKEN_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_API_TOKEN
+RUMI_DEFAULTSPACK_LOCAL_TOKEN="$RUMI_API_TOKEN"
+export RUMI_DEFAULTSPACK_LOCAL_TOKEN
 RUMI_PANEL_BOOTSTRAP_SECRET=$(cat "$PANEL_BOOTSTRAP_SECRET_FILE" 2>/dev/null | tr -d '\n')
 export RUMI_PANEL_BOOTSTRAP_SECRET
 
@@ -568,17 +666,113 @@ pub(crate) fn launch_defaultspack_desktop_window_impl(
     info!("launch_defaultspack_desktop_impl: starting");
     let url = ensure_defaultspack_desktop_ready(config)?;
     open_defaultspack_tauri_window(app, &url)?;
-    info!("launch_defaultspack_desktop_impl: opened Tauri window {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    info!(
+        "launch_defaultspack_desktop_impl: opened Tauri window {}",
+        defaultspack_window_url_for_log(&url)
+    );
+    Ok("Rumi Defaultspackを開きました".into())
+}
+
+pub(crate) fn open_defaultspack_desktop_window_path_impl(
+    app: &AppHandle,
+    config: &AppConfig,
+    path: &str,
+) -> AnyResult<String> {
+    info!("open_defaultspack_desktop_window_path_impl: starting");
+    let authenticated_url = ensure_defaultspack_desktop_ready(config)?;
+    let url = defaultspack_window_url_with_path(&authenticated_url, path)?;
+    open_defaultspack_tauri_window(app, &url)?;
+    info!(
+        "open_defaultspack_desktop_window_path_impl: opened Tauri window {}",
+        defaultspack_window_url_for_log(&url)
+    );
+    Ok("Rumi Defaultspackを開きました".into())
 }
 
 #[allow(dead_code)]
 pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<String> {
-    info!("launch_defaultspack_desktop_impl: starting external browser launch");
+    info!("launch_defaultspack_desktop_impl: starting legacy external launch");
+    let allow_browser_debug = std::env::var("RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG")
+        .ok()
+        .as_deref()
+        == Some("1");
+    let requested_browser_surface = std::env::var("RUMI_DEFAULTSPACK_SURFACE")
+        .ok()
+        .is_some_and(|surface| surface.trim().eq_ignore_ascii_case("browser"));
+    if !(allow_browser_debug && requested_browser_surface) {
+        bail!(
+            "external browser Defaultspack launch is disabled; use the Rumi Viewer window or set RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG=1 with RUMI_DEFAULTSPACK_SURFACE=browser for debug"
+        );
+    }
     let url = ensure_defaultspack_desktop_ready(config)?;
-    open::that_detached(&url).with_context(|| format!("failed to open {url}"))?;
-    info!("launch_defaultspack_desktop_impl: opened browser URL {url}");
-    Ok(format!("Opening Rumi Defaultspack at {url}"))
+    open::that_detached(&url)
+        .with_context(|| format!("failed to open {}", defaultspack_window_url_for_log(&url)))?;
+    info!(
+        "launch_defaultspack_desktop_impl: opened legacy external URL {}",
+        defaultspack_window_url_for_log(&url)
+    );
+    Ok(format!(
+        "Opening Rumi Defaultspack in debug browser at {}",
+        defaultspack_window_url_for_log(&url)
+    ))
+}
+
+fn normalized_process_value(value: &str) -> String {
+    value
+        .trim()
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn identify_defaultspack_listener(
+    listener: &PortListener,
+    metadata: &DefaultspackDesktopMetadata,
+) -> bool {
+    let command = normalized_process_value(&listener.command);
+    let working_dir = normalized_process_value(&metadata.app_working_dir.to_string_lossy());
+    let cwd_matches = listener
+        .cwd
+        .as_deref()
+        .is_some_and(|cwd| normalized_process_value(cwd) == working_dir);
+    let command_mentions_working_dir = !working_dir.is_empty() && command.contains(&working_dir);
+    let command_mentions_defaultspack = command.contains("defaultspack");
+
+    // A generic Python process is never enough. Ownership requires both the
+    // Defaultspack identity and the configured pack working directory, either
+    // as the process cwd or as an explicit pack-shell argument.
+    command_mentions_defaultspack && (cwd_matches || command_mentions_working_dir)
+}
+
+fn recover_stale_defaultspack_listener(metadata: &DefaultspackDesktopMetadata) -> AnyResult<()> {
+    let listener = detect_port_listener(metadata.port)?.ok_or_else(|| {
+        anyhow!(
+            "Defaultspack port {} is occupied, but Viewer could not identify the listener. Viewer did not stop it. Close that process or free port {}.",
+            metadata.port,
+            metadata.port
+        )
+    })?;
+    if !identify_defaultspack_listener(&listener, metadata) {
+        bail!(
+            "Defaultspack port {} is occupied by pid {} ({}), which is not an owned Defaultspack process. Viewer did not stop it. Close that process or free port {}.",
+            metadata.port,
+            listener.pid,
+            listener.summary(),
+            metadata.port
+        );
+    }
+    warn!(
+        "Stopping stale owned Defaultspack listener on port {}: pid {} ({})",
+        metadata.port,
+        listener.pid,
+        listener.summary()
+    );
+    terminate_external_listener(listener.pid, metadata.port).with_context(|| {
+        format!(
+            "failed to stop stale owned Defaultspack listener pid {} on port {}",
+            listener.pid, metadata.port
+        )
+    })
 }
 
 fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
@@ -597,10 +791,22 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
             return Err(e);
         }
     };
-    let url = defaultspack_browser_url(metadata.port);
-    info!("launch_defaultspack_desktop_impl: browser URL will be {url}");
+    let base_url = defaultspack_window_url(metadata.port);
+    info!("launch_defaultspack_desktop_impl: Defaultspack window URL will be {base_url}");
+    let api_token = read_desktop_api_token_from_config(config)
+        .context("failed to read Viewer local auth token for Defaultspack launch")?;
 
-    if !is_defaultspack_http_ready(metadata.port) {
+    if is_defaultspack_http_ready(metadata.port, &api_token) {
+        info!(
+            "launch_defaultspack_desktop_impl: health and local auth checks passed, server already ready at {base_url}"
+        );
+    } else {
+        if defaultspack_health_client()
+            .map(|client| check_defaultspack_health_ready(&client, metadata.port))
+            .unwrap_or(false)
+        {
+            recover_stale_defaultspack_listener(&metadata)?;
+        }
         info!("launch_defaultspack_desktop_impl: health check indicates server not ready, spawning...");
         let mut child = match spawn_defaultspack_local_server(config, &metadata) {
             Ok(c) => {
@@ -622,8 +828,8 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
                 return Err(e);
             }
         };
-        match wait_for_defaultspack_http_ready(metadata.port, &mut child) {
-            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {url}"),
+        match wait_for_defaultspack_http_ready(metadata.port, &api_token, &mut child) {
+            Ok(()) => info!("launch_defaultspack_desktop_impl: server became ready at {base_url}"),
             Err(e) => {
                 error!("launch_defaultspack_desktop_impl: wait_for_ready failed: {e:#}");
                 match child.try_wait() {
@@ -634,13 +840,9 @@ fn ensure_defaultspack_desktop_ready(config: &AppConfig) -> AnyResult<String> {
                 return Err(e);
             }
         }
-    } else {
-        info!(
-            "launch_defaultspack_desktop_impl: health check passed, server already ready at {url}"
-        );
     }
 
-    Ok(url)
+    defaultspack_window_url_with_local_auth(metadata.port, &api_token)
 }
 
 fn focus_defaultspack_window(window: &tauri::WebviewWindow) -> AnyResult<()> {
@@ -667,8 +869,8 @@ fn open_defaultspack_tauri_window(app: &AppHandle, url: &str) -> AnyResult<()> {
     let window =
         WebviewWindowBuilder::new(app, DEFAULTSPACK_WINDOW_LABEL, WebviewUrl::External(url))
             .title(DEFAULTSPACK_WINDOW_TITLE)
-            .inner_size(1280.0, 800.0)
-            .min_inner_size(800.0, 600.0)
+            .inner_size(980.0, 720.0)
+            .min_inner_size(860.0, 600.0)
             .resizable(true)
             .focused(true)
             .visible(true)
@@ -705,59 +907,79 @@ fn read_defaultspack_desktop_metadata(
 
 fn read_desktop_api_token_from_config(config: &AppConfig) -> AnyResult<String> {
     let token_path = config.desktop_api_token_path();
-    info!(
-        "read_desktop_api_token_from_config: trying saved token at {}",
-        token_path.display()
-    );
-    if let Ok(token) = read_saved_desktop_api_token(&token_path) {
-        info!(
-            "read_desktop_api_token_from_config: found saved token ({} chars)",
-            token.len()
-        );
-        return Ok(token);
-    }
-    info!("read_desktop_api_token_from_config: no saved token, trying hmac_keys.json candidates");
-
     let candidates = [
         config.user_data_dir.join("hmac_keys.json"),
         config.rumi_home.join("user_data").join("hmac_keys.json"),
     ];
-    let mut last_error: Option<anyhow::Error> = None;
+    let mut saw_hmac_store = false;
+    let mut encrypted_store_error: Option<anyhow::Error> = None;
+    let mut plaintext_store_error: Option<anyhow::Error> = None;
+
+    // The active HMAC store is authoritative. Reading the desktop cache first
+    // can reuse a rotated token and launch a server that immediately rejects
+    // every Viewer request.
     for hmac_keys_path in &candidates {
-        info!(
-            "read_desktop_api_token_from_config: checking {}",
-            hmac_keys_path.display()
-        );
         if !hmac_keys_path.exists() {
-            info!("read_desktop_api_token_from_config: does not exist");
             continue;
         }
-        match read_desktop_api_token(&hmac_keys_path) {
+        saw_hmac_store = true;
+        info!(
+            "read_desktop_api_token_from_config: checking active HMAC store {}",
+            hmac_keys_path.display()
+        );
+        match read_desktop_api_token(hmac_keys_path) {
+            Ok(token) => {
+                let _ = persist_desktop_api_token(config, &token);
+                return Ok(token);
+            }
+            Err(error) if error.to_string().to_ascii_lowercase().contains("encrypted") => {
+                encrypted_store_error = Some(error);
+            }
+            Err(error) => {
+                plaintext_store_error = Some(error);
+            }
+        }
+    }
+
+    if let Some(error) = plaintext_store_error {
+        return Err(error).context(
+            "active plaintext HMAC store is unreadable; Viewer refused to use a potentially stale cached token",
+        );
+    }
+
+    if saw_hmac_store && encrypted_store_error.is_some() {
+        match read_saved_desktop_api_token(&token_path) {
             Ok(token) => {
                 info!(
-                    "read_desktop_api_token_from_config: got token from hmac_keys.json ({} chars)",
-                    token.len()
+                    "active HMAC store is encrypted; using the Kernel-managed desktop token cache"
                 );
                 return Ok(token);
             }
-            Err(error) => {
-                warn!("read_desktop_api_token_from_config: hmac_keys.json exists but read failed: {error:#}");
-                last_error = Some(error);
+            Err(cache_error) => {
+                return Err(cache_error).with_context(|| {
+                    format!(
+                        "active HMAC store is encrypted and the Kernel-managed desktop token cache is unavailable at {}",
+                        token_path.display()
+                    )
+                });
             }
         }
     }
-    if let Some(error) = last_error {
-        return Err(error).with_context(|| {
-            format!(
-                "failed to read desktop API token. Start the Kernel or remove stale {}",
-                token_path.display()
-            )
-        });
+
+    if !saw_hmac_store {
+        if let Ok(token) = read_saved_desktop_api_token(&token_path) {
+            info!(
+                "read_desktop_api_token_from_config: no HMAC store yet; using Kernel-managed desktop token cache"
+            );
+            return Ok(token);
+        }
     }
+
     bail!(
-        "hmac_keys.json not found (checked {}, {}). Start the Kernel first to generate API keys.",
+        "local auth token is not configured (checked {}, {}, and {}). Start or restart the Kernel first.",
         candidates[0].display(),
-        candidates[1].display()
+        candidates[1].display(),
+        token_path.display()
     )
 }
 
@@ -837,8 +1059,8 @@ fn spawn_defaultspack_local_server(
         .env("RUMI_APP_DIR", &config.app_dir)
         .env("RUMI_USER_DATA", &config.user_data_dir)
         .env("RUMI_API_TOKEN", &api_token)
+        .env("RUMI_DEFAULTSPACK_LOCAL_TOKEN", &api_token)
         .env("RUMI_PANEL_BOOTSTRAP_SECRET", &panel_bootstrap_secret)
-        .env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0")
         .current_dir(&metadata.app_working_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -847,6 +1069,7 @@ fn spawn_defaultspack_local_server(
     for (key, value) in &metadata.env_vars {
         command.env(key, value);
     }
+    command.env("RUMI_DEFAULTSPACK_OPEN_BROWSER", "0");
 
     command
         .spawn()
@@ -893,6 +1116,21 @@ fn ensure_defaultspack_app_bundle(config: &AppConfig) -> AnyResult<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_config(root: &Path) -> AppConfig {
+        let user_data_dir = root.join("app-data").join("user_data");
+        AppConfig {
+            app_dir: root.join("runtime"),
+            rumi_home: root.join("runtime"),
+            python_dir: root.join("python"),
+            uv_path: root.join("uv"),
+            venv_dir: root.join("venv"),
+            user_data_dir,
+            log_dir: root.join("logs"),
+            kernel_port: 8765,
+            dev_workspace_root: None,
+        }
+    }
 
     #[test]
     fn read_desktop_api_token_rejects_encrypted() {
@@ -964,6 +1202,86 @@ mod tests {
     }
 
     #[test]
+    fn config_token_prefers_active_hmac_store_over_stale_cache() {
+        let thread_name = std::thread::current()
+            .name()
+            .unwrap_or("test")
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        let root = std::env::temp_dir().join(format!(
+            "rumi_dock_token_precedence_{}_{}",
+            std::process::id(),
+            thread_name
+        ));
+        let config = test_config(&root);
+        fs::create_dir_all(&config.user_data_dir).unwrap();
+        fs::write(config.desktop_api_token_path(), "stale-token").unwrap();
+        fs::write(
+            config.user_data_dir.join("hmac_keys.json"),
+            r#"{"version":"1.0","keys":[{"key":"active-token","is_active":true}]}"#,
+        )
+        .unwrap();
+
+        let token = read_desktop_api_token_from_config(&config).unwrap();
+
+        assert_eq!(token, "active-token");
+        assert_eq!(
+            fs::read_to_string(config.desktop_api_token_path()).unwrap(),
+            "active-token"
+        );
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn config_token_uses_kernel_cache_only_for_encrypted_hmac_store() {
+        let root =
+            std::env::temp_dir().join(format!("rumi_dock_encrypted_token_{}", std::process::id()));
+        let config = test_config(&root);
+        fs::create_dir_all(&config.user_data_dir).unwrap();
+        fs::write(config.desktop_api_token_path(), "kernel-cache-token").unwrap();
+        fs::write(
+            config.user_data_dir.join("hmac_keys.json"),
+            r#"{"version":"1.0","encryption":"fernet","payload":"abc"}"#,
+        )
+        .unwrap();
+
+        let token = read_desktop_api_token_from_config(&config).unwrap();
+
+        assert_eq!(token, "kernel-cache-token");
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn stale_listener_identity_requires_defaultspack_and_working_directory() {
+        let metadata = DefaultspackDesktopMetadata {
+            command: "python -m ecosystem.defaultspack.desktop_app".into(),
+            app_working_dir: PathBuf::from("/tmp/rumi/defaultspack"),
+            env_vars: vec![],
+            port: DEFAULTSPACK_DEFAULT_PORT,
+        };
+        let owned = PortListener {
+            pid: 101,
+            command: "pack-shell run defaultspack --working-dir /tmp/rumi/defaultspack".into(),
+            cwd: Some("/tmp/rumi/defaultspack".into()),
+        };
+        let foreign = PortListener {
+            pid: 202,
+            command: "python -m http.server 8766".into(),
+            cwd: Some("/tmp/rumi/defaultspack".into()),
+        };
+
+        assert!(identify_defaultspack_listener(&owned, &metadata));
+        assert!(!identify_defaultspack_listener(&foreign, &metadata));
+    }
+
+    #[test]
     #[cfg(unix)]
     fn launch_script_sets_rumi_app_dir_and_user_data() {
         let script = build_launch_script(
@@ -991,6 +1309,7 @@ mod tests {
         assert!(script.contains("exec \"$PACK_SHELL\" run \"defaultspack\""));
         assert!(!script.contains("--api-token"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
+        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
         assert!(!script.contains(".defaultspack_launch_request"));
         assert!(!script.contains("open -a \"Rumi AI\""));
     }
@@ -1017,6 +1336,7 @@ mod tests {
 
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export DEFAULTS_HTTP_PORT='8766'"));
+        assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
         assert!(script.contains("export RUMI_PANEL_BOOTSTRAP_SECRET"));
     }
 
@@ -1117,6 +1437,65 @@ mod tests {
         let err =
             read_defaultspack_port(&[("DEFAULTS_HTTP_PORT".into(), "nope".into())]).unwrap_err();
         assert!(err.to_string().contains("DEFAULTS_HTTP_PORT"));
+    }
+
+    #[test]
+    fn defaultspack_window_url_targets_loopback_chat_route() {
+        assert_eq!(
+            defaultspack_window_url(DEFAULTSPACK_DEFAULT_PORT),
+            "http://127.0.0.1:8766/chat"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_with_local_auth_uses_fragment() {
+        assert_eq!(
+            defaultspack_window_url_with_local_auth(DEFAULTSPACK_DEFAULT_PORT, "local+token/1=")
+                .unwrap(),
+            "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_with_path_preserves_local_auth_fragment() {
+        assert_eq!(
+            defaultspack_window_url_with_path(
+                "http://127.0.0.1:8766/chat#rumi_local_auth=local-token",
+                "/chat?chat=abc-123"
+            )
+            .unwrap(),
+            "http://127.0.0.1:8766/chat?chat=abc-123#rumi_local_auth=local-token"
+        );
+    }
+
+    #[test]
+    fn defaultspack_window_url_with_path_rejects_external_url() {
+        let err = defaultspack_window_url_with_path(
+            "http://127.0.0.1:8766/chat#rumi_local_auth=local-token",
+            "https://example.com/chat",
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("Defaultspack window path must be a same-origin path"));
+    }
+
+    #[test]
+    fn defaultspack_window_url_for_log_strips_local_auth_fragment() {
+        assert_eq!(
+            defaultspack_window_url_for_log(
+                "http://127.0.0.1:8766/chat#rumi_local_auth=local%2Btoken%2F1%3D"
+            ),
+            "http://127.0.0.1:8766/chat"
+        );
+    }
+
+    #[test]
+    fn defaultspack_auth_probe_url_targets_sensitive_read_route() {
+        assert_eq!(
+            defaultspack_auth_probe_url(DEFAULTSPACK_DEFAULT_PORT),
+            "http://127.0.0.1:8766/api/integrations/secrets"
+        );
     }
 
     #[test]

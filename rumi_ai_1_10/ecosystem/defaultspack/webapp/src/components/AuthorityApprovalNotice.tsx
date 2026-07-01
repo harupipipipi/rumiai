@@ -1,6 +1,6 @@
 import { ExternalLink, ShieldAlert } from "lucide-react";
 
-import type { AuthorityApproval } from "../lib/authorityApproval";
+import { authorityApprovalRiskTone, type AuthorityApproval } from "../lib/authorityApproval";
 import { cn } from "../lib/cn";
 
 type AuthorityApprovalNoticeProps = {
@@ -17,9 +17,7 @@ export function AuthorityApprovalNotice({ approval, title, onOpen }: AuthorityAp
           <div className="flex min-w-0 items-center gap-2">
             <span className={cn(
               "flex h-6 w-6 shrink-0 items-center justify-center rounded border",
-              approval.riskLevel === "high"
-                ? "border-red-500/30 bg-red-500/10 text-red-200"
-                : "border-sky-500/30 bg-sky-500/10 text-sky-200",
+              authorityApprovalRiskTone(approval.riskLevel),
             )}>
               <ShieldAlert size={14} />
             </span>

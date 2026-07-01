@@ -98,6 +98,62 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/chat/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/chat/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: GET
+  pattern: /api/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/conversations/{id}/tool-preferences
+  legacy_block_module: blocks.chat.tool_preferences
+  replacement_function_id: ''
+  owner: chat
+  reason: tracked compatibility fallback for Tool UX v3 conversation preferences
+  remove_after: v2.4
+- method: GET
+  pattern: /api/tools/catalog
+  legacy_block_module: blocks.tool.catalog
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 catalog
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/selection/preview
+  legacy_block_module: blocks.tool.selection_preview
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 review preview
+  remove_after: v2.4
+- method: GET
+  pattern: /api/tools/selection/traces/{trace_id}
+  legacy_block_module: blocks.tool.selection_trace
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 trace lookup
+  remove_after: v2.4
+- method: POST
+  pattern: /api/tools/embedding-index/rebuild
+  legacy_block_module: blocks.tool.embedding_index_rebuild
+  replacement_function_id: ''
+  owner: tool
+  reason: tracked compatibility fallback for Tool UX v3 local embedding cache rebuild
+  remove_after: v2.4
+- method: GET
   pattern: /api/chat/channels
   legacy_block_module: blocks.chat.channel.list
   replacement_function_id: chat_channel_list
@@ -1756,6 +1812,111 @@ legacy_routes:
   owner: knowledge
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/prompts
+  legacy_block_module: blocks.prompt.editor_load
+  replacement_function_id: prompt_editor_load
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/active
+  legacy_block_module: blocks.prompt.active
+  replacement_function_id: prompt_active
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/traces
+  legacy_block_module: blocks.prompt.trace
+  replacement_function_id: prompt_trace_list
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/traces/{trace_id}
+  legacy_block_module: blocks.prompt.trace
+  replacement_function_id: prompt_trace_get
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/toggle
+  legacy_block_module: blocks.prompt.toggle
+  replacement_function_id: prompt_toggle
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/preview-toggle
+  legacy_block_module: blocks.prompt.preview_toggle
+  replacement_function_id: prompt_preview_toggle
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/editor
+  legacy_block_module: blocks.prompt.editor_load
+  replacement_function_id: prompt_editor_load
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/editor/save
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_editor_save
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/override
+  legacy_block_module: blocks.prompt.editor
+  replacement_function_id: prompt_create_override
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/diff
+  legacy_block_module: blocks.prompt.diff
+  replacement_function_id: prompt_diff
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/test
+  legacy_block_module: blocks.prompt.test
+  replacement_function_id: prompt_test
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/{name}/versions
+  legacy_block_module: blocks.prompt.versions
+  replacement_function_id: prompt_versions
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/versions
+  legacy_block_module: blocks.prompt.advanced.version
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: PUT
+  pattern: /api/prompts/{name}/versions/{version}
+  legacy_block_module: blocks.prompt.advanced.version
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/rollback
+  legacy_block_module: blocks.prompt.rollback
+  replacement_function_id: prompt_rollback
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
 - method: PUT
   pattern: /api/prompts/{name}
   legacy_block_module: blocks.prompt.update
@@ -1788,6 +1949,41 @@ legacy_routes:
   pattern: /api/prompts/compact
   legacy_block_module: blocks.prompt.compact_prompt
   replacement_function_id: prompt_compact_prompt
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/build
+  legacy_block_module: blocks.prompt.advanced.build
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/prompts/context-vars
+  legacy_block_module: blocks.prompt.advanced.context_vars
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/conditional
+  legacy_block_module: blocks.prompt.advanced.conditional
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/{name}/inherit
+  legacy_block_module: blocks.prompt.advanced.inherit
+  replacement_function_id: ''
+  owner: prompt
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/prompts/preview
+  legacy_block_module: blocks.prompt.advanced.preview
+  replacement_function_id: ''
   owner: prompt
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
@@ -2156,6 +2352,27 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/connections/codex
+  legacy_block_module: blocks.connections.codex
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/connections/codex
+  legacy_block_module: blocks.connections.codex
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/connections/import
+  legacy_block_module: blocks.connections.import_bundle
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/ai/provider-key
   legacy_block_module: blocks.ai.provider_key
   replacement_function_id: ''
@@ -2335,6 +2552,76 @@ legacy_routes:
   legacy_block_module: blocks.authority.requests
   replacement_function_id: ''
   owner: authority
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
+  pattern: /api/ambient/status
+  legacy_block_module: blocks.ambient.status
+  replacement_function_id: ambient_status
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/monitor/start
+  legacy_block_module: blocks.ambient.monitor
+  replacement_function_id: ambient_monitor_start
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/monitor/stop
+  legacy_block_module: blocks.ambient.monitor
+  replacement_function_id: ambient_monitor_stop
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/config
+  legacy_block_module: blocks.ambient.config
+  replacement_function_id: ambient_configure
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/events
+  legacy_block_module: blocks.ambient.event_submit
+  replacement_function_id: ambient_event_submit
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/approval/approve
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/approval/deny
+  legacy_block_module: blocks.ambient.approval
+  replacement_function_id: ''
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/grant
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_grant
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/revoke
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_revoke
+  owner: ambient
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/ambient/permissions/check
+  legacy_block_module: blocks.ambient.permissions
+  replacement_function_id: ambient_permission_check
+  owner: ambient
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET

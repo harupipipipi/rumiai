@@ -525,9 +525,10 @@ class AIClient:
         provider=None,
         stream=False,
         reason=None,
+        consume_approval_token=True,
     ):
         provider_id = str(provider_id or "").strip()
-        if provider_id in {"", "stub", "rumi"}:
+        if not provider_id:
             return
 
         context = self._authority_context_from_params(params)
@@ -547,7 +548,9 @@ class AIClient:
 
         from core_runtime.authority import get_authority_service
 
-        decision = get_authority_service().check(
+        service = get_authority_service()
+        request_id, approval_token = self._authority_token_for_permission(context, permission_id)
+        decision = service.check(
             principal_id=principal_id,
             permission_id=permission_id,
             resource=resource,
@@ -556,8 +559,9 @@ class AIClient:
             profile_id=context.get("profile_id"),
             node_id=context.get("node_id"),
             graph_id=context.get("graph_id"),
-            request_id=self._authority_token_for_permission(context, permission_id)[0] or context.get("request_id"),
-            approval_token=self._authority_token_for_permission(context, permission_id)[1],
+            request_id=request_id or context.get("request_id"),
+            approval_token=approval_token,
+            consume_approval_token=consume_approval_token,
         )
         if not decision.allowed:
             raise AuthorityApprovalRequired(decision)
@@ -572,6 +576,7 @@ class AIClient:
         params,
         provider=None,
         stream=False,
+        consume_approval_token=True,
     ):
         self._check_authority_for_provider_api(
             permission_id="model.invoke",
@@ -584,6 +589,7 @@ class AIClient:
             provider=provider,
             stream=stream,
             reason=None,
+            consume_approval_token=consume_approval_token,
         )
 
     def _check_authority_for_api_key_use(
@@ -596,6 +602,7 @@ class AIClient:
         params,
         provider=None,
         stream=False,
+        consume_approval_token=True,
     ):
         self._check_authority_for_provider_api(
             permission_id="api_key.use",
@@ -608,6 +615,7 @@ class AIClient:
             provider=provider,
             stream=stream,
             reason=None,
+            consume_approval_token=consume_approval_token,
         )
 
     def _check_authority_for_network_egress(
@@ -620,6 +628,7 @@ class AIClient:
         params,
         provider=None,
         stream=False,
+        consume_approval_token=True,
     ):
         self._check_authority_for_provider_api(
             permission_id="network.egress",
@@ -632,6 +641,7 @@ class AIClient:
             provider=provider,
             stream=stream,
             reason=None,
+            consume_approval_token=consume_approval_token,
         )
 
     def _check_authority_for_model_and_api_key_use(
@@ -646,7 +656,7 @@ class AIClient:
         stream=False,
     ):
         checks = [
-            ("model.invoke", lambda: self._check_authority_for_model_api(
+            ("model.invoke", lambda *, consume_approval_token=True: self._check_authority_for_model_api(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_id,
@@ -654,8 +664,9 @@ class AIClient:
                 params=params,
                 provider=provider,
                 stream=stream,
+                consume_approval_token=consume_approval_token,
             )),
-            ("api_key.use", lambda: self._check_authority_for_api_key_use(
+            ("api_key.use", lambda *, consume_approval_token=True: self._check_authority_for_api_key_use(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_id,
@@ -663,8 +674,9 @@ class AIClient:
                 params=params,
                 provider=provider,
                 stream=stream,
+                consume_approval_token=consume_approval_token,
             )),
-            ("network.egress", lambda: self._check_authority_for_network_egress(
+            ("network.egress", lambda *, consume_approval_token=True: self._check_authority_for_network_egress(
                 provider_id=provider_id,
                 api_id=api_id,
                 model_id=model_id,
@@ -672,6 +684,7 @@ class AIClient:
                 params=params,
                 provider=provider,
                 stream=stream,
+                consume_approval_token=consume_approval_token,
             )),
         ]
         if self._has_authority_token_for_permission(params, "model.invoke"):
@@ -683,7 +696,9 @@ class AIClient:
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
         for _, check in checks:
-            check()
+            check(consume_approval_token=False)
+        for _, check in checks:
+            check(consume_approval_token=True)
 
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []

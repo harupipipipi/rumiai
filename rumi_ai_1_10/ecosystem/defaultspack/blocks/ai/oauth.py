@@ -17,6 +17,7 @@ from domain.ai_client.oauth_store import (
     save_provider_oauth_client_config,
     start_provider_oauth,
 )
+from domain.connections.store import import_connection_bundle
 
 
 def _callback_page(provider_id: str, *, success: bool, title: str, message: str, payload: dict[str, object]) -> dict[str, object]:
@@ -158,7 +159,15 @@ def run(input_data, context):
 
     if method == "POST":
         action = str((input_data or {}).get("action", "status")).strip().lower()
-        if action == "save_client":
+        if action == "import":
+            raw_bundle = (input_data or {}).get("connection") or (input_data or {}).get("credential_bundle") or (input_data or {}).get("bundle")
+            if isinstance(raw_bundle, str):
+                result = import_connection_bundle(raw_bundle, provider_id=provider_id)
+            elif isinstance(raw_bundle, dict):
+                result = import_connection_bundle(raw_bundle, provider_id=provider_id)
+            else:
+                result = {"success": False, "provider_id": provider_id, "error": "credential bundle JSON is required"}
+        elif action == "save_client":
             raw_value = str((input_data or {}).get("client_config") or (input_data or {}).get("value") or "")
             result = save_provider_oauth_client_config(provider_id, raw_value)
         elif action == "clear_client":
@@ -166,7 +175,13 @@ def run(input_data, context):
         elif action == "disconnect":
             result = disconnect_provider_oauth(provider_id)
         elif action == "start":
-            result = start_provider_oauth(provider_id, request_headers=request_headers)
+            requested_services = (input_data or {}).get("services")
+            result = start_provider_oauth(
+                provider_id,
+                request_headers=request_headers,
+                scope_mode=str((input_data or {}).get("scope_mode") or "").strip() or None,
+                services=requested_services if isinstance(requested_services, list) else None,
+            )
         else:
             result = {
                 "success": True,

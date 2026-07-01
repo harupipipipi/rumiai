@@ -38,10 +38,10 @@ fn python_runtime_env_vars() -> [(&'static str, &'static str); 3] {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct PortListener {
-    pid: u32,
-    command: String,
-    cwd: Option<String>,
+pub(crate) struct PortListener {
+    pub(crate) pid: u32,
+    pub(crate) command: String,
+    pub(crate) cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +62,7 @@ impl ListenerIdentity {
 }
 
 impl PortListener {
-    fn summary(&self) -> String {
+    pub(crate) fn summary(&self) -> String {
         match self.cwd.as_deref() {
             Some(cwd) if !cwd.is_empty() => format!("{} (cwd={cwd})", self.command),
             _ => self.command.clone(),
@@ -160,6 +160,7 @@ impl KernelManager {
             .args(["-m", "app"])
             .current_dir(&self.config.rumi_home)
             .env("RUMI_HOME", &self.config.rumi_home)
+            .env("RUMI_APP_DIR", &self.config.app_dir)
             .env("RUMI_USER_DATA", &self.config.user_data_dir)
             .env("RUMI_LOG_DIR", &self.config.log_dir)
             .env("RUMI_PORT", self.config.kernel_port.to_string())
@@ -359,7 +360,7 @@ impl KernelManager {
     }
 }
 
-fn detect_port_listener(port: u16) -> Result<Option<PortListener>> {
+pub(crate) fn detect_port_listener(port: u16) -> Result<Option<PortListener>> {
     #[cfg(unix)]
     {
         detect_port_listener_unix(port)
@@ -573,7 +574,7 @@ fn normalize_for_match(value: &str) -> String {
     }
 }
 
-fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
+pub(crate) fn terminate_external_listener(pid: u32, port: u16) -> Result<()> {
     #[cfg(unix)]
     {
         let pid_str = pid.to_string();

@@ -47,13 +47,49 @@ def test_fallback_sorting_keeps_static_agent_company_status_before_generic_statu
     )
 
 
+def test_http_route_spec_preserves_authority_metadata_on_handler():
+    from ecosystem.defaultspack.transport.registry import (
+        HttpRouteSpec,
+        build_http_routes_from_specs,
+    )
+
+    class Server:
+        def _handle_mobile_chat(self, request_data, path_params):
+            return {"status": "ok"}
+
+    routes = build_http_routes_from_specs(
+        Server(),
+        [
+            HttpRouteSpec(
+                "POST",
+                "/api/mobile/v1/chat",
+                handler_name="_handle_mobile_chat",
+                permission_id="mobile.chat.send",
+                owner_pack_id="defaultspack",
+                provider_id="rumi",
+                frontend_id="mobile",
+                audience="kernel_api",
+                resource_template={"surface_id": "mobile", "device_id": "{body.device_id}"},
+                core_only=False,
+            ),
+        ],
+    )
+
+    _method, _compiled, handler, _source, _path_inject = routes[0]
+    assert getattr(handler, "__rumi_route_authority__") == {
+        "permission_id": "mobile.chat.send",
+        "owner_pack_id": "defaultspack",
+        "provider_id": "rumi",
+        "frontend_id": "mobile",
+        "audience": "kernel_api",
+        "resource_template": {"surface_id": "mobile", "device_id": "{body.device_id}"},
+    }
+
+
 def test_chat_send_fallback_specs_target_chat_turn_flow():
     from ecosystem.defaultspack.transport.registry import _FALLBACK_HTTP_ROUTE_SPECS
 
-    specs = {
-        (spec.method, spec.pattern): spec
-        for spec in _FALLBACK_HTTP_ROUTE_SPECS
-    }
+    specs = {(spec.method, spec.pattern): spec for spec in _FALLBACK_HTTP_ROUTE_SPECS}
 
     completion = specs[("POST", "/v1/chat/completions")]
     message = specs[("POST", "/api/chat/conversations/{id}/messages")]
@@ -68,6 +104,22 @@ def test_chat_send_fallback_specs_target_chat_turn_flow():
     assert stream.path_inject == {"id": "conversation_id"}
 
 
+def test_tool_selection_resource_routes_have_authority_metadata():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    preferences = specs[("PUT", "/api/chat/conversations/{id}/tool-preferences")]
+    assert preferences.permission_id == "chat.tool_preferences.write"
+    assert preferences.owner_pack_id == "defaultspack"
+    assert preferences.resource_template == {"conversation_id": "{path.id}"}
+
+    trace = specs[("GET", "/api/tools/selection/traces/{trace_id}")]
+    assert trace.permission_id == "tool_selection.trace.read"
+    assert trace.owner_pack_id == "defaultspack"
+    assert trace.resource_template == {"trace_id": "{path.trace_id}"}
+
+
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     from ecosystem.defaultspack.transport.registry import (
         canonical_http_route_specs,
@@ -78,9 +130,262 @@ def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
 
     assert flow_specs[("POST", "/v1/chat/completions")].flow_id == "defaultspack.chat_turn"
-    assert flow_specs[("POST", "/api/chat/conversations/{id}/messages")].flow_id == "defaultspack.chat_turn"
-    assert flow_specs[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
-    assert canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id == "defaultspack.chat_stream_turn"
+    assert (
+        flow_specs[("POST", "/api/chat/conversations/{id}/messages")].flow_id
+        == "defaultspack.chat_turn"
+    )
+    assert (
+        flow_specs[("POST", "/api/chat/conversations/{id}/stream")].flow_id
+        == "defaultspack.chat_stream_turn"
+    )
+    assert (
+        canonical[("POST", "/api/chat/conversations/{id}/stream")].flow_id
+        == "defaultspack.chat_stream_turn"
+    )
+
+
+def test_template_function_routes_join_canonical_transport_registry():
+    from ecosystem.defaultspack.transport.registry import (
+        canonical_http_route_specs,
+        template_http_route_specs,
+    )
+
+    template_routes = {(spec.method, spec.pattern): spec for spec in template_http_route_specs()}
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    token_route = template_routes[("POST", "/api/context/token-estimate")]
+    assert token_route.function_id == "context_token_estimate"
+    assert token_route.function_name == "defaultspack:context_token_estimate"
+    assert canonical[("POST", "/api/context/token-estimate")].function_name == (
+        "defaultspack:context_token_estimate"
+    )
+    provider_key_route = canonical[("POST", "/api/ai/provider-key")]
+    assert provider_key_route.function_name == "defaultspack:ai_set_provider_key"
+    assert provider_key_route.sensitive is True
+    connection_import_route = canonical[("POST", "/api/connections/import")]
+    assert connection_import_route.block_module == "blocks.connections.import_bundle"
+    assert connection_import_route.sensitive is True
+    external_template_route = canonical[("POST", "/api/external/templates")]
+    assert (
+        external_template_route.function_name == "defaultspack:external_io_upsert_custom_template"
+    )
+    assert external_template_route.sensitive is True
+    prompt_save_route = template_routes[("POST", "/api/prompts/editor/save")]
+    assert prompt_save_route.function_name == "defaultspack:prompt_editor_save"
+    assert prompt_save_route.defaults == {"action": "save"}
+    assert prompt_save_route.sensitive is True
+    assert prompt_save_route.local_only is True
+    prompt_versions_route = canonical[("GET", "/api/prompts/{name}/versions")]
+    assert prompt_versions_route.function_name == "defaultspack:prompt_versions"
+    assert prompt_versions_route.path_inject == {"name": "name"}
+    assert prompt_versions_route.sensitive is True
+    assert prompt_versions_route.local_only is True
+    assert all(
+        spec.sensitive is True
+        for spec in canonical.values()
+        if str(spec.pattern).startswith("/api/prompts")
+    )
+    assert all(
+        spec.local_only is True
+        for spec in canonical.values()
+        if str(spec.pattern).startswith("/api/prompts")
+    )
+
+
+def test_adaptive_function_routes_join_canonical_transport_registry():
+    import json
+    from pathlib import Path
+
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    canonical = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+
+    onboarding = canonical[("GET", "/api/onboarding/status")]
+    assert onboarding.function_id == "adaptive_onboarding_status"
+    assert onboarding.function_name == "defaultspack:adaptive_onboarding_status"
+    assert (
+        canonical[("POST", "/api/prepared-actions/{id}/commit")].path_inject
+        == {"id": "id"}
+    )
+    assert (
+        canonical[("POST", "/api/orchestration/leases/{id}/release")].function_name
+        == "defaultspack:adaptive_lease_release"
+    )
+    assert (
+        canonical[("PUT", "/api/automations/{id}")].path_inject
+        == {"id": "automation_id"}
+    )
+    assert (
+        canonical[("POST", "/api/events/{id}/ack")].path_inject
+        == {"id": "event_id"}
+    )
+    assert (
+        canonical[("GET", "/api/events/outbox")].function_name
+        == "defaultspack:adaptive_event_outbox"
+    )
+    assert (
+        canonical[("POST", "/api/continuations/resume")].function_id
+        == "adaptive_continuation_resume"
+    )
+
+    ecosystem_path = Path(__file__).resolve().parent.parent / "ecosystem" / "defaultspack" / "ecosystem.json"
+    ecosystem_routes = json.loads(ecosystem_path.read_text(encoding="utf-8"))["api_routes"]
+    ecosystem_adaptive = {
+        (str(route["method"]).upper(), route.get("path") or route.get("path_pattern")): route
+        for route in ecosystem_routes
+        if str(route.get("function_id") or "").startswith("adaptive_")
+    }
+    canonical_adaptive = {
+        key: spec
+        for key, spec in canonical.items()
+        if str(spec.function_id or "").startswith("adaptive_")
+    }
+    assert set(ecosystem_adaptive) == set(canonical_adaptive)
+    for key, spec in canonical_adaptive.items():
+        route = ecosystem_adaptive[key]
+        assert route["function_id"] == spec.function_id
+        if spec.path_inject:
+            assert route.get("path_param_map") == spec.path_inject
+        if spec.sensitive:
+            assert route.get("sensitive") is True
+
+
+def test_inactive_template_function_routes_are_not_registered(tmp_path):
+    import domain.function_runtime.template_specs as template_specs
+    from ecosystem.defaultspack.transport.registry import template_http_route_specs
+
+    for status in ("active", "draft", "deprecated", "disabled"):
+        template_path = tmp_path / "templates" / status / "template.json"
+        template_path.parent.mkdir(parents=True)
+        template_path.write_text(
+            json.dumps(
+                {
+                    "id": f"route.{status}",
+                    "kind": "backend",
+                    "version": "1.0.0",
+                    "status": status,
+                    "trust_level": "builtin",
+                    "pieces": [
+                        {
+                            "id": "route_action",
+                            "kind": "function",
+                            "role": "action",
+                            "action_id": f"{status}_route_action",
+                            "block_module": "blocks.context.token_estimate",
+                            "method": "POST",
+                            "route_path": f"/api/{status}",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    template_specs._template_catalog.cache_clear()
+    try:
+        routes = {
+            (spec.method, spec.pattern): spec
+            for spec in template_http_route_specs(defaultspack_root=tmp_path)
+        }
+    finally:
+        template_specs._template_catalog.cache_clear()
+
+    assert ("POST", "/api/active") in routes
+    assert ("POST", "/api/draft") not in routes
+    assert ("POST", "/api/deprecated") not in routes
+    assert ("POST", "/api/disabled") not in routes
+
+
+def test_always_available_routes_include_ambient_shell():
+    from ecosystem.defaultspack.transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+
+    routes = {
+        (spec.method, spec.pattern, spec.handler_name)
+        for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
+    }
+
+    assert ("GET", "/chat", "_handle_static") in routes
+    assert ("GET", "/defaultspack", "_handle_static") in routes
+    assert ("GET", "/pack/defaultspack", "_handle_static") in routes
+    assert ("GET", "/coding", "_handle_static") in routes
+    assert ("GET", "/approval", "_handle_static") in routes
+    assert ("POST", "/api/authority/browser-ui-operator", "_handle_authority_browser_ui_operator") in routes
+    assert ("GET", "/ambient", "_handle_static") in routes
+    assert ("GET", "/ambient-debug", "_handle_static") in routes
+    assert ("GET", "/finger-recording", "_handle_static") in routes
+    assert ("GET", "/console", "_handle_static") in routes
+    assert ("GET", "/host-permissions", "_handle_static") in routes
+    assert ("GET", "/adaptive", "_handle_static") in routes
+    assert ("GET", "/operating-profile", "_handle_static") in routes
+
+
+def test_routes_json_transport_direct_entries_match_canonical_registry():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
+    committed_direct_routes = {
+        (str(route["method"]).upper(), route["path"])
+        for route in routes_json["routes"]
+        if route.get("flow_id") == "transport_direct"
+    }
+    canonical_routes = {
+        (spec.method, spec.pattern)
+        for spec in canonical_http_route_specs(include_always_available=True)
+    }
+
+    assert committed_direct_routes <= canonical_routes
+
+
+def test_static_mediapipe_assets_fall_back_to_webapp_public_canonical(monkeypatch):
+    from ecosystem.defaultspack.transport import http as http_transport
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
+    canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    real_isfile = http_transport.os.path.isfile
+
+    def isfile_without_generated_ui(path):
+        if f"{http_transport.os.sep}ui{http_transport.os.sep}" in str(path):
+            return False
+        return real_isfile(path)
+
+    monkeypatch.setattr(http_transport.os.path, "isfile", isfile_without_generated_ui)
+
+    for name in canonical_files:
+        result = server._handle_static_file(
+            {},
+            {"path": f"mediapipe/wasm/{name}"},
+        )
+        assert result["_static"] is True, name
+        expected_body = (
+            (canonical_dir / name).read_bytes()
+            if name.endswith(".wasm")
+            else (canonical_dir / name).read_text(encoding="utf-8")
+        )
+        assert result["body"] == expected_body
+
+    model_result = server._handle_static_file({}, {"path": "models/hand_landmarker.task"})
+    assert model_result["_static"] is True
+    assert model_result["content_type"] == "application/octet-stream"
+    assert model_result["body"] == (
+        DEFAULTSPACK_ROOT / "webapp" / "public" / "models" / "hand_landmarker.task"
+    ).read_bytes()
+
+
+def test_static_mediapipe_wasm_uses_browser_wasm_mime():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    result = server._handle_static_file(
+        {},
+        {"path": "mediapipe/wasm/vision_wasm_internal.wasm"},
+    )
+
+    assert result["_static"] is True
+    assert result["content_type"] == "application/wasm"
+    assert isinstance(result["body"], bytes)
 
 
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
@@ -171,13 +476,37 @@ def test_pack_api_uses_direct_defaultspack_fallback_without_registered_routes(mo
     finally:
         monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
 
-    assert captured == [
-        {"status": "ok", "data": {"id": "c1", "model": "google/gemma-4-31b-it"}}
-    ]
+    assert captured == [{"status": "ok", "data": {"id": "c1", "model": "google/gemma-4-31b-it"}}]
     module_name, input_data, context = calls[0]
     assert module_name == "blocks.chat.create_conversation"
     assert input_data["model"] == "google/gemma-4-31b-it"
     assert context["owner_pack"] == "defaultspack"
+
+
+def test_pack_api_dispatches_adaptive_defaultspack_route_without_kernel(tmp_path, monkeypatch):
+    from core_runtime.pack_api_server import PackAPIHandler
+
+    monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path / "user_data"))
+
+    handler = object.__new__(PackAPIHandler)
+    handler.path = "/api/onboarding/status"
+    handler.headers = {"Origin": "http://127.0.0.1:8766"}
+    captured = []
+    handler._send_defaultspack_http_result = captured.append
+
+    previous_kernel = PackAPIHandler.kernel
+    monkeypatch.setattr(PackAPIHandler, "kernel", None)
+    try:
+        assert handler._dispatch_defaultspack_http_route(
+            "GET",
+            "/api/onboarding/status",
+        )
+    finally:
+        monkeypatch.setattr(PackAPIHandler, "kernel", previous_kernel)
+
+    assert captured
+    assert captured[0]["status"] == "ok"
+    assert captured[0]["data"]["profile_id"] == "default"
 
 
 def test_chat_send_route_handler_invokes_flow_route_before_block_fallback():
@@ -525,7 +854,10 @@ def test_http_chat_stream_flow_route_falls_back_when_sse_events_are_stringified(
         def execute(self, flow_id, trigger_input, context=None):
             return FlowResult(
                 status="completed",
-                output={"status": "ok", "data": {"_sse": True, "events": "<generator object _engine_events>"}},
+                output={
+                    "status": "ok",
+                    "data": {"_sse": True, "events": "<generator object _engine_events>"},
+                },
                 metadata={"flow_id": flow_id},
             )
 
@@ -709,7 +1041,9 @@ def test_registry_sorting_keeps_static_agent_company_status_before_generic_statu
             ]
 
     server = DefaultsHttpServer(Facade())
-    handler, params, source, path_inject, _ = server._match_route("GET", "/api/agent/company/status")
+    handler, params, source, path_inject, _ = server._match_route(
+        "GET", "/api/agent/company/status"
+    )
 
     assert handler is company_status
     assert params == {}
@@ -923,6 +1257,14 @@ def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
             {"_method": "POST"},
         ),
         (
+            "POST",
+            "/api/connections/import",
+            "blocks.connections.import_bundle",
+            {},
+            {},
+            {"_method": "POST"},
+        ),
+        (
             "DELETE",
             "/api/p2p/peers/peer-a",
             "blocks.p2p.peers",
@@ -1006,21 +1348,46 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
         ("POST", "/api/company/bootstrap", "blocks.company.bootstrap"),
         ("GET", "/api/agent/companies/{company_id}/status", "blocks.company.status"),
         ("PUT", "/api/agent/companies/{company_id}/agents/{agent_id}", "blocks.company.agents"),
-        ("POST", "/api/agent/companies/{company_id}/channels/{channel_id}/messages", "blocks.company.messages"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/channels/{channel_id}/messages",
+            "blocks.company.messages",
+        ),
         ("GET", "/api/agent/companies/{company_id}/threads", "blocks.company.threads"),
-        ("POST", "/api/agent/companies/{company_id}/threads/{thread_id}/messages", "blocks.company.messages"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/threads/{thread_id}/messages",
+            "blocks.company.messages",
+        ),
         ("PUT", "/api/agent/companies/{company_id}/tasks/{task_id}", "blocks.company.tasks"),
-        ("POST", "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch", "blocks.company.dispatch"),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/tasks/{task_id}/dispatch",
+            "blocks.company.dispatch",
+        ),
         ("GET", "/api/agent/companies/{company_id}/runs", "blocks.company.runs"),
-        ("GET", "/api/agent/companies/{company_id}/agents/{agent_id}/inbox", "blocks.company.inbox"),
-        ("POST", "/api/agent/companies/{company_id}/supervisor/tick", "blocks.company.supervisor_tick"),
+        (
+            "GET",
+            "/api/agent/companies/{company_id}/agents/{agent_id}/inbox",
+            "blocks.company.inbox",
+        ),
+        (
+            "POST",
+            "/api/agent/companies/{company_id}/supervisor/tick",
+            "blocks.company.supervisor_tick",
+        ),
         ("GET", "/api/agent/companies/{company_id}/summaries", "blocks.company.summary"),
-        ("DELETE", "/api/agent/companies/{company_id}/inbound-routes/{route_id}", "blocks.company.inbound_routes"),
+        (
+            "DELETE",
+            "/api/agent/companies/{company_id}/inbound-routes/{route_id}",
+            "blocks.company.inbound_routes",
+        ),
         ("GET", "/api/p2p/status", "blocks.p2p.status"),
         ("POST", "/api/p2p/identity/rotate", "blocks.p2p.identity"),
         ("PUT", "/api/p2p/peers/{peer_id}", "blocks.p2p.peers"),
         ("POST", "/api/p2p/messages/inbound", "blocks.p2p.messages_inbound"),
         ("POST", "/api/integrations/p2p/events", "blocks.integrations.p2p"),
+        ("POST", "/api/connections/import", "blocks.connections.import_bundle"),
         ("POST", "/api/chat/conversations/{id}/compact", "blocks.chat.compact"),
         ("POST", "/api/chat/conversations/{id}/auto-compact", "blocks.chat.auto_compact"),
         ("GET", "/api/coding/workspaces/get", "blocks.coding.workspace.get"),
@@ -1036,9 +1403,7 @@ def test_p2p_pre_auth_only_exposes_signed_integration_event():
     manifest = json.loads((DEFAULTSPACK_ROOT / "ecosystem.json").read_text(encoding="utf-8"))
     pre_auth_routes = manifest["pre_auth_routes"]
     method_paths = {
-        (route.get("method"), route.get("path"))
-        for route in pre_auth_routes
-        if route.get("path")
+        (route.get("method"), route.get("path")) for route in pre_auth_routes if route.get("path")
     }
 
     assert ("POST", "/api/integrations/p2p/events") in method_paths
@@ -1052,6 +1417,16 @@ def test_routes_json_documents_new_route_groups():
     routes = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))["routes"]
     method_paths = {(route["method"], route["path"]) for route in routes}
     expected = {
+        ("POST", "/api/authority/browser-ui-operator"),
+        ("GET", "/chat"),
+        ("GET", "/defaultspack"),
+        ("GET", "/pack/defaultspack"),
+        ("GET", "/approval"),
+        ("GET", "/ambient"),
+        ("GET", "/ambient-debug"),
+        ("GET", "/finger-recording"),
+        ("GET", "/console"),
+        ("GET", "/host-permissions"),
         ("POST", "/api/chat/conversations/{id}/compact"),
         ("GET", "/api/agent/companies/{company_id}/status"),
         ("POST", "/api/agent/companies/{company_id}/dispatch"),

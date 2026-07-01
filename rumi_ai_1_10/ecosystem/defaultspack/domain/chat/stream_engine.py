@@ -48,7 +48,21 @@ from domain.chat.ir_legacy_adapter import (
     append_tool_result_to_ir,
     legacy_standard_messages_to_ir,
 )
+from domain.chat.loop_guard import (
+    LoopDecision,
+    LoopGuard,
+    build_loop_observation,
+    emergency_budget_from_context,
+    explicit_param_max_tool_calls,
+    loop_guard_config_from_context,
+)
 from domain.chat.message_builder import build_assistant_message
+from domain.chat.progress_tool import (
+    ASSISTANT_PROGRESS_MAX_UPDATES,
+    ASSISTANT_PROGRESS_TOOL_NAME,
+    is_assistant_progress_tool_name,
+    normalize_assistant_progress_payload,
+)
 from domain.chat.public_metadata import compact_provider_planning
 from domain.chat.run_request import PreparedChatRun, prepare_chat_run
 from domain.chat.tool_call_accumulator import ToolCallAccumulator
@@ -67,6 +81,24 @@ class _ChatCancelled(Exception):
 
 _APPROVAL_WAITING_TEXT = "許可が必要なため、ユーザーが承認するまで待機します。承認後に続行します。"
 _AUTHORITY_WAITING_TEXT = "モデル/API の使用許可が必要です。承認後に続行します。"
+
+
+def _tool_selection_activity_message(selection: dict[str, Any]) -> str:
+    services = selection.get("selected_services") if isinstance(selection.get("selected_services"), list) else []
+    labels = [
+        str(service.get("label") or service.get("service_id") or "").strip()
+        for service in services
+        if isinstance(service, dict) and str(service.get("label") or service.get("service_id") or "").strip()
+    ]
+    count = len(selection.get("selected_tool_ids") if isinstance(selection.get("selected_tool_ids"), list) else [])
+    if labels:
+        head = " と ".join(labels[:2])
+        if len(labels) > 2:
+            head = f"{head} など"
+        return f"{head}を使用します"
+    if count:
+        return f"{count}個の機能を使用します"
+    return "追加の機能なしで続行します"
 
 
 def _tool_display_group(tool_name: str) -> dict[str, str]:
@@ -97,6 +129,41 @@ def _display_arg(arguments: dict[str, Any], keys: tuple[str, ...]) -> str:
     return ""
 
 
+def _basename(value: str) -> str:
+    text = str(value or "").replace("\\", "/").rstrip("/")
+    return text.split("/")[-1] if text else ""
+
+
+def _terminal_action_label(command: str) -> str:
+    text = str(command or "").strip()
+    lowered = text.lower()
+    if not text:
+        return "ターミナルで作業"
+    if lowered.startswith(("rg ", "grep ", "fd ", "find ")):
+        return "コードを検索"
+    if lowered.startswith(("sed ", "cat ", "less ", "head ", "tail ", "nl ")):
+        return "ファイルを確認"
+    if lowered.startswith(("git status", "git diff", "git show", "git log", "git branch", "git rev-parse")):
+        return "Git 状態を確認"
+    if lowered.startswith("git add"):
+        return "変更をステージ"
+    if lowered.startswith("git commit"):
+        return "コミットを作成"
+    if lowered.startswith("git push"):
+        return "変更を push"
+    if lowered.startswith(("npm test", "pnpm test", "yarn test", "python -m pytest", "pytest", "cargo test")):
+        return "テストを実行"
+    if lowered.startswith(("npm run build", "pnpm build", "pnpm run build", "yarn build", "cargo build")):
+        return "ビルドを実行"
+    if lowered.startswith(("npm run lint", "pnpm lint", "pnpm run lint", "yarn lint", "ruff ", "eslint ")):
+        return "lint を実行"
+    if lowered.startswith(("gh repo view", "gh pr view", "gh issue view")):
+        return "GitHub 情報を確認"
+    if lowered.startswith(("gh pr create", "gh pr edit")):
+        return "PR を更新"
+    return "ターミナルで作業"
+
+
 def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
     lowered = str(tool_name or "").lower()
     if not isinstance(arguments, dict):
@@ -106,9 +173,24 @@ def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
     if "search" in lowered or "web" in lowered or "reddit" in lowered:
         query = _display_arg(arguments, ("query", "q", "search_query", "text", "url"))
         return "検索: {}".format(query) if query else "検索"
+    if "git" in lowered:
+        if "push" in lowered:
+            return "変更を push"
+        if "commit" in lowered:
+            return "コミットを作成"
+        if "diff" in lowered:
+            return "差分を確認"
+        if "branch" in lowered:
+            return "ブランチを確認"
+        return "Git 状態を確認"
     if "file" in lowered:
         path = _display_arg(arguments, ("path", "filename", "directory", "glob"))
-        return "ファイル確認: {}".format(path) if path else "ファイル確認"
+        label = _basename(path) or path
+        if any(key in lowered for key in ("write", "patch", "create", "delete")):
+            return "ファイルを編集: {}".format(label) if label else "ファイルを編集"
+        if "list" in lowered:
+            return "ファイル一覧を確認: {}".format(label) if label else "ファイル一覧を確認"
+        return "ファイルを確認: {}".format(label) if label else "ファイルを確認"
     if "browser" in lowered or "computer" in lowered:
         action = _display_arg(arguments, ("action",)) or "画面操作"
         target = _display_arg(arguments, ("url", "app", "application", "browser", "name", "title"))
@@ -116,7 +198,7 @@ def _tool_display_action(tool_name: str, arguments: dict[str, Any]) -> str:
         return " ".join(part for part in (action, target, text) if part).strip()
     if "terminal" in lowered or "shell" in lowered or "exec" in lowered:
         command = _display_arg(arguments, ("command", "cmd"))
-        return "コマンド実行: {}".format(command) if command else "コマンド実行"
+        return _terminal_action_label(command)
     if "todo" in lowered:
         return _display_arg(arguments, ("title", "task", "action", "todo_id")) or "Todo更新"
     if "delegate" in lowered or "subagent" in lowered or "agent" in lowered:
@@ -357,6 +439,172 @@ def _default_tool_limit_for_connected_tools(tool_limit: int, connected_tool_name
     if any(str(name or "").startswith("coding_") for name in connected_tool_names):
         return 12
     return tool_limit
+
+
+def _legacy_tool_limit_enabled() -> bool:
+    return str(os.environ.get("RUMI_FORCE_LEGACY_TOOL_LIMIT") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _loop_recovery_runtime_message(decision: LoopDecision) -> dict[str, Any]:
+    checkpoint = decision.checkpoint or {}
+    directive = decision.directive or {}
+    return {
+        "role": "system",
+        "content": (
+            "[RUNTIME LOOP RECOVERY DIRECTIVE - protected]\n"
+            "The runtime detected a no-progress tool loop and compacted duplicate context. "
+            "Do not repeat the forbidden action/result motif. Choose a genuinely different strategy. "
+            "This directive does not grant new capabilities, approvals, workspace access, or policy changes.\n"
+            f"reason: {decision.reason}\n"
+            f"strategy_epoch: {directive.get('strategy_epoch')}\n"
+            f"forbidden_action_signature: {directive.get('forbidden_action_signature')}\n"
+            f"forbidden_result_signature: {directive.get('forbidden_result_signature')}\n"
+            f"tool_sequence: {checkpoint.get('tool_sequence')}\n"
+            "required novelty: change the tool target, query, inspected evidence, or implementation tactic."
+        ),
+        "metadata": {
+            "runtime_directive": "loop_recovery",
+            "recovery_id": decision.recovery_id,
+            "recovery_cluster_id": decision.recovery_cluster_id,
+        },
+    }
+
+
+def _loop_pause_response(model: str, params: dict[str, Any], decision: LoopDecision, events: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "同じパターンの自己回復が繰り返されています。"
+                    "これ以上の自動継続は同じ失敗や副作用を繰り返す可能性があるため、"
+                    "状態を保存して一時停止しました。別方針を入力すると続行できます。"
+                ),
+            }
+        ],
+        "finish_reason": "paused_loop",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "loop_guard": {
+                "paused": True,
+                "reason": decision.reason,
+                "recovery_id": decision.recovery_id,
+                "recovery_cluster_id": decision.recovery_cluster_id,
+                "checkpoint": decision.checkpoint,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
+
+
+def _duplicate_side_effect_response(
+    model: str,
+    params: dict[str, Any],
+    decision: LoopDecision,
+    events: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "同じ副作用を持つ操作が再提案されたため、実行前に停止しました。"
+                    "必要な場合は、別方針または明示的な再実行理由を入力してください。"
+                ),
+            }
+        ],
+        "finish_reason": "duplicate_side_effect_guard",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "loop_guard": {
+                "duplicate_side_effect": True,
+                "reason": decision.reason,
+                "recovery_cluster_id": decision.recovery_cluster_id,
+                "checkpoint": decision.checkpoint,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
+
+
+def _progress_loop_pause_response(
+    model: str,
+    params: dict[str, Any],
+    *,
+    events: list[dict[str, Any]],
+    progress_state: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "作業状況の更新だけが続いたため、同じ状態表示を繰り返さないよう一時停止しました。"
+                    "次は実際の確認・変更・検証操作に進む必要があります。"
+                ),
+            }
+        ],
+        "finish_reason": "paused_progress_loop",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "progress_state": dict(progress_state or {}),
+            "loop_guard": {"paused": True, "reason": "progress_loop"},
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
+
+
+def _external_provider_tools(provider_tools: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    return [
+        tool
+        for tool in provider_tools or []
+        if not is_assistant_progress_tool_name(tool_name_from_definition(tool))
+    ]
+
+
+def _emergency_pause_response(
+    model: str,
+    params: dict[str, Any],
+    *,
+    reason: str,
+    events: list[dict[str, Any]],
+    tool_executions: int,
+    model_turns: int,
+) -> dict[str, Any]:
+    return {
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "内部の安全予算に達したため、状態を保存して一時停止しました。"
+                    "これは通常の max_tool_calls ではなく、資源暴走を防ぐ operator emergency brake です。"
+                ),
+            }
+        ],
+        "finish_reason": "paused_emergency_budget",
+        "usage": {},
+        "events": list(events),
+        "metadata": {
+            "model": model,
+            "emergency_budget": {
+                "paused": True,
+                "reason": reason,
+                "tool_executions": tool_executions,
+                "model_turns": model_turns,
+            },
+            "thinking": {"state": "completed"},
+            "thinking_level": params.get("thinking_level") if isinstance(params, dict) else None,
+        },
+    }
 
 
 def _approval_waiting_response(
@@ -740,6 +988,10 @@ class ChatRunEngine:
         self._started_tool_call_ids: set[str] = set()
         self._browser_state_revision = 0
         self._stream_mode = True
+        self._progress_updates = 0
+        self._progress_signatures: set[tuple[str, str, str, str]] = set()
+        self._progress_without_external_tool = 0
+        self._progress_state: dict[str, Any] = {}
 
     def stream(
         self,
@@ -759,6 +1011,10 @@ class ChatRunEngine:
         self._started_tool_call_ids = set()
         self._browser_state_revision = 0
         self._stream_mode = bool(stream_mode)
+        self._progress_updates = 0
+        self._progress_signatures = set()
+        self._progress_without_external_tool = 0
+        self._progress_state = {}
         self._cancel_event = threading.Event()
         self._current_stream = None
 
@@ -801,6 +1057,24 @@ class ChatRunEngine:
                 data={"message": prepared.user_message},
                 message="user message committed",
             )
+            tool_selection = prepared.request_context.get("tool_selection") if isinstance(prepared.request_context, dict) else None
+            if isinstance(tool_selection, dict) and tool_selection.get("selection_id"):
+                yield self._emit(
+                    "tool_selection_started",
+                    data={
+                        "selection_id": tool_selection.get("selection_id"),
+                        "mode": tool_selection.get("mode"),
+                        "strategy": tool_selection.get("strategy"),
+                    },
+                    message="機能を選定しています",
+                    phase="tool_selection",
+                )
+                yield self._emit(
+                    "tool_selection_completed",
+                    data=tool_selection,
+                    message=_tool_selection_activity_message(tool_selection),
+                    phase="tool_selection",
+                )
 
             assistant_seq = int(prepared.user_message.get("sequence_number", 1) or 1) + 1
             if stream_mode:
@@ -819,7 +1093,8 @@ class ChatRunEngine:
                         message="assistant draft created",
                     )
 
-            if prepared.provider_tools:
+            visible_provider_tools = _external_provider_tools(prepared.provider_tools)
+            if visible_provider_tools:
                 yield self._emit(
                     "status",
                     data={"model": prepared.model},
@@ -829,8 +1104,8 @@ class ChatRunEngine:
                 )
                 yield self._emit(
                     "status",
-                    data={"tool_count": len(prepared.provider_tools)},
-                    message="{} 個の tool を接続しました".format(len(prepared.provider_tools)),
+                    data={"tool_count": len(visible_provider_tools)},
+                    message="{} 個の tool を接続しました".format(len(visible_provider_tools)),
                     phase="tools_attached",
                 )
             self._sync_draft(draft, force=True)
@@ -967,6 +1242,85 @@ class ChatRunEngine:
             )
             return []
 
+    @staticmethod
+    def _is_assistant_progress_tool_use(block: dict[str, Any]) -> bool:
+        name = str(block.get("name") or block.get("tool_name") or "").strip()
+        return is_assistant_progress_tool_name(name)
+
+    def _execute_assistant_progress_tool_use(
+        self,
+        working_messages: list[dict[str, Any]],
+        working_ir: Any,
+        draft: _AssistantDraft | None,
+        block: dict[str, Any],
+        *,
+        has_external_tool_in_cycle: bool,
+    ) -> Iterator[dict[str, Any]]:
+        tool_call_id = str(block.get("id") or block.get("tool_call_id") or gen_id()).strip()
+        payload, errors = normalize_assistant_progress_payload(self._tool_arguments(block))
+        signature = (
+            str(payload.get("phase") or ""),
+            str(payload.get("status") or ""),
+            str(payload.get("summary") or ""),
+            str(payload.get("next_action") or ""),
+        )
+        result_status = "ok"
+        result_reason = ""
+        if signature in self._progress_signatures:
+            result_status = "ignored"
+            result_reason = "duplicate"
+        elif self._progress_updates >= ASSISTANT_PROGRESS_MAX_UPDATES:
+            result_status = "ignored"
+            result_reason = "max_updates"
+        elif not has_external_tool_in_cycle and self._progress_without_external_tool >= 2:
+            result_status = "blocked"
+            result_reason = "progress_loop"
+        else:
+            self._progress_signatures.add(signature)
+            self._progress_updates += 1
+            if has_external_tool_in_cycle:
+                self._progress_without_external_tool = 0
+            else:
+                self._progress_without_external_tool += 1
+            self._progress_state = {
+                **payload,
+                "updated_seq": self._event_seq + 1,
+                "tool_call_id": tool_call_id,
+            }
+            yield self._emit(
+                "assistant_progress",
+                data={
+                    **payload,
+                    "tool_call_id": tool_call_id,
+                    "validation_warnings": errors,
+                },
+                message=str(payload.get("summary") or ""),
+                tool_call_id=tool_call_id,
+            )
+            self._sync_draft(draft, force=True)
+
+        result = {
+            "status": result_status,
+            "summary": payload.get("summary"),
+            "next_action": payload.get("next_action"),
+            "reason": result_reason,
+        }
+        _append_tool_result_message(working_messages, ASSISTANT_PROGRESS_TOOL_NAME, result, tool_call_id)
+        try:
+            append_tool_result_to_ir(working_ir, ASSISTANT_PROGRESS_TOOL_NAME, result, tool_call_id)
+        except Exception:
+            pass
+        if result_status == "blocked":
+            yield self._emit(
+                "run_paused_loop",
+                data={"reason": result_reason, "progress_state": dict(self._progress_state or payload)},
+                message="進捗更新だけが続いたため一時停止しました",
+                phase="run_paused_loop",
+            )
+            self._sync_draft(draft, force=True)
+            return {"blocked": True, "reason": result_reason, "progress_state": dict(self._progress_state or payload)}
+        return None
+
     def _execute_tool_use(
         self,
         prepared: PreparedChatRun,
@@ -1101,10 +1455,18 @@ class ChatRunEngine:
 
         response = None
         blocked_response = None
-        tool_limit = max_tool_calls(prepared.tool_context or {})
-        if tool_limit is None:
-            tool_limit = int(prepared.params.get("max_tool_calls", 4) or 4)
-        tool_limit = _default_tool_limit_for_connected_tools(tool_limit, prepared.connected_tool_names)
+        tool_execution_limit = max_tool_calls(prepared.tool_context or {})
+        if tool_execution_limit is None:
+            tool_execution_limit = explicit_param_max_tool_calls(prepared.params)
+        if tool_execution_limit is None and _legacy_tool_limit_enabled():
+            tool_execution_limit = _default_tool_limit_for_connected_tools(4, prepared.connected_tool_names)
+        emergency_budget = emergency_budget_from_context(prepared.tool_context or {})
+        loop_guard = LoopGuard(
+            run_id=self._run_id,
+            conversation_id=prepared.conversation_id,
+            task_lineage_id=str(prepared.request_context.get("task_lineage_id") or prepared.conversation_id),
+            config=loop_guard_config_from_context(prepared.tool_context or {}),
+        )
 
         approval_followup = _approval_followup_tool_use(prepared.user_message.get("metadata"))
         approval_replay_state = prepared.tool_context if isinstance(prepared.tool_context, dict) else {}
@@ -1131,7 +1493,9 @@ class ChatRunEngine:
                 response = blocked_response
                 return response
 
-        for step_index in range(max(1, tool_limit + 1)):
+        model_turns = 0
+        for step_index in range(max(1, emergency_budget.max_model_turns)):
+            model_turns = step_index + 1
             self._raise_if_cancelled()
             for event in self._inject_conversation_steer(prepared.conversation_id, working_messages):
                 yield event
@@ -1156,27 +1520,94 @@ class ChatRunEngine:
                     events=list(self._activity_events),
                 )
                 tool_uses = []
-            if tool_uses and step_index >= tool_limit:
+            if tool_uses:
+                external_tool_uses = [
+                    block for block in tool_uses if not self._is_assistant_progress_tool_use(block)
+                ]
+                proposal_decision = loop_guard.inspect_proposal(external_tool_uses)
+                if proposal_decision.kind == "duplicate_side_effect":
+                    yield self._emit(
+                        "run_paused_loop",
+                        data=proposal_decision.event_data(),
+                        message="同じ副作用操作の再実行を防ぐため停止しました",
+                        phase="run_paused_loop",
+                    )
+                    response = _duplicate_side_effect_response(
+                        prepared.model,
+                        prepared.params,
+                        proposal_decision,
+                        list(self._activity_events),
+                    )
+                    self._sync_draft(draft, force=True)
+                    break
+            else:
+                external_tool_uses = []
+
+            planned_tool_executions = len(self._tool_logs) + len(external_tool_uses or [])
+            if external_tool_uses and tool_execution_limit is not None and planned_tool_executions > tool_execution_limit:
                 response = {
-                    "content": [{"type": "text", "text": _tool_limit_message(tool_limit, tool_uses)}],
+                    "content": [{"type": "text", "text": _tool_limit_message(tool_execution_limit, external_tool_uses)}],
                     "finish_reason": "tool_call_limit",
                     "usage": response.get("usage", {}) if isinstance(response, dict) else {},
                     "metadata": {
                         "max_tool_calls_reached": True,
+                        "tool_executions": len(self._tool_logs),
                         "pending_tool_uses": [
                             {
                                 "name": str(block.get("name") or block.get("tool_name") or ""),
                                 "id": str(block.get("id") or block.get("tool_call_id") or ""),
                             }
-                            for block in tool_uses
+                            for block in external_tool_uses
                         ],
                     },
                 }
                 yield self._emit(
                     "status",
-                    data={"tool_count": len(self._tool_logs), "max_tool_calls": tool_limit},
+                    data={"tool_count": len(self._tool_logs), "max_tool_calls": tool_execution_limit},
                     message="tool call の上限に達したため停止しました",
                     phase="tool_call_limit",
+                )
+                self._sync_draft(draft, force=True)
+                break
+            if external_tool_uses and model_turns >= emergency_budget.max_model_turns:
+                yield self._emit(
+                    "run_paused_emergency",
+                    data={
+                        "model_turns": model_turns,
+                        "max_model_turns": emergency_budget.max_model_turns,
+                        "pending_tool_uses": len(tool_uses),
+                    },
+                    message="内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                )
+                response = _emergency_pause_response(
+                    prepared.model,
+                    prepared.params,
+                    reason="max_model_turns",
+                    events=list(self._activity_events),
+                    tool_executions=len(self._tool_logs),
+                    model_turns=model_turns,
+                )
+                self._sync_draft(draft, force=True)
+                break
+            if external_tool_uses and planned_tool_executions > emergency_budget.max_tool_executions:
+                yield self._emit(
+                    "run_paused_emergency",
+                    data={
+                        "tool_executions": len(self._tool_logs),
+                        "pending_tool_uses": len(tool_uses),
+                        "max_tool_executions": emergency_budget.max_tool_executions,
+                    },
+                    message="内部安全予算に達したため一時停止しました",
+                    phase="run_paused_emergency",
+                )
+                response = _emergency_pause_response(
+                    prepared.model,
+                    prepared.params,
+                    reason="max_tool_executions",
+                    events=list(self._activity_events),
+                    tool_executions=len(self._tool_logs),
+                    model_turns=model_turns,
                 )
                 self._sync_draft(draft, force=True)
                 break
@@ -1196,19 +1627,130 @@ class ChatRunEngine:
                 )
             except Exception:
                 pass
+            logs_before_cycle = len(self._tool_logs)
             for block in tool_uses:
-                blocked_response = yield from self._execute_tool_use(
-                    prepared,
-                    working_messages,
-                    working_ir,
-                    draft,
-                    block,
-                )
+                if self._is_assistant_progress_tool_use(block):
+                    progress_blocked = yield from self._execute_assistant_progress_tool_use(
+                        working_messages,
+                        working_ir,
+                        draft,
+                        block,
+                        has_external_tool_in_cycle=bool(external_tool_uses),
+                    )
+                    if isinstance(progress_blocked, dict) and progress_blocked.get("blocked"):
+                        blocked_response = _progress_loop_pause_response(
+                            prepared.model,
+                            prepared.params,
+                            events=list(self._activity_events),
+                            progress_state=progress_blocked.get("progress_state") if isinstance(progress_blocked.get("progress_state"), dict) else {},
+                        )
+                        break
+                else:
+                    blocked_response = yield from self._execute_tool_use(
+                        prepared,
+                        working_messages,
+                        working_ir,
+                        draft,
+                        block,
+                    )
+                    self._progress_without_external_tool = 0
                 if blocked_response is not None:
                     break
             if blocked_response is not None:
                 response = blocked_response
                 break
+            new_tool_logs = self._tool_logs[logs_before_cycle:]
+            if new_tool_logs:
+                observation = build_loop_observation(
+                    tool_uses=tool_uses,
+                    tool_logs=new_tool_logs,
+                    response=response,
+                )
+                loop_decision = loop_guard.observe_cycle(observation)
+                if loop_decision.kind == "recover":
+                    yield self._emit(
+                        "loop_recovery_started",
+                        data=loop_decision.event_data(),
+                        message="同じ操作が進展なく繰り返されたため、履歴を整理して別方針へ切り替えます",
+                        phase="loop_recovery_started",
+                    )
+                    compacted: dict[str, Any] = {}
+                    try:
+                        compacted = ContextCompressor().compact(
+                            working_messages,
+                            metadata={
+                                "run_id": self._run_id,
+                                "conversation_id": prepared.conversation_id,
+                                "goal": prepared.user_text,
+                                "next_steps": loop_decision.directive.get("required_novelty_dimensions", []),
+                            },
+                        )
+                        replacement_history = list(compacted.get("replacement_history") or working_messages)
+                    except Exception as exc:
+                        yield self._emit(
+                            "run_paused_loop",
+                            data={"error": str(exc), **loop_decision.event_data()},
+                            message="loop recovery checkpoint の生成に失敗したため一時停止しました",
+                            phase="run_paused_loop",
+                        )
+                        response = _loop_pause_response(
+                            prepared.model,
+                            prepared.params,
+                            loop_decision,
+                            list(self._activity_events),
+                        )
+                        break
+                    replacement_history.append(_loop_recovery_runtime_message(loop_decision))
+                    working_messages[:] = replacement_history
+                    try:
+                        working_ir = legacy_standard_messages_to_ir(working_messages, prepared.conversation_id)
+                    except Exception:
+                        pass
+                    yield self._emit(
+                        "loop_checkpoint_created",
+                        data={
+                            **loop_decision.event_data(),
+                            "tokens_before": compacted.get("tokens_before"),
+                            "tokens_after": compacted.get("tokens_after"),
+                        },
+                        message="重複した履歴を圧縮し、進捗を保持しました",
+                        phase="loop_checkpoint_created",
+                    )
+                    yield self._emit(
+                        "loop_strategy_changed",
+                        data=loop_decision.event_data(),
+                        message="別方針で続行します",
+                        phase="loop_strategy_changed",
+                    )
+                    yield self._emit(
+                        "loop_recovery_completed",
+                        data=loop_decision.event_data(),
+                        message="作業内容を保持したまま再開しました",
+                        phase="loop_recovery_completed",
+                    )
+                    self._sync_draft(draft, force=True)
+                    continue
+                if loop_decision.kind == "pause":
+                    yield self._emit(
+                        "loop_recovery_recurred",
+                        data=loop_decision.event_data(),
+                        message="同じパターンの自己回復が繰り返されています",
+                        phase="loop_recovery_recurred",
+                    )
+                    yield self._emit(
+                        "run_paused_loop",
+                        data={**loop_decision.event_data(), "recoverable": True, "requires_user_strategy": True},
+                        message="loop guard により一時停止しました",
+                        phase="run_paused_loop",
+                    )
+                    response = _loop_pause_response(
+                        prepared.model,
+                        prepared.params,
+                        loop_decision,
+                        list(self._activity_events),
+                    )
+                    self._sync_draft(draft, force=True)
+                    break
 
         return response or _ai_error_response(
             prepared.model,
@@ -1661,6 +2203,7 @@ class ChatRunEngine:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
+        decisions: list[tuple[str, dict[str, Any], str, str]] = []
         for permission_id, resource_kind in checks:
             request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
             resource = build_provider_authority_resource(
@@ -1673,6 +2216,7 @@ class ChatRunEngine:
                 provider=provider,
                 stream=False,
             )
+            decisions.append((permission_id, resource, request_id, approval_token))
             decision = service.check(
                 principal_id=str(context.get("principal_id") or "defaultspack"),
                 permission_id=permission_id,
@@ -1684,6 +2228,23 @@ class ChatRunEngine:
                 graph_id=context.get("graph_id"),
                 request_id=request_id or context.get("request_id"),
                 approval_token=approval_token,
+                consume_approval_token=False,
+            )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
+        for permission_id, resource, request_id, approval_token in decisions:
+            decision = service.check(
+                principal_id=str(context.get("principal_id") or "defaultspack"),
+                permission_id=permission_id,
+                resource=resource,
+                reason=provider_authority_reason(permission_id, resource),
+                conversation_id=context.get("conversation_id"),
+                profile_id=context.get("profile_id"),
+                node_id=context.get("node_id"),
+                graph_id=context.get("graph_id"),
+                request_id=request_id or context.get("request_id"),
+                approval_token=approval_token,
+                consume_approval_token=True,
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
@@ -2015,6 +2576,33 @@ class ChatRunEngine:
             finalized["metadata"] = metadata
         metadata = dict(finalized.get("metadata") or {})
         requested_tools = list(prepared.tools_called or [])
+        requested_tool_ids: list[str] = []
+        unselected_requested_tools: list[dict[str, Any]] = []
+        unknown_selected_tools: list[str] = []
+        if isinstance(prepared.tool_context, dict):
+            raw_requested_tool_ids = prepared.tool_context.get("requested_tool_ids")
+            if isinstance(raw_requested_tool_ids, list):
+                requested_tool_ids = [
+                    str(item).strip()
+                    for item in raw_requested_tool_ids
+                    if str(item or "").strip()
+                ]
+            raw_unselected = prepared.tool_context.get("unselected_requested_tools")
+            if isinstance(raw_unselected, list):
+                unselected_requested_tools = [
+                    dict(item)
+                    for item in raw_unselected
+                    if isinstance(item, dict)
+                ]
+            raw_unknown = prepared.tool_context.get("unknown_selected_tools")
+            if isinstance(raw_unknown, list):
+                unknown_selected_tools = [
+                    str(item).strip()
+                    for item in raw_unknown
+                    if str(item or "").strip()
+                ]
+        if requested_tool_ids:
+            requested_tools = list(dict.fromkeys([*requested_tool_ids, *requested_tools]))
         # When the approval-followup replay path transiently suppresses
         # ``provider_tools`` for the summary turn, ``tool_context`` holds a
         # snapshot of the originally attached tools so the finalised
@@ -2029,9 +2617,12 @@ class ChatRunEngine:
         attached_provider_tools = [
             name
             for name in (tool_name_from_definition(tool) for tool in attached_provider_tools_source)
-            if name
+            if name and not is_assistant_progress_tool_name(name)
         ]
-        attached_tool_count = len(attached_provider_tools_source)
+        unattached_requested_tools = [
+            name for name in requested_tools if name not in set(attached_provider_tools)
+        ]
+        attached_tool_count = len(attached_provider_tools)
         executed_tools: list[str] = []
         for log in self._tool_logs:
             tool_name = str(log.get("tool_name") or "").strip()
@@ -2048,6 +2639,8 @@ class ChatRunEngine:
                 "attached_tools": attached_provider_tools,
                 "attached_provider_tools": attached_provider_tools,
                 "executed_tools": executed_tools,
+                "unattached_requested_tools": unattached_requested_tools,
+                "unknown_selected_tools": unknown_selected_tools,
                 "thinking": {
                     "state": "completed" if finalized.get("finish_reason") != "error" else "failed",
                     **({"transcript": "".join(self._thinking_transcript_parts)} if self._thinking_transcript_parts else {}),
@@ -2061,6 +2654,19 @@ class ChatRunEngine:
                 "provider_capabilities": redact_sensitive_value(dict(prepared.provider_capabilities or {})),
             }
         )
+        if self._progress_state:
+            metadata["progress_state"] = dict(self._progress_state)
+        if unattached_requested_tools or unselected_requested_tools or unknown_selected_tools:
+            metadata["tool_attachment_diagnostics"] = {
+                "requested_tools": requested_tools,
+                "attached_tools": attached_provider_tools,
+                "connected_tools": sorted(str(name) for name in prepared.connected_tool_names if name),
+                "unattached_requested_tools": unattached_requested_tools,
+                "unselected_requested_tools": unselected_requested_tools,
+                "unknown_selected_tools": unknown_selected_tools,
+            }
+        if isinstance(prepared.request_context, dict) and isinstance(prepared.request_context.get("tool_selection"), dict):
+            metadata["tool_selection"] = dict(prepared.request_context["tool_selection"])
         trace_metadata = self._write_provider_trace(prepared, finalized)
         if trace_metadata:
             metadata["provider_trace"] = trace_metadata
@@ -2069,6 +2675,9 @@ class ChatRunEngine:
             metadata["tool_calling_unavailable_reason"] = "selected_model_does_not_support_tool_calling"
         if prepared.matched_skills:
             metadata["matched_skill_instructions"] = list(prepared.matched_skills)
+        prompt_usage = prepared.request_context.get("prompt_usage") if isinstance(prepared.request_context, dict) else None
+        if isinstance(prompt_usage, dict):
+            metadata["prompt_usage"] = prompt_usage
         finalized["metadata"] = metadata
         finalized["events"] = list(self._activity_events)
         finalized["tool_logs"] = list(self._tool_logs)
@@ -2156,6 +2765,7 @@ class ChatRunEngine:
         event_type = str(event.get("type") or "").strip()
         return event_type in {
             "status",
+            "assistant_progress",
             "tool_call_started",
             "tool_call_delta",
             "tool_call_completed",
@@ -2167,6 +2777,10 @@ class ChatRunEngine:
             "ai_retry_scheduled",
             "task_failed",
             "cancelled",
+            "tool_selection_started",
+            "tool_selection_completed",
+            "tool_selection_fallback",
+            "tool_selection_reviewed",
         }
 
     def _provider_supports_stream_tool_calls(self, model: str) -> bool:
@@ -2486,7 +3100,7 @@ class ChatRunEngine:
             metadata["recovered_from_empty_stream"] = True
             metadata["fallback_kept_tools"] = bool(tools)
             metadata.setdefault("model", prepared.model)
-            metadata.setdefault("attached_tool_count", len(prepared.provider_tools))
+            metadata.setdefault("attached_tool_count", len(_external_provider_tools(prepared.provider_tools)))
             metadata.setdefault("attached_tools", list(prepared.tools_called))
             metadata["thinking_level"] = prepared.params.get("thinking_level")
             metadata["deepthink_enabled"] = bool(prepared.params.get("deepthink_enabled"))

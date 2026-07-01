@@ -4,6 +4,16 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { buildVisibleModelOptions, SettingsModalRenderer } from "./SettingsModalRenderer";
+import { createSettingsFieldRendererRegistry, SettingsFieldRendererHost } from "./settings/fieldRendererRegistry";
+import { builtinSettingsFieldRendererEntries } from "./settings/builtinSettingsFieldRenderers";
+import {
+  appendEmptySlashCommandDraft,
+  serializeSlashCommandDrafts,
+  slashCommandDraftRowsFromValue,
+} from "./settings/renderers/slashCommandsField";
+import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
+import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
+import type { SettingsSection } from "../lib/api";
 
 function makeModelOption(index: number) {
   return {
@@ -15,7 +25,569 @@ function makeModelOption(index: number) {
   };
 }
 
-test("Settings > Tools contains detailed tool settings", () => {
+test("settings field renderer host falls back for unknown fields", () => {
+  const registry = createSettingsFieldRendererRegistry();
+  const field = {
+    id: "future_field",
+    label: "Future Field",
+    type: "future_field",
+    default: "default value",
+  } as TemplateSettingsField;
+
+  const html = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field,
+      sectionId: "demo",
+      value: "fallback value",
+      onChange: () => undefined,
+      fallbackRenderer: ({ value }) => createElement("span", { "data-fallback": "settings" }, String(value)),
+    }),
+  );
+
+  assert.match(html, /data-fallback="settings"/);
+  assert.match(html, /fallback value/);
+});
+
+test("settings field renderer registry routes new field types and catalog bindings", () => {
+  const registry = createSettingsFieldRendererRegistry([
+    {
+      id: "builtin-model-select",
+      types: ["model_select"],
+      render: ({ field, value }) => createElement("output", { "data-renderer": "model" }, `${field.id}:${String(value)}`),
+    },
+    {
+      id: "api-key-setup-binding",
+      component: "ApiKeySetupField",
+      render: ({ field }) => createElement("output", { "data-renderer": "api-key" }, field.id),
+    },
+    {
+      id: "provider-select-renderer",
+      renderers: ["provider_select.compact"],
+      render: ({ field }) => createElement("output", { "data-renderer": "provider" }, field.id),
+    },
+  ]);
+
+  const modelHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "preferred_model",
+        label: "Preferred Model",
+        type: "model_select",
+      } as TemplateSettingsField,
+      sectionId: "models",
+      value: "google/gemini",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const apiKeyHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      componentBindings: [{ part_id: "api_key_setup", component: "ApiKeySetupField" }],
+      field: {
+        id: "provider_key",
+        label: "Provider Key",
+        type: "api_key_setup",
+        part_id: "api_key_setup",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: null,
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+  const providerHtml = renderToStaticMarkup(
+    createElement(SettingsFieldRendererHost, {
+      registry,
+      field: {
+        id: "provider",
+        label: "Provider",
+        type: "provider_select",
+        renderer: "provider_select.compact",
+      } as TemplateSettingsField,
+      sectionId: "providers",
+      value: "google",
+      onChange: () => undefined,
+      fallbackRenderer: () => createElement("span", null, "fallback"),
+    }),
+  );
+
+  assert.match(modelHtml, /data-renderer="model"/);
+  assert.match(modelHtml, /preferred_model:google\/gemini/);
+  assert.match(apiKeyHtml, /data-renderer="api-key"/);
+  assert.match(apiKeyHtml, /provider_key/);
+  assert.match(providerHtml, /data-renderer="provider"/);
+  assert.match(providerHtml, /provider/);
+});
+
+test("builtin settings field renderer registry resolves template model_select renderer", () => {
+  const registry = createSettingsFieldRendererRegistry(builtinSettingsFieldRendererEntries);
+  const match = registry.resolve({
+    id: "preferred_model_template",
+    label: "Preferred Model",
+    type: "model_select",
+  } as TemplateSettingsField);
+
+  assert.equal(match?.entry.id, "builtin-settings-model-select");
+  assert.equal(match?.key, "model_select");
+});
+
+test("api_key_setup renderer actions target the rendered template field", () => {
+  assert.equal(apiKeySetupTargetFieldId({
+    id: "api_key_setup_template",
+    label: "API Setup",
+    type: "api_key_setup",
+  } as TemplateSettingsField), "api_key_setup_template");
+});
+
+test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "preferred_model",
+              label: "Preferred Model",
+              type: "model_select",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_select"/);
+  assert.match(html, /Gemini 2.5 Flash/);
+  assert.doesNotMatch(html, /type="text"[^>]*google\/gemini-2\.5-flash/);
+});
+
+test("SettingsModalRenderer renders template slash command registration field", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "commands",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "commands",
+          label: "Commands",
+          fields: [
+            {
+              id: "registered_slash_commands",
+              label: "Slash Commands",
+              type: "slash_commands",
+              renderer: "slash_commands",
+              default: [],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        commands: {
+          registered_slash_commands: [
+            { name: "yolo", action: "toggle_yolo", aliases: ["go"], enabled: true },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="slash_commands"/);
+  assert.match(html, /value="yolo"/);
+  assert.match(html, /value="go"/);
+  assert.match(html, /YOLO/);
+});
+
+test("slash command settings keep unsaved empty rows with stable row ids", () => {
+  let nextId = 0;
+  const rows = slashCommandDraftRowsFromValue([], () => `row-${++nextId}`);
+  const withEmptyRow = appendEmptySlashCommandDraft(rows, "row-new");
+
+  assert.equal(withEmptyRow.length, 1);
+  assert.equal(withEmptyRow[0].rowId, "row-new");
+  assert.equal(withEmptyRow[0].name, "");
+  assert.deepEqual(serializeSlashCommandDrafts(withEmptyRow), []);
+
+  const namedRows = withEmptyRow.map((row) => ({ ...row, name: "ship" }));
+  assert.equal(namedRows[0].rowId, "row-new");
+  assert.deepEqual(serializeSlashCommandDrafts(namedRows), [
+    { name: "ship", action: "toggle_yolo", aliases: [], description: "", enabled: true },
+  ]);
+});
+
+test("SettingsModalRenderer hides ambient detail fields until finger recording is enabled", () => {
+  const sections = [
+    {
+      id: "ambient",
+      label: "Ambient",
+      fields: [
+        {
+          id: "ambient.monitor.enabled",
+          label: "指で録音",
+          type: "toggle",
+          default: false,
+        },
+        {
+          id: "ambient.camera.lock",
+          label: "カメラ",
+          type: "device_lock",
+          renderer: "device_lock",
+          visible_when: { field: "ambient.monitor.enabled", truthy: true },
+          lock_message: "カメラが見つかりません。",
+        },
+        {
+          id: "ambient.routing.model",
+          label: "Ambient Send Model",
+          type: "model_select",
+          renderer: "model_select",
+          visible_when: { field: "ambient.monitor.enabled", truthy: true },
+        },
+      ] as unknown as SettingsSection["fields"],
+    },
+  ];
+
+  const offHtml = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "ambient",
+      catalog: { sidebar: { filters: [], items: [] }, settings: { sections: [], values: {} }, chat_rendering: { renderers: [] }, extension_points: [] },
+      health: null,
+      previewsCount: 0,
+      settingsSections: sections,
+      settingsValues: { ambient: { "ambient.monitor.enabled": false } },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  assert.match(offHtml, /指で録音/);
+  assert.doesNotMatch(offHtml, /Ambient Send Model/);
+  assert.doesNotMatch(offHtml, /data-settings-renderer="device_lock"/);
+
+  const onHtml = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "ambient",
+      catalog: { sidebar: { filters: [], items: [] }, settings: { sections: [], values: {} }, chat_rendering: { renderers: [] }, extension_points: [] },
+      health: null,
+      previewsCount: 0,
+      settingsSections: sections,
+      settingsValues: { ambient: { "ambient.monitor.enabled": true } },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  assert.match(onHtml, /Ambient Send Model/);
+  assert.match(onHtml, /data-settings-renderer="device_lock"/);
+});
+
+test("SettingsModalRenderer renders template api_key_setup with setup control", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "apis",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "apis",
+          label: "APIs",
+          fields: [
+            {
+              id: "api_key_setup_template",
+              label: "API Key Setup",
+              type: "api_key_setup",
+              provider_id: "openai",
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "openai",
+              label: "OpenAI",
+              apis: [{ api_id: "main", name: "main", configured: true }],
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="api_key_setup"/);
+  assert.match(html, /openai:main:\*\*\*/);
+  assert.match(html, /placeholder="openai API key"/);
+  assert.match(html, />Save</);
+});
+
+test("SettingsModalRenderer renders template model_api_routes through registered model routing renderer", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "models",
+          label: "Models",
+          fields: [
+            {
+              id: "model_api_routes",
+              label: "Model API Variants",
+              type: "model_api_routes",
+              renderer: "model_routing",
+              options: [
+                {
+                  value: "google/gemini-2.5-flash",
+                  label: "Gemini 2.5 Flash",
+                  provider_id: "google",
+                  model_id: "gemini-2.5-flash",
+                  configured: true,
+                },
+              ],
+              api_keys: [
+                {
+                  provider_id: "google",
+                  label: "Google",
+                  apis: [{ api_id: "main", name: "main", configured: true }],
+                },
+              ],
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        models: {
+          preferred_model: "google/gemini-2.5-flash",
+          model_api_routes: "google/gemini-2.5-flash: google/main",
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="model_routing"/);
+  assert.match(html, /Gemini 2\.5 Flash/);
+  assert.match(html, /google\/main/);
+});
+
+test("SettingsModalRenderer renders continuity handoff controls", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "continuity",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "continuity",
+          label: "Continuity",
+          fields: [
+            {
+              id: "handoff",
+              label: "Cloud / Device Handoff",
+              type: "continuity",
+              default: {
+                sandbox_id: "sandbox-demo",
+                mode: "move",
+                destination_node_id: "node-workstation",
+                route_id: "route-openai",
+                local_node: {
+                  node_id: "node-source",
+                  display_name: "MacBook",
+                  destination_kind: "source",
+                  online: true,
+                },
+                nodes: [
+                  {
+                    node_id: "node-workstation",
+                    display_name: "Workstation",
+                    destination_kind: "cloud_node",
+                    platform: "Linux",
+                    online: true,
+                  },
+                ],
+                routes: [
+                  {
+                    route_id: "route-openai",
+                    provider_id: "openai",
+                    api_id: "primary",
+                    model_id: "gpt-4.1",
+                    qualified_route: "openai/primary/gpt-4.1",
+                    endpoint_class: "public_https",
+                    credential_ref: "RUMIAPI_OPENAI_PRIMARY",
+                    portable: true,
+                  },
+                ],
+                operations: [
+                  {
+                    operation_id: "handoff-demo",
+                    status: "COMPLETED",
+                    sandbox_id: "sandbox-demo",
+                    destination_node_id: "node-workstation",
+                  },
+                ],
+              },
+            } as TemplateSettingsField,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        continuity: {
+          handoff: {
+            sandbox_id: "sandbox-demo",
+            destination_node_id: "node-workstation",
+            route_id: "route-openai",
+            mode: "move",
+          },
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-settings-renderer="continuity"/);
+  assert.match(html, /Workstation/);
+  assert.match(html, /openai\/primary\/gpt-4\.1/);
+  assert.match(html, /handoff-demo/);
+  assert.match(html, /Current primary/);
+  assert.match(html, /Source/);
+  assert.match(html, /Destination/);
+  assert.match(html, /planning-only/);
+  assert.match(html, /Source primary/);
+  assert.match(html, /Review plan/);
+  assert.match(html, /Completed/);
+  assert.doesNotMatch(html, /Return to this device/);
+  assert.doesNotMatch(html, /Switch primary/);
+  assert.doesNotMatch(html, /Move primary/);
+  assert.match(html, /Advanced routing details/);
+  assert.doesNotMatch(html, /COMPLETED/);
+});
+
+test("Settings > Tools contains tool experience settings tabs", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: {
+          filters: [],
+          items: [
+            {
+              id: "vision_tool",
+              label: "Vision Tool",
+              category: "tool",
+              description: "Inspect images",
+              tool_info: {
+                requires_approval: true,
+                requires_model_capabilities: ["model.image_input"],
+                attachment_policy: "images_only",
+              },
+            },
+          ],
+        },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "tools",
+          label: "機能と接続",
+          fields: [
+            { id: "default_mode", label: "既定の使い方", type: "select", default: "auto", options: [{ value: "auto", label: "自動で選ぶ" }] },
+          ],
+        },
+      ],
+      settingsValues: {
+        tools: {
+          disabled_tool_ids: [],
+          hidden_tool_ids: [],
+          tool_permission_overrides: {},
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /接続/);
+  assert.match(html, /高度な設定/);
+  assert.match(html, /既定の使い方/);
+  assert.match(html, /自動で選ぶ/);
+});
+
+test("Settings > Tools defaults to the tool experience overview", () => {
   const html = renderToStaticMarkup(
     createElement(SettingsModalRenderer, {
       isOpen: true,
@@ -64,9 +636,11 @@ test("Settings > Tools contains detailed tool settings", () => {
     }),
   );
 
-  assert.match(html, /Tool details/);
-  assert.match(html, /Vision Tool/);
-  assert.match(html, /model.image_input/);
+  assert.match(html, /基本/);
+  assert.match(html, /権限/);
+  assert.match(html, /1件/);
+  assert.match(html, /選んだ機能を回答内に表示/);
+  assert.doesNotMatch(html, /Tool details/);
 });
 
 test("settings surface pinned placements render in the modal", () => {
@@ -308,4 +882,281 @@ test("settings system info shows browser context message when info is null", () 
   assert.match(html, /権限状態を取得できませんでした/);
   assert.match(html, /Rumi Viewerを起動し/);
   assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
+});
+
+test("settings accounts prelude renders actionable Google and disabled Cloudflare states", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        apis: {
+          api_keys: [
+            {
+              provider_id: "google",
+              oauth: {
+                supported: true,
+                backend_supported: true,
+                client_configured: true,
+                connect_enabled: true,
+                connection_status: "not_connected",
+                status_label: "Ready to connect",
+                scope_mode: "google_gmail_labels",
+                scope_modes: [
+                  {
+                    id: "google_identity",
+                    label: "Google identity",
+                    description: "Basic sign-in identity only.",
+                    scopes: ["openid", "email", "profile"],
+                    services: ["identity"],
+                  },
+                  {
+                    id: "google_drive",
+                    label: "Google Drive selected files",
+                    description: "Drive file scope.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/drive.file"],
+                    services: ["identity", "drive_file"],
+                  },
+                  {
+                    id: "google_gmail_labels",
+                    label: "Gmail labels",
+                    description: "Labels only.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.labels"],
+                    services: ["identity", "gmail_labels"],
+                  },
+                  {
+                    id: "google_gmail_metadata",
+                    label: "Gmail metadata/search",
+                    description: "Restricted metadata mode.",
+                    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+                    services: ["identity", "gmail_metadata"],
+                    restricted: true,
+                    warning: "Restricted Gmail scopes require explicit review.",
+                  },
+                ],
+                scopes: [
+                  "openid",
+                  "email",
+                  "profile",
+                  "https://www.googleapis.com/auth/drive.file",
+                  "https://www.googleapis.com/auth/gmail.labels",
+                ],
+              },
+            },
+            {
+              provider_id: "cloudflare",
+              oauth: {
+                backend_supported: false,
+                connect_enabled: false,
+                connection_status: "missing_scope_config",
+                status_label: "Missing scope config",
+                disabled_reason: "Configure self-host OAuth",
+              },
+            },
+          ],
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Connect selected mode/);
+  assert.match(html, /Ready to connect/);
+  assert.match(html, /Google identity/);
+  assert.match(html, /Google Drive selected files/);
+  assert.match(html, /Gmail labels/);
+  assert.match(html, /Gmail metadata\/search/);
+  assert.match(html, /Restricted/);
+  assert.match(html, /Restricted Gmail scopes require explicit review/);
+  assert.match(html, /<input[^>]*(value="google_gmail_labels"[^>]*checked=""|checked=""[^>]*value="google_gmail_labels")/);
+  assert.match(html, /https:\/\/www\.googleapis\.com\/auth\/gmail\.labels/);
+  assert.match(html, /Connect Cloudflare/);
+  assert.match(html, /Missing scope config/);
+  assert.match(html, /Official app required|Hosted broker flows|official hosted broker/);
+  assert.match(html, /Configure self-host OAuth/);
+  assert.match(html, /title="Configure self-host OAuth"/);
+  assert.doesNotMatch(html, />Not connected</);
+});
+
+test("settings accounts prelude renders Codex token credential without raw token", () => {
+  const rawToken = ["codex", "renderer", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "accounts",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "accounts", label: "Accounts", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              connected: true,
+              token_configured: true,
+              can_clear: true,
+              connection_status: "connected",
+              status_label: "Token saved",
+              access_token: rawToken,
+            },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex access token/);
+  assert.match(html, /Token saved/);
+  assert.match(html, /Saved/);
+  assert.match(html, /Update token/);
+  assert.match(html, /Clear token/);
+  assert.doesNotMatch(html, /Connect Codex/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+});
+
+test("settings tools prelude renders Codex App Server status and controls", () => {
+  const rawToken = ["codex", "hidden", "token"].join("-");
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "tools",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        { id: "tools", label: "Tools", fields: [] },
+      ],
+      settingsValues: {
+        accounts_connections: {
+          providers: {
+            codex: {
+              configured: true,
+              token_configured: true,
+              access_token: rawToken,
+            },
+          },
+        },
+        tools_mcp: {
+          codex_app_server: {
+            configured: true,
+            enabled: true,
+            transport: "websocket_loopback",
+            connection_status: "configured",
+            status_label: "Configured",
+            base_url: "http://127.0.0.1:7331",
+            websocket_url: "ws://127.0.0.1:7331/ws",
+            unix_socket_path: "",
+            loopback: true,
+            auth_required: false,
+            auth_configured: true,
+            auth_source: "file",
+            auth_kind: "ws_token",
+            ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+            shared_secret_file: "",
+            account: {
+              provider_id: "codex",
+              provider_kind: "codex",
+              type: "chatgpt",
+              auth_method: "chatgpt_account",
+              auth_method_label: "ChatGPT account",
+              account_label: "rumi-user@example.test",
+              email: "rumi-user@example.test",
+              plan_type: "prolite",
+            },
+            tool_source: { status: "configured" },
+            automation_endpoint: { status: "configured" },
+          },
+        },
+      },
+      onClose: () => undefined,
+      onOpenSection: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /Codex App Server/);
+  assert.match(html, /Tool source/);
+  assert.match(html, /Automation/);
+  assert.match(html, /http:\/\/127\.0\.0\.1:7331/);
+  assert.match(html, /ws:\/\/127\.0\.0\.1:7331\/ws/);
+  assert.match(html, /websocket_loopback/);
+  assert.match(html, /ws_token via file/);
+  assert.match(html, /Connected Codex provider via ChatGPT account: rumi-user@example.test/);
+  assert.match(html, /Save config/);
+  assert.match(html, /Probe/);
+  assert.doesNotMatch(html, new RegExp(rawToken));
+  assert.doesNotMatch(html, /Connected ChatGPT account/);
+});
+
+test("settings help pane uses reported active profile with fallback when absent", () => {
+  const withProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: { profiles: { active_profile: "workbench/deep-focus" } },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+  const withoutProfile = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [{ id: "models", label: "Models", fields: [] }],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(withProfile, /workbench\/deep-focus/);
+  assert.doesNotMatch(withProfile, />default</);
+  assert.match(withoutProfile, /No active profile reported/);
+  assert.doesNotMatch(withoutProfile, />default</);
 });

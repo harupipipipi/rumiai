@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_automation_update",
+  "description": "Update a local adaptive automation setting.",
+  "tags": [
+    "adaptive",
+    "automation"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.automation.update"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.automation_update",
+    "defaultspack.adaptive.automation_update",
+    "defaults.adaptive.automation.update",
+    "defaultspack.adaptive.automation.update"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "automation_update"
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "function_id": "ambient_permission_grant",
+  "description": "Grant a Rumi-side ambient permission and optionally record OS permission state.",
+  "tags": [
+    "ambient",
+    "permission"
+  ],
+  "risk": "high",
+  "requires": [
+    "ambient.permission.grant"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.ambient.permission_grant",
+    "defaultspack.ambient.permission_grant",
+    "defaults.ambient.permission.grant",
+    "defaultspack.ambient.permission.grant"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.ambient.permissions",
+      "default_args": {
+        "action": "grant"
+      }
+    }
+  }
+}

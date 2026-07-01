@@ -1,38 +1,41 @@
-import * as ReactRuntime from "react";
 import { Component, Suspense, lazy, type ComponentType, type ReactNode } from "react";
 
 import type { ShellRenderer } from "../lib/api";
 
-const TRUSTED_RENDERER_PREFIXES = [
-  "/static/renderers/",
-  "/static/assets/renderers/",
-  "/static/user_renderers/",
-] as const;
+const TRUSTED_RENDERER_PATH = /^\/static\/packs\/([A-Za-z0-9_.-]+)\/(?:renderers|assets\/renderers)\/[^?#]+\.js$/;
 
-const rendererWindow = typeof window === "undefined"
-  ? null
-  : window as Window & { __RUMI_REACT__?: typeof ReactRuntime };
-
-if (rendererWindow) {
-  rendererWindow.__RUMI_REACT__ = ReactRuntime;
+function trustedLocalRendererPackId(modulePath: string | undefined): string | null {
+  if (!modulePath) return null;
+  if (typeof window === "undefined") return null;
+  try {
+    const url = new URL(modulePath, window.location.origin);
+    if (url.origin !== window.location.origin) return null;
+    return TRUSTED_RENDERER_PATH.exec(url.pathname)?.[1] ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export function isTrustedLocalRendererModule(modulePath: string | undefined): modulePath is string {
-  if (!modulePath) return false;
-  try {
-    const url = new URL(modulePath, window.location.origin);
-    return url.origin === window.location.origin
-      && TRUSTED_RENDERER_PREFIXES.some((prefix) => url.pathname.startsWith(prefix));
-  } catch {
-    return false;
-  }
+  return trustedLocalRendererPackId(modulePath) !== null;
+}
+
+function rendererMatchesCatalogBinding(renderer: ShellRenderer): boolean {
+  const modulePackId = trustedLocalRendererPackId(renderer.module);
+  const sourcePackId = typeof renderer.source_pack_id === "string" ? renderer.source_pack_id : "";
+  const declaredModulePackId = typeof renderer.module_pack_id === "string" ? renderer.module_pack_id : "";
+  const integrity = typeof renderer.integrity === "string" ? renderer.integrity : "";
+  return Boolean(modulePackId)
+    && modulePackId === sourcePackId
+    && (!declaredModulePackId || declaredModulePackId === modulePackId)
+    && integrity.startsWith("sha256-");
 }
 
 export function loadTrustedRenderer<T extends object>(
   renderer: ShellRenderer | null | undefined,
   fallback: ComponentType<T>,
 ): ComponentType<T> {
-  if (renderer?.trust !== "local" || !isTrustedLocalRendererModule(renderer.module)) {
+  if (renderer?.trust !== "local" || !isTrustedLocalRendererModule(renderer.module) || !rendererMatchesCatalogBinding(renderer)) {
     return fallback;
   }
 

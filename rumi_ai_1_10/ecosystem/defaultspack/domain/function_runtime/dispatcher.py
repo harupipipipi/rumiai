@@ -62,14 +62,23 @@ def _run_block_function(
     args: dict[str, Any],
     context: dict[str, Any],
 ) -> dict[str, Any]:
+    from domain.adaptive.guard import guard_function_execution
+
     payload = default_args_for(function_id)
     payload.update(args)
     payload = _apply_function_defaults(function_id, payload)
-    module = importlib.import_module(block_module)
-    run = getattr(module, "run")
     call_context = dict(context)
     call_context["_defaultspack_function_dispatch"] = True
     call_context["function_id"] = function_id
+    adaptive_decision = guard_function_execution(function_id, payload, call_context)
+    if adaptive_decision is not None:
+        return error(
+            str(adaptive_decision.get("message") or "adaptive runtime blocked function execution"),
+            str(adaptive_decision.get("code") or "ADAPTIVE_GUARD"),
+            details=adaptive_decision,
+        )
+    module = importlib.import_module(block_module)
+    run = getattr(module, "run")
     return run(payload, call_context)
 
 

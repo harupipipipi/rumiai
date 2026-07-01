@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -118,6 +120,53 @@ def test_chat_store_normalizes_legacy_conversations_with_pin_fields(tmp_path, mo
     assert legacy["is_pinned"] is False
     assert legacy["pinned_at"] is None
     assert legacy["pin_scope"] == "global"
+    ChatStore._instance = None
+
+
+def test_chat_store_reloads_external_conversation_index_updates(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    first_message = store.add_message(
+        conversation["id"],
+        {"role": "user", "content": [{"type": "text", "text": "original"}]},
+    )
+    storage_path = Path(os.environ["RUMI_DEFAULTSPACK_CHAT_STORE_PATH"])
+    payload = json.loads(storage_path.read_text(encoding="utf-8"))
+    external_message = {
+        "id": "external-assistant-message",
+        "conversation_id": conversation["id"],
+        "parent_id": first_message["id"],
+        "children_ids": [],
+        "sequence_number": 2,
+        "role": "assistant",
+        "content": [{"type": "text", "text": "external reply"}],
+        "raw_text": "external reply",
+        "created_at": first_message["created_at"] + 1,
+        "finish_reason": None,
+        "usage": None,
+        "widget": None,
+        "metadata": None,
+        "events": None,
+        "tool_logs": None,
+    }
+    external_conversation = payload["conversations"][conversation["id"]]
+    external_conversation["messages"].append(external_message)
+    external_conversation["current_node_id"] = external_message["id"]
+    external_conversation["updated_at"] = first_message["created_at"] + 2
+    payload["updated_at"] = first_message["created_at"] + 2
+    storage_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.utime(storage_path, (time.time() + 2, time.time() + 2))
+
+    reloaded = store.get_conversation(conversation["id"])
+    assert reloaded["current_node_id"] == "external-assistant-message"
+    assert [message["id"] for message in reloaded["messages"]][-1] == "external-assistant-message"
+
+    added = store.add_message(conversation["id"], {"role": "user", "content": "after external"})
+    updated = store.get_conversation(conversation["id"])
+    assert added["parent_id"] == "external-assistant-message"
+    assert [message["id"] for message in updated["messages"]][-2:] == ["external-assistant-message", added["id"]]
     ChatStore._instance = None
 
 

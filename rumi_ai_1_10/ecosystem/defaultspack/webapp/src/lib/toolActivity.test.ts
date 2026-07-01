@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildToolActivityGroups, summarizeToolArguments, toolFolderFor } from "./toolActivity";
+import { buildToolActivityGroups, buildToolActivityItems, summarizeToolArguments, toolFolderFor } from "./toolActivity";
 
 test("formats calculator arguments as a compact activity title", () => {
   assert.equal(summarizeToolArguments("calculator", { expression: "13829+12312" }), "13829+12312");
@@ -24,10 +24,10 @@ test("groups real tool logs into folder-like sections", () => {
 
   assert.equal(groups.length, 2);
   assert.equal(groups[0].id, "calculation");
-  assert.equal(groups[0].items[0].title, "計算 / calculator: 13829+12312");
+  assert.equal(groups[0].items[0].title, "計算: 13829+12312");
   assert.equal(groups[0].items[0].detail, "26141");
   assert.equal(groups[1].id, "web/search");
-  assert.equal(groups[1].items[0].title, "Web検索 / web_search: 今日の天気 東京");
+  assert.equal(groups[1].items[0].title, "Webで検索: 今日の天気 東京");
 });
 
 test("polishes calculator result prose into the answer", () => {
@@ -60,7 +60,136 @@ test("uses running tool_call events when a log has not arrived yet", () => {
   assert.equal(groups.length, 1);
   assert.equal(groups[0].id, "coding/files");
   assert.equal(groups[0].items[0].status, "running");
-  assert.equal(groups[0].items[0].title, "ファイル / coding_file_list: src");
+  assert.equal(groups[0].items[0].title, "ファイル一覧を確認: src");
+});
+
+test("summarizes terminal commands as user-facing activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "gh repo view --json defaultBranchRef" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "{\"defaultBranchRef\":{\"name\":\"main\"}}" } },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(groups[0].id, "coding/git");
+  assert.equal(item.title, "GitHub 情報を確認");
+  assert.equal(item.detail, "終了コード 0");
+  assert.equal(item.input, "gh repo view --json defaultBranchRef");
+});
+
+test("groups file-oriented terminal commands with file activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "sed -n '1,80p' src/App.tsx" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "import React from 'react';" } },
+    },
+  ]);
+
+  assert.equal(groups[0].id, "coding/files");
+  assert.equal(groups[0].label, "ファイル");
+  assert.equal(groups[0].items[0].title, "ファイルを確認");
+});
+
+test("keeps generic GitHub terminal commands inside Git activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "gh pr list --state open" },
+      result: { status: "ok", data: { exit_code: 0, stdout: "" } },
+    },
+  ]);
+
+  assert.equal(groups[0].id, "coding/git");
+  assert.equal(groups[0].items[0].title, "GitHub を操作");
+});
+
+test("summarizes nested JSON string results instead of surfacing raw payloads", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_git_status",
+      arguments: {},
+      result: {
+        status: "ok",
+        data: {
+          result: JSON.stringify({
+            branch: "main",
+            clean: false,
+            staged: [],
+            modified: ["src/App.tsx"],
+            untracked: ["notes.md"],
+          }),
+          widget: {
+            branch: "main",
+            clean: false,
+            staged: [],
+            modified: ["src/App.tsx"],
+            untracked: ["notes.md"],
+          },
+        },
+      },
+    },
+    {
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "git branch -a" },
+      result: {
+        status: "ok",
+        data: {
+          result: JSON.stringify({
+            command: "git branch -a",
+            exit_code: 0,
+            stdout: "* main\n  remotes/origin/main\n",
+          }),
+        },
+      },
+    },
+  ]);
+
+  assert.equal(groups[0].items[0].detail, "ブランチ main · 2件の変更");
+  assert.equal(groups[0].items[1].detail, "終了コード 0");
+  assert.doesNotMatch(groups[0].items[0].detail, /[{"]/);
+  assert.doesNotMatch(groups[0].items[1].detail, /command|stdout/);
+});
+
+test("surfaces file edits without exposing the whole diff as the main activity", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "coding_file_patch",
+      arguments: { path: "src/App.tsx", old: "before", new: "after" },
+      result: { status: "ok", data: { path: "src/App.tsx", patched: true, diff: "-before\n+after\n" } },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(item.title, "ファイルを編集: App.tsx");
+  assert.equal(item.detail, "変更しました: App.tsx");
+});
+
+test("labels sandbox coding tools separately from host tools", () => {
+  const groups = buildToolActivityGroups([
+    {
+      tool_name: "sandbox_file_write",
+      arguments: { path: "src/App.tsx", content: "updated" },
+      result: {
+        status: "ok",
+        data: {
+          path: "src/App.tsx",
+          written: true,
+          host_modified: false,
+          sandbox_only: true,
+          diff_summary: "Sandbox changed 1 file(s): 1 modified.",
+        },
+      },
+    },
+  ]);
+
+  const item = groups[0].items[0];
+  assert.equal(groups[0].id, "sandbox/files");
+  assert.equal(groups[0].label, "Sandbox");
+  assert.equal(item.title, "Sandboxで編集: App.tsx");
+  assert.equal(item.detail, "Sandbox changed 1 file(s): 1 modified.");
 });
 
 test("updates streamed tool activity when a completion event arrives before the log", () => {
@@ -177,7 +306,7 @@ test("hides generic completion text for completed tool activity", () => {
   assert.equal(groups[0].items[0].input, "context");
 });
 
-test("keeps raw json for unsupported tools", () => {
+test("keeps unsupported tool payloads out of the main timeline", () => {
   const groups = buildToolActivityGroups([
     {
       tool_name: "mystery_plugin",
@@ -188,7 +317,153 @@ test("keeps raw json for unsupported tools", () => {
 
   const item = groups[0].items[0];
   assert.equal(item.supported, false);
-  assert.match(item.rawJson ?? "", /mystery_plugin|answer|value/);
+  assert.equal(item.title, "Toolsを使用");
+  assert.equal(item.rawJson, undefined);
+});
+
+test("preserves chronological file terminal file order instead of category aggregation", () => {
+  const items = buildToolActivityItems([], [
+    {
+      type: "tool_call_started",
+      seq: 10,
+      timestamp: "2026-06-24T10:20:30Z",
+      tool_call_id: "call_file_1",
+      tool_name: "coding_file_read",
+      arguments: { path: "src/App.tsx" },
+    },
+    {
+      type: "tool_call_started",
+      seq: 11,
+      timestamp: "2026-06-24T10:20:31Z",
+      tool_call_id: "call_terminal",
+      tool_name: "coding_terminal_exec",
+      arguments: { command: "npm test" },
+    },
+    {
+      type: "tool_call_started",
+      seq: 12,
+      timestamp: "2026-06-24T10:20:32Z",
+      tool_call_id: "call_file_2",
+      tool_name: "coding_file_patch",
+      arguments: { path: "src/App.tsx" },
+    },
+  ]);
+
+  assert.deepEqual(
+    items.map((item) => item.folder),
+    ["coding/files", "coding/terminal", "coding/files"],
+  );
+});
+
+test("completion logs update rows without moving them from their start sequence", () => {
+  const items = buildToolActivityItems(
+    [
+      {
+        tool_name: "coding_file_read",
+        tool_call_id: "call_file_1",
+        arguments: { path: "src/App.tsx" },
+        result: { status: "ok", data: { content: "x", path: "src/App.tsx" } },
+        timestamp: "2026-06-24T10:20:40Z",
+      },
+      {
+        tool_name: "coding_terminal_exec",
+        tool_call_id: "call_terminal",
+        arguments: { command: "npm test" },
+        result: { status: "ok", data: { exit_code: 0 } },
+        timestamp: "2026-06-24T10:20:33Z",
+      },
+      {
+        tool_name: "coding_file_patch",
+        tool_call_id: "call_file_2",
+        arguments: { path: "src/App.tsx" },
+        result: { status: "ok", data: { patched: true, path: "src/App.tsx" } },
+        timestamp: "2026-06-24T10:20:34Z",
+      },
+    ],
+    [
+      {
+        type: "tool_call_started",
+        seq: 10,
+        timestamp: "2026-06-24T10:20:30Z",
+        tool_call_id: "call_file_1",
+        tool_name: "coding_file_read",
+        arguments: { path: "src/App.tsx" },
+      },
+      {
+        type: "tool_call_started",
+        seq: 11,
+        timestamp: "2026-06-24T10:20:31Z",
+        tool_call_id: "call_terminal",
+        tool_name: "coding_terminal_exec",
+        arguments: { command: "npm test" },
+      },
+      {
+        type: "tool_call_started",
+        seq: 12,
+        timestamp: "2026-06-24T10:20:32Z",
+        tool_call_id: "call_file_2",
+        tool_name: "coding_file_patch",
+        arguments: { path: "src/App.tsx" },
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    items.map((item) => item.toolCallId),
+    ["call_file_1", "call_terminal", "call_file_2"],
+  );
+  assert.equal(items[0].status, "completed");
+  assert.equal(items[0].detail, "読みました: App.tsx");
+});
+
+test("uses nested event data and tool_started aliases for timeline order", () => {
+  const items = buildToolActivityItems(
+    [
+      {
+        tool_name: "coding_terminal_exec",
+        tool_call_id: "call_terminal",
+        arguments: { command: "npm test" },
+        result: { status: "ok", data: { exit_code: 0 } },
+        timestamp: "2026-06-24T10:20:33Z",
+      },
+      {
+        tool_name: "coding_file_read",
+        tool_call_id: "call_file_1",
+        arguments: { path: "src/App.tsx" },
+        result: { status: "ok", data: { content: "x", path: "src/App.tsx" } },
+        timestamp: "2026-06-24T10:20:40Z",
+      },
+    ],
+    [
+      {
+        type: "tool_started",
+        seq: 10,
+        timestamp: "2026-06-24T10:20:30Z",
+        tool_call_id: "call_file_1",
+        data: {
+          tool_name: "coding_file_read",
+          arguments: { path: "src/App.tsx" },
+        },
+      },
+      {
+        type: "tool_started",
+        seq: 11,
+        timestamp: "2026-06-24T10:20:31Z",
+        tool_call_id: "call_terminal",
+        data: {
+          tool_name: "coding_terminal_exec",
+          arguments: { command: "npm test" },
+        },
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    items.map((item) => item.toolCallId),
+    ["call_file_1", "call_terminal"],
+  );
+  assert.equal(items[0].title, "ファイルを確認: App.tsx");
+  assert.equal(items[1].title, "テストを実行");
 });
 
 test("dedupes started events when a matching completed log exists", () => {

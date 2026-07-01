@@ -319,6 +319,12 @@ class GoogleProvider(OpenAICompatibleProvider):
                 header, data = url.split(";base64,", 1)
                 mime_type = header.replace("data:", "", 1) or "image/png"
                 return {"inlineData": {"mimeType": mime_type, "data": data}}
+        if block_type in {"audio", "input_audio"}:
+            audio = value.get("input_audio") if isinstance(value.get("input_audio"), dict) else value
+            data = audio.get("data") if isinstance(audio, dict) else None
+            audio_format = str(audio.get("format") or "webm") if isinstance(audio, dict) else "webm"
+            if isinstance(data, str) and data:
+                return {"inlineData": {"mimeType": f"audio/{audio_format}", "data": data}}
         return None
 
     @staticmethod

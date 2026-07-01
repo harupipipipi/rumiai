@@ -4,6 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
+import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
 
@@ -45,7 +46,7 @@ test("right sidebar initially focuses the rail on tools", () => {
     }),
   );
 
-  assert.match(html, /title="Filter: Tools"/);
+  assert.match(html, /title="Filter: 機能"/);
   assert.match(html, /title="other \(1\)"/);
   assert.doesNotMatch(html, /title="Widget A"/);
 });
@@ -90,7 +91,7 @@ test("right sidebar keeps initial tool groups compact", () => {
     }),
   );
 
-  assert.match(html, /title="More tools \(4 groups\)"/);
+  assert.match(html, /title="その他の機能 \(4 groups\)"/);
   assert.doesNotMatch(html, /title="Group 11 \(1\)"/);
 });
 
@@ -150,6 +151,92 @@ test("right sidebar exposes workspace tabs as a vertical switcher widget", () =>
   assert.match(html, /title="Workspace tabs"/);
   assert.match(html, /aria-label="Workspace tabs"/);
   assert.match(html, />2</);
+});
+
+test("right sidebar exposes current prompts as a rail widget", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      items: [],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      promptUsage: {
+        active_count: 2,
+        token_estimate: { total: 155 },
+        segments: [
+          { id: "default_chat", prompt_id: "default_chat", label: "default_chat", status: "active", tokens: 124 },
+          { id: "calculator", prompt_id: "calculator", label: "calculator", status: "active", tokens: 31 },
+        ],
+      },
+      onLoadPromptActive: async () => ({ segments: [] }),
+      onTogglePromptEdge: async () => ({ segments: [] }),
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /title="Current prompts"/);
+  assert.match(html, /aria-label="Current prompts"/);
+  assert.match(html, />2</);
+});
+
+test("prompt sidebar widget lists prompt name and token count before details", () => {
+  const html = renderToStaticMarkup(
+    createElement(PromptSidebarWidget, {
+      profileId: "default-profile",
+      conversationId: "conversation-1",
+      initialUsage: {
+        active_count: 1,
+        token_estimate: { total: 124 },
+        segments: [
+          {
+            id: "default_chat",
+            prompt_id: "default_chat",
+            label: "default_chat",
+            kind: "pack",
+            status: "active",
+            tokens: 124,
+            reason: "Selected by the active profile.",
+          },
+        ],
+      },
+      loadPromptActive: async () => ({ segments: [] }),
+      togglePromptEdge: async () => ({ segments: [] }),
+      onOpenStudio: noop,
+    }),
+  );
+
+  assert.match(html, /現在のプロンプト/);
+  assert.match(html, /default_chat/);
+  assert.match(html, /124/);
+  assert.match(html, /Prompt Studio/);
+  assert.doesNotMatch(html, /Selected by the active profile/);
+});
+
+test("prompt sidebar widget exposes chat prompt disclosure toggle", () => {
+  const html = renderToStaticMarkup(
+    createElement(PromptSidebarWidget, {
+      profileId: "default-profile",
+      initialUsage: {
+        active_count: 0,
+        token_estimate: { total: 0 },
+        segments: [],
+      },
+      loadPromptActive: async () => ({ segments: [] }),
+      togglePromptEdge: async () => ({ segments: [] }),
+      showChatPromptUsage: false,
+      onToggleChatPromptUsage: noop,
+      onOpenStudio: noop,
+    }),
+  );
+
+  assert.match(html, /チャット内の Prompt used/);
+  assert.match(html, /メッセージ下では非表示/);
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, />Off</);
 });
 
 test("right sidebar floating menus clamp to the viewport", () => {

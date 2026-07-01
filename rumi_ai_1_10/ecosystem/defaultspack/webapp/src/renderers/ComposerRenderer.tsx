@@ -39,6 +39,9 @@ import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicke
 import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
+import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
+import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
+import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
 import { composerSkillMentionDisplay, composerSkillMentionWidget, composerToolMentionDisplay, composerToolMentionWidget, filterComposerSkillMentions, filterComposerToolMentions, resolveComposerWidgetDrop, skillMentionIdsFromText, toolMentionIdsFromText } from "../lib/composerWidgets";
 import { HISTORY_CHAT_DROP_MIME, parseHistoryChatDrop } from "../lib/historyComposer";
@@ -75,10 +78,12 @@ type ComposerChromeWidth = {
 };
 
 type ComposerChromeSlot = "leading" | "trailing";
+type ComposerHomeSlot = "editor-leading" | "editor-trailing" | "toolbar-leading" | "toolbar-trailing";
 
 type ComposerChromeWidgetSpec = {
   id: string;
   slot: ComposerChromeSlot;
+  homeSlot?: ComposerHomeSlot;
   order: number;
   visible?: boolean;
   mobile?: "show" | "hide";
@@ -120,12 +125,31 @@ const COMPOSER_MODEL_CONTROL_MIN_CH = 9;
 const COMPOSER_MODEL_CONTROL_MAX_CH = 18;
 const COMPOSER_MODEL_CONTROL_CHROME_CH = 6;
 const NEW_CONVERSATION_TEXTAREA_MIN_HEIGHT = 22;
-const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 72;
+const NEW_CONVERSATION_TEXTAREA_MAX_HEIGHT = 150;
 const useIsomorphicLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
 const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
 const MODEL_STATUS_POPOVER_GAP = 10;
 const MODEL_STATUS_POPOVER_VIEWPORT_MARGIN = 16;
+const TEMPLATE_COMPOSER_TEXT_MAX = 180;
+const TEMPLATE_COMPOSER_MODALITY_LABELS: Record<string, string> = {
+  text: "Text",
+  file: "Files",
+  files: "Files",
+  image: "Images",
+  images: "Images",
+  audio: "Audio",
+  voice: "Voice",
+  speech: "Voice",
+};
+const TEMPLATE_COMPOSER_FEATURE_LABELS: Record<string, string> = {
+  slash_commands: "Slash",
+  at_mentions: "Mentions",
+  tool_mentions: "Tools",
+  file_attachments: "Files",
+  voice_input: "Voice",
+  context_preview: "Context",
+};
 
 export function composerChromeWidgetStyle(width: ComposerChromeWidth): CSSProperties {
   return {
@@ -141,6 +165,77 @@ function fitComposerTextareaHeight(textarea: HTMLTextAreaElement, minHeight: num
   const nextHeight = Math.min(Math.max(contentHeight, minHeight), maxHeight);
   textarea.style.height = `${nextHeight}px`;
   textarea.style.overflowY = contentHeight > maxHeight ? "auto" : "hidden";
+}
+
+function templateComposerText(value: unknown, maxLength = TEMPLATE_COMPOSER_TEXT_MAX): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+function normalizedTemplateComposerList(value: unknown): string[] {
+  const rawItems = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : [];
+  const normalized = rawItems
+    .map((item) => String(item ?? "").trim().toLowerCase())
+    .filter(Boolean)
+    .slice(0, 8);
+  return [...new Set(normalized)];
+}
+
+function templateComposerFeatureFlags(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const flags: Record<string, boolean> = {};
+  Object.entries(value as Record<string, unknown>).forEach(([key, flag]) => {
+    if (typeof flag === "boolean") flags[key] = flag;
+  });
+  return flags;
+}
+
+function looksLikeInternalComposerCopy(value: string): boolean {
+  return /template-composed composer|context txt materialization|slash commands, mentions, files|context text|会話をtxt化/i.test(value);
+}
+
+export function composerPlaceholderCopy({
+  isSteerMode,
+  mode,
+  placeholder,
+  templatePlaceholder,
+}: {
+  isSteerMode: boolean;
+  mode: AppMode;
+  placeholder?: string;
+  templatePlaceholder?: string;
+}): string {
+  if (isSteerMode) return "追加の指示を入力";
+  const templateCopy = templateComposerText(templatePlaceholder);
+  if (templateCopy && !looksLikeInternalComposerCopy(templateCopy)) return templateCopy;
+  if (mode === "coding") return "変更したい内容を入力...";
+  if (mode === "agent") return "タスクを入力...";
+  return placeholder || "メッセージを入力...";
+}
+
+export function composerHelperCopy({
+  isSteerMode,
+  hasInput,
+  slashCommands,
+  atMentions,
+  fileAttachments,
+  templateHelp,
+}: {
+  isSteerMode: boolean;
+  hasInput: boolean;
+  slashCommands: boolean;
+  atMentions: boolean;
+  fileAttachments: boolean;
+  templateHelp?: string;
+}): string {
+  if (isSteerMode) return hasInput ? "Enterで追加指示を送信" : "実行中の応答へ追加指示できます";
+  const help = templateComposerText(templateHelp, 120);
+  if (help && !looksLikeInternalComposerCopy(help)) return help;
+  const hints = ["Enterで送信"];
+  if (slashCommands) hints.push("/ でコマンド");
+  if (atMentions) hints.push("@ で候補");
+  else if (fileAttachments) hints.push("ファイル添付対応");
+  return hints.join(" · ");
 }
 
 function SendButtonIcon({ className = "" }: { className?: string }) {
@@ -441,6 +536,15 @@ function composerChromeWidgetsForSlot(
 ): ComposerChromeWidgetSpec[] {
   return widgets
     .filter((widget) => widget.slot === slot && widget.visible !== false)
+    .sort((left, right) => left.order - right.order);
+}
+
+function composerChromeWidgetsForHomeSlot(
+  widgets: ComposerChromeWidgetSpec[],
+  slot: ComposerHomeSlot,
+): ComposerChromeWidgetSpec[] {
+  return widgets
+    .filter((widget) => widget.visible !== false && widget.homeSlot === slot)
     .sort((left, right) => left.order - right.order);
 }
 
@@ -777,18 +881,35 @@ function DroppedWidgetChip({
     );
   }
 
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${onToggle ? "cursor-pointer" : "cursor-default"} ${
-        widget.enabled
-          ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
-          : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
-      }`}
-      onClick={() => onToggle?.(widget.id)}
-    >
+  const toolToggleClassName = `inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] transition-colors ${
+    widget.enabled
+      ? "border-emerald-600/50 bg-emerald-900/30 text-emerald-300"
+      : "border-zinc-700/60 bg-zinc-800/70 text-zinc-400"
+  }`;
+  const toolToggleContent = (
+    <>
       <Wrench size={10} />
       <span className="truncate">{widget.label}</span>
-    </span>
+    </>
+  );
+
+  if (!onToggle) {
+    return (
+      <span className={`${toolToggleClassName} cursor-default`}>
+        {toolToggleContent}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      title={widget.description ?? widget.label}
+      className={`${toolToggleClassName} cursor-pointer hover:bg-emerald-900/40`}
+      onClick={() => onToggle(widget.id)}
+    >
+      {toolToggleContent}
+    </button>
   );
 }
 
@@ -888,7 +1009,7 @@ function ProviderApiKeyPrompt({
               onClick={onCancel}
               className="h-8 rounded-lg px-3 text-xs text-zinc-400 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
             >
-              Cancel
+              キャンセル
             </button>
             <button
               type="button"
@@ -900,7 +1021,7 @@ function ProviderApiKeyPrompt({
                   : "bg-zinc-900 text-zinc-600 cursor-not-allowed"
               }`}
             >
-              {isSaving ? "Saving..." : "Save and use"}
+              {isSaving ? "保存中..." : "保存して使う"}
             </button>
           </div>
         </div>
@@ -1426,6 +1547,7 @@ export function ComposerRenderer({
   belowExtensions,
   skillExtensions = [],
   commands = [],
+  composerInput = null,
   modelCommandCandidates = [],
   modelPickerRequestId = 0,
   yoloMode = false,
@@ -1439,6 +1561,9 @@ export function ComposerRenderer({
   attachedFiles = [],
   droppedWidgets = [],
   selectedToolIds = [],
+  actionApprovalMode = "ask",
+  toolSelectionTargets = [],
+  toolSelectionReview = null,
   keyboardButtonNavigation = false,
   steerStatus = null,
   steerBusy = false,
@@ -1447,6 +1572,12 @@ export function ComposerRenderer({
   suppressPopovers = false,
   onOpenModelManager,
   onOpenToolSettings,
+  onActionApprovalModeChange,
+  onToolSelectionTargetRemove,
+  onToolSelectionReviewApprove,
+  onToolSelectionReviewEdit,
+  onToolSelectionReviewNoTools,
+  onToolSelectionReviewCancel,
   onSwitchToVisionModel,
   onExtensionSelect,
   onCommandSelect,
@@ -1515,11 +1646,52 @@ export function ComposerRenderer({
   const contextDegrees = Math.round(contextUsage.ratio * 360);
   const contextTitle =
     contextUsage.maxContext < 0
-      ? `${contextUsage.usedTokens} tokens / unlimited`
-      : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens`;
+      ? `${contextUsage.usedTokens} tokens / unlimited · ${selectedModelRouteLabel}`
+      : `${contextUsage.usedTokens} / ${contextUsage.maxContext || "unknown"} tokens · ${selectedModelRouteLabel}`;
+  const templateComposerInputId = templateComposerText(composerInput?.id, 80);
+  const templateComposerPlaceholder = templateComposerText(composerInput?.placeholder);
+  const templateComposerHelp = templateComposerText(composerInput?.help || composerInput?.description, 220);
+  const templateAcceptedModalities = useMemo(
+    () => normalizedTemplateComposerList(composerInput?.accepted_modalities),
+    [composerInput?.accepted_modalities],
+  );
+  const templateFeatureFlags = useMemo(
+    () => templateComposerFeatureFlags(composerInput?.feature_flags),
+    [composerInput?.feature_flags],
+  );
+  const templateAllowsSlashCommands = templateFeatureFlags.slash_commands !== false;
+  const templateComposerInfoItems = useMemo(() => {
+    const items = [
+      ...templateAcceptedModalities.map((modality) => TEMPLATE_COMPOSER_MODALITY_LABELS[modality] ?? modality),
+      ...Object.entries(templateFeatureFlags)
+        .filter(([key, value]) => value === true && TEMPLATE_COMPOSER_FEATURE_LABELS[key])
+        .map(([key]) => TEMPLATE_COMPOSER_FEATURE_LABELS[key]),
+    ];
+    return [...new Set(items)].slice(0, 6);
+  }, [templateAcceptedModalities, templateFeatureFlags]);
+  const templateHasModalityLimit = templateAcceptedModalities.length > 0;
+  const templateAllowsFileAttachments = templateFeatureFlags.file_attachments !== false
+    && templateFeatureFlags.attachments !== false
+    && (!templateHasModalityLimit || templateAcceptedModalities.some((item) => (
+      item === "file" || item === "files" || item === "image" || item === "images" || item === "audio" || item === "video"
+    )));
+  const templateAllowsVoiceInput = templateFeatureFlags.voice_input !== false
+    && templateFeatureFlags.voice !== false
+    && (!templateHasModalityLimit || templateAcceptedModalities.some((item) => (
+      item === "voice" || item === "speech" || item === "audio"
+    )));
+  const templateAllowsAtMentions = templateFeatureFlags.at_mentions !== false
+    && templateFeatureFlags.mentions !== false;
 	  const toolItems = useMemo(() => [...inlineExtensions, ...belowExtensions], [inlineExtensions, belowExtensions]);
 	  const selectableProfiles = modelProfiles.length > 0 ? modelProfiles : favoriteProfiles;
 	  const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
+  const serviceLabelById = useMemo(() => new Map(toolGroups.map((group) => [group.id, group.label])), [toolGroups]);
+  const toolLabelById = useMemo(() => new Map(toolItems.map((item) => [item.id, item.label || item.id])), [toolItems]);
+  const labelForServiceId = useCallback((serviceId: string) => serviceLabelById.get(serviceId) ?? serviceId, [serviceLabelById]);
+  const labelForToolTarget = useCallback((target: { kind: string; id: string }) => (
+    target.kind === "tool" ? (toolLabelById.get(target.id) ?? target.id) : labelForServiceId(target.id)
+  ), [labelForServiceId, toolLabelById]);
   const computerUseSelected = selectedToolIds.some((toolId) => (
     toolId === "computer_use"
     || toolId === "browser_computer"
@@ -1554,17 +1726,31 @@ export function ComposerRenderer({
   ], [droppedWidgets, mentionPreviewWidgets]);
   const hasAttachedImages = attachedFiles.some((file) => String(file.type ?? "").startsWith("image/"));
   const imageBridgePlanned = hasAttachedImages && !selectedProfile?.supports_vision && !selectedProfile?.supports_image_input;
-  const toolGroups = useMemo(() => groupToolItems(toolItems), [toolItems]);
   const activeToolGroup = toolGroups.find((group) => group.id === openToolGroup) ?? toolGroups[0] ?? null;
   const showToolGroups = toolItems.length > 4;
   const isEscapedSlash = input.startsWith("//");
   const isSteerMode = isGenerating && !isNewConversation;
-  const slashText = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? input.slice(1) : "";
+  const effectiveComposerPlaceholder = composerPlaceholderCopy({
+    isSteerMode,
+    mode,
+    placeholder,
+    templatePlaceholder: templateComposerPlaceholder,
+  });
+  const effectiveComposerHelp = composerHelperCopy({
+    isSteerMode,
+    hasInput: Boolean(input.trim()),
+    slashCommands: templateAllowsSlashCommands,
+    atMentions: templateAllowsAtMentions,
+    fileAttachments: templateAllowsFileAttachments,
+    templateHelp: templateComposerHelp,
+  });
+  const hasSlashCommandPrefix = templateAllowsSlashCommands && !isSteerMode && input.startsWith("/") && !isEscapedSlash;
+  const slashText = hasSlashCommandPrefix ? input.slice(1) : "";
   const slashCommandName = slashText.trimStart().split(/\s+/, 1)[0] ?? "";
   const slashQuery = slashCommandName.toLowerCase();
   const thinkingCommand = commands.find((command) => command.id === "think");
-  const thinkingMatch = !isSteerMode && input.startsWith("/") && !isEscapedSlash ? thinkingCommandMatch(input) : null;
-  const matchedCommands = !isSteerMode && input.startsWith("/") && !isEscapedSlash
+  const thinkingMatch = hasSlashCommandPrefix ? thinkingCommandMatch(input) : null;
+  const matchedCommands = hasSlashCommandPrefix
     ? thinkingMatch && thinkingCommand && levels.length > 0
       ? levels
           .filter((level) => !thinkingMatch.query || level.toLowerCase().includes(thinkingMatch.query))
@@ -1582,7 +1768,7 @@ export function ComposerRenderer({
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
   const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
-  const showCommandSuggestions = !hasModelCommandCandidates && matchedCommands.length > 0;
+  const showCommandSuggestions = templateAllowsSlashCommands && !hasModelCommandCandidates && matchedCommands.length > 0;
   const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
     item.visible !== false && String(item.prompt ?? "").trim()
   ));
@@ -1624,40 +1810,6 @@ export function ComposerRenderer({
       : [];
 	    return [...toolCandidates, ...skillCandidates, ...fileCandidates];
 	  }, [atMentionQuery, codingContext?.files, mode, skillExtensions, toolItems]);
-
-	  const composerMentionLookup = useMemo(() => {
-	    const lookup = new Map<string, ComposerMentionDescriptor>();
-	    const add = (token: string | undefined, descriptor: ComposerMentionDescriptor) => {
-	      const normalized = token?.trim().toLowerCase();
-	      if (normalized && !lookup.has(normalized)) lookup.set(normalized, descriptor);
-	    };
-
-	    for (const item of toolItems) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "tool",
-	        label: item.ui?.composer_label ?? item.label ?? item.id,
-	      };
-	      add(item.id, descriptor);
-	      add(item.id.split("/").pop(), descriptor);
-	    }
-	    for (const skill of skillExtensions) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "skill",
-	        label: skill.label || skill.id,
-	      };
-	      add(skill.id, descriptor);
-	      add(skill.id.split("/").pop(), descriptor);
-	    }
-	    for (const file of codingContext?.files ?? []) {
-	      const descriptor: ComposerMentionDescriptor = {
-	        kind: "file",
-	        label: file.split("/").pop() || file,
-	      };
-	      add(file, descriptor);
-	      add(file.split("/").pop(), descriptor);
-	    }
-	    return lookup;
-	  }, [codingContext?.files, skillExtensions, toolItems]);
 
 	  const needsApiKey = useCallback(
     (profile: ModelProfile | null | undefined) => (
@@ -1791,16 +1943,6 @@ export function ComposerRenderer({
     });
   }, [atMentionCandidates.length]);
 
-  useEffect(() => {
-    setTextareaSelection((current) => {
-      const nextStart = Math.min(current.start, input.length);
-      const nextEnd = Math.min(current.end, input.length);
-      return current.start === nextStart && current.end === nextEnd
-        ? current
-        : { start: nextStart, end: nextEnd };
-    });
-  }, [input.length]);
-
   useIsomorphicLayoutEffect(() => {
     resizeNewConversationTextarea();
   }, [input, resizeNewConversationTextarea]);
@@ -1835,6 +1977,11 @@ export function ComposerRenderer({
   }, [onModelCommandCandidatesClose, suppressPopovers]);
 
   useEffect(() => {
+    if (templateAllowsSlashCommands || openFolder !== "commands") return;
+    setOpenFolder("tools");
+  }, [openFolder, templateAllowsSlashCommands]);
+
+  useEffect(() => {
     if (!hasModelCommandCandidates) return;
     updateComposerPopoverAnchor();
     window.addEventListener("resize", updateComposerPopoverAnchor);
@@ -1865,37 +2012,8 @@ export function ComposerRenderer({
   }, []);
 
   useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || typeof document === "undefined" || typeof window === "undefined") return;
-
-    const sync = () => syncTextareaFocusAndSelection();
-    const syncAfterBrowserUpdate = () => {
-      window.requestAnimationFrame(sync);
-    };
-
-    textarea.addEventListener("focus", sync);
-    textarea.addEventListener("blur", sync);
-    textarea.addEventListener("click", syncAfterBrowserUpdate);
-    textarea.addEventListener("input", syncAfterBrowserUpdate);
-    textarea.addEventListener("keyup", syncAfterBrowserUpdate);
-    textarea.addEventListener("select", syncAfterBrowserUpdate);
-    document.addEventListener("selectionchange", syncAfterBrowserUpdate);
-    syncAfterBrowserUpdate();
-
-    return () => {
-      textarea.removeEventListener("focus", sync);
-      textarea.removeEventListener("blur", sync);
-      textarea.removeEventListener("click", syncAfterBrowserUpdate);
-      textarea.removeEventListener("input", syncAfterBrowserUpdate);
-      textarea.removeEventListener("keyup", syncAfterBrowserUpdate);
-      textarea.removeEventListener("select", syncAfterBrowserUpdate);
-      document.removeEventListener("selectionchange", syncAfterBrowserUpdate);
-    };
-  }, [syncTextareaFocusAndSelection]);
-
-  useEffect(() => {
     const handleDocumentSlashFocus = (event: KeyboardEvent) => {
-      if (isGenerating || !shouldFocusComposerForSlashKey(event, event.target)) return;
+      if (!templateAllowsSlashCommands || isGenerating || !shouldFocusComposerForSlashKey(event, event.target)) return;
       event.preventDefault();
       const textarea = textareaRef.current;
       if (!textarea) return;
@@ -1912,9 +2030,10 @@ export function ComposerRenderer({
 
     document.addEventListener("keydown", handleDocumentSlashFocus);
     return () => document.removeEventListener("keydown", handleDocumentSlashFocus);
-  }, [input, isGenerating, onInputChange]);
+  }, [input, isGenerating, onInputChange, templateAllowsSlashCommands]);
 
   const chooseCommand = (commandId: string, rawInput = input) => {
+    if (!templateAllowsSlashCommands) return;
     const thinkingLevelMatch = commandId.match(/^think:(.+)$/);
     if (thinkingLevelMatch) {
       onCommandSelect?.("think", `/think ${thinkingLevelMatch[1]}`);
@@ -1957,7 +2076,11 @@ export function ComposerRenderer({
   const updateAtMentionStateFromInput = useCallback(
     (value: string) => {
       const textarea = textareaRef.current;
-      if (!textarea || suppressPopovers) return;
+      if (!textarea || suppressPopovers || !templateAllowsAtMentions) {
+        setAtMentionOpen(false);
+        setAtMentionQuery("");
+        return;
+      }
       const cursorPos = textarea.selectionStart ?? value.length;
       const textBeforeCursor = value.slice(0, cursorPos);
       const atMatch = textBeforeCursor.match(/(?:^|\s)@([^\s@]*)$/);
@@ -1972,7 +2095,7 @@ export function ComposerRenderer({
         setAtMentionQuery("");
       }
     },
-    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, toolItems.length, updateComposerMentionPopoverAnchor],
+    [codingContext?.files?.length, isSteerMode, mode, skillExtensions.length, suppressPopovers, templateAllowsAtMentions, toolItems.length, updateComposerMentionPopoverAnchor],
   );
 
   useEffect(() => {
@@ -1982,14 +2105,13 @@ export function ComposerRenderer({
   const handleInputChange = useCallback(
     (value: string) => {
       onInputChange(value);
-      syncTextareaSelection();
       updateAtMentionStateFromInput(value);
 
-      if (!value.startsWith("/") || value.startsWith("//")) {
+      if (!templateAllowsSlashCommands || !value.startsWith("/") || value.startsWith("//")) {
         setSelectedCommandIndex(0);
       }
     },
-    [onInputChange, syncTextareaSelection, updateAtMentionStateFromInput],
+    [onInputChange, templateAllowsSlashCommands, updateAtMentionStateFromInput],
   );
 
   const handleAtMentionSelect = useCallback(
@@ -2010,7 +2132,6 @@ export function ComposerRenderer({
       setTimeout(() => {
         textarea.setSelectionRange(next.cursor, next.cursor);
         textarea.focus();
-        setTextareaSelection({ start: next.cursor, end: next.cursor });
       }, 0);
     },
 	    [input, mode, onAtFileAttach, onInputChange],
@@ -2018,9 +2139,10 @@ export function ComposerRenderer({
 
   const attachFiles = useCallback(async (files: FileList | null) => {
     if (!files?.length) return;
+    if (!templateAllowsFileAttachments) return;
     const newFiles: AttachedFile[] = await Promise.all(Array.from(files).map(fileToAttachment));
     onFileAttach?.(newFiles);
-  }, [onFileAttach]);
+  }, [onFileAttach, templateAllowsFileAttachments]);
 
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
@@ -2117,7 +2239,7 @@ export function ComposerRenderer({
   );
 
   const toggleVoiceInput = useCallback(() => {
-    if (!voiceInputEnabled || isGenerating) return;
+    if (!voiceInputEnabled || !templateAllowsVoiceInput || isGenerating) return;
     if (isVoiceListening) {
       recognitionRef.current?.stop();
       setIsVoiceListening(false);
@@ -2155,7 +2277,7 @@ export function ComposerRenderer({
     recognitionRef.current = recognition;
     setIsVoiceListening(true);
     recognition.start();
-  }, [input, isGenerating, isVoiceListening, onInputChange, voiceInputEnabled, voiceInputUseAi]);
+  }, [input, isGenerating, isVoiceListening, onInputChange, templateAllowsVoiceInput, voiceInputEnabled, voiceInputUseAi]);
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -2265,13 +2387,15 @@ export function ComposerRenderer({
     {
       id: "file-attach",
       slot: "leading",
+      homeSlot: "editor-leading",
       order: 20,
+      visible: templateAllowsFileAttachments,
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
         <button
           type="button"
           tabIndex={chromeButtonTabIndex}
-          disabled={isGenerating}
+          disabled={isGenerating || !templateAllowsFileAttachments}
           title="ファイル添付（複数選択可）"
           onClick={() => fileInputRef.current?.click()}
           className={`${
@@ -2287,14 +2411,16 @@ export function ComposerRenderer({
     {
       id: "voice-input",
       slot: "leading",
+      homeSlot: "editor-trailing",
       order: 30,
+      visible: templateAllowsVoiceInput,
       mobile: "hide",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
 	        <button
 	          type="button"
 	          tabIndex={chromeButtonTabIndex}
-	          disabled={isGenerating || !voiceInputEnabled}
+	          disabled={isGenerating || !voiceInputEnabled || !templateAllowsVoiceInput}
 	          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
 	          onClick={toggleVoiceInput}
 	          className={`${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
@@ -2308,6 +2434,7 @@ export function ComposerRenderer({
     {
       id: "mode",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 40,
       visible: false,
       width: COMPOSER_CHROME_WIDTHS.mode,
@@ -2359,7 +2486,8 @@ export function ComposerRenderer({
     {
       id: "yolo-status",
       slot: "leading",
-      order: 50,
+      homeSlot: "toolbar-leading",
+      order: 55,
       visible: yoloMode && visibleModelStatusIndicators.length === 0,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
@@ -2370,35 +2498,57 @@ export function ComposerRenderer({
       ),
     },
     {
+      id: "action-approval-control",
+      slot: "leading",
+      homeSlot: "toolbar-leading",
+      order: 50,
+      width: { basis: "auto", min: "4rem", max: "8.5rem", shrink: 1 },
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <ActionApprovalControl
+          mode={actionApprovalMode}
+          disabled={isGenerating}
+          surfaceClassName={COMPOSER_CONTROL_SURFACE_CLASSNAME}
+          tabIndex={chromeButtonTabIndex}
+          onModeChange={(nextMode) => onActionApprovalModeChange?.(nextMode)}
+          onOpenSettings={onOpenToolSettings}
+        />
+      ),
+    },
+    {
       id: "computer-use-status",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 60,
       visible: computerUseSelected,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
-        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+        <span aria-label="PC操作" title="PC操作" className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-300 max-[430px]:px-1.5">
           <MousePointerClick size={12} className="flex-shrink-0" />
-          <span className="truncate">Computer ON</span>
+          <span className="truncate max-[430px]:hidden">PC操作</span>
         </span>
       ),
     },
     {
       id: "vision-bridge-status",
       slot: "leading",
+      homeSlot: "toolbar-leading",
       order: 70,
       visible: imageBridgePlanned,
       width: COMPOSER_CHROME_WIDTHS.badge,
       className: "overflow-hidden",
       render: () => (
-        <span className="inline-flex items-center rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300">
-          <span className="truncate">Vision Bridge</span>
+        <span aria-label="Vision Bridge" title="Vision Bridge" className="inline-flex items-center gap-1 rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-300 max-[430px]:px-1.5">
+          <FileText size={12} className="flex-shrink-0" />
+          <span className="truncate max-[430px]:hidden">Vision Bridge</span>
         </span>
       ),
     },
     {
       id: "model-picker",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 10,
       mobile: "hide",
       width: modelControlWidth,
@@ -2422,19 +2572,19 @@ export function ComposerRenderer({
               onClick={() => setModelDropdownOpen((v) => !v)}
               className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
-              <span className="min-w-0 flex-1 truncate" title={profileName}>{compactSelectedProfileName}</span>
+              <span className="min-w-0 flex-1 truncate" title={profileName}>モデル: {compactSelectedProfileName}</span>
               <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
             </button>
-            <span className="block max-w-full truncate text-[10px] leading-none text-zinc-500" title={selectedModelRouteLabel}>
-              {selectedModelRouteLabel}
-            </span>
             {modelDropdownOpen && (
               <ModelDropdown
                 profiles={selectableProfiles}
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
                 placement={isNewConversation ? "below" : "above"}
-                onSelect={(profile) => requestModelProfileSelect(profile.profile_id)}
+                onSelect={(profile) => {
+                  requestModelProfileSelect(profile.profile_id);
+                  setModelDropdownOpen(false);
+                }}
                 onClose={() => setModelDropdownOpen(false)}
               />
             )}
@@ -2445,6 +2595,7 @@ export function ComposerRenderer({
     {
       id: "thinking-control",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 20,
       visible: levels.length > 0,
       mobile: "hide",
@@ -2474,6 +2625,7 @@ export function ComposerRenderer({
     {
       id: "model-status",
       slot: "trailing",
+      homeSlot: "toolbar-trailing",
       order: 30,
       visible: visibleModelStatusIndicators.length > 0,
       mobile: "hide",
@@ -2498,6 +2650,7 @@ export function ComposerRenderer({
     {
       id: "send",
       slot: "trailing",
+      homeSlot: "editor-trailing",
       order: 40,
       width: isNewConversation ? COMPOSER_CHROME_WIDTHS.sendLarge : COMPOSER_CHROME_WIDTHS.send,
       render: () => (
@@ -2507,7 +2660,7 @@ export function ComposerRenderer({
           disabled={!isGenerating && (!input.trim() && attachedFiles.length === 0)}
           onPointerDown={handleSendButtonPointerDown}
           onClick={handleSendButtonClick}
-	          title={isGenerating ? (input.trim() ? "ステアを送る" : "停止") : "送信"}
+	          title={isGenerating ? (input.trim() ? "追加指示を送る" : "停止") : "送信"}
 	          className={`rumi-send-button ${
 	            isNewConversation ? "h-7 w-7" : "w-8 h-8 max-[640px]:h-7 max-[640px]:w-7"
 	          } flex flex-shrink-0 items-center justify-center rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-opacity ${
@@ -2530,13 +2683,20 @@ export function ComposerRenderer({
 
   const leadingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "leading");
   const trailingChromeWidgets = composerChromeWidgetsForSlot(chromeWidgets, "trailing");
-  const newConversationInlineLeadingWidgets = leadingChromeWidgets.filter((widget) => widget.id === "file-attach");
-  const newConversationInlineActionWidgets = leadingChromeWidgets.filter((widget) => (
-    widget.id !== "file-attach" && widget.id !== "voice-input"
-  ));
-  const newConversationTopRightWidgets = leadingChromeWidgets.filter((widget) => widget.id === "voice-input");
-  const newConversationSendWidgets = trailingChromeWidgets.filter((widget) => widget.id === "send");
-  const newConversationTrailingWidgets = trailingChromeWidgets.filter((widget) => widget.id !== "send");
+  const newConversationInlineLeadingWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-leading");
+  const newConversationTopRightWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "editor-trailing");
+  const newConversationInlineActionWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "toolbar-leading");
+  const newConversationTrailingWidgets = composerChromeWidgetsForHomeSlot(chromeWidgets, "toolbar-trailing");
+  const menuFolders = templateAllowsSlashCommands
+    ? ([
+        ["tools", "Tools", Wrench],
+        ["models", "Models", SlidersHorizontal],
+        ["commands", "Commands", Folder],
+      ] as const)
+    : ([
+        ["tools", "Tools", Wrench],
+        ["models", "Models", SlidersHorizontal],
+      ] as const);
 
   return (
     <div
@@ -2661,13 +2821,7 @@ export function ComposerRenderer({
                       />
               <div ref={menuRef} className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 grid w-[min(480px,calc(100vw-32px))] grid-cols-[120px_minmax(0,1fr)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl max-[640px]:left-2 max-[640px]:grid-cols-1">
                 <div className="border-r border-zinc-800 bg-zinc-950/90 p-1.5 max-[640px]:flex max-[640px]:border-b max-[640px]:border-r-0">
-                  {(
-                    [
-                      ["tools", "Tools", Wrench],
-                      ["models", "Models", SlidersHorizontal],
-                      ["commands", "Commands", Folder],
-                    ] as const
-                  ).map(([id, label, Icon]) => (
+                  {menuFolders.map(([id, label, Icon]) => (
                             <button
                               key={id}
                               type="button"
@@ -2787,7 +2941,7 @@ export function ComposerRenderer({
                       })}
                     </div>
                   )}
-                  {openFolder === "commands" && (
+                  {templateAllowsSlashCommands && openFolder === "commands" && (
                     <div className="grid gap-0.5">
                       {commands.map((command) => (
                                 <button
@@ -2864,96 +3018,86 @@ export function ComposerRenderer({
             </div>
           )}
 
+          {toolSelectionReview && (
+            <ToolSelectionReviewCard
+              review={toolSelectionReview}
+              labelForService={labelForServiceId}
+              onApprove={() => onToolSelectionReviewApprove?.()}
+              onEdit={() => {
+                onToolSelectionReviewEdit?.();
+                setOpenFolder("tools");
+                setMenuOpen(true);
+              }}
+              onNoTools={() => onToolSelectionReviewNoTools?.()}
+              onCancel={() => onToolSelectionReviewCancel?.()}
+            />
+          )}
+
           {isNewConversation ? (
             <div className="grid gap-1.5">
-              <div className="rumi-composer-main-panel grid min-h-[46px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[1.4rem] border border-white/20 bg-[#242423] px-4 py-1">
-                <div className="self-center">
-                  {newConversationInlineLeadingWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-                <div className="relative min-w-0 self-center">
-                  <ComposerMentionOverlay
-                    value={input}
-                    mentionLookup={composerMentionLookup}
-                    cursorPosition={textareaSelection.start}
-                    showCaret={textareaFocused && textareaSelection.start === textareaSelection.end}
-                    className="rumi-composer-input-new-overlay text-[16px] font-medium leading-[22px]"
-                  />
-                  <textarea
-                    ref={textareaRef}
-                    autoFocus
-                    rows={1}
-                    value={input}
-                    onChange={(event) => {
-                      resizeNewConversationTextarea(event.currentTarget);
-                      handleInputChange(event.currentTarget.value);
-                    }}
-                    placeholder={
-                      isSteerMode
-                        ? "実行中のAIへステアを入力..."
-                        : mode === "coding"
-                        ? "コーディング指示を入力... (@ でtool/ファイル)"
-                        : placeholder
-                    }
-                    className={`rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[22px] w-full max-h-[72px] select-text resize-none overflow-x-hidden overflow-y-hidden border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[22px] text-transparent outline-none placeholder:text-zinc-500 ${
-                      input ? "caret-transparent" : "caret-zinc-100"
-                    }`}
-                    onFocus={() => {
-                      setTextareaFocused(true);
-                      syncTextareaSelection();
-                    }}
-                    onBlur={() => setTextareaFocused(false)}
-                    onClick={syncTextareaSelection}
-                    onKeyUp={syncTextareaSelection}
-                    onSelect={syncTextareaSelection}
-                    onKeyDownCapture={(event) => {
-                      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
-                        event.stopPropagation();
-                      }
-                    }}
-                    onKeyDown={handleKeyDown}
-                  />
-                </div>
-                <div className="flex items-center justify-end gap-2 self-center">
-                  {newConversationInlineActionWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationTopRightWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                  {newConversationSendWidgets.map((widget) => (
-                    <ComposerChromeWidget key={widget.id} widget={widget} />
-                  ))}
-                </div>
-              </div>
-              {newConversationTrailingWidgets.length > 0 && (
-                <div className="rumi-composer-model-dock flex min-w-0 justify-end pr-5 max-[640px]:hidden">
-                  <div className="rumi-composer-dock-rail flex min-w-0 items-center justify-end gap-2">
-                    {newConversationTrailingWidgets.map((widget) => (
-                      <ComposerChromeWidget
-                        key={widget.id}
-                        widget={widget}
-                        onNodeChange={registerChromeWidgetNode}
-                      />
+              <div className="rumi-composer-main-panel flex flex-col gap-2 rounded-3xl border border-white/10 bg-[#20201f] p-3 shadow-xl focus-within:border-white/30 focus-within:bg-[#242423] focus-within:shadow-2xl transition-all duration-300">
+                <div className="rumi-composer-editor-row grid min-h-[32px] grid-cols-[1.75rem_minmax(0,1fr)_auto] items-end gap-x-3">
+                  <div className="flex items-center justify-center self-end">
+                    {newConversationInlineLeadingWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  <div className="rumi-composer-editor relative min-w-0 self-end">
+                    <textarea
+                      ref={textareaRef}
+                      autoFocus
+                      rows={1}
+                      value={input}
+                      data-template-composer-input={templateComposerInputId || undefined}
+                      onChange={(event) => {
+                        resizeNewConversationTextarea(event.currentTarget);
+                        handleInputChange(event.currentTarget.value);
+                      }}
+                      placeholder={effectiveComposerPlaceholder}
+                      className="rumi-composer-input-new rumi-composer-textarea relative rumi-layer-panel block min-h-[24px] w-full max-h-[150px] select-text resize-none overflow-x-hidden overflow-y-auto border-none bg-transparent px-0 pb-0 pt-0 text-[16px] font-medium leading-[24px] text-zinc-100 caret-zinc-100 outline-none placeholder:text-zinc-500/70"
+                      onKeyDownCapture={(event) => {
+                        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+                          event.stopPropagation();
+                        }
+                      }}
+                      onKeyDown={handleKeyDown}
+                    />
+                  </div>
+                  <div className="flex items-center justify-end gap-2 self-end">
+                    {newConversationTopRightWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
                     ))}
                   </div>
                 </div>
-              )}
+
+                <div className="rumi-composer-toolbar flex items-center justify-between border-t border-white/5 pt-2">
+                  <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                    {newConversationInlineActionWidgets.map((widget) => (
+                      <ComposerChromeWidget key={widget.id} widget={widget} />
+                    ))}
+                  </div>
+                  {newConversationTrailingWidgets.length > 0 && (
+                    <div className="rumi-composer-model-dock flex min-w-0 items-center justify-end gap-2 max-[640px]:hidden">
+                      {newConversationTrailingWidgets.map((widget) => (
+                        <ComposerChromeWidget
+                          key={widget.id}
+                          widget={widget}
+                          onNodeChange={registerChromeWidgetNode}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ) : (
             <textarea
               ref={textareaRef}
               autoFocus
               value={input}
+              data-template-composer-input={templateComposerInputId || undefined}
               onChange={(event) => handleInputChange(event.target.value)}
-              placeholder={
-                isSteerMode
-                  ? "実行中のAIへステアを入力..."
-                  : mode === "coding"
-                  ? "コーディング指示を入力... (@ でtool/ファイル)"
-                  : placeholder
-              }
+              placeholder={effectiveComposerPlaceholder}
               className="rumi-composer-textarea min-h-[34px] w-full max-h-[130px] select-text resize-none border-none bg-transparent px-5 pb-0 pt-3 text-[15px] text-zinc-100 outline-none max-[640px]:min-h-[32px] max-[640px]:px-3 max-[640px]:pb-0 max-[640px]:pt-2.5 max-[640px]:text-[13px]"
               onKeyDownCapture={(event) => {
                 if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -2964,11 +3108,37 @@ export function ComposerRenderer({
             />
           )}
 
+          {!isSteerMode && (effectiveComposerHelp || templateComposerInfoItems.length > 0) && (
+            <div className={`${isNewConversation ? "px-5 pt-1" : "px-5 pt-1 max-[640px]:px-3"} flex min-h-5 flex-wrap items-center gap-1.5 text-[10px] leading-none text-zinc-500`}>
+              {effectiveComposerHelp && (
+                <span className="min-w-0 flex-1 truncate" title={effectiveComposerHelp}>
+                  {effectiveComposerHelp}
+                </span>
+              )}
+              {templateComposerInfoItems.map((item) => (
+                <span
+                  key={item}
+                  className="flex-shrink-0 rounded-full border border-zinc-700/70 px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-zinc-500"
+                >
+                  {item}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {!isNewConversation && toolSelectionTargets.length > 0 && (
+            <ToolOverrideChips
+              targets={toolSelectionTargets}
+              labelForTarget={labelForToolTarget}
+              onRemove={(target) => onToolSelectionTargetRemove?.(target)}
+            />
+          )}
+
           {isSteerMode && (
             <div className="flex min-h-5 items-center gap-2 px-5 pt-1 text-[10px] leading-none text-zinc-500 max-[640px]:px-3">
               <CornerDownRight size={12} className="flex-shrink-0" />
               <span className="truncate">
-                {input.trim() ? "Enterでステアを送信" : "AI実行中。入力するとステアになります"}
+                {effectiveComposerHelp}
               </span>
               {steerBusy && <Loader2 size={11} className="flex-shrink-0 animate-spin" />}
               {steerQueuedCount > 0 && (
@@ -2986,6 +3156,7 @@ export function ComposerRenderer({
             ref={fileInputRef}
             type="file"
             multiple
+            disabled={!templateAllowsFileAttachments}
             className="hidden"
             onChange={(event) => {
               void attachFiles(event.target.files).finally(() => {

@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { Hand, Loader2 } from "lucide-react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
+import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
+import { AdaptiveRuntimePage } from "./adaptive";
+import { ambientTriggerClient, type AmbientRoutingConfig } from "./ambient/ambientTriggerClient";
+import { publishAmbientFinalAnswer } from "./ambient/finalAnswerBridge";
 import { AuthorityApprovalNotice } from "./components/AuthorityApprovalNotice";
 import { AuthorityApprovalWindow } from "./components/AuthorityApprovalWindow";
 import { CodingCockpit } from "./components/coding/CodingCockpit";
 import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
+import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
+import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -17,12 +25,22 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, defaultspackApiFetch, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type SettingsSection, type ShellRegion, type ShellRenderer, type SidebarAction, type SidebarItem, type UICatalog } from "./lib/api";
-import { authorityApprovalTitle, pendingAuthorityApproval } from "./lib/authorityApproval";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type ShellRegion, type ShellRenderer, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
+import type { ConversationToolPreferences } from "./features/tools/types";
+import { useToolSelectionController } from "./features/tools/useToolSelectionController";
+import {
+  AUTHORITY_WAITING_TEXT,
+  authorityApprovalTitle,
+  pendingAuthorityApproval,
+  sanitizeAssistantAuthorityBoilerplate,
+} from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
+import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
@@ -30,12 +48,14 @@ import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
 import { boundedDurationLabel } from "./lib/duration";
-import { openAuthorityApprovalWindow } from "./lib/desktopApproval";
+import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
+import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
 import { hasShellRegion, shellRegionsForSlot, shellRendererForRegion } from "./lib/uiShell";
@@ -55,9 +75,11 @@ import {
   toggleAgentStackToolOverride,
   type AgentStackConversationState,
 } from "./lib/agentStack";
+import { promptResources } from "./features/prompts/resources/promptResources";
 import { resolveDefaultspackRenderers } from "./renderers/defaultspackRenderers";
 import { loadTrustedRenderer, RendererBoundary } from "./renderers/trustedRendererLoader";
 import type { AppMode, AttachedFile, ChatHeaderAgentStackControls, ChatUiMessage, CodingContext, ComposerExtensionItem, ComposerModelStatusIndicator, ComposerSkillItem, ContextUsageInfo, DroppedWidget } from "./renderers/types";
+import { LayerPortal } from "./ui/layers/LayerPortal";
 
 type ComposerCandidateMenuState = {
   mode: "model";
@@ -65,8 +87,16 @@ type ComposerCandidateMenuState = {
   candidates: ModelCommandCandidate[];
 } | null;
 
-type WorkspacePanelMode = "composer" | "calendar";
 type BackendConnectionState = "online" | "degraded" | "offline";
+
+const AMBIENT_ROUTING_SETTING_KEYS: Record<string, keyof AmbientRoutingConfig> = {
+  "ambient.routing.mode": "mode",
+  "ambient.routing.model": "model",
+  "ambient.routing.group_enabled": "group_enabled",
+  "ambient.routing.group_id": "group_id",
+  "ambient.routing.group_title": "group_title",
+  "ambient.routing.ai_send_approval_required": "ai_send_approval_required",
+};
 
 type PendingNewTaskContext = {
   groupId?: string;
@@ -107,6 +137,67 @@ type CalendarSettings = {
   timeSlotMinutes: 15 | 30 | 60;
   weekStart: "sunday" | "monday";
 };
+
+type SubmitOverride = {
+  input: string;
+  attachments: AttachedFile[];
+  droppedWidgets: DroppedWidget[];
+  toolSelectionRequest?: ToolSelectionRequest;
+  skipReview?: boolean;
+};
+
+function toolIdsFromSelectionRequest(request: ToolSelectionRequest): string[] {
+  const ids: string[] = [];
+  for (const target of request.include ?? []) {
+    if (typeof target === "string") {
+      if (target.trim()) ids.push(target.trim());
+      continue;
+    }
+    const structured = target as ToolTarget;
+    if (structured.kind === "tool" && structured.id.trim()) ids.push(structured.id.trim());
+  }
+  return [...new Set(ids)];
+}
+
+function parseConversationToolPreferences(metadata: unknown): ConversationToolPreferences {
+  const source = metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).tool_preferences
+    : null;
+  const raw = source && typeof source === "object" && !Array.isArray(source)
+    ? source as Record<string, unknown>
+    : {};
+  const mode = typeof raw.mode === "string" && ["auto", "review", "manual", "none"].includes(raw.mode)
+    ? raw.mode as ConversationToolPreferences["mode"]
+    : undefined;
+  return {
+    mode,
+    include: normalizeConversationToolTargets(raw.include),
+    exclude: normalizeConversationToolTargets(raw.exclude),
+  };
+}
+
+function normalizeConversationToolTargets(value: unknown): ToolTarget[] {
+  if (!Array.isArray(value)) return [];
+  const targets: ToolTarget[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    let target: ToolTarget | null = null;
+    if (typeof item === "string" && item.trim()) {
+      target = { kind: "tool", id: item.trim() };
+    } else if (item && typeof item === "object") {
+      const raw = item as Record<string, unknown>;
+      const kind = raw.kind === "service" ? "service" : raw.kind === "tool" ? "tool" : null;
+      const id = typeof raw.id === "string" ? raw.id.trim() : "";
+      if (kind && id) target = { kind, id };
+    }
+    if (!target) continue;
+    const key = `${target.kind}:${target.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    targets.push(target);
+  }
+  return targets;
+}
 
 type CalendarCell = {
   col: number;
@@ -418,6 +509,136 @@ function withAugmentedSettingsSections(sections: SettingsSection[]): SettingsSec
 
 function withAugmentedSettingsValues(values: Record<string, Record<string, unknown>>): Record<string, Record<string, unknown>> {
   return withAgentStackSettingsValues(withCalendarSettingsValues(values));
+}
+
+type ExternalIoTemplateRecord = Record<string, unknown>;
+
+const fallbackExternalIoTemplates: ExternalIoTemplateRecord[] = [
+  {
+    id: "line.input.default",
+    direction: "input",
+    provider: "line",
+    input_profile_id: "line.default",
+    endpoint: { id: "line-main", route: "/api/integrations/line/webhook" },
+  },
+  {
+    id: "line.input.computer_use",
+    direction: "input",
+    provider: "line",
+    input_profile_id: "line.computer_use",
+    endpoint: { id: "line-main", route: "/api/integrations/line/webhook" },
+    response: { mode: "computer_use_line_biz" },
+    response_prompt: { preset: "computer_use_line_biz" },
+  },
+  {
+    id: "discord.input.default",
+    direction: "input",
+    provider: "discord",
+    input_profile_id: "discord.default",
+    endpoint: { id: "discord-main", route: "/api/integrations/discord/interactions" },
+  },
+  {
+    id: "slack.input.default",
+    direction: "input",
+    provider: "slack",
+    input_profile_id: "slack.default",
+    endpoint: { id: "slack-main", route: "/api/integrations/slack/events" },
+  },
+  {
+    id: "generic.input.default",
+    direction: "input",
+    provider: "generic",
+    input_profile_id: "generic.webhook.default",
+    endpoint: { id: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
+  },
+  {
+    id: "line.output.default",
+    direction: "output",
+    provider: "line",
+    output_profile_id: "line.default",
+    response: { mode: "reply_to_origin" },
+  },
+  {
+    id: "discord.output.bot_channel",
+    direction: "output",
+    provider: "discord",
+    output_profile_id: "discord.bot_channel",
+    response: { mode: "discord_bot_channel" },
+  },
+  {
+    id: "discord.output.webhook",
+    direction: "output",
+    provider: "discord",
+    output_profile_id: "discord.webhook",
+    response: { mode: "discord_webhook_url" },
+  },
+  {
+    id: "slack.output.default",
+    direction: "output",
+    provider: "slack",
+    output_profile_id: "slack.default",
+    response: { mode: "slack_channel" },
+  },
+  {
+    id: "generic.output.webhook",
+    direction: "output",
+    provider: "generic",
+    output_profile_id: "generic.webhook",
+    response: { mode: "generic_webhook" },
+  },
+];
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function externalIoTemplateItems(catalog: UICatalog | null, direction: "input" | "output"): ExternalIoTemplateRecord[] {
+  const catalogItems = Array.isArray(catalog?.external_io_templates) ? catalog.external_io_templates : [];
+  const items = catalogItems.length ? catalogItems : fallbackExternalIoTemplates;
+  return items.filter((item) => String(item.direction ?? "") === direction);
+}
+
+function externalIoTemplateById(catalog: UICatalog | null, direction: "input" | "output", templateId: string): ExternalIoTemplateRecord | null {
+  return externalIoTemplateItems(catalog, direction).find((item) => String(item.id ?? "") === templateId) ?? null;
+}
+
+function firstExternalIoTemplateForProvider(catalog: UICatalog | null, direction: "input" | "output", provider: string): ExternalIoTemplateRecord | null {
+  return externalIoTemplateItems(catalog, direction).find((item) => (
+    String(item.provider ?? "") === provider && String(item.origin ?? "") !== "custom"
+  )) ?? null;
+}
+
+function externalIoTemplateRoute(template: ExternalIoTemplateRecord | null): string {
+  const endpoint = recordValue(template?.endpoint);
+  const route = String(endpoint.route ?? "").trim();
+  if (route) return route;
+  const routes = Array.isArray(endpoint.routes) ? endpoint.routes : [];
+  return String(routes[0] ?? "").trim();
+}
+
+function externalIoInputEndpointId(template: ExternalIoTemplateRecord | null, provider: string): string {
+  const endpoint = recordValue(template?.endpoint);
+  return String(endpoint.id ?? "").trim() || `${provider}-main`;
+}
+
+function externalIoOutputMode(template: ExternalIoTemplateRecord | null): string {
+  const response = recordValue(template?.response);
+  const defaultResponse = recordValue(template?.default_response);
+  return String(
+    template?.output_send_mode
+      ?? template?.send_mode
+      ?? response.mode
+      ?? defaultResponse.mode
+      ?? "",
+  ).trim();
+}
+
+function externalIoTemplateForResponsePreset(catalog: UICatalog | null, preset: string): ExternalIoTemplateRecord | null {
+  return externalIoTemplateItems(catalog, "input").find((item) => {
+    const response = recordValue(item.response);
+    const responsePrompt = recordValue(item.response_prompt);
+    return String(response.mode ?? "") === preset || String(responsePrompt.preset ?? "") === preset;
+  }) ?? null;
 }
 
 function calendarDateKey(date: Date): string {
@@ -1424,6 +1645,9 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
   const pendingAuthorityApproval = chatMessageMetadataRecord(metadata.pendingAuthorityApproval ?? metadata.pending_authority_approval);
   const authorityFollowup = chatMessageMetadataRecord(metadata.authority_followup ?? metadata.authorityFollowup);
   const chatDisplay = chatMessageMetadataRecord(metadata.chat_display ?? metadata.chatDisplay);
+  const promptUsage = metadata.prompt_usage && typeof metadata.prompt_usage === "object" && !Array.isArray(metadata.prompt_usage)
+    ? metadata.prompt_usage as NonNullable<ChatUiMessage["metadata"]>["promptUsage"]
+    : undefined;
   const attachedToolCount = Number(metadata.attached_tool_count ?? 0);
   const thinkingDuration = String(timing?.thinking_duration_label ?? "")
     || boundedDurationLabel(timing?.thinking_started_at, timing?.completed_at);
@@ -1456,6 +1680,7 @@ function toUiMessage(message: ChatMessage, profile?: ModelProfile | null): ChatU
             : undefined,
           pendingAuthorityApproval,
           ...displayMetadata,
+          promptUsage,
         },
   };
 }
@@ -2139,7 +2364,12 @@ type ParsedSlashCommandInput = {
   raw: string;
 };
 
-export function parseSlashCommandInput(input: string, commands: ComposerCommandItem[]): ParsedSlashCommandInput | null {
+export function parseSlashCommandInput(
+  input: string,
+  commands: ComposerCommandItem[],
+  options: { enabled?: boolean } = {},
+): ParsedSlashCommandInput | null {
+  if (options.enabled === false) return null;
   const trimmed = input.trim();
   if (!trimmed.startsWith("/") || trimmed.startsWith("//")) return null;
   const body = trimmed.slice(1).trim();
@@ -2244,7 +2474,7 @@ export function resolveUltraYoloModeState(
 }
 
 export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record<string, unknown>>): boolean {
-  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, true);
+  return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
 function commandSearchText(command: ComposerCommandItem): string {
@@ -2305,6 +2535,7 @@ function ChatApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
+  const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
     createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
   ]);
@@ -2341,6 +2572,7 @@ function ChatApp() {
   const [codingDirectory, setCodingDirectory] = useState(".");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const [droppedWidgets, setDroppedWidgets] = useState<DroppedWidget[]>([]);
+  const [storedSelectedToolIds, setStoredSelectedToolIds] = useLocalStorage<string[]>("rumi-selected-tool-ids", []);
   const pendingStorageKey = "rumi-pending-chat-requests";
   const [pendingRequests, setPendingRequests] = useLocalStorage<Record<string, PendingChatRequest>>(pendingStorageKey, {});
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -2422,6 +2654,7 @@ function ChatApp() {
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
+  const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
   useEffect(() => {
@@ -2436,6 +2669,10 @@ function ChatApp() {
       };
     }));
   }, [activeChatTitle, activeConversationId, activeWorkspaceTabId]);
+  const activePromptUsage = latestActiveMetadata.prompt_usage && typeof latestActiveMetadata.prompt_usage === "object" && !Array.isArray(latestActiveMetadata.prompt_usage)
+    ? latestActiveMetadata.prompt_usage as PromptUsageSummary
+    : null;
+  const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -2443,10 +2680,55 @@ function ChatApp() {
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
   const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
+  const composerMode = mode as ComposerCommandMode;
+  const templateAiInputMetadata = useMemo(
+    () => selectTemplateAiInput(catalog, composerMode),
+    [catalog, composerMode],
+  );
+  const composerInputMetadata = useMemo(
+    () => selectTemplateComposerInput(catalog, composerMode, templateAiInputMetadata),
+    [catalog, composerMode, templateAiInputMetadata],
+  );
+  const slashCommandsEnabled = useMemo(
+    () => templateFeatureFlagEnabled(composerInputMetadata, "slash_commands", true),
+    [composerInputMetadata],
+  );
+  const templateToolPolicyMetadata = useMemo(
+    () => selectTemplateToolPolicy(catalog, composerMode, templateAiInputMetadata),
+    [catalog, composerMode, templateAiInputMetadata],
+  );
+  const activeTemplateToolPolicy = useMemo(
+    () => templateToolPolicySettings(templateToolPolicyMetadata),
+    [templateToolPolicyMetadata],
+  );
+  const templatePolicyReferencePayload = useMemo(
+    () => templateToolPolicyReferencePayload(templateAiInputMetadata, templateToolPolicyMetadata),
+    [templateAiInputMetadata, templateToolPolicyMetadata],
+  );
+  const templateAiInputParams = useMemo(
+    () => templateAiInputParamsPayload(templateAiInputMetadata),
+    [templateAiInputMetadata],
+  );
   const disabledToolIds = settingList(settingsValues.tools?.disabled_tool_ids);
   const hiddenToolIds = settingList(settingsValues.tools?.hidden_tool_ids);
-  const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
+  const templateDisabledToolIds = useMemo(
+    () => [...new Set([
+      ...activeTemplateToolPolicy.defaultDisabledToolIds,
+      ...activeTemplateToolPolicy.deniedToolIds,
+    ])],
+    [activeTemplateToolPolicy.defaultDisabledToolIds, activeTemplateToolPolicy.deniedToolIds],
+  );
+  const effectiveDisabledToolIds = useMemo(
+    () => [...new Set([...disabledToolIds, ...templateDisabledToolIds])],
+    [disabledToolIds, templateDisabledToolIds],
+  );
+  const disabledToolIdSet = useMemo(() => new Set(effectiveDisabledToolIds), [effectiveDisabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
+  const templateAllowedToolIdSet = useMemo(
+    () => new Set(activeTemplateToolPolicy.allowedToolIds),
+    [activeTemplateToolPolicy.allowedToolIds],
+  );
+  const templateHasToolAllowlist = activeTemplateToolPolicy.hasAllowedToolRestriction;
   const sidebarItems: SidebarItem[] = useMemo(
     () => rawSidebarItems.filter((item) => item.category !== "tool" || !hiddenToolIdSet.has(item.id)),
     [hiddenToolIdSet, rawSidebarItems],
@@ -2468,9 +2750,21 @@ function ChatApp() {
   const deepthinkEnabled = parseCommandBoolean(settingsValues.models?.deepthink_enabled, false);
   const contextUsage = contextUsageFor(activeConversation, activeProfile);
   const composerExtensions = useMemo(
-    () => composerExtensionItems(sidebarItems).filter((item) => !disabledToolIdSet.has(item.id)),
-    [disabledToolIdSet, sidebarItems],
+    () => composerExtensionItems(sidebarItems)
+      .filter((item) => !disabledToolIdSet.has(item.id))
+      .filter((item) => !templateHasToolAllowlist || templateAllowedToolIdSet.has(item.id)),
+    [disabledToolIdSet, sidebarItems, templateAllowedToolIdSet, templateHasToolAllowlist],
   );
+  const templateComposerWidgets = useMemo(
+    () => templateComposerWidgetsForInput(catalog, templateAiInputMetadata, composerInputMetadata, composerExtensions),
+    [catalog, templateAiInputMetadata, composerInputMetadata, composerExtensions],
+  );
+  const activeDroppedWidgets = useMemo(() => {
+    const byId = new Map<string, DroppedWidget>();
+    for (const widget of templateComposerWidgets) byId.set(widget.id, widget);
+    for (const widget of droppedWidgets) byId.set(widget.id, widget);
+    return Array.from(byId.values());
+  }, [droppedWidgets, templateComposerWidgets]);
   const composerSkills = useMemo<ComposerSkillItem[]>(() => (
     (catalog?.skills ?? []).map((skill) => ({
       id: skill.id,
@@ -2508,13 +2802,28 @@ function ChatApp() {
     ),
     [resolvedAgentStackProfiles],
   );
-  const selectedTools = useMemo(() => applyAgentStackToolOverrides(
-    mergedAgentStackProfiles.toolIds,
-    resolvedAgentStackSelection.toolOverrides,
-  ).map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
-    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [composerExtensions, mergedAgentStackProfiles.toolIds, resolvedAgentStackSelection.toolOverrides]);
+  const agentStackToolIds = useMemo(
+    () => applyAgentStackToolOverrides(
+      mergedAgentStackProfiles.toolIds,
+      resolvedAgentStackSelection.toolOverrides,
+    ),
+    [mergedAgentStackProfiles.toolIds, resolvedAgentStackSelection.toolOverrides],
+  );
+  const selectedTools = useMemo(() => [...new Set([...agentStackToolIds, ...storedSelectedToolIds])]
+    .map((toolId) => composerExtensions.find((tool) => tool.id === toolId))
+    .filter((tool): tool is ComposerExtensionItem => Boolean(tool)), [agentStackToolIds, composerExtensions, storedSelectedToolIds]);
   const selectedToolIds = useMemo(() => selectedTools.map((tool) => tool.id), [selectedTools]);
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
+  const activeConversationToolPreferences = useMemo(
+    () => parseConversationToolPreferences(activeConversation?.metadata),
+    [activeConversation?.id, activeConversation?.metadata],
+  );
+  const toolSelectionController = useToolSelectionController({
+    settingsValues,
+    selectedToolIds,
+    setSelectedToolIds: setStoredSelectedToolIds,
+    conversationPreferences: activeConversationToolPreferences,
+  });
   const pendingRequest = activeConversationId ? pendingRequests[activeConversationId] : null;
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
@@ -2523,14 +2832,41 @@ function ChatApp() {
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
   const rawRuntimeApproval = pendingRuntimeApproval(messages);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
-  const authorityApproval = !ultraYoloMode && rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
+  const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
     : null;
-  const runtimeApproval = !ultraYoloMode && rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
+  const runtimeApproval = rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
   const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
+  const latestAssistantFinal = useMemo(() => {
+    if (isGenerating || isConversationPending) return null;
+    for (const message of [...messages].reverse()) {
+      if (message.role === "user") return null;
+      if (message.role !== "agent") continue;
+      const rawText = message.rawText.trim();
+      if (!rawText) continue;
+      if (rawText === AUTHORITY_WAITING_TEXT && pendingAuthorityApproval([message])) return null;
+      const text = sanitizeAssistantAuthorityBoilerplate(rawText).trim();
+      if (!text) continue;
+      return {
+        messageId: message.id,
+        createdAt: message.createdAt ?? 0,
+        text,
+      };
+    }
+    return null;
+  }, [isConversationPending, isGenerating, messages]);
+
+  useEffect(() => {
+    if (!latestAssistantFinal) return;
+    publishAmbientFinalAnswer(latestAssistantFinal.text, activeConversationId, {
+      messageId: latestAssistantFinal.messageId,
+      messageCreatedAt: latestAssistantFinal.createdAt,
+      updatedAt: latestAssistantFinal.createdAt || Date.now(),
+    });
+  }, [activeConversationId, latestAssistantFinal]);
 
   useEffect(() => {
     if (!authorityApproval) {
@@ -2550,7 +2886,7 @@ function ChatApp() {
         {
           id: "ultra-yolo",
           name: "Ultra YOLO",
-          description: "Ultra YOLO が ON です。承認が必要な coding / browser 操作まで自動許可されます。",
+          description: "Ultra YOLO が ON です。高権限の実行方針を要求しますが、承認カードとサーバー側の安全ポリシーは維持されます。",
           svgMarkup: dangerShieldSvg,
           tone: "danger",
           action: {
@@ -2623,6 +2959,12 @@ function ChatApp() {
   }, [messageToolPreviews, previews]);
   const canShowCanvas = hasCanvasItems(canvasPreviews, canvasMemo) || liveBrowserState.state_revision >= 0;
   const effectiveShowPreview = showPreview && canShowCanvas;
+  const effectiveCommandCatalog = useMemo(() => (
+    mergeRegisteredSlashCommands(
+      commandCatalog,
+      registeredSlashCommandsFromSettings(settingsValues.commands?.registered_slash_commands),
+    )
+  ), [commandCatalog, settingsValues.commands?.registered_slash_commands]);
 
   useEffect(() => {
     const preview = canvasPreviews.find(isHumanOperatorCanvasPreview);
@@ -2637,11 +2979,12 @@ function ChatApp() {
   }, [canvasPreviews]);
 
   const composerCommands = useMemo(() => {
+    if (!slashCommandsEnabled) return [];
     const showAdvanced = settingsValues.commands?.show_advanced_commands === true;
     const fastCandidate = fastCandidateForProfile(activeProfile, selectableModelProfiles);
     const priceLowCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "low");
     const priceHighCandidate = priceCandidateForProfile(activeProfile, selectableModelProfiles, "high");
-    return commandCatalog
+    return effectiveCommandCatalog
       .filter((command) => command.visibility !== "hidden")
       .filter((command) => showAdvanced || command.visibility === "default")
       .filter((command) => !command.modes?.length || command.modes.includes(mode as ComposerCommandMode))
@@ -2653,13 +2996,13 @@ function ChatApp() {
         active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
         enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
       }));
-  }, [activeProfile, commandCatalog, deepthinkEnabled, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, ultraYoloMode, yoloMode]);
+  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace;
+  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -2701,6 +3044,30 @@ function ChatApp() {
     return () => media.removeEventListener("change", applyMobileHistoryLayout);
   }, [setIsHistoryMinimized]);
 
+  useEffect(() => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    setStoredSelectedToolIds((current) => {
+      const next = current.filter((toolId) => validIds.has(toolId));
+      return next.length === current.length ? current : next;
+    });
+  }, [composerExtensions, setStoredSelectedToolIds]);
+
+  useEffect(() => {
+    const validIds = new Set(composerExtensions.map((tool) => tool.id));
+    const defaults = activeTemplateToolPolicy.defaultEnabledToolIds.filter((toolId) => validIds.has(toolId));
+    if (defaults.length === 0) return;
+    setStoredSelectedToolIds((current) => {
+      let changed = false;
+      const next = [...current];
+      for (const toolId of defaults) {
+        if (next.includes(toolId)) continue;
+        next.push(toolId);
+        changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [activeTemplateToolPolicy.defaultEnabledToolIds, composerExtensions, setStoredSelectedToolIds]);
+
   const updatePendingRequests = (updater: (current: Record<string, PendingChatRequest>) => Record<string, PendingChatRequest>) => {
     setPendingRequests((current) => {
       const next = updater(current);
@@ -2728,8 +3095,12 @@ function ChatApp() {
     try {
       const result = await api.listCodingWorkspaces();
       setCodingWorkspaces(result.workspaces);
-      setSelectedCodingWorkspaceId((current) => current ?? result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null);
-      return result;
+      let selectedWorkspaceId = result.selected_workspace_id ?? result.workspaces[0]?.workspace_id ?? null;
+      setSelectedCodingWorkspaceId((current) => {
+        selectedWorkspaceId = current ?? selectedWorkspaceId;
+        return selectedWorkspaceId;
+      });
+      return { ...result, selected_workspace_id: selectedWorkspaceId };
     } catch {
       setCodingWorkspaces([]);
       return { workspaces: [], selected_workspace_id: null };
@@ -2748,8 +3119,8 @@ function ChatApp() {
     ?? undefined;
   const effectiveConsoleKey = `${effectiveGroupId ?? "ungrouped"}:${effectiveWorkspaceId ?? "no-workspace"}`;
 
-  const loadCodingContext = useCallback(async () => {
-    const workspaceId = effectiveWorkspaceId;
+  const loadCodingContext = useCallback(async (workspaceIdOverride?: string | null) => {
+    const workspaceId = workspaceIdOverride ?? effectiveWorkspaceId;
     try {
       const [result, branchInfo] = await Promise.all([
         api.getCodingContext({ directory: codingDirectory, workspace_id: workspaceId }),
@@ -2819,7 +3190,7 @@ function ChatApp() {
 
   useEffect(() => {
     if (mode === "coding") {
-      void loadCodingWorkspaces().then(() => loadCodingContext());
+      void loadCodingWorkspaces().then((result) => loadCodingContext(result.selected_workspace_id ?? null));
     }
   }, [mode, loadCodingContext, loadCodingWorkspaces]);
 
@@ -2983,12 +3354,13 @@ function ChatApp() {
     } else {
       if (settingsResult.status === "rejected") console.error(settingsResult.reason);
     }
-    if (commandsResult.status === "fulfilled") {
-      setCommandCatalog(commandsResult.value.commands);
-    } else {
+    if (commandsResult.status === "rejected") {
       console.error(commandsResult.reason);
-      setCommandCatalog([]);
     }
+    setCommandCatalog(mergeComposerCommands(
+      commandsResult.status === "fulfilled" ? commandsResult.value.commands ?? [] : [],
+      nextCatalog?.commands ?? [],
+    ));
     const defaultMode = nextSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);
@@ -3450,96 +3822,88 @@ function ChatApp() {
     setSettingsValues((current) => {
       const section = settingsSections.find((item) => item.id === sectionId);
       const field = section?.fields.find((item) => item.id === fieldId);
+      const fieldType = String(field?.type ?? "");
       const sectionPatch = {
         ...(current[sectionId] ?? {}),
-        [fieldId]: field?.type === "secret" || field?.type === "api_keys" || field?.type === "external_tokens" ? "" : value,
+        [fieldId]: fieldType === "secret" || fieldType === "api_keys" || fieldType === "api_key_setup" || fieldType === "external_tokens" ? "" : value,
       };
       if (sectionId === "external_input" && fieldId === "input_provider") {
         const provider = String(value ?? "line");
-        const templateByProvider: Record<string, { template: string; profile: string; endpoint: string; route: string }> = {
-          line: { template: "line.input.default", profile: "line.default", endpoint: "line-main", route: "/api/integrations/line/webhook" },
-          discord: { template: "discord.input.default", profile: "discord.default", endpoint: "discord-main", route: "/api/integrations/discord/interactions" },
-          slack: { template: "slack.input.default", profile: "slack.default", endpoint: "slack-main", route: "/api/integrations/slack/events" },
-          generic: { template: "generic.input.default", profile: "generic.webhook.default", endpoint: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
-        };
-        const mapped = templateByProvider[provider] ?? templateByProvider.line;
-        sectionPatch.input_template_id = mapped.template;
-        sectionPatch.input_profile_id = mapped.profile;
-        sectionPatch.input_endpoint_id = mapped.endpoint;
-        sectionPatch.public_url_launcher = {
-          ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
-          route_path: mapped.route,
-        };
+        const template = firstExternalIoTemplateForProvider(catalog, "input", provider)
+          ?? firstExternalIoTemplateForProvider(catalog, "input", "line");
+        if (template) {
+          const resolvedProvider = String(template.provider ?? provider);
+          sectionPatch.input_provider = resolvedProvider;
+          sectionPatch.input_template_id = String(template.id ?? "");
+          sectionPatch.input_profile_id = String(template.input_profile_id ?? `${resolvedProvider}.default`);
+          sectionPatch.input_endpoint_id = externalIoInputEndpointId(template, resolvedProvider);
+          const route = externalIoTemplateRoute(template);
+          if (route) {
+            sectionPatch.public_url_launcher = {
+              ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+              route_path: route,
+            };
+          }
+        }
       } else if (sectionId === "external_input" && fieldId === "input_template_id") {
         const templateId = String(value ?? "");
-        const inputByTemplate: Record<string, { provider: string; profile: string; endpoint: string; route: string }> = {
-          "line.input.default": { provider: "line", profile: "line.default", endpoint: "line-main", route: "/api/integrations/line/webhook" },
-          "line.input.computer_use": { provider: "line", profile: "line.computer_use", endpoint: "line-main", route: "/api/integrations/line/webhook" },
-          "discord.input.default": { provider: "discord", profile: "discord.default", endpoint: "discord-main", route: "/api/integrations/discord/interactions" },
-          "slack.input.default": { provider: "slack", profile: "slack.default", endpoint: "slack-main", route: "/api/integrations/slack/events" },
-          "generic.input.default": { provider: "generic", profile: "generic.webhook.default", endpoint: "generic-main", route: "/api/webhooks/inbound/{webhook_id}" },
-        };
-        const mapped = inputByTemplate[templateId];
-        const provider = mapped?.provider ?? (templateId.split(".")[0] || "line");
-        const routeByProvider: Record<string, string> = {
-          line: "/api/integrations/line/webhook",
-          discord: "/api/integrations/discord/interactions",
-          slack: "/api/integrations/slack/events",
-          generic: "/api/webhooks/inbound/{webhook_id}",
-        };
-        sectionPatch.input_provider = provider;
-        sectionPatch.input_profile_id = mapped?.profile ?? (provider === "discord" ? "discord.default" : provider === "slack" ? "slack.default" : provider === "generic" ? "generic.webhook.default" : "line.default");
-        sectionPatch.input_endpoint_id = mapped?.endpoint ?? `${provider}-main`;
-        sectionPatch.public_url_launcher = {
-          ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
-          route_path: mapped?.route ?? routeByProvider[provider] ?? routeByProvider.line,
-        };
+        const template = externalIoTemplateById(catalog, "input", templateId);
+        if (template) {
+          const provider = String(template.provider ?? (templateId.split(".")[0] || "line"));
+          sectionPatch.input_provider = provider;
+          sectionPatch.input_profile_id = String(template.input_profile_id ?? `${provider}.default`);
+          sectionPatch.input_endpoint_id = externalIoInputEndpointId(template, provider);
+          const route = externalIoTemplateRoute(template);
+          if (route) {
+            sectionPatch.public_url_launcher = {
+              ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+              route_path: route,
+            };
+          }
+        }
       } else if (sectionId === "external_input" && fieldId === "input_response_preset") {
         const preset = String(value ?? "");
-        if (preset === "computer_use_line_biz") {
-          sectionPatch.input_provider = "line";
-          sectionPatch.input_template_id = "line.input.computer_use";
-          sectionPatch.input_profile_id = "line.computer_use";
-          sectionPatch.input_endpoint_id = "line-main";
-          sectionPatch.public_url_launcher = {
-            ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
-            route_path: "/api/integrations/line/webhook",
-          };
+        const template = externalIoTemplateForResponsePreset(catalog, preset);
+        if (template) {
+          const provider = String(template.provider ?? "line");
+          sectionPatch.input_provider = provider;
+          sectionPatch.input_template_id = String(template.id ?? "");
+          sectionPatch.input_profile_id = String(template.input_profile_id ?? `${provider}.default`);
+          sectionPatch.input_endpoint_id = externalIoInputEndpointId(template, provider);
+          const route = externalIoTemplateRoute(template);
+          if (route) {
+            sectionPatch.public_url_launcher = {
+              ...((current.external_input?.public_url_launcher as Record<string, unknown> | undefined) ?? {}),
+              route_path: route,
+            };
+          }
         }
       } else if (sectionId === "external_output" && fieldId === "output_provider") {
         const provider = String(value ?? "line");
-        const templateByProvider: Record<string, { template: string; profile: string; mode: string }> = {
-          line: { template: "line.output.default", profile: "line.default", mode: "reply_to_origin" },
-          discord: { template: "discord.output.bot_channel", profile: "discord.bot_channel", mode: "discord_bot_channel" },
-          slack: { template: "slack.output.default", profile: "slack.default", mode: "slack_channel" },
-          generic: { template: "generic.output.webhook", profile: "generic.webhook", mode: "generic_webhook" },
-          web: { template: "generic.output.webhook", profile: "generic.webhook", mode: "web_local" },
-        };
-        const mapped = templateByProvider[provider] ?? templateByProvider.line;
-        sectionPatch.output_template_id = mapped.template;
-        sectionPatch.output_profile_id = mapped.profile;
-        sectionPatch.output_send_mode = mapped.mode;
+        const template = firstExternalIoTemplateForProvider(catalog, "output", provider)
+          ?? firstExternalIoTemplateForProvider(catalog, "output", "line");
+        if (template) {
+          const resolvedProvider = String(template.provider ?? provider);
+          sectionPatch.output_provider = resolvedProvider;
+          sectionPatch.output_template_id = String(template.id ?? "");
+          sectionPatch.output_profile_id = String(template.output_profile_id ?? `${resolvedProvider}.default`);
+          sectionPatch.output_send_mode = externalIoOutputMode(template) || String(sectionPatch.output_send_mode ?? "reply_to_origin");
+        }
       } else if (sectionId === "external_output" && fieldId === "output_template_id") {
         const templateId = String(value ?? "");
-        const outputByTemplate: Record<string, { provider: string; profile: string; mode: string }> = {
-          "line.output.default": { provider: "line", profile: "line.default", mode: "reply_to_origin" },
-          "discord.output.bot_channel": { provider: "discord", profile: "discord.bot_channel", mode: "discord_bot_channel" },
-          "discord.output.webhook": { provider: "discord", profile: "discord.webhook", mode: "discord_webhook_url" },
-          "slack.output.default": { provider: "slack", profile: "slack.default", mode: "slack_channel" },
-          "generic.output.webhook": { provider: "generic", profile: "generic.webhook", mode: "generic_webhook" },
-        };
-        const mapped = outputByTemplate[templateId];
-        if (mapped) {
-          sectionPatch.output_provider = mapped.provider;
-          sectionPatch.output_profile_id = mapped.profile;
-          sectionPatch.output_send_mode = mapped.mode;
+        const template = externalIoTemplateById(catalog, "output", templateId);
+        if (template) {
+          const provider = String(template.provider ?? (templateId.split(".")[0] || "line"));
+          sectionPatch.output_provider = provider;
+          sectionPatch.output_profile_id = String(template.output_profile_id ?? `${provider}.default`);
+          sectionPatch.output_send_mode = externalIoOutputMode(template) || String(sectionPatch.output_send_mode ?? "reply_to_origin");
         }
       }
       const next = {
         ...current,
         [sectionId]: sectionPatch,
       };
-      if (field?.type === "api_keys") {
+      if (fieldType === "api_keys" || fieldType === "api_key_setup") {
         const payload = value && typeof value === "object" ? value as Record<string, unknown> : {};
         const providerId = String(payload.provider_id ?? "").trim();
         const apiId = String(payload.api_id ?? payload.name ?? "").trim();
@@ -3616,6 +3980,16 @@ function ChatApp() {
           .then(() => refreshCatalog())
           .catch(console.error);
       } else {
+        if (sectionId === "ambient" && fieldId === "ambient.monitor.enabled") {
+          void (Boolean(value)
+            ? ambientTriggerClient.startMonitor({ voice_wake: true, gesture_pinch: true })
+            : ambientTriggerClient.stopMonitor()
+          ).catch(console.error);
+        }
+        const ambientRoutingKey = sectionId === "ambient" ? AMBIENT_ROUTING_SETTING_KEYS[fieldId] : undefined;
+        if (ambientRoutingKey) {
+          void ambientTriggerClient.configure({ [ambientRoutingKey]: value } as AmbientRoutingConfig).catch(console.error);
+        }
         void api.updateUiSettings(next).then((result) => setSettingsValues(withAugmentedSettingsValues(result.values))).catch(console.error);
       }
       return next;
@@ -3665,6 +4039,32 @@ function ChatApp() {
     setRequestedSettingsSectionId(sectionId);
     setIsSettingsOpen(true);
   }, []);
+
+  const actionApprovalMode: ActionApprovalMode = ultraYoloMode ? "full" : yoloMode ? "agent" : "ask";
+
+  const handleActionApprovalModeChange = useCallback((nextMode: ActionApprovalMode) => {
+    if (nextMode === "custom") {
+      openSettingsSection("tools");
+      return;
+    }
+    if (nextMode === "full") {
+      const nextState = resolveUltraYoloModeState(
+        {
+          yoloMode,
+          ultraYoloMode,
+          restoreYoloMode: ultraYoloRestoreYoloMode,
+        },
+        true,
+      );
+      setYoloMode(nextState.yoloMode);
+      setUltraYoloMode(nextState.ultraYoloMode);
+      setUltraYoloRestoreYoloMode(nextState.restoreYoloMode);
+      return;
+    }
+    setUltraYoloMode(false);
+    setUltraYoloRestoreYoloMode(false);
+    setYoloMode(nextMode === "agent");
+  }, [openSettingsSection, setUltraYoloMode, setUltraYoloRestoreYoloMode, setYoloMode, ultraYoloMode, ultraYoloRestoreYoloMode, yoloMode]);
 
   const handleSwitchToVisionModel = useCallback(() => {
     if (preferredVisionCandidate) {
@@ -3738,17 +4138,27 @@ function ChatApp() {
 
   const toggleSelectedTool = (item: ComposerExtensionItem) => {
     if (disabledToolIdSet.has(item.id)) {
-      setError(`${item.label || item.id} は Settings > Tools で OFF です。`);
+      setError(`${item.label || item.id} は機能と接続の権限設定でブロックされています。`);
       return;
     }
+    toolSelectionController.setTurnMode("manual");
     const enabled = !selectedToolIdSet.has(item.id);
-    const nextOverrides = toggleAgentStackToolOverride(
-      mergedAgentStackProfiles.toolIds,
-      resolvedAgentStackSelection.toolOverrides,
-      item.id,
-      enabled,
-    );
-    persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+    if (mergedAgentStackProfiles.toolIds.includes(item.id) || item.id in resolvedAgentStackSelection.toolOverrides) {
+      const nextOverrides = toggleAgentStackToolOverride(
+        mergedAgentStackProfiles.toolIds,
+        resolvedAgentStackSelection.toolOverrides,
+        item.id,
+        enabled,
+      );
+      persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+      return;
+    }
+    setStoredSelectedToolIds((current) => {
+      if (enabled) {
+        return current.includes(item.id) ? current : [...current, item.id];
+      }
+      return current.filter((selectedId) => selectedId !== item.id);
+    });
   };
 
   const runFrontendCommandAction = (
@@ -3928,8 +4338,8 @@ function ChatApp() {
   };
 
   const executeComposerCommand = async (commandId: string, rawInput = `/${commandId}`): Promise<boolean | void> => {
-    const parsed = parseSlashCommandInput(rawInput, commandCatalog) ?? {
-      command: commandCatalog.find((command) => command.id === commandId || command.name === commandId),
+    const parsed = parseSlashCommandInput(rawInput, effectiveCommandCatalog) ?? {
+      command: effectiveCommandCatalog.find((command) => command.id === commandId || command.name === commandId),
       args: {},
       raw: rawInput,
     };
@@ -3939,6 +4349,11 @@ function ChatApp() {
     }
     try {
       setError(null);
+      if (isRegisteredSlashCommand(parsed.command)) {
+        const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
+        runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
+        return true;
+      }
       const commandArgs = { ...parsed.args };
       if (parsed.command.id === "think" && commandArgs.level && activeProfile) {
         commandArgs.scope = "profile";
@@ -3950,8 +4365,9 @@ function ChatApp() {
         conversation_id: activeConversationId,
         mode: mode as ComposerCommandMode,
       });
+      const feedbackMessage = composerCommandResultMessage(result);
       if (result.requires_approval) {
-        setError(result.message ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
+        setError(feedbackMessage ?? `/${parsed.command.name} は approval center 経由で実行してください。`);
         return;
       }
       if (isModelCommand(parsed.command)) {
@@ -3961,20 +4377,20 @@ function ChatApp() {
             query: String(result.args?.query ?? commandArgs.query ?? "").trim(),
             candidates: Array.isArray(result.candidates) ? result.candidates : [],
           });
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           return false;
         }
         if (result.action === "open_model_picker") {
           setComposerCandidateMenu(null);
           setModelPickerRequestId((value) => value + 1);
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           return true;
         }
         if (result.executed) {
           const selectedProfileId = selectedModelProfileId(result.selected_model);
           setComposerCandidateMenu(null);
           setInput("");
-          if (result.message) setError(result.message);
+          if (feedbackMessage) setError(feedbackMessage);
           await refreshCatalog(selectedProfileId || undefined);
           if (activeConversationId && selectedProfileId) {
             const conversation = await api.updateConversation(activeConversationId, { model: selectedProfileId });
@@ -3998,8 +4414,8 @@ function ChatApp() {
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
       }
-      if (result.message) {
-        setError(result.message);
+      if (feedbackMessage) {
+        setError(feedbackMessage);
       }
     } catch (commandError) {
       setError(commandError instanceof Error ? commandError.message : "command execution に失敗しました。");
@@ -4007,6 +4423,7 @@ function ChatApp() {
   };
 
   const handleComposerCommand = (commandId: string, rawInput?: string) => {
+    if (!slashCommandsEnabled) return;
     void executeComposerCommand(commandId, rawInput);
   };
 
@@ -4132,15 +4549,14 @@ function ChatApp() {
     handleModeChange("coding");
     setSelectedCodingWorkspaceId(workspaceId);
     void api.selectCodingWorkspace(workspaceId)
-      .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then((selected) => loadCodingWorkspaces().then(() => loadCodingContext(selected.selected_workspace_id ?? workspaceId)))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace selection failed."));
   };
 
   const handleCodingWorkspaceTrust = (workspaceId: string) => {
     void api.trustCodingWorkspace(workspaceId)
       .then(() => loadCodingWorkspaces())
-      .then(() => loadCodingContext())
+      .then(() => loadCodingContext(workspaceId))
       .catch((workspaceError) => setError(workspaceError instanceof Error ? workspaceError.message : "workspace trust failed."));
   };
 
@@ -4155,7 +4571,7 @@ function ChatApp() {
       const selected = await api.selectCodingWorkspace(created.workspace.workspace_id);
       setSelectedCodingWorkspaceId(selected.selected_workspace_id);
       await loadCodingWorkspaces();
-      await loadCodingContext();
+      await loadCodingContext(selected.selected_workspace_id);
       return created.workspace;
     } catch (workspaceError) {
       setError(workspaceError instanceof Error ? workspaceError.message : "workspace creation failed.");
@@ -4166,6 +4582,12 @@ function ChatApp() {
   const handleDirectorySelect = async () => {
     const selected = await api.selectDirectory("New Group の保存先フォルダを選択");
     return selected.cancelled ? null : selected.path;
+  };
+
+  const handleCodingWorkspacePickCreate = async () => {
+    const selected = await handleDirectorySelect();
+    if (!selected) return null;
+    return handleCodingWorkspaceCreate(selected);
   };
 
   const handlePrepareChatGroupStorage = async (rootPath: string) => {
@@ -4189,19 +4611,24 @@ function ChatApp() {
       const toolId = widget.sourceItemId || widget.id;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
       if (item) {
-        const nextOverrides = toggleAgentStackToolOverride(
-          mergedAgentStackProfiles.toolIds,
-          resolvedAgentStackSelection.toolOverrides,
-          item.id,
-          true,
-        );
-        persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+        toolSelectionController.setTurnMode("manual");
+        if (mergedAgentStackProfiles.toolIds.includes(item.id) || item.id in resolvedAgentStackSelection.toolOverrides) {
+          const nextOverrides = toggleAgentStackToolOverride(
+            mergedAgentStackProfiles.toolIds,
+            resolvedAgentStackSelection.toolOverrides,
+            item.id,
+            true,
+          );
+          persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+        } else {
+          setStoredSelectedToolIds((current) => current.includes(item.id) ? current : [...current, item.id]);
+        }
       }
     }
   };
 
   const handleWidgetToggle = (widgetId: string) => {
-    const widget = droppedWidgets.find((candidate) => candidate.id === widgetId);
+    const widget = activeDroppedWidgets.find((candidate) => candidate.id === widgetId);
     if (widget?.widgetKind === "tool_toggle" || widget?.type === "tool") {
       const toolId = widget.sourceItemId || widgetId;
       const item = composerExtensions.find((candidate) => candidate.id === toolId);
@@ -4217,13 +4644,28 @@ function ChatApp() {
     const validIds = new Set(composerExtensions.map((tool) => tool.id));
     const requestedIds = [...new Set(toolIds.filter((toolId) => validIds.has(toolId)))];
     if (requestedIds.length === 0) return;
-    const nextOverrides = batchAgentStackToolOverrides(
-      mergedAgentStackProfiles.toolIds,
-      resolvedAgentStackSelection.toolOverrides,
-      requestedIds,
-      enabled,
-    );
-    persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+    toolSelectionController.setTurnMode("manual");
+    const stackIds = requestedIds.filter((toolId) => (
+      mergedAgentStackProfiles.toolIds.includes(toolId)
+      || toolId in resolvedAgentStackSelection.toolOverrides
+    ));
+    if (stackIds.length) {
+      const nextOverrides = batchAgentStackToolOverrides(
+        mergedAgentStackProfiles.toolIds,
+        resolvedAgentStackSelection.toolOverrides,
+        stackIds,
+        enabled,
+      );
+      persistResolvedAgentStackState(resolvedAgentStackSelection.profileIds, nextOverrides);
+    }
+    const manualIds = requestedIds.filter((toolId) => !stackIds.includes(toolId));
+    if (manualIds.length) {
+      setStoredSelectedToolIds((current) => {
+        if (enabled) return [...new Set([...current, ...manualIds])];
+        const requestedIdSet = new Set(manualIds);
+        return current.filter((toolId) => !requestedIdSet.has(toolId));
+      });
+    }
   };
 
   const handleComposerEndpointAction = async (widget: DroppedWidget, action: Extract<ComposerWidgetAction, { type: "call_endpoint" }>) => {
@@ -4316,10 +4758,13 @@ function ChatApp() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を踏まえて続行してください。", {
         tool_choice: "required",
         tool_policy: {
+          ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...((yoloMode || ultraYoloMode) ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...mergedAgentStackProfiles.toolPolicy,
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
-          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(approvalToolIds.length ? { selected_tools: approvalToolIds } : {}),
         },
         tools: approvalToolIds.length ? approvalToolIds : undefined,
@@ -4381,9 +4826,13 @@ function ChatApp() {
       await api.sendMessage(activeConversationId, "ユーザーが許可しました。承認済みの操作を続行してください。", {
         tool_choice: "required",
         tool_policy: {
+          ...templatePolicyReferencePayload,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...mergedAgentStackProfiles.toolPolicy,
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...(approvalWorkspace.workspaceId ? { workspace_id: approvalWorkspace.workspaceId } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           selected_tools: [runtimeApproval.toolName],
         },
         tools: [runtimeApproval.toolName],
@@ -4526,6 +4975,30 @@ function ChatApp() {
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
   const mimoCodingPersonas = () => settingList(settingsValues.mimo_coding_company?.docker_personas);
+  const mimoCodingMaxToolCalls = () => {
+    const raw = settingsValues.mimo_coding_company?.max_tool_calls;
+    if (raw === null || raw === undefined || raw === "" || raw === false) return null;
+    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+  };
+  const mimoCodingMaxToolCallsPayload = () => {
+    const value = mimoCodingMaxToolCalls();
+    return value === null ? {} : { max_tool_calls: value };
+  };
+  const selectedCodingWorkspaceRecord = () => (
+    effectiveWorkspaceId
+      ? codingWorkspaces.find((workspace) => workspace.workspace_id === effectiveWorkspaceId) ?? null
+      : null
+  );
+  const mimoCodingWorkspacePayload = () => {
+    const workspace = selectedCodingWorkspaceRecord();
+    const workspaceId = workspace?.workspace_id ?? activeConversationWorkspaceContext.workspaceId ?? effectiveWorkspaceId;
+    if (!workspaceId) return {};
+    return {
+      workspace_id: workspaceId,
+      workspace_label: workspace?.label ?? activeConversationWorkspaceContext.workspaceLabel ?? null,
+      workspace_root: workspace?.root_path ?? activeConversationWorkspaceContext.workspaceRoot ?? null,
+    };
+  };
 
   const handleStartMimoCodingCompany = async () => {
     setMimoCodingBusy(true);
@@ -4536,12 +5009,14 @@ function ChatApp() {
         heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
         review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
         qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+        ...mimoCodingMaxToolCallsPayload(),
         model: preferredMimoCodingModel(),
         vision_model: preferredMimoVisionModel(),
         fast_model: preferredMimoFastModel(),
         qa_targets: mimoCodingTargets(),
         docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
         docker_personas: mimoCodingPersonas(),
+        ...mimoCodingWorkspacePayload(),
         run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
       });
       setMimoCodingStatus(status);
@@ -4560,13 +5035,13 @@ function ChatApp() {
       setMimoCodingStatus(refreshed);
       if (refreshed.conversation_id) {
         setError(null);
-        await loadConversation(refreshed.conversation_id);
+        handleHistoryClick(refreshed.conversation_id);
         return refreshed.conversation_id;
       }
       return null;
     }
     setError(null);
-    await loadConversation(mimoCodingStatus.conversation_id);
+    handleHistoryClick(mimoCodingStatus.conversation_id);
     return mimoCodingStatus.conversation_id;
   };
 
@@ -4653,12 +5128,14 @@ function ChatApp() {
           heartbeat_minutes: Math.max(1, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.heartbeat_minutes, 30))),
           review_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.review_interval_minutes, 180))),
           qa_interval_minutes: Math.max(5, Math.min(1440, settingNumber(settingsValues.mimo_coding_company?.qa_interval_minutes, 240))),
+          ...mimoCodingMaxToolCallsPayload(),
           model: preferredMimoCodingModel(),
           vision_model: preferredMimoVisionModel(),
           fast_model: preferredMimoFastModel(),
           qa_targets: mimoCodingTargets(),
           docker_worker_count: Math.max(1, Math.min(16, settingNumber(settingsValues.mimo_coding_company?.docker_worker_count, 3))),
           docker_personas: mimoCodingPersonas(),
+          ...mimoCodingWorkspacePayload(),
           run_initial_review_now: settingsValues.mimo_coding_company?.run_initial_review_now !== false,
         });
         setMimoCodingStatus(result as MimoCodingCompanyStatus);
@@ -4681,21 +5158,53 @@ function ChatApp() {
     }
   };
 
-  const handleSubmit = async (event: FormEvent) => {
-    event.preventDefault();
-    if ((!input.trim() && attachedFiles.length === 0) || isGenerating) return;
+  const handleSubmit = async (event?: FormEvent, override?: SubmitOverride) => {
+    event?.preventDefault();
+    const inputForSubmit = override?.input ?? input;
+    const attachmentsForSubmit = override?.attachments ?? attachedFiles;
+    const droppedWidgetsForSubmit = override?.droppedWidgets ?? droppedWidgets;
+    if ((!inputForSubmit.trim() && attachmentsForSubmit.length === 0) || isGenerating) return;
 
-    const commandInput = parseSlashCommandInput(input, commandCatalog);
+    const commandInput = override ? null : parseSlashCommandInput(inputForSubmit, effectiveCommandCatalog, { enabled: slashCommandsEnabled });
     if (commandInput) {
       const shouldClearInput = await executeComposerCommand(commandInput.command.id, commandInput.raw);
       if (shouldClearInput !== false) setInput("");
       return;
     }
 
-    const trimmedInput = input.trim();
+    const trimmedInput = inputForSubmit.trim();
     const userText = (trimmedInput.startsWith("//") ? trimmedInput.slice(1) : trimmedInput) || "添付ファイルを確認してください。";
-    const submittedAttachments = attachedFiles;
+    const submittedAttachments = attachmentsForSubmit;
     const wasNewConversation = isNewConversation;
+    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
+    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
+    const toolSelectionRequest = override?.toolSelectionRequest ?? toolSelectionController.buildRequest({
+      toolIds: selectedToolIds,
+      mentionedToolIds,
+    });
+    if (!override?.skipReview && toolSelectionRequest.mode === "review") {
+      setError(null);
+      try {
+        await toolSelectionController.previewReview({
+          conversationId: activeConversationId,
+          userText,
+          attachmentMetadata: submittedAttachments.map(({ name, size, type, truncated, source, sourcePath }) => ({ name, size, type, truncated, source, sourcePath })),
+          toolSelection: toolSelectionRequest,
+          model: activeProfile?.profile_id ?? preferredModel ?? null,
+          draft: {
+            input: inputForSubmit,
+            attachments: submittedAttachments,
+            droppedWidgets: droppedWidgetsForSubmit,
+          },
+        });
+        setInput("");
+        setAttachedFiles([]);
+        setDroppedWidgets([]);
+      } catch (previewError) {
+        setError(previewError instanceof Error ? previewError.message : "機能の候補を取得できませんでした。");
+      }
+      return;
+    }
     setIsGenerating(true);
     setError(null);
     if (wasNewConversation) {
@@ -4705,15 +5214,14 @@ function ChatApp() {
     setAttachedFiles([]);
     let submittedConversationId: string | null = null;
     const shouldKeepSelectedToolsAfterSend = keepSelectedToolsAfterSend(settingsValues);
-    const mentionedToolIds = toolMentionIdsFromText(userText, composerExtensions);
-    const mentionedSkillIdsFromText = skillMentionIdsFromText(userText, composerSkills);
-    const submittedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds])];
+    const requestedToolIds = [...new Set([...selectedToolIds, ...mentionedToolIds, ...toolIdsFromSelectionRequest(toolSelectionRequest)])];
+    const submittedToolIds = toolSelectionRequest.mode === "none" ? [] : requestedToolIds;
     const submittedToolIdSet = new Set(submittedToolIds);
     const composerToolById = new Map(composerExtensions.map((item) => [item.id, item]));
     const composerSkillById = new Map(composerSkills.map((item) => [item.id, item]));
-    const droppedWidgetToolIds = new Set(droppedWidgets.map((widget) => widget.sourceItemId || widget.id));
+    const droppedWidgetToolIds = new Set(droppedWidgetsForSubmit.map((widget) => widget.sourceItemId || widget.id));
     const droppedWidgetSkillIds = new Set(
-      droppedWidgets
+      droppedWidgetsForSubmit
         .filter((widget) => widget.type === "skill" || widget.widgetKind === "skill_prompt")
         .map((widget) => widget.sourceItemId || widget.id),
     );
@@ -4732,7 +5240,7 @@ function ChatApp() {
       .filter((item): item is ComposerSkillItem => Boolean(item))
       .filter((item) => !droppedWidgetSkillIds.has(item.id))
       .map((item) => composerSkillMentionWidget(item));
-    const submittedDroppedWidgets = [...droppedWidgets, ...mentionedToolWidgets, ...mentionedSkillWidgets];
+    const submittedDroppedWidgets = [...droppedWidgetsForSubmit, ...mentionedToolWidgets, ...mentionedSkillWidgets];
     const selectedToolLabels = submittedToolIds.map((toolId) => composerToolById.get(toolId)?.label || toolId);
     const activeContextForSubmit = workspaceContextFromConversation(activeConversation);
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
@@ -4790,6 +5298,13 @@ function ChatApp() {
       }
       const isOperationsMode = isOperationsConversation(conversation);
       const isMimoCodingMode = isMimoCodingConversation(conversation);
+      const workspaceIdForRuntime = workspaceIdForSubmit ?? (isMimoCodingMode ? selectedCodingWorkspaceId : null);
+      const workspaceRecordForRuntime = workspaceIdForRuntime
+        ? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForRuntime) ?? null
+        : null;
+      const workspaceLabelForRuntime = workspaceLabelForSubmit ?? workspaceRecordForRuntime?.label ?? null;
+      const workspaceRootForRuntime = workspaceRootForSubmit ?? workspaceRecordForRuntime?.root_path ?? null;
+      const shouldAttachWorkspaceToRuntime = isCodingWorkspaceSubmit || isMimoCodingMode;
       submittedConversationId = conversation.id;
       submittedConversationRuntimeId = conversation.id;
       const requestStartedAt = Date.now();
@@ -5073,27 +5588,39 @@ function ChatApp() {
             terminal_actions_require_approval: false,
             normal_status_silent: true,
             max_concurrent_children: 6,
+            ...mimoCodingMaxToolCallsPayload(),
             ...(mimoCodingModelAllowlist.length ? { model_allowlist: mimoCodingModelAllowlist } : {}),
             ...(mimoCodingToolAllowlist.length ? { tool_allowlist: mimoCodingToolAllowlist } : {}),
           }
         : {};
-      const shouldSendExplicitToolSelection = submittedToolIds.length > 0;
+      const templateRequestPayload = {
+        params: templateAiInputParams,
+        toolPolicy: {
+          ...templatePolicyReferencePayload,
+          ...(composerInputMetadata?.id ? { composer_input_id: composerInputMetadata.id } : {}),
+        },
+      };
+      const shouldSendExplicitToolSelection = toolSelectionRequest.mode === "manual" && submittedToolIds.length > 0;
 
       await api.streamMessage(conversation.id, userText, {
+        params: templateRequestPayload.params,
         thinking_level: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
         deepthink_enabled: deepthinkEnabled,
-        tool_choice: submittedToolIds.length > 0 ? "required" : undefined,
+        tool_selection: toolSelectionRequest,
         tool_policy: {
+          ...templateRequestPayload.toolPolicy,
+          action_approval_mode: actionApprovalMode,
           ...(ultraYoloMode ? { yolo_mode: true, allow_shell: true, allow_file_write: true, write_actions_require_approval: false } : {}),
           ...mergedAgentStackProfiles.toolPolicy,
+          ...(ultraYoloMode ? { full_access: true } : {}),
           ...operationsPolicy,
           ...mimoCodingPolicy,
-          ...(isCodingWorkspaceSubmit && workspaceIdForSubmit ? { workspace_id: workspaceIdForSubmit } : {}),
-          ...(disabledToolIds.length ? { disabled_tools: disabledToolIds } : {}),
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? { workspace_id: workspaceIdForRuntime } : {}),
+          ...(effectiveDisabledToolIds.length ? { disabled_tools: effectiveDisabledToolIds } : {}),
           ...(shouldSendExplicitToolSelection ? { selected_tools: submittedToolIds } : {}),
         },
         attachments: submittedAttachments,
-        tools: submittedToolIds,
+        tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
           mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
@@ -5110,11 +5637,12 @@ function ChatApp() {
             conversation_strategy: "one_agent_one_conversation",
             internal_channel: "mimo-coding-company",
           } : {}),
-          ...(isCodingWorkspaceSubmit ? {
-            workspace_id: workspaceIdForSubmit,
-            workspace_label: workspaceLabelForSubmit,
-            workspace_root: workspaceRootForSubmit,
+          ...(shouldAttachWorkspaceToRuntime && workspaceIdForRuntime ? {
+            workspace_id: workspaceIdForRuntime,
+            workspace_label: workspaceLabelForRuntime,
+            workspace_root: workspaceRootForRuntime,
           } : {}),
+          ...templateRequestPayload.toolPolicy,
           ...(mergedAgentStackProfiles.systemPrompt ? { agent_profile_system_prompt: mergedAgentStackProfiles.systemPrompt } : {}),
           ...(resolvedAgentStackSelection.profileIds.length ? { agent_stack_profile_ids: resolvedAgentStackSelection.profileIds } : {}),
           ...(activeAgentStackProfileIds.length ? { agent_stack_active_profile_ids: activeAgentStackProfileIds } : {}),
@@ -5154,6 +5682,7 @@ function ChatApp() {
           delete metadataAfterSend.agent_stack_state;
         }
       }
+      toolSelectionController.clearTurnStateAfterSend({ keepSelectedTools: shouldKeepSelectedToolsAfterSend });
       forgetPendingRequest(conversation.id);
       replaceChatIdInUrl(conversation.id, false);
 
@@ -5241,6 +5770,49 @@ function ChatApp() {
     }
   };
 
+  const handleToolReviewApprove = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.approveReview();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewNoTools = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    const request = toolSelectionController.continueWithoutTools();
+    if (!pending || !request) return;
+    void handleSubmit(undefined, {
+      input: pending.draft.input,
+      attachments: pending.draft.attachments as AttachedFile[],
+      droppedWidgets: pending.draft.droppedWidgets as DroppedWidget[],
+      toolSelectionRequest: request,
+      skipReview: true,
+    });
+  };
+
+  const handleToolReviewCancel = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    toolSelectionController.cancelReview();
+    if (!pending) return;
+    setInput(pending.draft.input);
+    setAttachedFiles(pending.draft.attachments as AttachedFile[]);
+    setDroppedWidgets(pending.draft.droppedWidgets as DroppedWidget[]);
+  };
+
+  const handleToolReviewEdit = () => {
+    const pending = toolSelectionController.state.pendingReview;
+    if (!pending) return;
+    const selectedIds = pending.decision.selected_tools.filter((toolId) => composerExtensions.some((tool) => tool.id === toolId));
+    setStoredSelectedToolIds(selectedIds);
+    toolSelectionController.setTurnMode("manual");
+  };
+
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
   const codingSidebarPanel = mode === "coding" ? (
     <CodingCockpit
@@ -5249,6 +5821,8 @@ function ChatApp() {
       selectedWorkspaceId={effectiveWorkspaceId}
       consoleScopeKey={effectiveConsoleKey}
       onWorkspaceSelect={handleCodingWorkspaceSelect}
+      onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+      onWorkspaceTrust={handleCodingWorkspaceTrust}
       onWorkspacesRefresh={() => void loadCodingWorkspaces()}
     />
   ) : null;
@@ -5344,6 +5918,15 @@ function ChatApp() {
     openKanbanScope();
   };
 
+  const handleDesktopsModeOpen = () => {
+    const existingDesktopsTab = workspaceTabs.find((tab) => tab.kind === "desktops");
+    if (existingDesktopsTab) {
+      activateWorkspaceTab(existingDesktopsTab);
+      return;
+    }
+    handleWorkspaceTabCreate("desktops");
+  };
+
   const handleKanbanScopeChange = (scope: KanbanBoardScope, label?: string | null) => {
     setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId && tab.kind === "kanban"
       ? {
@@ -5357,6 +5940,18 @@ function ChatApp() {
 
   const handleHistoryGroupKanbanOpen = (group: ChatGroup) => {
     openKanbanScope({ type: "group", id: group.id }, group.title);
+  };
+
+  const openPromptStudio = (promptId?: string) => {
+    const url = new URL(window.location.href);
+    url.pathname = "/prompts";
+    url.search = "";
+    if (activePromptProfileId) url.searchParams.set("profile_id", activePromptProfileId);
+    if (activeConversationId) url.searchParams.set("conversation_id", activeConversationId);
+    if (promptId) url.searchParams.set("prompt_id", promptId);
+    const modelProfileId = profileIdentity(activeProfile) || activeModelId;
+    if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
+    window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
@@ -5373,6 +5968,7 @@ function ChatApp() {
       belowExtensions={[]}
       skillExtensions={composerSkills}
       commands={composerCommands}
+      composerInput={composerInputMetadata}
       modelCommandCandidates={modelCommandCandidates}
       modelPickerRequestId={modelPickerRequestId}
       yoloMode={yoloMode || ultraYoloMode}
@@ -5384,8 +5980,11 @@ function ChatApp() {
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}
       attachedFiles={attachedFiles}
-      droppedWidgets={droppedWidgets}
+      droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
+      actionApprovalMode={actionApprovalMode}
+      toolSelectionTargets={toolSelectionController.state.overrideChips}
+      toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}
@@ -5394,6 +5993,12 @@ function ChatApp() {
       suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
+      onActionApprovalModeChange={handleActionApprovalModeChange}
+      onToolSelectionTargetRemove={toolSelectionController.removeTarget}
+      onToolSelectionReviewApprove={handleToolReviewApprove}
+      onToolSelectionReviewEdit={handleToolReviewEdit}
+      onToolSelectionReviewNoTools={handleToolReviewNoTools}
+      onToolSelectionReviewCancel={handleToolReviewCancel}
       onSwitchToVisionModel={handleSwitchToVisionModel}
       onExtensionSelect={handleComposerExtensionSelect}
       onCommandSelect={handleComposerCommand}
@@ -5486,6 +6091,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onMinimize={() => setIsHistoryMinimized(true)}
@@ -5514,6 +6121,8 @@ function ChatApp() {
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
               isKanbanActive={isKanbanMode}
+              onDesktopsOpen={handleDesktopsModeOpen}
+              isDesktopsActive={isDesktopsWorkspace}
               onSettingsClick={() => setIsSettingsOpen(true)}
               onChatMetadataChange={handleHistoryMetadataChange}
               onRestore={() => setIsHistoryMinimized(false)}
@@ -5584,7 +6193,9 @@ function ChatApp() {
               </div>
             )}
 
-            {isKanbanMode ? (
+            {isDesktopsWorkspace ? (
+              <DesktopMonitorWorkspace />
+            ) : isKanbanMode ? (
               <div className="flex min-h-0 flex-1 p-1.5">
                 <KanbanWorkspacePanel
                   activeConversationId={activeConversationId}
@@ -5623,6 +6234,8 @@ function ChatApp() {
                   selectedWorkspaceId={effectiveWorkspaceId}
                   consoleScopeKey={effectiveConsoleKey}
                   onWorkspaceSelect={handleCodingWorkspaceSelect}
+                  onWorkspaceCreate={() => void handleCodingWorkspacePickCreate()}
+                  onWorkspaceTrust={handleCodingWorkspaceTrust}
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
               </div>
@@ -5678,11 +6291,13 @@ function ChatApp() {
                 unknownBlockStrategy={unknownBlockStrategy}
                 showActivityInMessages={showActivityInMessages}
                 showWidgets={showWidgets}
+                showPromptUsageInMessages={showPromptUsageInMessages}
                 onSuggestionClick={(text) => setInput(text)}
                 onOpenToolPreview={(previewId) => {
                   setActivePreviewId(previewId);
                   setShowPreview(true);
                 }}
+                onLoadPromptTrace={promptResources.getTraceUsage}
               />
             )}
 
@@ -5713,7 +6328,7 @@ function ChatApp() {
                         onClick={approveBrowserAction}
                         className="h-8 flex-shrink-0 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                       >
-                        許可
+                        許可 (2)
                       </button>
                     </div>
                   </div>
@@ -5760,7 +6375,7 @@ function ChatApp() {
                           onClick={denyCodingAction}
                           className="h-8 rounded-lg border border-zinc-800 px-3 text-xs font-semibold text-zinc-400 hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-200"
                         >
-                          拒否
+                          拒否 (2)
                         </button>
                         <button
                           type="button"
@@ -5771,7 +6386,7 @@ function ChatApp() {
                           onClick={approveCodingAction}
                           className="h-8 rounded-lg bg-zinc-100 px-3 text-xs font-semibold text-zinc-950 hover:bg-white"
                         >
-                          許可
+                          許可 (3)
                         </button>
                       </div>
                     </div>
@@ -5848,9 +6463,18 @@ function ChatApp() {
             selectedProfile={activeProfile}
             toolFilterEntries={toolFilterEntries}
             runtimeCapabilitySnapshot={runtimeCapabilitySnapshot}
+            promptUsage={activePromptUsage}
+            promptProfileId={activePromptProfileId}
+            conversationId={activeConversationId}
+            showChatPromptUsage={showPromptUsageInMessages}
+            onLoadPromptActive={promptResources.getActiveSummary}
+            onTogglePromptEdge={promptResources.toggleEdge}
+            onToggleChatPromptUsage={setShowPromptUsageInMessages}
+            onOpenPromptStudio={openPromptStudio}
             yoloMode={yoloMode}
             workspaceTabs={workspaceTabs}
             activeWorkspaceTabId={activeWorkspaceTabId}
+            activeConversationId={activeConversationId}
             onSettingChange={handleSettingChange}
             onOpenSettings={() => setIsSettingsOpen(true)}
             onOpenSettingsSection={openSettingsSection}
@@ -5907,14 +6531,93 @@ function ChatApp() {
       )}
 
       {customOverlayRegions.map((region) => renderGenericShellRegion(region, "overlay"))}
+      <AmbientWindowLauncher enabled={Boolean(settingsValues.ambient?.["ambient.monitor.enabled"])} />
     </div>
     </RendererBoundary>
   );
 }
 
+function AmbientWindowLauncher({ enabled }: { enabled: boolean }) {
+  const [opening, setOpening] = useState(false);
+  const [fallbackVisible, setFallbackVisible] = useState(false);
+  if (!enabled) return null;
+
+  const openWindow = async () => {
+    if (opening) return;
+    setOpening(true);
+    setFallbackVisible(false);
+    try {
+      const opened = await openFingerRecordingWindow();
+      if (opened) return;
+      const popup = window.open(
+        defaultspackUrlWithLocalAuth(browserApprovalTokenizedPath("/finger-recording")),
+        "rumi-finger-recording",
+        "width=380,height=520",
+      );
+      if (popup) popup.focus();
+      else setFallbackVisible(true);
+    } catch {
+      setFallbackVisible(true);
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <LayerPortal layer="globalOverlay">
+      <div className="fixed bottom-4 right-4 flex flex-col items-end gap-2">
+        {fallbackVisible && (
+          <div className="max-w-64 rounded-lg border border-amber-300/25 bg-zinc-950/95 px-3 py-2 text-xs leading-5 text-amber-50 shadow-xl shadow-black/40">
+            Rumi Viewerから開くと、指録音は専用ウィンドウで表示されます。
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => void openWindow()}
+          disabled={opening}
+          className="inline-flex h-10 items-center gap-2 rounded-lg border border-zinc-700/80 bg-zinc-950/92 px-3 text-sm font-semibold text-zinc-100 shadow-xl shadow-black/40 backdrop-blur hover:border-zinc-500 hover:bg-zinc-900 disabled:cursor-wait disabled:opacity-70"
+          title="指で録音ウィンドウを開く"
+          aria-label="指で録音ウィンドウを開く"
+        >
+          {opening ? <Loader2 size={16} className="animate-spin" /> : <Hand size={16} />}
+          指録音
+        </button>
+      </div>
+    </LayerPortal>
+  );
+}
+
 export default function App() {
-  if (window.location.pathname === "/approval") {
+  const pathname = window.location.pathname;
+  const searchParams = new URLSearchParams(window.location.search);
+  const fingerDebugMode = pathname === "/ambient-debug"
+    || searchParams.get("debug") === "1"
+    || searchParams.get("qa") === "debug";
+  const explicitDebugConversationId = fingerDebugMode ? chatIdFromLocation() : null;
+
+  if (pathname === "/approval") {
     return <AuthorityApprovalWindow />;
+  }
+  if (pathname === "/prompts") {
+    return <PromptStudio />;
+  }
+  if (pathname === "/ambient") {
+    return <AmbientTriggerPanel variant="window" />;
+  }
+  if (pathname === "/ambient-debug" || pathname === "/finger-recording") {
+    return <AmbientTriggerPanel variant="window" debugMode={fingerDebugMode} conversationId={explicitDebugConversationId} />;
+  }
+  if (pathname === "/console") {
+    return <DefaultsConsoleWindow />;
+  }
+  if (pathname === "/host-permissions") {
+    return <HostPermissionsPage />;
+  }
+  if (pathname === "/adaptive" || pathname === "/operating-profile") {
+    return <AdaptiveRuntimePage />;
+  }
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+    return <ChatApp />;
   }
   return <ChatApp />;
 }

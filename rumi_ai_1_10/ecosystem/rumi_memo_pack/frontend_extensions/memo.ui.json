@@ -40,7 +40,7 @@
       "component": "MemoNav",
       "regions": ["memo_nav"],
       "fallback": "hidden",
-      "module": "/static/renderers/rumi-memo-nav.js",
+      "module": "/static/packs/rumi_memo_pack/renderers/rumi-memo-nav.js",
       "export": "default",
       "trust": "local"
     },
@@ -49,7 +49,7 @@
       "component": "MemoWorkspace",
       "regions": ["memo_workspace"],
       "fallback": "hidden",
-      "module": "/static/renderers/rumi-memo-workspace.js",
+      "module": "/static/packs/rumi_memo_pack/renderers/rumi-memo-workspace.js",
       "export": "default",
       "trust": "local"
     }

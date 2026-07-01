@@ -1,0 +1,296 @@
+{
+  "schema_version": 1,
+  "id": "rumi.composer.default",
+  "kind": "frontend",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.composer.default",
+      "rumi.composer.context_txt",
+      "rumi.context.materialize_txt"
+    ],
+    "requires": [],
+    "permissions": []
+  },
+  "metadata": {
+    "title": "Default Composer",
+    "template_kind": "frontend_template",
+    "local_first": true,
+    "description": "Declarative metadata for the default composer input surface and context materialization command."
+  },
+  "pieces": [
+    {
+      "id": "composer_shell_region",
+      "kind": "shell_region",
+      "order": 50,
+      "region": {
+        "id": "composer",
+        "part_id": "ai_chat",
+        "renderer": "composer",
+        "slot": "bottom",
+        "order": 50,
+        "enabled": true
+      }
+    },
+    {
+      "id": "composer_shell_renderer",
+      "kind": "shell_renderer",
+      "order": 51,
+      "renderer": {
+        "id": "composer",
+        "component": "Composer",
+        "regions": [
+          "composer"
+        ],
+        "fallback": "hidden"
+      }
+    },
+    {
+      "id": "default_composer_input",
+      "kind": "composer_input",
+      "order": 52,
+      "input": {
+        "id": "default_composer",
+        "region_id": "composer",
+        "renderer": "composer",
+        "part_id": "ai_chat",
+        "surface": "chat",
+        "enabled": true,
+        "placeholder": "メッセージを入力...",
+        "help": "Enterで送信。必要に応じて / でコマンド、@ で候補を開けます。",
+        "accepted_modalities": [
+          "text",
+          "files",
+          "images",
+          "voice"
+        ],
+        "feature_flags": {
+          "slash_commands": true,
+          "at_mentions": true,
+          "tool_mentions": true,
+          "file_attachments": true,
+          "voice_input": true,
+          "context_preview": true
+        },
+        "commands": [
+          "context_txt"
+        ],
+        "context_policy": "materialize_txt"
+      }
+    },
+    {
+      "id": "context_txt_command",
+      "kind": "composer_command",
+      "order": 53,
+      "command": {
+        "id": "context_txt",
+        "name": "context_txt",
+        "aliases": [
+          "context text",
+          "context-txt",
+          "context_text",
+          "long context txt",
+          "long-context-txt",
+          "long_context_txt"
+        ],
+        "label": "会話メモ",
+        "description": "現在の会話をテキストにまとめます。",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "medium",
+        "modes": [
+          "chat",
+          "coding",
+          "agent"
+        ],
+        "args": [
+          {
+            "name": "scope",
+            "type": "string",
+            "required": false
+          }
+        ],
+        "execution": {
+          "type": "pack_block",
+          "qualified_name": "defaultspack:chat.materialize_context",
+          "mode": "materialize_txt"
+        }
+      }
+    },
+    {
+      "id": "materialize_txt_policy",
+      "kind": "context_policy",
+      "order": 54,
+      "policy": {
+        "id": "materialize_txt",
+        "mode": "materialize_txt",
+        "format": "text/plain",
+        "filename": "context.txt",
+        "command_id": "context_txt",
+        "source": "conversation_context",
+        "delivery": "composer_command"
+      }
+    },
+    {
+      "id": "default_tool_policy",
+      "kind": "tool_policy",
+      "order": 55,
+      "policy": {
+        "id": "default_tools",
+        "toggleable": true,
+        "tool_choice": "auto",
+        "parallel_tool_calls": true,
+        "default_enabled_tools": [],
+        "default_disabled_tools": [],
+        "settings_defaults": {
+          "section_id": "tools",
+          "keep_selected_tools_after_send": true,
+          "tool_assist_mode": "all",
+          "tool_assist_limit": 8,
+          "default_target": ""
+        }
+      }
+    },
+    {
+      "id": "default_ai_input",
+      "kind": "ai_input",
+      "order": 56,
+      "input": {
+        "id": "default_ai_input",
+        "composer_input": "default_composer",
+        "context_policy": "materialize_txt",
+        "tool_policy": "default_tools",
+        "widgets": [
+          "web_search_toggle"
+        ],
+        "params": {}
+      }
+    },
+    {
+      "id": "web_search_toggle",
+      "kind": "composer_widget",
+      "order": 57,
+      "widget": {
+        "id": "web_search_toggle",
+        "tool_id": "web_search",
+        "label": "Web Search",
+        "description": "Toggle web search for this AI input.",
+        "widget_kind": "tool_toggle",
+        "enabled": true
+      }
+    },
+    {
+      "id": "tools_settings_section",
+      "kind": "settings_section",
+      "order": 57,
+      "section_id": "tools",
+      "label": "Tools",
+      "description": "Tool composer defaults and selection behavior.",
+      "fields": []
+    },
+    {
+      "id": "tool_default_target",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 57,
+      "section_id": "tools",
+      "field_id": "default_target",
+      "type": "text",
+      "label": "Default Target",
+      "default": "",
+      "help": "Backcompat value for tool UIs that still read a shared default_target.",
+      "advanced": true
+    },
+    {
+      "id": "keep_selected_tools_after_send",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 57,
+      "section_id": "tools",
+      "type": "toggle",
+      "label": "Keep Selected Tools",
+      "default": true,
+      "help": "Keep composer tool selections after a message is sent."
+    },
+    {
+      "id": "tool_assist_mode",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 58,
+      "section_id": "tools",
+      "type": "select",
+      "label": "Tool Assist",
+      "default": "all",
+      "options": [
+        {"value": "all", "label": "All tools: expose every tool"},
+        {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
+        {"value": "vector", "label": "Vector: recommend relevant tools"},
+        {"value": "off", "label": "Off: only manually selected tools"}
+      ],
+      "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。"
+    },
+    {
+      "id": "tool_assist_limit",
+      "kind": "settings_field",
+      "slot": "tools",
+      "order": 59,
+      "section_id": "tools",
+      "type": "number",
+      "label": "Tool Assist Limit",
+      "default": 8,
+      "min": 1,
+      "max": 24,
+      "help": "Vector が AI に推薦する tool 数の上限です。",
+      "advanced": true
+    },
+    {
+      "id": "commands_settings_section",
+      "kind": "settings_section",
+      "order": 60,
+      "section_id": "commands",
+      "label": "Commands",
+      "description": "Slash command visibility and command palette behavior.",
+      "fields": []
+    },
+    {
+      "id": "show_advanced_commands",
+      "kind": "settings_field",
+      "slot": "commands",
+      "order": 61,
+      "section_id": "commands",
+      "type": "toggle",
+      "label": "Show Advanced Commands",
+      "default": false,
+      "help": "Advanced slash commandsを候補に含めます。hidden command は直接入力か将来の管理UI向けです。"
+    },
+    {
+      "id": "registered_slash_commands_renderer",
+      "kind": "field_renderer",
+      "order": 61.5,
+      "renderer": "slash_commands",
+      "component": "SlashCommandsField",
+      "field_types": [
+        "slash_commands"
+      ],
+      "part_id": "settings",
+      "fallback": "text"
+    },
+    {
+      "id": "registered_slash_commands",
+      "kind": "settings_field",
+      "slot": "commands",
+      "order": 62,
+      "section_id": "commands",
+      "field_id": "registered_slash_commands",
+      "type": "slash_commands",
+      "renderer": "slash_commands",
+      "component": "SettingsFieldRendererHost",
+      "part_id": "settings",
+      "label": "Slash Commands",
+      "default": [],
+      "help": "会話で /name と打った時に実行するショートカットを登録します。任意コードではなく、許可済みの既存アクションだけを選べます。"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "function_id": "adaptive_prepared_action_prepare",
+  "description": "Prepare an exact-plan action.",
+  "tags": [
+    "adaptive",
+    "prepared_action"
+  ],
+  "risk": "medium",
+  "requires": [
+    "adaptive.prepared.action.prepare"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.adaptive.prepared_action_prepare",
+    "defaultspack.adaptive.prepared_action_prepare",
+    "defaults.adaptive.prepared.action.prepare",
+    "defaultspack.adaptive.prepared.action.prepare"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.adaptive",
+      "default_args": {
+        "operation": "prepared_action_prepare"
+      }
+    }
+  }
+}

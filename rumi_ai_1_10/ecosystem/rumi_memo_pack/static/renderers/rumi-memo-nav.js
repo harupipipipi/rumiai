@@ -1,5 +1,26 @@
-const React = globalThis.__RUMI_REACT__;
-const h = React?.createElement;
+const REACT_ELEMENT_TYPE = Symbol.for("react.transitional.element");
+
+function h(type, props, ...children) {
+  const normalizedProps = { ...(props || {}) };
+  const key = normalizedProps.key == null ? null : String(normalizedProps.key);
+  const ref = normalizedProps.ref ?? null;
+  delete normalizedProps.key;
+  delete normalizedProps.ref;
+  if (children.length === 1) {
+    normalizedProps.children = children[0];
+  } else if (children.length > 1) {
+    normalizedProps.children = children;
+  }
+  return {
+    $$typeof: REACT_ELEMENT_TYPE,
+    type,
+    key,
+    props: normalizedProps,
+    _owner: null,
+    ref,
+    _store: {}
+  };
+}
 
 const pages = [
   { id: "today", title: "Today", count: 4 },
@@ -9,7 +30,6 @@ const pages = [
 ];
 
 export default function MemoNav() {
-  if (!h) return null;
   return h(
     "nav",
     {

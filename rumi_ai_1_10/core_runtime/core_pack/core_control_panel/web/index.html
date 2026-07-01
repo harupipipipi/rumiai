@@ -3,9 +3,61 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0a0a0a" />
     <title>Rumi AI</title>
-    <script type="module" crossorigin src="/panel/assets/index-B2aG4KtU.js"></script>
-    <link rel="stylesheet" crossorigin href="/panel/assets/index-DlVAH5Pz.css">
+    <style>
+      html {
+        background: #0a0a0a;
+        color: #f5f5f5;
+        color-scheme: dark;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background: inherit;
+        color: inherit;
+      }
+
+      #root {
+        min-height: 100vh;
+        background: inherit;
+      }
+    </style>
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var themes = {
+          Rumi: 'theme-rumi',
+          Minimal: 'theme-minimal',
+          Standard: 'theme-standard',
+          Rounded: 'theme-rounded'
+        };
+        var theme = 'Rumi';
+        var mode = 'dark';
+
+        try {
+          var storedTheme = localStorage.getItem('rumi-theme');
+          var storedMode = localStorage.getItem('rumi-color-mode');
+          if (themes[storedTheme]) theme = storedTheme;
+          if (storedMode === 'light' || storedMode === 'dark') mode = storedMode;
+        } catch (error) {
+          theme = 'Rumi';
+          mode = 'dark';
+        }
+
+        root.classList.add(themes[theme]);
+        if (mode === 'dark') {
+          root.classList.add('dark');
+        }
+        root.style.colorScheme = mode;
+        root.style.backgroundColor = mode === 'light' && theme === 'Rounded' ? '#f0f4f9' : mode === 'light' ? '#ffffff' : '#0a0a0a';
+        root.style.color = mode === 'light' ? '#111827' : '#f5f5f5';
+      })();
+    </script>
+    <script type="module" crossorigin src="/panel/assets/index-CxdH-F8i.js"></script>
+    <link rel="stylesheet" crossorigin href="/panel/assets/index-rj2fQ-F2.css">
   </head>
   <body>
     <div id="root"></div>

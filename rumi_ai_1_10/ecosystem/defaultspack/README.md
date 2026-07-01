@@ -59,6 +59,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 - **通信基盤** — frontend handler + transport。HTTP、stdio、UDS 経由の通信。
 - **Widget ライブラリ** — lib/rumi_widgets/。バックエンドが UI に描画指示を出すための Python ヘルパー。
 - **シェル** — ui/shell.html。スロット定義 + Asset ローダー + Widget レンダラー。Asset を載せる空の枠。
+- **RumiTemplate catalog** — `templates/` の JSON から settings、AI input、tool/context policy、commands、backend bindings、test contracts を安全に合成する metadata layer。実行権限は kernel/runtime 側に残る。
 
 ## まずどこを見るか
 
@@ -73,6 +74,7 @@ defaults 単体で既存の AI サービス（ChatGPT / Claude / Cursor / Devin�
 | 8766 のフロントエンドを直したい | `webapp/` |
 | rumi_bundle の metadata を見たい | `docs/rumi_bundle.md` |
 | 右バー / 設定 / chat renderer の拡張方法を知りたい | `docs/frontend_extensions.md` |
+| RumiTemplate で設定、AI input、tool policy、commands を合成したい | `docs/templates.md` |
 | AI Agent Service Defaults の全体像を知りたい | `docs/ai_agent_services_feature_catalog.md`, `docs/local_agent_implementation_plan.md` |
 | local-first policy / safety / compact の設計を知りたい | `docs/local_first_policy.md`, `docs/safety_permission_audit_design.md`, `docs/compact_context_design.md` |
 | capability/profile/preset を使いたい | `capabilities/`, `profiles/local_agent.profile.yaml`, `presets/local_only_safe.preset.yaml` |
@@ -101,7 +103,7 @@ and OpenClaw, see `docs/competitive_agent_install_eval.md`.
 
 ## defaults が提供しないもの
 
-- **Asset** — 画面に描画される UI ファイル。chat 画面、agent 画面、coding 画面、設定画面は全て user_data 側に配置される。
+- **任意実行 UI/Asset** — 画面に描画される独自 UI ファイル。template は builtin renderer へ metadata を渡せるが、任意 React module の実行権限は持たない。
 - **ツール定義** — tool.json + handler.py。user_data/shared/tools/ に配置される。
 - **エージェント定義** — agent.json。user_data/shared/agents/ に配置される。
 - **プロンプト定義** — user_data/shared/prompts/ に配置される。

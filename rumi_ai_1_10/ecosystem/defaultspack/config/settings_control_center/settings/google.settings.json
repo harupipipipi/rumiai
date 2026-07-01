@@ -1,0 +1,61 @@
+{
+  "schema": "rumi.settings.v1",
+  "pack_id": "google_core",
+  "contributions": [
+    {
+      "id": "google.accounts.connection",
+      "owner": "google_core",
+      "title": {
+        "en": "Google",
+        "ja": "Google"
+      },
+      "description": {
+        "en": "Connect Google for Gmail and Drive capabilities.",
+        "ja": "GmailとDrive機能のためにGoogleを連携します。"
+      },
+      "section": "accounts_connections",
+      "priority": 40,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "AccountsConnectionsPanel.GoogleCard",
+      "requires": [
+        "provider.google"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "google",
+        "gmail",
+        "drive",
+        "oauth"
+      ]
+    },
+    {
+      "id": "google.tools.drive",
+      "owner": "google_core",
+      "title": {
+        "en": "Google Drive tools",
+        "ja": "Google Driveツール"
+      },
+      "description": {
+        "en": "Search and read selected Drive files through approved tools.",
+        "ja": "承認済みツールで選択されたDriveファイルを検索/読み取りします。"
+      },
+      "section": "tools_mcp",
+      "priority": 55,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "ToolsMcpPanel.GoogleDriveToolsCard",
+      "requires": [
+        "connection.google"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "drive",
+        "files",
+        "tools"
+      ]
+    }
+  ]
+}

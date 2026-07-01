@@ -99,6 +99,7 @@ node_settings:
       - coding_git_status
       - coding_git_diff
       - coding_git_commit
+      - coding_git_push
       - coding_terminal_exec
       - sandbox_exec
       - python_exec
@@ -164,6 +165,7 @@ policy:
     - coding_git_status
     - coding_git_diff
     - coding_git_commit
+    - coding_git_push
     - coding_terminal_exec
     - sandbox_exec
     - python_exec

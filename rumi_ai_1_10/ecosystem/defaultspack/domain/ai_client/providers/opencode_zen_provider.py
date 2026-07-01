@@ -40,7 +40,7 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         "capabilities": {
             "chat": True,
             "streaming": True,
-            "tool_calls": False,
+            "tool_calls": True,
             "vision": True,
             "reasoning": True,
         },
@@ -119,11 +119,9 @@ class OpencodeZenProvider(AnthropicProvider):
         return next_params
 
     def complete(self, model, messages, tools, params):
-        del tools
         model_id = self._assert_supported_model(model)
-        return super().complete(model_id, messages, [], self._params_with_token_floor(params))
+        return super().complete(model_id, messages, tools or [], self._params_with_token_floor(params))
 
     def stream(self, model, messages, tools, params):
-        del tools
         model_id = self._assert_supported_model(model)
-        yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
+        yield from super().stream(model_id, messages, tools or [], self._params_with_token_floor(params))

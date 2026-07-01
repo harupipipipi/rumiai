@@ -1,0 +1,78 @@
+{
+  "function_id": "sandbox_file_read",
+  "description": "Read a file from a sandbox-only coding workspace.",
+  "tags": [
+    "sandbox",
+    "coding",
+    "file"
+  ],
+  "risk": "low",
+  "requires": [
+    "sandbox.workspace.read"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.sandbox.file_read",
+    "defaultspack.sandbox.file_read",
+    "defaults.sandbox.file.read",
+    "defaultspack.sandbox.file.read"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "workspace_id": {
+        "type": "string"
+      },
+      "include_paths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "path": {
+        "type": "string"
+      },
+      "start_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "end_line": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "max_output_chars": {
+        "type": "integer",
+        "minimum": 1
+      }
+    },
+    "required": [
+      "path"
+    ]
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.sandbox_file_read",
+      "default_args": {}
+    }
+  }
+}

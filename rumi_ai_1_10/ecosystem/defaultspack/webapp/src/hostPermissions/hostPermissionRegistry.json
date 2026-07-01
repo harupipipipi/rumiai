@@ -1,0 +1,198 @@
+{
+  "host.permission.status": {
+    "label": "Host permission status",
+    "risk_level": "low",
+    "approval_required": false,
+    "stream_allowed": false,
+    "broker_runner_implemented": true
+  },
+  "host.permission.open_settings": {
+    "label": "Open host permission settings",
+    "risk_level": "medium",
+    "approval_required": false,
+    "stream_allowed": false,
+    "broker_runner_implemented": true
+  },
+  "host.intent.execute": {
+    "label": "Execute host intent",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.stream.start": {
+    "label": "Start host stream",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.stream.stop": {
+    "label": "Stop host stream",
+    "risk_level": "medium",
+    "approval_required": false,
+    "stream_allowed": false
+  },
+  "host.screen.capture": {
+    "label": "Screen capture",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "os_permissions": {
+      "macos": ["screen_recording"],
+      "windows": ["graphics_capture"]
+    },
+    "privacy": {
+      "may_include_secrets": true
+    }
+  },
+  "host.accessibility.read": {
+    "label": "Accessibility read",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "os_permissions": {
+      "macos": ["accessibility"],
+      "windows": ["ui_automation"]
+    }
+  },
+  "host.accessibility.mutate": {
+    "label": "Accessibility mutation",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "os_permissions": {
+      "macos": ["accessibility"],
+      "windows": ["ui_automation"]
+    }
+  },
+  "host.input.pointer": {
+    "label": "Pointer input",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "os_permissions": {
+      "macos": ["accessibility"],
+      "windows": ["input_injection"]
+    }
+  },
+  "host.input.keyboard": {
+    "label": "Keyboard input",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "os_permissions": {
+      "macos": ["accessibility", "input_monitoring"],
+      "windows": ["input_injection"]
+    }
+  },
+  "host.clipboard.read": {
+    "label": "Clipboard read",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.clipboard.write": {
+    "label": "Clipboard write",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.microphone.capture": {
+    "label": "Microphone capture",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "max_duration_ms_default": 30000,
+    "max_duration_ms_hard": 300000,
+    "os_permissions": {
+      "macos": ["microphone"],
+      "windows": ["microphone"]
+    },
+    "privacy": {
+      "store_raw": false,
+      "network_send": false
+    }
+  },
+  "host.audio.capture": {
+    "label": "System audio capture",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "max_duration_ms_default": 30000,
+    "max_duration_ms_hard": 300000
+  },
+  "host.audio.output": {
+    "label": "Audio output",
+    "risk_level": "medium",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.speech.transcribe": {
+    "label": "Speech transcription",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "privacy": {
+      "store_raw": false
+    }
+  },
+  "host.speech.synthesize": {
+    "label": "Speech synthesis",
+    "risk_level": "medium",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.camera.capture": {
+    "label": "Camera capture",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false,
+    "max_duration_ms_default": 30000,
+    "max_duration_ms_hard": 300000,
+    "os_permissions": {
+      "macos": ["camera"],
+      "windows": ["camera"]
+    },
+    "privacy": {
+      "store_raw": false,
+      "network_send": false,
+      "landmarks_only_preferred": true
+    }
+  },
+  "host.file.open_dialog": {
+    "label": "Open file dialog",
+    "risk_level": "medium",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.file.read_user_selected": {
+    "label": "Read selected file",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.file.write_user_selected": {
+    "label": "Write selected file",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.process.open_url": {
+    "label": "Open URL",
+    "risk_level": "medium",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.process.launch_app": {
+    "label": "Launch application",
+    "risk_level": "high",
+    "approval_required": true,
+    "stream_allowed": false
+  },
+  "host.process.exec_guarded": {
+    "label": "Guarded process execution",
+    "risk_level": "critical",
+    "approval_required": true,
+    "typed_confirmation_required": true,
+    "stream_allowed": false
+  }
+}

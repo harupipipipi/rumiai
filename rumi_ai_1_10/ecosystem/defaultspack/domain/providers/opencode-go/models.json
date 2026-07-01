@@ -43,14 +43,17 @@
       "capabilities": {
         "chat": true,
         "streaming": true,
-        "tool_calls": false,
-        "vision": false,
-        "reasoning": false
+        "tool_calls": true,
+        "vision": true,
+        "reasoning": true
       },
       "metadata": {
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
-        "source": "opencode_go_docs"
+        "source": "opencode_go_docs",
+        "tool_calls_verified": true,
+        "vision_verified": true,
+        "thinking_disabled_for_tool_calls": true
       }
     },
     {

@@ -94,8 +94,21 @@ test("agentStackProfileAvailability supports vision and model id constraints", (
       provider_id: "opencode-zen",
       model_id: "minimax-m3-free",
       supports_vision: true,
+      supports_tool_calling: true,
     }),
     { matches: true, reason: null },
+  );
+  assert.equal(
+    agentStackProfileAvailability(subagent, {
+      profile_id: "opencode-zen/minimax-m3-free",
+      qualified_model_id: "opencode-zen/minimax-m3-free",
+      display_name: "MiniMax M3 Free via OpenCode Zen",
+      provider_id: "opencode-zen",
+      model_id: "minimax-m3-free",
+      supports_vision: true,
+      supports_tool_calling: false,
+    }).matches,
+    false,
   );
   assert.equal(
     agentStackProfileAvailability(subagent, {
@@ -104,6 +117,7 @@ test("agentStackProfileAvailability supports vision and model id constraints", (
       provider_id: "openai",
       model_id: "gpt-5.4",
       supports_vision: true,
+      supports_tool_calling: true,
     }).matches,
     false,
   );
@@ -162,7 +176,15 @@ test("sanitizeAgentStackToolPolicy strips approval bypass keys but keeps advisor
   );
 });
 
-test("mergeAgentStackProfiles strips yolo profile approval bypass policy", () => {
+test("mergeAgentStackProfiles keeps yolo advisory policy without approval bypass", () => {
+  const yoloProfile = normalizeAgentStackSettings({}).profiles.find((profile) => profile.id === "yolo");
+  assert.deepEqual(yoloProfile?.tool_policy, {
+    allow_shell: true,
+    allow_file_write: true,
+  });
+});
+
+test("mergeAgentStackProfiles strips custom yolo profile approval bypass policy", () => {
   const merged = mergeAgentStackProfiles([
     {
       id: "yolo",

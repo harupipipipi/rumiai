@@ -33,6 +33,11 @@ def run(context, args):
     return run_defaultspack_function("{function_id}", args, context)
 '''
 
+CUSTOM_WRAPPER_FUNCTIONS = {
+    # Browser-owned ambient capture exposes a dedicated contract wrapper.
+    "ambient_monitor_start",
+}
+
 
 def write_function(spec) -> None:
     function_dir = PACK_ROOT / "functions" / spec.function_id
@@ -43,6 +48,8 @@ def write_function(spec) -> None:
         json.dumps(manifest_for(spec), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    if spec.function_id in CUSTOM_WRAPPER_FUNCTIONS and main_path.exists():
+        return
     main_path.write_text(MAIN_TEMPLATE.format(function_id=spec.function_id), encoding="utf-8")
 
 

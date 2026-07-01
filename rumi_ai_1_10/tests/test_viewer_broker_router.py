@@ -75,6 +75,96 @@ def test_viewer_broker_client_waits_longer_than_helper_timeout(monkeypatch):
     assert seen["timeout"] > viewer_broker_client.VIEWER_BROKER_HELPER_TIMEOUT_SECONDS
 
 
+def test_viewer_broker_client_execute_intent_posts_payload(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    captured: dict[str, object] = {}
+
+    def fake_request(self, method, path, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"ok": True, "intent_id": "intent_1"}
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+
+    result = client.execute_intent({"intent": "open", "target": "settings"})
+
+    assert result == {"ok": True, "intent_id": "intent_1"}
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/host/intent/execute"
+    assert captured["payload"] == {"intent": "open", "target": "settings"}
+
+
+def test_viewer_broker_client_start_stream_posts_payload(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    captured: dict[str, object] = {}
+
+    def fake_request(self, method, path, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"ok": True, "stream_id": "stream_1"}
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+
+    result = client.start_stream({"topic": "desktop"})
+
+    assert result == {"ok": True, "stream_id": "stream_1"}
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/host/stream/start"
+    assert captured["payload"] == {"topic": "desktop"}
+
+
+def test_viewer_broker_client_stop_stream_posts_payload_with_stream_id(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    captured: dict[str, object] = {}
+
+    def fake_request(self, method, path, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"ok": True}
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+    payload = {"reason": "done"}
+
+    result = client.stop_stream("stream 1/2", payload)
+
+    assert result == {"ok": True}
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/api/host/stream/stop"
+    assert captured["payload"] == {"reason": "done", "stream_id": "stream 1/2"}
+    assert payload == {"reason": "done"}
+
+
+def test_viewer_broker_client_stream_events_gets_encoded_stream_id(monkeypatch):
+    from ecosystem.defaultspack.domain.host_bridge.viewer_broker_client import ViewerBrokerClient
+
+    captured: dict[str, object] = {}
+
+    def fake_request(self, method, path, payload=None):
+        captured["method"] = method
+        captured["path"] = path
+        captured["payload"] = payload
+        return {"ok": True, "events": []}
+
+    monkeypatch.setattr(ViewerBrokerClient, "_request", fake_request)
+    client = ViewerBrokerClient(url="http://127.0.0.1:8770", token="secret-token")
+
+    result = client.stream_events("stream 1/2")
+
+    assert result == {"ok": True, "events": []}
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/api/host/stream/events/stream%201%2F2"
+    assert captured["payload"] is None
+
+
 def test_computer_router_routes_darwin_computer_calls_to_viewer(monkeypatch):
     from ecosystem.defaultspack.domain.host_bridge import computer_router
 

@@ -49,7 +49,7 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["quirks"]["supports_stream_tool_calls"] is False
-    assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
+    assert models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"] is True
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
 
 
@@ -84,11 +84,11 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
     assert captured["body"]["max_tokens"] == 96
     assert captured["body"]["temperature"] == 0
     assert captured["body"]["system"] == [{"type": "text", "text": "Be terse."}]
-    assert "tools" not in captured["body"]
+    assert captured["body"]["tools"] == [{"name": "noop", "input_schema": {"type": "object"}}]
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
-def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
+def test_opencode_zen_stream_keeps_tools_and_applies_token_floor(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}
     response = _FakeSseResponse(
@@ -119,7 +119,7 @@ def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
     assert captured["path"] == "/v1/messages"
     assert captured["body"]["model"] == "minimax-m3-free"
     assert captured["body"]["max_tokens"] == 96
-    assert "tools" not in captured["body"]
+    assert captured["body"]["tools"] == [{"name": "noop", "input_schema": {"type": "object"}}]
     assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "OK"}}
     assert events[-1]["type"] == "stream_end"
     assert response.closed is True

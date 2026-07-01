@@ -1,4 +1,9 @@
 domains:
+  adaptive:
+    may_import:
+    - domain/coding
+    - domain/tool_policy
+    path: domain/adaptive
   agent:
     may_import:
     - domain/agent_runtime
@@ -18,11 +23,16 @@ domains:
     may_import:
     - domain/chat
     - domain/components
+    - domain/connections
     - domain/extensions
     - domain/human_operator
     - domain/temporal_context
     - domain/tool
     path: domain/ai_client
+  ambient:
+    may_import:
+    - domain/input
+    path: domain/ambient
   api_map:
     may_import:
     - domain/external
@@ -80,6 +90,9 @@ domains:
   components:
     may_import: []
     path: domain/components
+  connections:
+    may_import: []
+    path: domain/connections
   context:
     may_import:
     - domain/chat
@@ -92,6 +105,10 @@ domains:
   context_engine:
     may_import: []
     path: domain/context_engine
+  codex:
+    may_import:
+    - domain/connections
+    path: domain/codex
   dev:
     may_import: []
     path: domain/dev
@@ -115,6 +132,7 @@ domains:
     - domain/capability
     - domain/chat
     - domain/components
+    - domain/codex
     - domain/dev
     - domain/extensions
     - domain/external
@@ -123,6 +141,7 @@ domains:
     path: domain/frontend
   function_runtime:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/browser
     - domain/external
@@ -243,6 +262,7 @@ domains:
     path: domain/templates
   tool:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/artifact
     - domain/capabilities
@@ -300,3 +320,7 @@ exceptions:
 - from: chat
   import: domain/tool_policy
   file: domain/chat/run_request.py
+- file: domain/ambient/router.py
+  from: ambient
+  import: domain/chat
+  reason: ambient trigger routing creates destination conversations through the chat store

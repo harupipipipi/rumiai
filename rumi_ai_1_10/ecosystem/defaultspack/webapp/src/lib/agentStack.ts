@@ -1,6 +1,7 @@
 import type { ModelProfile } from "./api";
 
 export type AgentStackModelConstraints = {
+  requires_tool_calling?: boolean;
   requires_vision?: boolean;
   model_ids?: string[];
   model_id_includes?: string[];
@@ -135,6 +136,7 @@ const DEFAULT_PROFILES: AgentStackProfile[] = [
       "subagent",
     ],
     constraints: {
+      requires_tool_calling: true,
       provider_ids: ["opencode-zen"],
       model_ids: ["minimax-m3-free", "opencode-zen/minimax-m3-free"],
     },
@@ -165,15 +167,11 @@ const DEFAULT_PROFILES: AgentStackProfile[] = [
   {
     id: "yolo",
     label: "yolo",
-    description: "High-autonomy profile for fully local coding/browser execution.",
-    system_prompt: "Move decisively. When the path is clear, execute directly instead of waiting for extra confirmation.",
+    description: "Advisory local execution profile. Approval bypass still requires a server-issued authority grant.",
+    system_prompt: "Move decisively when the path is clear, while respecting the active approval policy.",
     tool_policy: {
-      yolo_mode: true,
       allow_shell: true,
       allow_file_write: true,
-      write_actions_require_approval: false,
-      delete_actions_require_approval: false,
-      terminal_actions_require_approval: false,
     },
   },
 ];
@@ -222,6 +220,7 @@ export function sanitizeAgentStackToolPolicy(value: unknown): Record<string, unk
 function normalizeConstraints(value: unknown): AgentStackModelConstraints | undefined {
   if (!isRecord(value)) return undefined;
   const constraints: AgentStackModelConstraints = {};
+  if (value.requires_tool_calling === true) constraints.requires_tool_calling = true;
   if (value.requires_vision === true) constraints.requires_vision = true;
   const modelIds = cleanStringArray(value.model_ids);
   const modelIdIncludes = cleanStringArray(value.model_id_includes);
@@ -422,6 +421,9 @@ export function agentStackProfileAvailability(
 ): AgentStackAvailability {
   const constraints = profile.constraints;
   if (!constraints) return { matches: true, reason: null };
+  if (constraints.requires_tool_calling && !modelProfile?.supports_tool_calling) {
+    return { matches: false, reason: "Tool-calling model only" };
+  }
   if (constraints.requires_vision && !modelProfile?.supports_vision && !modelProfile?.supports_image_input) {
     return { matches: false, reason: "Vision model only" };
   }

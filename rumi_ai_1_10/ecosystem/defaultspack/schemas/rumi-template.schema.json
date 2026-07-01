@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/rumi-template.schema.json",
+  "title": "RumiTemplate",
+  "type": "object",
+  "required": ["id", "kind", "version", "status", "pieces"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "kind": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "active", "deprecated", "disabled"]
+    },
+    "trust_level": {
+      "type": "string",
+      "enum": ["builtin", "local", "user", "untrusted"]
+    },
+    "dependencies": {
+      "$ref": "#/$defs/dependencyList"
+    },
+    "conflicts": {
+      "$ref": "#/$defs/dependencyList"
+    },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "provides": { "$ref": "#/$defs/stringList" },
+        "requires": { "$ref": "#/$defs/stringList" },
+        "permissions": { "$ref": "#/$defs/stringList" }
+      },
+      "additionalProperties": true
+    },
+    "pieces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "minLength": 1 },
+          "slot": { "type": "string" },
+          "order": { "type": "integer" },
+          "entrypoint": { "type": "string" },
+          "path": { "type": "string" },
+          "handler": { "type": "string" },
+          "override": {
+            "type": "object"
+          }
+        },
+        "additionalProperties": true
+      }
+    },
+    "patches": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "metadata": {
+      "type": "object"
+    },
+    "lifecycle": {
+      "type": "object"
+    },
+    "override": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "dependency": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "object",
+          "required": ["id"],
+          "properties": {
+            "id": { "type": "string", "minLength": 1 },
+            "version": { "type": "string" },
+            "optional": { "type": "boolean" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "dependencyList": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/dependency" }
+    }
+  }
+}

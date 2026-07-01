@@ -14,11 +14,13 @@ class FunctionSpec:
     tags: tuple[str, ...]
     risk: str = "low"
     block_module: str | None = None
+    handler_ref: str | None = None
     default_args: dict[str, Any] = field(default_factory=dict)
     aliases: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
+    permission_id: str | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -79,7 +81,13 @@ def _spec(
 
 
 def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
-    return {
+    defaultspack_extension = {
+        "block_module": spec.block_module,
+        "default_args": spec.default_args,
+    }
+    if spec.handler_ref:
+        defaultspack_extension["handler_ref"] = spec.handler_ref
+    manifest = {
         "function_id": spec.function_id,
         "description": spec.description,
         "tags": list(spec.tags),
@@ -93,12 +101,12 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
         "input_schema": dict(spec.input_schema or OBJECT_SCHEMA),
         "output_schema": dict(ENVELOPE_SCHEMA),
         "extensions": {
-            "defaultspack": {
-                "block_module": spec.block_module,
-                "default_args": spec.default_args,
-            }
+            "defaultspack": defaultspack_extension
         },
     }
+    if spec.permission_id:
+        manifest["permission_id"] = spec.permission_id
+    return manifest
 
 
 AI_FUNCTIONS: tuple[FunctionSpec, ...] = (
@@ -323,6 +331,137 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
 )
 
 
+def _sandbox_input_schema(
+    properties: dict[str, Any],
+    *,
+    required: tuple[str, ...] = (),
+    any_of: tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    schema: dict[str, Any] = {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "workspace_id": {"type": "string"},
+            "include_paths": {"type": "array", "items": {"type": "string"}},
+            **properties,
+        },
+    }
+    if required:
+        schema["required"] = list(required)
+    if any_of:
+        schema["anyOf"] = list(any_of)
+    return schema
+
+
+SANDBOX_TERMINAL_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "command": {"type": "string"},
+        "argv": {"type": "array", "items": {"type": "string"}},
+        "cwd": {"type": "string"},
+        "timeout": {"type": "integer", "minimum": 1, "maximum": 120},
+        "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 120},
+        "max_diff_chars": {"type": "integer", "minimum": 1},
+        "network": {"type": "boolean"},
+        "network_enabled": {"type": "boolean"},
+    },
+    any_of=({"required": ["command"]}, {"required": ["argv"]}),
+)
+SANDBOX_FILE_READ_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "start_line": {"type": "integer", "minimum": 1},
+        "end_line": {"type": "integer", "minimum": 1},
+        "max_chars": {"type": "integer", "minimum": 1},
+        "max_output_chars": {"type": "integer", "minimum": 1},
+    },
+    required=("path",),
+)
+SANDBOX_FILE_WRITE_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "content": {"type": "string"},
+    },
+    required=("path", "content"),
+)
+SANDBOX_FILE_PATCH_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "path": {"type": "string"},
+        "old": {"type": "string"},
+        "new": {"type": "string"},
+    },
+    required=("path", "old", "new"),
+)
+SANDBOX_DIFF_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "max_chars": {"type": "integer", "minimum": 1},
+        "max_output_chars": {"type": "integer", "minimum": 1},
+    }
+)
+SANDBOX_ARTIFACT_EXPORT_INPUT_SCHEMA = _sandbox_input_schema(
+    {
+        "paths": {"type": "array", "items": {"type": "string"}},
+    }
+)
+
+
+SANDBOX_CODING_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "sandbox_terminal_exec",
+        "Execute a command inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "terminal"),
+        block="blocks.coding.sandbox_terminal_exec",
+        requires=("sandbox.terminal.exec",),
+        caller_requires=(),
+        input_schema=SANDBOX_TERMINAL_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_read",
+        "Read a file from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_read",
+        requires=("sandbox.workspace.read",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_READ_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_write",
+        "Write a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_write",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_WRITE_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_file_patch",
+        "Patch a file inside a sandbox-only coding workspace.",
+        ("sandbox", "coding", "file"),
+        block="blocks.coding.sandbox_file_patch",
+        requires=("sandbox.workspace.write",),
+        caller_requires=(),
+        input_schema=SANDBOX_FILE_PATCH_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_diff_preview",
+        "Preview sandbox-only workspace changes as a diff.",
+        ("sandbox", "coding", "diff"),
+        block="blocks.coding.sandbox_diff_preview",
+        requires=("sandbox.workspace.diff",),
+        caller_requires=(),
+        input_schema=SANDBOX_DIFF_INPUT_SCHEMA,
+    ),
+    _spec(
+        "sandbox_artifact_export",
+        "Export files from a sandbox-only coding workspace.",
+        ("sandbox", "coding", "artifact"),
+        block="blocks.coding.sandbox_artifact_export",
+        requires=("sandbox.artifact.export",),
+        caller_requires=(),
+        input_schema=SANDBOX_ARTIFACT_EXPORT_INPUT_SCHEMA,
+    ),
+)
+
+
 BROWSER_ARTIFACT_FUNCTIONS: tuple[FunctionSpec, ...] = (
     _spec("browser_artifacts", "List persistent browser coding artifacts.", ("tool", "browser"), block="blocks.browser.artifacts"),
 )
@@ -336,6 +475,73 @@ RECORDING_FUNCTIONS: tuple[FunctionSpec, ...] = (
         risk="high",
         block="blocks.recording.capture",
         aliases=("defaults.recording.capture", "defaultspack.recording.capture"),
+    ),
+)
+
+
+AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "ambient_status",
+        "Read ambient trigger monitor, permission, OS permission, and privacy status.",
+        ("ambient", "permission"),
+        block="blocks.ambient.status",
+    ),
+    _spec(
+        "ambient_monitor_start",
+        "Enable the ambient microphone and camera trigger monitor.",
+        ("ambient", "monitor"),
+        risk="high",
+        block="blocks.ambient.monitor",
+        default_args={"action": "start"},
+        requires=("host.microphone.capture", "host.camera.capture", "ambient.trigger.dispatch"),
+    ),
+    _spec(
+        "ambient_monitor_stop",
+        "Pause the ambient trigger monitor.",
+        ("ambient", "monitor"),
+        block="blocks.ambient.monitor",
+        default_args={"action": "stop"},
+    ),
+    _spec(
+        "ambient_configure",
+        "Configure ambient trigger chat routing and new-chat defaults.",
+        ("ambient", "settings"),
+        block="blocks.ambient.config",
+        aliases=("defaults.ambient.configure", "defaultspack.ambient.configure"),
+    ),
+    _spec(
+        "ambient_event_submit",
+        "Submit a sanitized ambient trigger event to the ambient trigger router.",
+        ("ambient", "input"),
+        risk="high",
+        block="blocks.ambient.event_submit",
+        aliases=("defaults.ambient.events.submit", "defaultspack.ambient.events.submit"),
+        requires=("ambient.trigger.dispatch",),
+    ),
+    _spec(
+        "ambient_permission_grant",
+        "Grant a Rumi-side ambient permission and optionally record OS permission state.",
+        ("ambient", "permission"),
+        risk="high",
+        block="blocks.ambient.permissions",
+        default_args={"action": "grant"},
+    ),
+    _spec(
+        "ambient_permission_revoke",
+        "Revoke a Rumi-side ambient permission without changing OS permission state.",
+        ("ambient", "permission"),
+        risk="medium",
+        block="blocks.ambient.permissions",
+        default_args={"action": "revoke"},
+    ),
+    _spec(
+        "ambient_permission_check",
+        "Record observed OS microphone and camera permission state without granting Rumi permissions.",
+        ("ambient", "permission"),
+        block="blocks.ambient.permissions",
+        default_args={"action": "check_os"},
+        aliases=("defaults.ambient.permissions.check", "defaultspack.ambient.permissions.check"),
+        requires=(),
     ),
 )
 
@@ -435,8 +641,21 @@ REMOTE_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+_PROMPT_WORKSPACE_DEFAULT_ARGS: dict[str, dict[str, Any]] = {
+    "prompt_editor_save": {"action": "save"},
+    "prompt_create_override": {"action": "override"},
+}
+
+
 DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
-    _spec(function_id, description, tags, risk=risk, block=block)
+    _spec(
+        function_id,
+        description,
+        tags,
+        risk=risk,
+        block=block,
+        default_args=_PROMPT_WORKSPACE_DEFAULT_ARGS.get(function_id),
+    )
     for function_id, description, tags, risk, block in (
         ("prompt_render", "Render a prompt.", ("prompt",), "low", "blocks.prompt.render"),
         ("prompt_list", "List prompts.", ("prompt",), "low", "blocks.prompt.list"),
@@ -448,6 +667,18 @@ DATA_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("prompt_convert", "Convert a prompt.", ("prompt",), "low", "blocks.prompt.convert"),
         ("prompt_validate_template", "Validate a prompt template.", ("prompt",), "low", None),
         ("prompt_resolve_for_conversation", "Resolve prompt context for a conversation.", ("prompt",), "low", None),
+        ("prompt_active", "Summarize active prompt segments for a profile or chat.", ("prompt",), "low", "blocks.prompt.active"),
+        ("prompt_trace_list", "List saved prompt usage traces.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
+        ("prompt_trace_get", "Get a saved prompt usage trace.", ("prompt", "trace"), "low", "blocks.prompt.trace"),
+        ("prompt_toggle", "Enable or disable a prompt edge through AI Input Graph disabled_edges.", ("prompt",), "medium", "blocks.prompt.toggle"),
+        ("prompt_preview_toggle", "Preview enabling or disabling a prompt edge without saving.", ("prompt",), "low", "blocks.prompt.preview_toggle"),
+        ("prompt_editor_load", "Load Prompt Studio data for prompts, source chains, and versions.", ("prompt", "editor"), "low", "blocks.prompt.editor_load"),
+        ("prompt_editor_save", "Save an editable prompt or create a profile override for a read-only prompt.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
+        ("prompt_create_override", "Create a profile prompt override.", ("prompt", "editor"), "medium", "blocks.prompt.editor"),
+        ("prompt_test", "Run a local Prompt Studio test for prompt, skill, and tool-schema activation.", ("prompt", "editor"), "low", "blocks.prompt.test"),
+        ("prompt_diff", "Diff prompt base, effective, and draft text.", ("prompt", "editor"), "low", "blocks.prompt.diff"),
+        ("prompt_versions", "List prompt versions recorded by Prompt Studio.", ("prompt", "editor"), "low", "blocks.prompt.versions"),
+        ("prompt_rollback", "Roll back a prompt to a recorded Prompt Studio version.", ("prompt", "editor"), "medium", "blocks.prompt.rollback"),
         ("memory_store", "Store memory.", ("memory",), "medium", "blocks.memory.store"),
         ("memory_recall", "Recall memory.", ("memory",), "low", "blocks.memory.recall"),
         ("memory_project_context", "Get project memory context.", ("memory",), "low", "blocks.memory.project_context"),
@@ -584,6 +815,173 @@ EXTERNAL_INPUT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 )
 
 
+ADAPTIVE_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
+    _spec(function_id, description, tags, risk=risk, block="blocks.adaptive", default_args={"operation": operation})
+    for function_id, operation, description, tags, risk in (
+        ("adaptive_onboarding_status", "onboarding_status", "Get adaptive onboarding status.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_schema", "onboarding_schema", "Get adaptive onboarding schema.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_normalize", "onboarding_normalize", "Normalize onboarding answers.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_compile", "onboarding_compile", "Compile an Operating Profile preview.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_simulate", "onboarding_simulate", "Simulate an Operating Profile.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_apply", "onboarding_apply", "Apply a signed Operating Profile plan.", ("adaptive", "onboarding"), "high"),
+        ("adaptive_onboarding_undo", "onboarding_undo", "Undo the last Operating Profile apply.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_onboarding_history", "onboarding_history", "List onboarding history.", ("adaptive", "onboarding"), "low"),
+        ("adaptive_onboarding_rediagnose", "onboarding_rediagnose", "Preview a re-diagnosis.", ("adaptive", "onboarding"), "medium"),
+        ("adaptive_operating_profiles_list", "operating_profiles_list", "List Operating Profiles.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_get", "operating_profiles_get", "Get an Operating Profile.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_create", "operating_profiles_create", "Create an Operating Profile preview.", ("adaptive", "profile"), "medium"),
+        ("adaptive_operating_profiles_update", "operating_profiles_update", "Update an Operating Profile preview.", ("adaptive", "profile"), "medium"),
+        ("adaptive_operating_profiles_preview", "operating_profiles_preview", "Preview an Operating Profile update.", ("adaptive", "profile"), "low"),
+        ("adaptive_operating_profiles_activate", "operating_profiles_activate", "Activate an Operating Profile.", ("adaptive", "profile"), "medium"),
+        ("adaptive_pack_recommendations_list", "pack_recommendations_list", "List Pack onboarding recommendations.", ("adaptive", "pack"), "low"),
+        ("adaptive_pack_recommendations_preview", "pack_recommendations_preview", "Preview Pack onboarding recommendations.", ("adaptive", "pack"), "low"),
+        ("adaptive_activity_snapshot", "activity_snapshot", "Get Activity Center snapshot.", ("adaptive", "activity"), "low"),
+        ("adaptive_freeze_set", "freeze_set", "Set adaptive emergency freeze.", ("adaptive", "activity"), "high"),
+        ("adaptive_automation_update", "automation_update", "Update a local adaptive automation setting.", ("adaptive", "automation"), "medium"),
+        ("adaptive_context_file_read", "context_file_read", "Read a bounded file window.", ("adaptive", "context"), "low"),
+        ("adaptive_context_code_search", "context_code_search", "Run bounded contextual code search.", ("adaptive", "context"), "low"),
+        ("adaptive_context_repository_map", "context_repository_map", "Build a bounded repository map.", ("adaptive", "context"), "low"),
+        ("adaptive_context_evidence", "context_evidence", "Build an evidence bundle.", ("adaptive", "context"), "low"),
+        ("adaptive_prepared_action_prepare", "prepared_action_prepare", "Prepare an exact-plan action.", ("adaptive", "prepared_action"), "medium"),
+        ("adaptive_prepared_action_commit", "prepared_action_commit", "Commit a prepared action marker.", ("adaptive", "prepared_action"), "high"),
+        ("adaptive_prepared_action_revoke", "prepared_action_revoke", "Revoke a prepared action.", ("adaptive", "prepared_action"), "medium"),
+        ("adaptive_event_append", "event_append", "Append a durable adaptive event.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_ack", "event_ack", "Acknowledge a durable adaptive event delivery.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_dlq", "event_dlq", "Move a durable adaptive event to the dead-letter queue.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_list", "event_list", "List durable adaptive events.", ("adaptive", "event"), "low"),
+        ("adaptive_event_outbox", "event_outbox", "List pending adaptive event outbox work.", ("adaptive", "event"), "low"),
+        ("adaptive_event_replay", "event_replay", "Replay durable adaptive events.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_retry", "event_retry", "Schedule retry for a durable adaptive event delivery.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_subscribe", "event_subscribe", "Create or update a durable adaptive event subscription.", ("adaptive", "event"), "medium"),
+        ("adaptive_event_subscription_list", "event_subscription_list", "List durable adaptive event subscriptions.", ("adaptive", "event"), "low"),
+        ("adaptive_continuation_resume", "continuation_resume", "Resume an adaptive continuation exactly once.", ("adaptive", "event"), "medium"),
+        ("adaptive_skill_candidates_list", "skill_candidates_list", "List adaptive Skill candidates.", ("adaptive", "skill"), "low"),
+        ("adaptive_skill_candidate_promote", "skill_candidate_promote", "Promote a Skill candidate.", ("adaptive", "skill"), "high"),
+        ("adaptive_skill_candidate_rollback", "skill_candidate_rollback", "Rollback a Skill candidate.", ("adaptive", "skill"), "high"),
+        ("adaptive_memory_conflicts_list", "memory_conflicts_list", "List memory conflicts.", ("adaptive", "memory"), "low"),
+        ("adaptive_memory_conflict_resolve", "memory_conflict_resolve", "Resolve a memory conflict.", ("adaptive", "memory"), "medium"),
+        ("adaptive_lease_acquire", "lease_acquire", "Acquire an adaptive path or resource lease.", ("adaptive", "orchestration"), "medium"),
+        ("adaptive_lease_release", "lease_release", "Release an adaptive path or resource lease.", ("adaptive", "orchestration"), "medium"),
+    )
+)
+
+
+CONTINUITY_FUNCTIONS: tuple[FunctionSpec, ...] = (
+    _spec(
+        "continuity_list_nodes",
+        "List paired Rumi Node and cloud continuity destinations.",
+        ("continuity", "node"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "nodes_list"},
+        aliases=("defaults.continuity.list_nodes", "defaultspack.continuity.list_nodes", "continuity.list_nodes"),
+    ),
+    _spec(
+        "continuity_pairing_start",
+        "Start an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_start"},
+        aliases=("defaults.continuity.pairing.start", "defaultspack.continuity.pairing.start"),
+    ),
+    _spec(
+        "continuity_pairing_accept",
+        "Accept an explicit Rumi Node pairing flow.",
+        ("continuity", "node", "pairing"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "pairing_accept"},
+        aliases=("defaults.continuity.pairing.accept", "defaultspack.continuity.pairing.accept"),
+    ),
+    _spec(
+        "continuity_remove_node",
+        "Remove a paired continuity destination.",
+        ("continuity", "node"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_delete"},
+        aliases=("defaults.continuity.node.remove", "defaultspack.continuity.node.remove"),
+    ),
+    _spec(
+        "continuity_probe_node",
+        "Probe a continuity destination without exporting credentials.",
+        ("continuity", "node", "probe"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "node_probe"},
+        aliases=("defaults.continuity.node.probe", "defaultspack.continuity.node.probe"),
+    ),
+    _spec(
+        "continuity_provider_routes",
+        "List API provider routes eligible for continuity.",
+        ("continuity", "provider"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_routes"},
+        aliases=("defaults.continuity.provider_routes", "defaultspack.continuity.provider_routes"),
+    ),
+    _spec(
+        "continuity_probe_provider_route",
+        "Probe a provider route against a continuity destination.",
+        ("continuity", "provider", "probe"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_probe"},
+        aliases=("defaults.continuity.provider_route.probe", "defaultspack.continuity.provider_route.probe"),
+    ),
+    _spec(
+        "continuity_set_provider_fallbacks",
+        "Set explicit continuity fallback route ordering.",
+        ("continuity", "provider", "fallback"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_route_set_fallbacks"},
+        aliases=("defaults.continuity.provider_route.set_fallbacks", "defaultspack.continuity.provider_route.set_fallbacks"),
+    ),
+    _spec(
+        "continuity_provider_extensions",
+        "List portable provider extension requirements.",
+        ("continuity", "provider", "extension"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "provider_extensions"},
+        aliases=("defaults.continuity.provider_extensions", "defaultspack.continuity.provider_extensions"),
+    ),
+    _spec(
+        "continuity_plan_handoff",
+        "Plan a continuity handoff and run provider, credential, runtime, and destination preflight.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "plan"},
+        aliases=("defaults.continuity.plan_handoff", "defaultspack.continuity.plan_handoff", "continuity.plan_handoff"),
+    ),
+    _spec(
+        "continuity_status",
+        "Get a continuity handoff operation status.",
+        ("continuity", "handoff"),
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_get"},
+        aliases=("defaults.continuity.status", "defaultspack.continuity.status", "continuity.status"),
+    ),
+    _spec(
+        "continuity_cancel",
+        "Cancel a continuity handoff before cutover.",
+        ("continuity", "handoff"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "handoff_cancel"},
+        aliases=("defaults.continuity.cancel", "defaultspack.continuity.cancel", "continuity.cancel"),
+    ),
+    _spec(
+        "continuity_checkpoint",
+        "Create a continuity checkpoint without cutting over to another destination.",
+        ("continuity", "checkpoint"),
+        risk="medium",
+        block="blocks.continuity.api",
+        default_args={"_handler": "checkpoint"},
+        aliases=("defaults.continuity.checkpoint", "defaultspack.continuity.checkpoint", "continuity.checkpoint"),
+    ),
+)
+
+
 FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     AI_FUNCTIONS
     + CHAT_FUNCTIONS
@@ -591,15 +989,19 @@ FUNCTION_SPECS: tuple[FunctionSpec, ...] = (
     + SKILL_FUNCTIONS
     + CONVERSATION_FUNCTIONS
     + CODING_FUNCTIONS
+    + SANDBOX_CODING_FUNCTIONS
     + AGENT_FUNCTIONS
     + REMOTE_FUNCTIONS
     + BROWSER_ARTIFACT_FUNCTIONS
     + RECORDING_FUNCTIONS
+    + AMBIENT_FUNCTIONS
     + DATA_FUNCTIONS
     + PROFILE_WORKSPACE_FUNCTIONS
     + RESEARCH_MEDIA_UI_DEV_FUNCTIONS
     + MANAGEMENT_FUNCTIONS
     + EXTERNAL_INPUT_FUNCTIONS
+    + ADAPTIVE_FUNCTIONS
+    + CONTINUITY_FUNCTIONS
 )
 
 

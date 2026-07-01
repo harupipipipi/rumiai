@@ -26,7 +26,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import {
   Globe, Terminal, MessageSquare, Plus, ChevronRight, Settings,
-  GripVertical, FolderOpen, Folder, KanbanSquare, PanelLeftOpen, X,
+  GripVertical, FolderOpen, Folder, KanbanSquare, Monitor, PanelLeftOpen, PanelLeftClose, X,
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -40,18 +40,6 @@ import { WarmActionIcon } from './WarmActionIcon';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
-}
-
-function SidebarCloseIcon({ size = 15 }: { size?: number }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width={size} height={size} aria-hidden="true" focusable="false">
-      <rect width="100" height="100" fill="#000000" />
-      <g fill="none" stroke="#999999" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="25" y="25" width="50" height="50" rx="12" />
-        <line x1="42" y1="25" x2="42" y2="75" />
-      </g>
-    </svg>
-  );
 }
 
 // ============================================================
@@ -78,6 +66,7 @@ export type ChatItem = {
 
 export type ChatGroup = {
   id: string;
+  sourceGroupId?: string;
   title: string;
   chats: ChatItem[];
   subGroups: ChatGroup[];
@@ -280,6 +269,38 @@ function saveCustomGroups(groups: CustomGroupInfo[]) {
   }
 }
 
+function collectGroupIds(groups: ChatGroup[], ids = new Set<string>()): Set<string> {
+  for (const group of groups) {
+    ids.add(group.id);
+    collectGroupIds(group.subGroups, ids);
+  }
+  return ids;
+}
+
+function uniqueHistoryGroupId(baseId: string, usedIds: Set<string>, prefix: string): string {
+  const normalizedBaseId = stringOrNull(baseId) ?? "group";
+  let candidate = usedIds.has(normalizedBaseId) ? `${prefix}${normalizedBaseId}` : normalizedBaseId;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${prefix}${normalizedBaseId}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
+}
+
+function uniquifyGroupTreeIds(groups: ChatGroup[], usedIds: Set<string>, prefix: string): ChatGroup[] {
+  return groups.map((group) => {
+    const id = uniqueHistoryGroupId(group.id, usedIds, prefix);
+    return {
+      ...group,
+      id,
+      sourceGroupId: id === group.id ? group.sourceGroupId : group.sourceGroupId ?? group.id,
+      subGroups: uniquifyGroupTreeIds(group.subGroups, usedIds, prefix),
+    };
+  });
+}
+
 export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: CustomGroupInfo[] = []): ChatGroup[] {
   const dateBuckets: Record<'today' | 'recent' | 'older', ChatItem[]> = {
     today: [],
@@ -294,7 +315,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
   };
   const tagBuckets = new Map<string, ChatItem[]>();
   const integrationGroups = new Map<string, ChatGroup>();
-  const customGroupsById = new Map(customGroups.map((group) => [group.id, group]));
+  const metadataGroupsById = new Map(customGroups.map((group) => [group.id, group]));
   const customChatBuckets = new Map(customGroups.map((group) => [group.id, [] as ChatItem[]]));
   const useMetadataGrouping = chatItems.some(hasWorkspaceGroupingMetadata);
 
@@ -304,7 +325,14 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       type: classifyChatType(chat),
     };
     const customGroupId = stringOrNull(normalized.metadata?.group_id ?? normalized.metadata?.groupId);
-    if (customGroupId && customGroupsById.has(customGroupId)) {
+    if (customGroupId) {
+      if (!metadataGroupsById.has(customGroupId)) {
+        metadataGroupsById.set(customGroupId, {
+          id: customGroupId,
+          title: stringOrNull(normalized.metadata?.group_title ?? normalized.metadata?.groupTitle) ?? customGroupId,
+        });
+        customChatBuckets.set(customGroupId, []);
+      }
       customChatBuckets.get(customGroupId)?.push(normalized);
       return;
     }
@@ -423,8 +451,12 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
       ];
 
   const visibleGroups = groups.filter((group) => group.chats.length > 0 || group.subGroups.length > 0);
-  const custom = customGroups.map((group) => ({
-    id: group.id,
+  const reservedGroupIds = collectGroupIds(visibleGroups);
+  const integration = uniquifyGroupTreeIds([...integrationGroups.values()], reservedGroupIds, "integration-");
+  const usedGroupIds = collectGroupIds([...integration, ...visibleGroups]);
+  const custom = [...metadataGroupsById.values()].map((group) => ({
+    id: uniqueHistoryGroupId(group.id, usedGroupIds, "custom-"),
+    sourceGroupId: group.id,
     title: group.title,
     workspaceId: group.workspaceId ?? null,
     workspaceLabel: group.workspaceLabel ?? null,
@@ -435,7 +467,7 @@ export function buildGroupsFromChats(chatItems: ChatItem[], customGroups: Custom
     subGroups: [],
     custom: true,
   }));
-  return [...custom, ...integrationGroups.values(), ...visibleGroups];
+  return [...custom, ...integration, ...visibleGroups];
 }
 
 // ============================================================
@@ -599,6 +631,9 @@ function createCustomCollision(activeType: string | null): CollisionDetection {
 interface SortableChatItemProps {
   chat: ChatItem;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onRename: (id: string, newTitle: string) => void;
   onTogglePinned?: (chat: ChatItem) => void;
@@ -608,18 +643,19 @@ interface SortableChatItemProps {
   depth?: number;
 }
 
-function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
+function SortableChatItem({ chat, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onRename, onTogglePinned, onToggleStarred, onToggleChildren, isChildrenExpanded, depth = 0 }: SortableChatItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(chat.title);
   const children = chat.children ?? [];
   const hasChildren = children.length > 0;
   const expanded = hasChildren && isChildrenExpanded(chat.id);
   const isActive = activeChatId === chat.id;
+  const isSelected = selectedChatId === chat.id;
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: chat.id,
     data: { type: 'Chat', chat },
-    disabled: isEditing,
+    disabled: isEditing || selectionMode,
   });
 
   const style = {
@@ -651,10 +687,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
       <div
         ref={setNodeRef}
         style={style}
-        {...attributes}
-        {...listeners}
-        draggable
+        {...(selectionMode ? { role: "button", "aria-selected": isSelected } : attributes)}
+        {...(selectionMode ? {} : listeners)}
+        draggable={!selectionMode}
         onDragStart={(event) => {
+          if (selectionMode) return;
           const payload = historyChatDragPayload({ ...chat, groupId: chatGroupId(chat) || undefined });
           event.dataTransfer.setData(HISTORY_CHAT_DROP_MIME, JSON.stringify(payload));
           event.dataTransfer.setData("text/plain", chat.title);
@@ -663,11 +700,19 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
         data-testid={`history-chat-card-${chat.id}`}
         className={cn(
           "box-border w-full max-w-full min-h-7 flex items-center gap-1.5 pr-1.5 py-1 rounded-[3px] text-left group/chat transition-colors cursor-grab active:cursor-grabbing outline-none",
-          isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
+          selectionMode && "cursor-pointer active:cursor-pointer",
+          isSelected ? "bg-emerald-500/15 ring-1 ring-inset ring-emerald-400/25" : isActive ? "bg-zinc-800/80" : "hover:bg-zinc-800/50",
           chat.conversationKind === "subagent" && "text-zinc-400",
           isDragging && "ring-1 ring-emerald-500/50 rumi-layer-modal"
         )}
         onClick={() => { if (!isEditing) onChatSelect(chat.id); }}
+        onKeyDown={(event) => {
+          if (!selectionMode || isEditing) return;
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onChatSelect(chat.id);
+          }
+        }}
         onDoubleClick={(e) => { e.stopPropagation(); setIsEditing(true); }}
         tabIndex={0}
       >
@@ -710,6 +755,11 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
             {chat.date}
           </span>
         )}
+        {selectionMode && isSelected && (
+          <span className="ml-auto shrink-0 rounded border border-emerald-400/25 bg-emerald-400/10 px-1.5 py-0.5 text-[10px] leading-none text-emerald-100">
+            {selectionLabel}
+          </span>
+        )}
         <ConversationPinStarMenu
           isPinned={chat.isPinned}
           isStarred={chat.isStarred}
@@ -724,6 +774,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
               key={child.id}
               chat={child}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onRename={onRename}
               onTogglePinned={onTogglePinned}
@@ -746,6 +799,9 @@ function SortableChatItem({ chat, activeChatId, onChatSelect, onRename, onToggle
 interface SubGroupProps {
   group: ChatGroup;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onChatRename: (chatId: string, newTitle: string) => void;
   onToggleCollapse: (id: string) => void;
@@ -759,7 +815,7 @@ interface SubGroupProps {
   depth: number;
 }
 
-function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, depth }: SubGroupProps) {
+function SubGroup({ group, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onChatRename, onToggleCollapse, onRenameGroup, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, depth }: SubGroupProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -773,7 +829,7 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
   } = useSortable({
     id: `drag-col-${group.id}`,
     data: { type: 'ColumnDrag', group },
-    disabled: isEditing,
+    disabled: isEditing || selectionMode,
   });
 
   const { setNodeRef: setDropRef, isOver } = useDroppable({
@@ -867,6 +923,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
                 key={chat.id}
                 chat={chat}
                 activeChatId={activeChatId}
+                selectedChatId={selectedChatId}
+                selectionMode={selectionMode}
+                selectionLabel={selectionLabel}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
                 onTogglePinned={onTogglePinned}
@@ -882,6 +941,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
               key={sub.id}
               group={sub}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onChatRename={onChatRename}
               onToggleCollapse={onToggleCollapse}
@@ -908,6 +970,9 @@ function SubGroup({ group, activeChatId, onChatSelect, onChatRename, onToggleCol
 interface DroppableColumnProps {
   group: ChatGroup;
   activeChatId: string | null;
+  selectedChatId?: string | null;
+  selectionMode?: boolean;
+  selectionLabel?: string;
   onChatSelect: (chatId: string) => void;
   onNewTask: (groupId: string) => void;
   onSettingsClick: () => void;
@@ -925,7 +990,7 @@ interface DroppableColumnProps {
   dragHandleProps?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
+function DroppableColumn({ group, activeChatId, selectedChatId = null, selectionMode = false, selectionLabel = "選択中", onChatSelect, onNewTask, onSettingsClick, onRename, onToggleCollapse, onChatRename, onUngroup, onTogglePinned, onToggleStarred, onToggleChatChildren, isChatChildrenExpanded, onGroupHeaderClick, isDraggedOver, isDragging, dragHandleProps }: DroppableColumnProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(group.title);
 
@@ -1027,6 +1092,9 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
                 key={chat.id}
                 chat={chat}
                 activeChatId={activeChatId}
+                selectedChatId={selectedChatId}
+                selectionMode={selectionMode}
+                selectionLabel={selectionLabel}
                 onChatSelect={onChatSelect}
                 onRename={onChatRename}
                 onTogglePinned={onTogglePinned}
@@ -1042,6 +1110,9 @@ function DroppableColumn({ group, activeChatId, onChatSelect, onNewTask, onSetti
               key={sub.id}
               group={sub}
               activeChatId={activeChatId}
+              selectedChatId={selectedChatId}
+              selectionMode={selectionMode}
+              selectionLabel={selectionLabel}
               onChatSelect={onChatSelect}
               onChatRename={onChatRename}
               onToggleCollapse={onToggleCollapse}
@@ -1127,6 +1198,8 @@ interface HistoryBoardProps {
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
+  onDesktopsOpen?: () => void;
+  isDesktopsActive?: boolean;
   onSettingsClick: () => void;
   onChatMetadataChange?: (chatId: string, updates: { is_pinned?: boolean; is_starred?: boolean; tags?: string[] }) => void;
   onMinimize?: () => void;
@@ -1138,6 +1211,9 @@ interface HistoryBoardProps {
   onDirectorySelect?: () => Promise<string | null | undefined>;
   onGroupDataPathPrepare?: (rootPath: string) => Promise<{ rootPath: string; rumiDataPath: string } | null | undefined>;
   onCodingWorkspacesRefresh?: () => void | Promise<void>;
+  selectionMode?: boolean;
+  selectedChatId?: string | null;
+  selectionLabel?: string;
 }
 
 type GroupWorkspaceChoice = "none" | "current" | "custom";
@@ -1332,6 +1408,8 @@ export function HistoryBoard({
   onKanbanOpen,
   onGroupKanbanOpen,
   isKanbanActive = false,
+  onDesktopsOpen,
+  isDesktopsActive = false,
   onSettingsClick,
   onChatMetadataChange,
   onMinimize,
@@ -1343,6 +1421,9 @@ export function HistoryBoard({
   onDirectorySelect,
   onGroupDataPathPrepare,
   onCodingWorkspacesRefresh,
+  selectionMode = false,
+  selectedChatId = null,
+  selectionLabel = "選択中",
 }: HistoryBoardProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -1546,9 +1627,10 @@ export function HistoryBoard({
 
   // --- Actions ---
   const handleRenameGroup = (id: string, newTitle: string) => {
+    const sourceGroupId = findGroupById(groups, id)?.sourceGroupId ?? id;
     setGroups(prev => mapGroups(prev, g => g.id === id ? { ...g, title: newTitle } : g));
     setCustomGroups((prev) => {
-      const next = prev.map((group) => group.id === id ? { ...group, title: newTitle } : group);
+      const next = prev.map((group) => group.id === sourceGroupId ? { ...group, title: newTitle } : group);
       saveCustomGroups(next);
       return next;
     });
@@ -1862,54 +1944,73 @@ export function HistoryBoard({
               title="サイドバーを開く"
               aria-label="サイドバーを開く"
             >
-              <PanelLeftOpen size={14} />
+              <PanelLeftOpen size={18} aria-hidden="true" />
             </button>
           )}
-          <button
-            onClick={handleCreateChat}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Chat"
-            aria-label="New Chat"
-          >
-            <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={openCreateGroup}
-            className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
-            title="New Group"
-            aria-label="New Group"
-          >
-            <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          {createGroupForm}
-          <button
-            type="button"
-            onClick={() => {
-              onCalendarOpen?.();
-            }}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-              isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
-            )}
-            title="Calendar"
-            aria-label="Calendar"
-          >
-            <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onKanbanOpen?.();
-            }}
-            className={cn(
-              "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
-              isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
-            )}
-            title="Kanban"
-            aria-label="Kanban"
-          >
-            <KanbanSquare size={14} />
-          </button>
+          {!selectionMode && (
+            <>
+              <button
+                onClick={handleCreateChat}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                title="New Chat"
+                aria-label="New Chat"
+              >
+                <WarmActionIcon kind="newChat" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={openCreateGroup}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-zinc-500 transition-colors hover:bg-zinc-800 hover:text-zinc-100"
+                title="New Group"
+                aria-label="New Group"
+              >
+                <WarmActionIcon kind="group" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              {createGroupForm}
+              <button
+                type="button"
+                onClick={() => {
+                  onCalendarOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isCalendarActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Calendar"
+                aria-label="Calendar"
+              >
+                <WarmActionIcon kind="calendar" size="sm" iconClassName="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onKanbanOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isKanbanActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Kanban"
+                aria-label="Kanban"
+              >
+                <KanbanSquare size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDesktopsOpen?.();
+                }}
+                className={cn(
+                  "flex h-9 w-9 items-center justify-center rounded-xl transition-colors",
+                  isDesktopsActive ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-100",
+                )}
+                title="Desktops"
+                aria-label="Desktops"
+                aria-current={isDesktopsActive ? "page" : undefined}
+              >
+                <Monitor size={14} />
+              </button>
+            </>
+          )}
         </div>
 
         <div className="flex min-h-0 w-full flex-1 flex-col items-center gap-1 overflow-y-auto px-1.5 py-2">
@@ -2000,63 +2101,84 @@ export function HistoryBoard({
                 title="サイドバーを閉じる"
                 aria-label="サイドバーを閉じる"
               >
-                <SidebarCloseIcon size={15} />
+                <PanelLeftClose size={18} aria-hidden="true" />
               </button>
             )}
           </div>
-          <div className="mt-2 flex flex-col gap-1.5">
-            <button
-              onClick={handleCreateChat}
-              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
-              title="New Chat"
-            >
-              <WarmActionIcon kind="newChat" size="sm" />
-              <span className="truncate">New Chat</span>
-            </button>
-            <button
-              onClick={openCreateGroup}
-              className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
-              title="New Group"
-            >
-              <WarmActionIcon kind="group" size="sm" />
-              <span className="truncate">New Group</span>
-            </button>
-            {createGroupForm}
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              onCalendarOpen?.();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
-              isCalendarActive
-                ? "bg-zinc-800/80 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
-            )}
-            title="Calendar"
-            aria-expanded={isCalendarActive}
-          >
-            <WarmActionIcon kind="calendar" size="sm" />
-            <span className="truncate">Calendar</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              onKanbanOpen?.();
-            }}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
-              isKanbanActive
-                ? "bg-zinc-800/80 text-zinc-100"
-                : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
-            )}
-            title="Kanban"
-            aria-expanded={isKanbanActive}
-          >
-            <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
-            <span className="truncate">Kanban</span>
-          </button>
+          {!selectionMode && (
+            <>
+              <div className="mt-2 flex flex-col gap-1.5">
+                <button
+                  onClick={handleCreateChat}
+                  className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+                  title="New Chat"
+                >
+                  <WarmActionIcon kind="newChat" size="sm" />
+                  <span className="truncate">New Chat</span>
+                </button>
+                <button
+                  onClick={openCreateGroup}
+                  className="flex min-w-0 items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-900/70 hover:text-zinc-100"
+                  title="New Group"
+                >
+                  <WarmActionIcon kind="group" size="sm" />
+                  <span className="truncate">New Group</span>
+                </button>
+                {createGroupForm}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  onCalendarOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isCalendarActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Calendar"
+                aria-expanded={isCalendarActive}
+              >
+                <WarmActionIcon kind="calendar" size="sm" />
+                <span className="truncate">Calendar</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onKanbanOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isKanbanActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Kanban"
+                aria-expanded={isKanbanActive}
+              >
+                <KanbanSquare size={15} className="shrink-0 text-zinc-500" />
+                <span className="truncate">Kanban</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDesktopsOpen?.();
+                }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-xs font-medium transition-colors",
+                  isDesktopsActive
+                    ? "bg-zinc-800/80 text-zinc-100"
+                    : "text-zinc-400 hover:bg-zinc-900/70 hover:text-zinc-100",
+                )}
+                title="Desktops"
+                aria-current={isDesktopsActive ? "page" : undefined}
+              >
+                <Monitor size={15} className="shrink-0 text-zinc-500" />
+                <span className="truncate">Desktops</span>
+              </button>
+            </>
+          )}
           <ConversationSearchBar value={searchQuery} resultCount={visibleChatCount} onChange={setSearchQuery} />
           <ConversationTagFilter tags={allTags} activeTag={activeTag} onChange={setActiveTag} />
         </div>
@@ -2070,6 +2192,9 @@ export function HistoryBoard({
                   <DroppableColumn
                     group={group}
                     activeChatId={activeChatId}
+                    selectedChatId={selectedChatId}
+                    selectionMode={selectionMode}
+                    selectionLabel={selectionLabel}
                     onChatSelect={onChatSelect}
                     onNewTask={handleNewTaskInGroup}
                     onSettingsClick={onSettingsClick}

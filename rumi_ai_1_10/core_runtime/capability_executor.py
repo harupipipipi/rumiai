@@ -17,22 +17,34 @@ Phase D: FunctionRegistry を唯一のレジストリとして統一。
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
 import os
 import re
+import shutil
+import shlex
 import subprocess
 import sys
 import tempfile
-import time
 import threading
-import shutil
-import uuid
-import logging
+import time
 import types
-from .flow_context_security import sanitize_user_flow_context
-from dataclasses import dataclass, field
+import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit, urlunsplit
+
+from .execution_boundary import (
+    ExecutionBoundary,
+    SANDBOX_RUNTIME_UNAVAILABLE,
+    profile_runtime_name,
+)
+from .flow_context_security import sanitize_user_flow_context
+from .pack_function_policy import permission_id_for_entry
+from .rate_limit_store import PersistentRateLimitStore
 
 # function.call: core_pack 判定用
 try:
@@ -78,10 +90,6 @@ sys.modules["core_runtime.crypto_utils"] = _crypto_utils
 sys.modules["rumi_ai_1_10.core_runtime.crypto_utils"] = _crypto_utils
 # def compute_file_sha256 is provided by crypto_utils and re-exported here.
 compute_file_sha256 = getattr(_crypto_utils, "compute_file_sha256", _imported_compute_file_sha256)
-from .pack_function_policy import permission_id_for_entry
-from .rate_limit_store import PersistentRateLimitStore
-
-from typing import Any, Dict, List, Optional
 
 _this_module = sys.modules.get(__name__)
 if _this_module is not None:
@@ -103,10 +111,46 @@ MAX_RESPONSE_SIZE = 1 * 1024 * 1024
 
 # args 要約の最大長（監査ログ用）
 MAX_ARGS_SUMMARY_LENGTH = 500
+MAX_HOST_ARGS_SUMMARY_VALUE_LENGTH = 160
+MAX_HOST_ARGS_SUMMARY_ITEMS = 6
+_HOST_ARG_SECRET_TOKENS = {
+    "apikey",
+    "authorization",
+    "credential",
+    "credentials",
+    "env",
+    "environment",
+    "key",
+    "passwd",
+    "password",
+    "private",
+    "pwd",
+    "secret",
+    "stdin",
+    "token",
+}
+_HOST_ARG_TARGET_TOKENS = {
+    "cwd",
+    "directory",
+    "dir",
+    "endpoint",
+    "file",
+    "files",
+    "path",
+    "paths",
+    "target",
+    "targets",
+    "uri",
+    "url",
+    "urls",
+    "working",
+}
+_HOST_URL_RE = re.compile(r"^https?://", re.IGNORECASE)
+_HOST_WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 logger = logging.getLogger(__name__)
 FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
-TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack"}
+TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack", "rumi_host_capabilities_pack"}
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0
@@ -211,6 +255,7 @@ class _HandlerDefAdapter:
     handler_dir: Path
     handler_py_path: Path
     is_builtin: bool = False
+    pack_id: str = ""
 
 
 
@@ -276,10 +321,206 @@ def _get_secure_tmp_dir() -> str:
         return str(_SECURE_TMP_DIR)
 
 
+def _arg_key_tokens(key: Any) -> list[str]:
+    raw = str(key or "")
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", raw)
+    return [token for token in re.split(r"[^a-z0-9]+", spaced.lower()) if token]
+
+
+def _is_sensitive_arg_key(key: Any) -> bool:
+    tokens = _arg_key_tokens(key)
+    joined = "_".join(tokens)
+    if "api_key" in joined or "private_key" in joined:
+        return True
+    return any(token in _HOST_ARG_SECRET_TOKENS for token in tokens)
+
+
+def _is_target_arg_key(key: Any) -> bool:
+    tokens = _arg_key_tokens(key)
+    joined = "_".join(tokens)
+    if joined in {"working_dir", "working_directory"}:
+        return True
+    return any(token in _HOST_ARG_TARGET_TOKENS for token in tokens)
+
+
+def _safe_host_summary_text(value: Any, max_length: int = MAX_HOST_ARGS_SUMMARY_VALUE_LENGTH) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) > max_length:
+        return text[:max(0, max_length - 14)] + "...(truncated)"
+    return text
+
+
+def _sanitize_host_url(value: Any) -> str:
+    text = _safe_host_summary_text(value)
+    match = re.match(r"^(https?://\S+)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    try:
+        parsed = urlsplit(match.group(1))
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"}:
+        return ""
+    hostname = parsed.hostname or ""
+    if not hostname:
+        return ""
+    if ":" in hostname and not (hostname.startswith("[") and hostname.endswith("]")):
+        hostname = f"[{hostname}]"
+    try:
+        port = parsed.port
+    except ValueError:
+        port = None
+    netloc = f"{hostname}:{port}" if port is not None else hostname
+    return _safe_host_summary_text(urlunsplit((scheme, netloc, parsed.path or "", "", "")))
+
+
+def _looks_like_host_path(value: Any) -> bool:
+    text = str(value or "").strip()
+    if not text or _HOST_URL_RE.match(text):
+        return False
+    return (
+        text.startswith(("/", "./", "../", "~/", "\\\\"))
+        or bool(_HOST_WINDOWS_PATH_RE.match(text))
+    )
+
+
+def _append_limited_unique(target: list[str], value: str) -> None:
+    if value and value not in target and len(target) < MAX_HOST_ARGS_SUMMARY_ITEMS:
+        target.append(value)
+
+
+def _split_flag_value(token: Any) -> str:
+    text = str(token or "").strip()
+    if text.startswith("-") and "=" in text:
+        return text.split("=", 1)[1]
+    return text
+
+
+def _collect_host_targets(value: Any, *, paths: list[str], urls: list[str]) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if _is_sensitive_arg_key(key):
+                continue
+            if _is_target_arg_key(key):
+                _collect_host_targets(nested, paths=paths, urls=urls)
+        return
+    if isinstance(value, (list, tuple, set)):
+        for item in value:
+            _collect_host_targets(item, paths=paths, urls=urls)
+        return
+    text = _split_flag_value(value)
+    url = _sanitize_host_url(text)
+    if url:
+        _append_limited_unique(urls, url)
+        return
+    if _looks_like_host_path(text):
+        _append_limited_unique(paths, _safe_host_summary_text(text))
+
+
+def _host_command_tokens(args: dict[str, Any]) -> list[str]:
+    raw_argv = args.get("argv")
+    if isinstance(raw_argv, (list, tuple)):
+        return [_safe_host_summary_text(item) for item in raw_argv if str(item or "").strip()]
+    raw_args = args.get("args")
+    if isinstance(raw_args, (list, tuple)):
+        return [_safe_host_summary_text(item) for item in raw_args if str(item or "").strip()]
+    for key in ("executable", "binary", "program"):
+        value = args.get(key)
+        if value is not None:
+            return [_safe_host_summary_text(value)]
+    for key in ("command", "cmd"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            return _tokenize_host_command_text(value)
+    return []
+
+
+def _tokenize_host_command_text(value: str) -> list[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    try:
+        parts = shlex.split(text)
+    except ValueError:
+        parts = text.split()
+    return [_safe_host_summary_text(part) for part in parts if str(part or "").strip()]
+
+
+def _collect_host_targets_from_command_tokens(tokens: list[str], *, paths: list[str], urls: list[str]) -> None:
+    skip_next = False
+    for token in tokens:
+        if skip_next:
+            skip_next = False
+            continue
+        if _is_sensitive_cli_token(token):
+            skip_next = "=" not in str(token or "")
+            continue
+        _collect_host_targets(token, paths=paths, urls=urls)
+
+
+def _is_sensitive_cli_token(value: Any) -> bool:
+    text = str(value or "").strip().lower().lstrip("-/")
+    if not text:
+        return False
+    token_name = re.split(r"[=\s:]", text, maxsplit=1)[0]
+    return _is_sensitive_arg_key(token_name)
+
+
+def _redact_sensitive_args(value: Any) -> Any:
+    if isinstance(value, dict):
+        redacted: dict[str, Any] = {}
+        redacted_count = 0
+        for key, nested in value.items():
+            if _is_sensitive_arg_key(key):
+                redacted_count += 1
+                continue
+            if str(key).strip().lower() in {"command", "cmd"} and isinstance(nested, str):
+                redacted[str(key)] = _redact_host_command_text(nested)
+                continue
+            redacted[str(key)] = _redact_sensitive_args(nested)
+        if redacted_count:
+            redacted["_redacted_field_count"] = redacted_count
+        return redacted
+    if isinstance(value, (list, tuple)):
+        redacted_items: list[Any] = []
+        skip_next = False
+        for item in value:
+            if skip_next:
+                redacted_items.append("[redacted]")
+                skip_next = False
+                continue
+            if isinstance(item, str) and _is_sensitive_cli_token(item):
+                redacted_items.append("[redacted]")
+                skip_next = "=" not in item
+                continue
+            redacted_items.append(_redact_sensitive_args(item))
+        return redacted_items
+    if isinstance(value, str) and _HOST_URL_RE.match(value.strip()):
+        return _sanitize_host_url(value)
+    return value
+
+
+def _redact_host_command_text(value: str) -> list[Any]:
+    redacted_items: list[Any] = []
+    skip_next = False
+    for item in _tokenize_host_command_text(value):
+        if skip_next:
+            redacted_items.append("[redacted]")
+            skip_next = False
+            continue
+        if _is_sensitive_cli_token(item):
+            redacted_items.append("[redacted]")
+            skip_next = "=" not in item
+            continue
+        redacted_items.append(_redact_sensitive_args(item))
+    return redacted_items
+
+
 def _summarize_args(args: Any, max_length: int = MAX_ARGS_SUMMARY_LENGTH) -> str:
     """args を監査ログ用に要約"""
     try:
-        s = json.dumps(args, ensure_ascii=False, default=str)
+        s = json.dumps(_redact_sensitive_args(args), ensure_ascii=False, default=str)
     except Exception:
         s = str(args)
     if len(s) > max_length:
@@ -744,7 +985,7 @@ class CapabilityExecutor:
             return False
         if pack_id in self._core_function_handlers:
             return True
-        return not self._entry_path_looks_like_ecosystem_pack(entry, pack_id)
+        return False
 
     def _trusted_builtin_pack_path_verdict(self, pack_id: str, pack_root_hint=None) -> bool | None:
         """Return True/False for an existing path hint, or None when no path evidence exists."""
@@ -1048,6 +1289,16 @@ class CapabilityExecutor:
             ):
                 caller_ok = True
             if not caller_ok:
+                self._log_caller_requires_denied(
+                    principal_id=principal_id,
+                    caller_requires=caller_requires,
+                    request_context=request_context,
+                    principal_is_trusted_builtin=principal_is_trusted_builtin,
+                    caller_ok=caller_ok,
+                    permission_id=effective_permission_id,
+                    handler_id=handler_id,
+                    entry=entry,
+                )
                 resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
                                           error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, effective_permission_id, handler_id, resp, args, request_id,
@@ -1109,17 +1360,47 @@ class CapabilityExecutor:
             if isinstance(result_config, dict):
                 grant_config.update(result_config)
 
+        host_boundary_resp = self._host_boundary_response_if_needed(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            args=args,
+        )
+        if host_boundary_resp is not None:
+            self._audit(
+                principal_id,
+                effective_permission_id,
+                handler_id,
+                host_boundary_resp,
+                args,
+                request_id,
+                trusted=True,
+                detail_reason="Direct host access requires critical typed confirmation",
+            )
+            return host_boundary_resp
+
         # 5. calling_convention 分岐
         if calling_convention and calling_convention in _VALID_CALLING_CONVENTIONS:
             resp = self._dispatch_by_calling_convention(
                 calling_convention=calling_convention, entry=entry, principal_id=principal_id,
                 effective_permission_id=effective_permission_id, grant_config=grant_config,
-                args=args, timeout_seconds=timeout_seconds, request_id=request_id, start_time=start_time)
+                args=args, timeout_seconds=timeout_seconds, request_id=request_id, start_time=start_time,
+                request_context=request_context)
         else:
             resp = self._dispatch_by_permission_id(
                 entry=entry, principal_id=principal_id, effective_permission_id=effective_permission_id,
                 grant_config=grant_config, args=args, timeout_seconds=timeout_seconds,
-                request_id=request_id, start_time=start_time)
+                request_id=request_id, start_time=start_time, request_context=request_context)
+
+        resp = self._response_after_host_intent_handling(
+            resp,
+            entry=entry,
+            principal_id=principal_id,
+            request_context=request_context,
+            start_time=start_time,
+        )
 
         # 6. 監査
         extra = {"unified_path": True}
@@ -1157,7 +1438,12 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
+                                          pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
@@ -1172,6 +1458,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "python_docker":
             return self._execute_user_function(
@@ -1183,6 +1470,7 @@ class CapabilityExecutor:
                 grant_config=grant_config,
                 request_context=request_context,
                 force_docker=True,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "binary":
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
@@ -1196,6 +1484,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         if calling_convention == "command":
             guard_resp = self._host_runtime_guard(entry, calling_convention, start_time)
@@ -1209,6 +1498,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         return CapabilityResponse(success=False, error=f"Unknown calling_convention: {calling_convention}",
                                   error_type="invalid_calling_convention", latency_ms=(time.time() - start_time) * 1000)
@@ -1218,7 +1508,8 @@ class CapabilityExecutor:
     # ------------------------------------------------------------------
 
     def _dispatch_by_permission_id(self, entry, principal_id, effective_permission_id,
-                                     grant_config, args, timeout_seconds, request_id, start_time):
+                                     grant_config, args, timeout_seconds, request_id, start_time,
+                                     request_context=None):
         """calling_convention が None/未知の場合のフォールバック。"""
         if effective_permission_id == FLOW_RUN_PERMISSION_ID:
             return self._execute_flow_run(principal_id=principal_id, permission_id=effective_permission_id,
@@ -1235,11 +1526,17 @@ class CapabilityExecutor:
             trusted_handler_path = Path(entry.main_py_path) if getattr(entry, "main_py_path", None) else function_dir / ep_file
             adapter = _HandlerDefAdapter(handler_id=entry.qualified_name, permission_id=effective_permission_id,
                                           entrypoint=entrypoint, handler_dir=function_dir,
-                                          handler_py_path=trusted_handler_path, is_builtin=getattr(entry, "is_builtin", False))
+                                          handler_py_path=trusted_handler_path,
+                                          is_builtin=(
+                                              getattr(entry, "is_builtin", False) is True
+                                              or self._is_core_builtin_trust_bypass_entry(entry)
+                                          ),
+                                          pack_id=str(getattr(entry, "pack_id", "") or ""))
             return self._execute_handler_subprocess(handler_def=adapter, principal_id=principal_id,
                                                      permission_id=effective_permission_id, grant_config=grant_config,
                                                      args=args, timeout_seconds=timeout_seconds,
-                                                     request_id=request_id, start_time=start_time)
+                                                     request_id=request_id, start_time=start_time,
+                                                     request_context=request_context)
 
     # ------------------------------------------------------------------
     # function.call dispatch
@@ -1425,11 +1722,40 @@ class CapabilityExecutor:
             ):
                 caller_ok = True
             if not caller_ok:
+                self._log_caller_requires_denied(
+                    principal_id=principal_id,
+                    caller_requires=entry.caller_requires,
+                    request_context=request_context,
+                    principal_is_trusted_builtin=principal_is_trusted_builtin,
+                    caller_ok=caller_ok,
+                    permission_id="function.call",
+                    handler_id=str(getattr(entry, "qualified_name", "") or ""),
+                    entry=entry,
+                )
                 resp = CapabilityResponse(success=False, error="Caller does not meet caller_requires",
                                           error_type="caller_requires_denied", latency_ms=(time.time() - start_time) * 1000)
                 self._audit(principal_id, "function.call", None, resp, args, request_id,
                             detail_reason=f"Principal '{principal_id}' does not meet caller_requires: {entry.caller_requires}")
                 return resp
+        host_boundary_resp = self._host_boundary_response_if_needed(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            args=args,
+        )
+        if host_boundary_resp is not None:
+            self._audit(
+                principal_id,
+                "function.call",
+                None,
+                host_boundary_resp,
+                args,
+                request_id,
+                detail_reason="Direct host access requires critical typed confirmation",
+            )
+            return host_boundary_resp
         calling_convention = getattr(entry, "calling_convention", None)
         authorized, auth_resp, dispatch_grant_config = self._authorized_core_dispatch_config(
             principal_id, entry, start_time
@@ -1543,6 +1869,13 @@ class CapabilityExecutor:
                 grant_config=dispatch_grant_config,
                 request_context=request_context,
             )
+        resp = self._response_after_host_intent_handling(
+            resp,
+            entry=entry,
+            principal_id=principal_id,
+            request_context=request_context,
+            start_time=start_time,
+        )
         self._audit(principal_id, "function.call", None, resp, args, request_id,
                     extra_details={"qualified_name": qualified_name, "pack_id": pack_id, "is_core": is_core, "calling_convention": calling_convention})
         return resp
@@ -1566,10 +1899,694 @@ class CapabilityExecutor:
         required = {str(item or "").strip() for item in caller_requires or []}
         return bool(required) and required <= {"user.approved.high_risk"}
 
+    def _caller_requires_diagnostic(
+        self,
+        *,
+        principal_id,
+        caller_requires,
+        request_context,
+        principal_is_trusted_builtin,
+        caller_ok,
+        permission_id=None,
+        handler_id=None,
+        entry=None,
+    ) -> dict[str, Any]:
+        context = request_context if isinstance(request_context, dict) else {}
+        authority = context.get("authority") if isinstance(context.get("authority"), dict) else {}
+        approval_tokens = authority.get("approval_tokens")
+        approval_token_keys = sorted(str(key) for key in approval_tokens.keys()) if isinstance(approval_tokens, dict) else []
+        required = {str(item or "").strip() for item in caller_requires or []}
+        if not principal_is_trusted_builtin:
+            reason = "principal_not_trusted_builtin"
+        elif not isinstance(request_context, dict):
+            reason = "missing_request_context"
+        elif context.get("_tool_server_approved") is not True:
+            reason = "tool_server_approval_missing"
+        elif not (required and required <= {"user.approved.high_risk"}):
+            reason = "unsupported_caller_requirement"
+        elif not caller_ok:
+            reason = "permission_manager_or_context_denied"
+        else:
+            reason = "allowed"
+        return {
+            "reason": reason,
+            "principal_id": str(principal_id or ""),
+            "permission_id": str(permission_id or ""),
+            "handler_id": str(handler_id or ""),
+            "pack_id": str(getattr(entry, "pack_id", "") or "") if entry is not None else "",
+            "function_id": str(getattr(entry, "function_id", "") or "") if entry is not None else "",
+            "qualified_name": str(getattr(entry, "qualified_name", "") or "") if entry is not None else "",
+            "caller_requires": sorted(required),
+            "high_risk_approval_only": self._caller_requires_high_risk_approval_only(caller_requires),
+            "principal_is_trusted_builtin": bool(principal_is_trusted_builtin),
+            "context_is_dict": isinstance(request_context, dict),
+            "tool_server_approved": context.get("_tool_server_approved") is True,
+            "context_source": str(context.get("source") or ""),
+            "context_approval_id": str(context.get("approval_id") or ""),
+            "context_request_id": str(context.get("request_id") or ""),
+            "context_conversation_id": str(context.get("conversation_id") or ""),
+            "authority_principal_id": str(context.get("authority_principal_id") or ""),
+            "authority_request_id": str(authority.get("request_id") or ""),
+            "authority_permission_id": str(authority.get("permission_id") or ""),
+            "authority_has_token": bool(authority.get("approval_token")),
+            "authority_approval_token_keys": approval_token_keys,
+            "context_keys": sorted(str(key) for key in context.keys())[:40],
+        }
+
+    def _log_caller_requires_denied(
+        self,
+        *,
+        principal_id,
+        caller_requires,
+        request_context,
+        principal_is_trusted_builtin,
+        caller_ok,
+        permission_id=None,
+        handler_id=None,
+        entry=None,
+    ) -> None:
+        diagnostic = self._caller_requires_diagnostic(
+            principal_id=principal_id,
+            caller_requires=caller_requires,
+            request_context=request_context,
+            principal_is_trusted_builtin=principal_is_trusted_builtin,
+            caller_ok=caller_ok,
+            permission_id=permission_id,
+            handler_id=handler_id,
+            entry=entry,
+        )
+        logger.warning("caller_requires denied: %s", json.dumps(diagnostic, ensure_ascii=False, sort_keys=True))
+
     @staticmethod
     def _caller_requires_high_risk_approval_only(caller_requires):
         required = {str(item or "").strip() for item in caller_requires or []}
         return bool(required) and required <= {"user.approved.high_risk"}
+
+    def _sandbox_execution_context(
+        self,
+        request_context: dict[str, Any] | None,
+        *,
+        principal_id: str,
+        entry,
+        request_id: str,
+        grant_config: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        source = request_context if isinstance(request_context, dict) else {}
+        context = {
+            key: self._sandbox_public_value(source[key])
+            for key in (
+                "conversation_id",
+                "chat_id",
+                "message_id",
+                "source_message_id",
+                "workspace_id",
+                "locale",
+                "timezone",
+                "language",
+                "run_source",
+                "source",
+            )
+            if key in source and not self._sandbox_context_key_is_sensitive(key)
+        }
+        context.update(
+            {
+                "principal_id": str(principal_id or ""),
+                "profile_id": self._principal_profile_id(principal_id, request_context),
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "request_id": request_id,
+                "ts": self._now_ts(),
+                "grant_config": self._sandbox_public_grant_config(grant_config),
+            }
+        )
+        return context
+
+    @classmethod
+    def _sandbox_public_grant_config(cls, grant_config: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(grant_config, dict):
+            return {}
+        public_keys = {
+            "allowed_kinds",
+            "allowed_models",
+            "allowed_packs",
+            "allowed_path_globs",
+            "allowed_providers",
+            "allowed_target_packs",
+            "expires_at_epoch",
+            "max_daily_sends_per_scope",
+            "max_output_bytes",
+            "max_payload_bytes",
+            "max_sends_per_scope",
+            "model_ids",
+            "provider_ids",
+            "send_scope_level",
+            "timeout",
+        }
+        return {
+            key: cls._sandbox_public_value(value)
+            for key, value in grant_config.items()
+            if isinstance(key, str)
+            and key in public_keys
+            and not cls._sandbox_context_key_is_sensitive(key)
+        }
+
+    @classmethod
+    def _sandbox_public_value(cls, value: Any, *, depth: int = 0) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if depth >= 4:
+            return None
+        if isinstance(value, (list, tuple)):
+            return [cls._sandbox_public_value(item, depth=depth + 1) for item in list(value)[:64]]
+        if isinstance(value, dict):
+            result: dict[str, Any] = {}
+            for key, item in list(value.items())[:64]:
+                if not isinstance(key, str) or cls._sandbox_context_key_is_sensitive(key):
+                    continue
+                sanitized = cls._sandbox_public_value(item, depth=depth + 1)
+                if sanitized is not None:
+                    result[key] = sanitized
+            return result
+        return str(value)
+
+    @staticmethod
+    def _sandbox_context_key_is_sensitive(key: str) -> bool:
+        normalized = str(key or "").strip().lower()
+        if not normalized:
+            return True
+        if normalized.startswith("_"):
+            return True
+        return any(
+            marker in normalized
+            for marker in (
+                "api_key",
+                "approval",
+                "auth",
+                "bearer",
+                "credential",
+                "csrf",
+                "keychain",
+                "local_auth",
+                "password",
+                "secret",
+                "session",
+                "token",
+            )
+        )
+
+    def _managed_sandbox_response_if_required(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        args: dict[str, Any] | None,
+        request_id: str,
+        start_time: float,
+        request_context: dict[str, Any] | None,
+        calling_convention: str,
+        timeout_seconds: float | None = None,
+        grant_config: dict[str, Any] | None = None,
+    ) -> CapabilityResponse | None:
+        if not self._entry_requires_managed_sandbox(entry, principal_id, request_context):
+            return None
+        if self._development_host_boundary_allowed(principal_id, request_context):
+            return None
+
+        supervisor = self._managed_sandbox_supervisor()
+        if supervisor is None:
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason="Managed sandbox runtime is not registered",
+            )
+        execute = getattr(supervisor, "execute_capability", None)
+        if not callable(execute):
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason="Managed sandbox supervisor cannot execute capabilities",
+            )
+        try:
+            function_dir = getattr(entry, "function_dir", None)
+            main_py_path = getattr(entry, "main_py_path", None)
+            entrypoint = str(getattr(entry, "entrypoint", "") or "main.py:run")
+            sandbox_context = self._sandbox_execution_context(
+                request_context,
+                principal_id=principal_id,
+                entry=entry,
+                request_id=request_id,
+                grant_config=grant_config,
+            )
+            result = execute(
+                {
+                    "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                    "profile_runtime": profile_runtime_name(self._principal_profile_id(principal_id, request_context)),
+                    "principal_id": principal_id,
+                    "request_id": request_id,
+                    "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                    "function_id": str(getattr(entry, "function_id", "") or ""),
+                    "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                    "calling_convention": str(calling_convention or ""),
+                    "function_dir": str(function_dir) if function_dir is not None else "",
+                    "main_py_path": str(main_py_path) if main_py_path is not None else "",
+                    "entrypoint": entrypoint,
+                    "timeout_seconds": float(timeout_seconds or self._get_function_timeout(entry)),
+                    "runner_path": str(FUNCTION_RUNNER_PATH),
+                    "args": dict(args or {}),
+                    "context": sandbox_context,
+                }
+            )
+        except Exception as exc:
+            return self._managed_sandbox_unavailable_response(
+                entry=entry,
+                principal_id=principal_id,
+                request_id=request_id,
+                start_time=start_time,
+                calling_convention=calling_convention,
+                reason=f"Managed sandbox execution failed: {exc}",
+            )
+        if isinstance(result, CapabilityResponse):
+            return result
+        if isinstance(result, dict) and result and (
+            isinstance(result.get("success"), bool) or isinstance(result.get("ok"), bool)
+        ):
+            success = result.get("success") if isinstance(result.get("success"), bool) else result.get("ok")
+            return CapabilityResponse(
+                success=success,
+                output=result.get("output", result),
+                error=None if success else str(result.get("error") or "Managed sandbox execution failed"),
+                error_type=None if success else str(result.get("error_type") or "managed_sandbox_error"),
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        return CapabilityResponse(
+            success=False,
+            output={
+                "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                "required": True,
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                "calling_convention": str(calling_convention or ""),
+                "request_id": request_id,
+            },
+            error="Managed sandbox returned an invalid response",
+            error_type="managed_sandbox_error",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    def _entry_requires_managed_sandbox(
+        self,
+        entry,
+        principal_id: str,
+        request_context: dict[str, Any] | None = None,
+    ) -> bool:
+        del principal_id
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        pack_root_hint = getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None)
+        if self._is_core_builtin_trust_bypass_entry(entry):
+            return False
+        if self._is_trusted_builtin_pack(pack_id, pack_root_hint=pack_root_hint):
+            return False
+        return True
+
+    def _handler_def_requires_managed_sandbox(self, handler_def, principal_id: str) -> bool:
+        del principal_id
+        pack_id = str(getattr(handler_def, "pack_id", "") or "").strip()
+        entry = types.SimpleNamespace(
+            pack_id=pack_id,
+            function_dir=getattr(handler_def, "handler_dir", None),
+            main_py_path=getattr(handler_def, "handler_py_path", None),
+        )
+        if self._is_core_builtin_trust_bypass_entry(entry):
+            return False
+        if pack_id and self._is_trusted_builtin_pack(pack_id, pack_root_hint=getattr(handler_def, "handler_dir", None)):
+            return False
+        return True
+
+    @staticmethod
+    def _development_host_boundary_allowed(
+        principal_id: str,
+        request_context: dict[str, Any] | None,
+    ) -> bool:
+        environment = str(os.environ.get("RUMI_ENVIRONMENT", "")).strip().lower()
+        if environment not in {"development", "dev"}:
+            return False
+        if str(os.environ.get("RUMI_ALLOW_DEVELOPMENT_HOST_EXECUTION", "")).strip().lower() not in {"1", "true"}:
+            return False
+        if str(principal_id or "").startswith("profile:"):
+            return False
+        context = request_context if isinstance(request_context, dict) else {}
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict):
+            if str(principal.get("auth_mode") or "").strip() == "scoped_bearer":
+                return False
+            if str(principal.get("surface_id") or "").strip().startswith("mobile"):
+                return False
+        return True
+
+    @staticmethod
+    def _principal_profile_id(principal_id: str, request_context: dict[str, Any] | None) -> str:
+        context = request_context if isinstance(request_context, dict) else {}
+        principal = context.get("_authenticated_principal")
+        if isinstance(principal, dict) and str(principal.get("profile_id") or "").strip():
+            return str(principal.get("profile_id") or "").strip()
+        text = str(principal_id or "").strip()
+        if text.startswith("profile:"):
+            return text.split(":", 1)[1].split("__", 1)[0]
+        return text or "default"
+
+    @staticmethod
+    def _managed_sandbox_supervisor():
+        try:
+            from .di_container import get_container as _get_di_container
+
+            return _get_di_container().get_or_none("managed_sandbox_supervisor")
+        except Exception:
+            return None
+
+    def _managed_sandbox_unavailable_response(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+        calling_convention: str,
+        reason: str,
+    ) -> CapabilityResponse:
+        profile_id = self._principal_profile_id(principal_id, None)
+        return CapabilityResponse(
+            success=False,
+            output={
+                "execution_boundary": ExecutionBoundary.MANAGED_SANDBOX.value,
+                "required": True,
+                "profile_runtime": profile_runtime_name(profile_id),
+                "pack_id": str(getattr(entry, "pack_id", "") or ""),
+                "function_id": str(getattr(entry, "function_id", "") or ""),
+                "qualified_name": str(getattr(entry, "qualified_name", "") or ""),
+                "calling_convention": str(calling_convention or ""),
+                "request_id": request_id,
+            },
+            error=reason,
+            error_type=SANDBOX_RUNTIME_UNAVAILABLE,
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    @staticmethod
+    def _is_host_capability_pack(pack_id: str) -> bool:
+        return str(pack_id or "").strip() == "rumi_host_capabilities_pack"
+
+    @staticmethod
+    def _entry_declares_direct_host_access(entry) -> bool:
+        manifest = getattr(entry, "manifest", None)
+        if not isinstance(manifest, dict):
+            manifest = {}
+        calling_convention = str(getattr(entry, "calling_convention", "") or "").strip()
+        configured_host_entry = bool(
+            getattr(entry, "host_execution", False)
+            and (getattr(entry, "function_dir", None) or getattr(entry, "main_py_path", None))
+        )
+        return bool(
+            manifest.get("host_operation")
+            or manifest.get("host_execution") is True
+            or configured_host_entry
+            or calling_convention == "python_host"
+        )
+
+    def _critical_host_confirmation_required_response(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+        request_context: dict[str, Any] | None = None,
+        args: dict[str, Any] | None = None,
+    ) -> CapabilityResponse | None:
+        phrase = self._host_confirmation_phrase_for_entry(entry)
+        manifest = getattr(entry, "manifest", None)
+        args_hash = self._host_execution_args_hash(args)
+        resource = {
+            "kind": "critical_host_function",
+            "pack_id": getattr(entry, "pack_id", ""),
+            "function_id": getattr(entry, "function_id", ""),
+            "function_qualified_name": getattr(entry, "qualified_name", ""),
+            "calling_convention": getattr(entry, "calling_convention", None),
+            "host_operation": manifest.get("host_operation") if isinstance(manifest, dict) else None,
+            "args_hash": args_hash,
+            "args_summary": self._host_execution_args_summary(args),
+            "confirmation_phrase": phrase,
+            "typed_confirmation_required": True,
+        }
+        try:
+            from .authority import get_authority_service
+
+            authority_request_id, approval_token = self._authority_context_token_for_permission(
+                request_context,
+                "host.process.exec_guarded",
+            )
+            decision = get_authority_service().check(
+                principal_id=principal_id,
+                permission_id="host.process.exec_guarded",
+                resource=resource,
+                reason="Direct host execution requires typed confirmation",
+                request_id=authority_request_id or request_id or None,
+                approval_token=approval_token or None,
+            )
+            if decision.allowed and not decision.approval_required:
+                return None
+            event = decision.to_approval_event() if decision.approval_required else decision.to_dict()
+        except Exception:
+            event = {
+                "approval_required": True,
+                "permission_id": "host.process.exec_guarded",
+                "resource": resource,
+                "risk_level": "critical",
+            }
+        event.update(
+            {
+                "approval_kind": "critical_host_function",
+                "critical": True,
+                "typed_confirmation_required": True,
+                "confirmation_phrase": phrase,
+            }
+        )
+        return CapabilityResponse(
+            success=False,
+            output=event,
+            error="Critical host confirmation required",
+            error_type="critical_host_confirmation_required",
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    def _host_boundary_response_if_needed(
+        self,
+        *,
+        entry,
+        principal_id: str,
+        request_id: str,
+        start_time: float,
+        request_context: dict[str, Any] | None = None,
+        args: dict[str, Any] | None = None,
+    ) -> CapabilityResponse | None:
+        pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        if self._is_host_capability_pack(pack_id):
+            return None
+        if not self._entry_declares_direct_host_access(entry):
+            return None
+        return self._critical_host_confirmation_required_response(
+            entry=entry,
+            principal_id=principal_id,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            args=args,
+        )
+
+    @staticmethod
+    def _host_confirmation_phrase_for_entry(entry) -> str:
+        manifest = getattr(entry, "manifest", None)
+        manifest = manifest if isinstance(manifest, dict) else {}
+        seed = "|".join(
+            str(value or "").strip()
+            for value in (
+                getattr(entry, "pack_id", ""),
+                getattr(entry, "function_id", ""),
+                getattr(entry, "qualified_name", ""),
+                getattr(entry, "calling_convention", ""),
+                manifest.get("host_operation"),
+            )
+        )
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8].upper()
+        return f"RUMI-HOST-{digest}"
+
+    @staticmethod
+    def _host_execution_args_hash(args: dict[str, Any] | None) -> str:
+        normalized = args if isinstance(args, dict) else {}
+        payload = json.dumps(
+            {"args": normalized},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _host_execution_args_summary(args: dict[str, Any] | None) -> dict[str, Any]:
+        if not isinstance(args, dict):
+            return {"type": type(args).__name__, "keys": [], "count": 0}
+        visible_keys = sorted(str(key) for key in args.keys() if not _is_sensitive_arg_key(key))
+        redacted_field_count = len(args) - len(visible_keys)
+        summary: dict[str, Any] = {
+            "type": "object",
+            "keys": visible_keys[:20],
+            "count": len(visible_keys),
+            "truncated": len(visible_keys) > 20,
+        }
+        tokens = _host_command_tokens(args)
+        paths: list[str] = []
+        urls: list[str] = []
+        if tokens:
+            summary["executable"] = tokens[0]
+            summary["argument_count"] = max(0, len(tokens) - 1)
+            _collect_host_targets_from_command_tokens(tokens[1:], paths=paths, urls=urls)
+        for key in ("cwd", "working_dir", "working_directory"):
+            if key in args and not _is_sensitive_arg_key(key):
+                cwd = _safe_host_summary_text(args.get(key))
+                if cwd:
+                    summary["cwd"] = cwd
+                break
+        for key, value in args.items():
+            if str(key) in {"cwd", "working_dir", "working_directory"}:
+                continue
+            if _is_sensitive_arg_key(key) or not _is_target_arg_key(key):
+                continue
+            _collect_host_targets(value, paths=paths, urls=urls)
+        if paths:
+            summary["target_paths"] = paths
+        if urls:
+            summary["target_urls"] = urls
+        if redacted_field_count:
+            summary["redacted_field_count"] = redacted_field_count
+        return summary
+
+    @staticmethod
+    def _authority_context_token_for_permission(
+        request_context: dict[str, Any] | None,
+        permission_id: str,
+    ) -> tuple[str, str]:
+        permission_id = str(permission_id or "").strip()
+        if not permission_id or not isinstance(request_context, dict):
+            return "", ""
+
+        def from_mapping(raw: Any) -> tuple[str, str]:
+            if not isinstance(raw, dict):
+                return "", ""
+            if str(raw.get("permission_id") or "").strip() not in {"", permission_id}:
+                return "", ""
+            authority_request_id = str(raw.get("request_id") or raw.get("approval_request_id") or "").strip()
+            token = str(raw.get("approval_token") or raw.get("token") or "").strip()
+            if authority_request_id and token:
+                return authority_request_id, token
+            return "", ""
+
+        for container in (request_context.get("authority"), request_context):
+            if not isinstance(container, dict):
+                continue
+            approvals = container.get("approval_tokens")
+            if isinstance(approvals, dict):
+                direct = from_mapping(approvals.get(permission_id))
+                if direct != ("", ""):
+                    return direct
+            approvals_list = container.get("approvals")
+            if isinstance(approvals, list):
+                approvals_list = approvals
+            if isinstance(approvals_list, list):
+                for item in approvals_list:
+                    direct = from_mapping(item)
+                    if direct != ("", ""):
+                        return direct
+            direct = from_mapping(container)
+            if direct != ("", ""):
+                return direct
+        return "", ""
+
+    def _response_after_host_intent_handling(
+        self,
+        resp: CapabilityResponse,
+        *,
+        entry,
+        principal_id: str,
+        request_context: dict[str, Any] | None,
+        start_time: float,
+    ) -> CapabilityResponse:
+        if not resp.success:
+            return resp
+        try:
+            from .host_intent import maybe_handle_host_intent_output
+
+            caller_pack_id, caller_function_id = self._host_intent_caller_ids(entry, request_context)
+            handled = maybe_handle_host_intent_output(
+                resp.output,
+                principal_id=principal_id,
+                caller_pack_id=caller_pack_id,
+                caller_function_id=caller_function_id,
+                request_context=request_context,
+            )
+        except Exception as exc:
+            return CapabilityResponse(
+                success=False,
+                error=f"Host intent handling failed: {exc}",
+                error_type="host_intent_error",
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+        if handled is None:
+            return resp
+        return CapabilityResponse(
+            success=bool(handled.get("success")),
+            output=handled,
+            error=None if handled.get("success") else str(handled.get("error_type") or "Host intent requires approval"),
+            error_type=None if handled.get("success") else str(handled.get("error_type") or "host_intent_approval_required"),
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
+    def _host_intent_caller_ids(self, entry, request_context: dict[str, Any] | None) -> tuple[str, str]:
+        entry_pack_id = str(getattr(entry, "pack_id", "") or "").strip()
+        entry_function_id = str(getattr(entry, "function_id", "") or "").strip()
+        if entry_function_id == "ambient_monitor_start":
+            return "rumi_ambient_trigger_pack", "ambient_monitor_start"
+        if self._is_host_capability_pack(entry_pack_id):
+            context = request_context if isinstance(request_context, dict) else {}
+            delegated_pack_id = self._first_context_string(
+                context,
+                "caller_pack_id",
+                "owner_pack",
+                "_source_pack_id",
+            )
+            delegated_function_id = self._first_context_string(
+                context,
+                "caller_function_id",
+                "function_id",
+                "_source_function_id",
+            )
+            if delegated_pack_id and delegated_function_id:
+                return delegated_pack_id, delegated_function_id
+        return entry_pack_id, entry_function_id
+
+    @staticmethod
+    def _first_context_string(context: dict[str, Any], *keys: str) -> str:
+        for key in keys:
+            value = str(context.get(key) or "").strip()
+            if value:
+                return value
+        return ""
 
     # ------------------------------------------------------------------
     # Docker / user function helpers
@@ -1652,7 +2669,8 @@ class CapabilityExecutor:
         return self._response_from_completed_process(proc, start_time, failure_prefix)
 
     def _get_function_timeout(self, entry):
-        grant_config = entry.manifest.get("grant_config", {}) if entry.manifest else {}
+        manifest = getattr(entry, "manifest", None)
+        grant_config = manifest.get("grant_config", {}) if isinstance(manifest, dict) else {}
         t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
         try:
             t = float(t)
@@ -1688,30 +2706,48 @@ class CapabilityExecutor:
         grant_config=None,
         request_context=None,
         force_docker=False,
+        timeout_seconds=None,
     ):
         runtime = getattr(entry, 'runtime', 'python')
         if runtime == "binary":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
                 return guard_resp
-            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
+            return self._execute_binary_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context, timeout_seconds=timeout_seconds)
         elif runtime == "command":
             guard_resp = self._host_runtime_guard(entry, runtime, start_time)
             if guard_resp is not None:
                 return guard_resp
-            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context)
+            return self._execute_command_function(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, grant_config=grant_config, request_context=request_context, timeout_seconds=timeout_seconds)
         if getattr(entry, "host_execution", False) and runtime != "python":
             return CapabilityResponse(success=False, error=f"runtime='{runtime}' requires Docker execution (host_execution must be false)",
                                       error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         pack_id, function_id = entry.pack_id, entry.function_id
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="User function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
             return CapabilityResponse(success=False, error=f"main.py not found: {main_py_path}", error_type="main_py_not_found", latency_ms=(time.time() - start_time) * 1000)
+        sandbox_resp = self._managed_sandbox_response_if_required(
+            entry=entry,
+            principal_id=principal_id,
+            args=args,
+            request_id=request_id,
+            start_time=start_time,
+            request_context=request_context,
+            calling_convention=(
+                "python_docker"
+                if force_docker
+                else str(getattr(entry, "calling_convention", None) or runtime)
+            ),
+            timeout_seconds=timeout_seconds,
+            grant_config=grant_config,
+        )
+        if sandbox_resp is not None:
+            return sandbox_resp
         if self._is_docker_available() and _DockerRunBuilder is not None:
             return self._execute_user_function_docker(principal_id=principal_id, entry=entry, args=args, request_id=request_id, start_time=start_time, timeout=timeout, grant_config=grant_config, request_context=request_context)
         else:
@@ -1746,8 +2782,11 @@ class CapabilityExecutor:
             builder.volume(f"{function_dir.resolve()}:/function:ro")
             builder.volume(f"{input_file}:/input.json:ro")
             builder.volume(f"{runner_path}:/tmp/function_runner.py:ro")
-            builder.env("RUMI_PACK_ID", pack_id); builder.env("RUMI_FUNCTION_ID", function_id)
-            builder.label("rumi.managed", "true"); builder.label("rumi.type", "function"); builder.label("rumi.pack_id", pack_id)
+            builder.env("RUMI_PACK_ID", pack_id)
+            builder.env("RUMI_FUNCTION_ID", function_id)
+            builder.label("rumi.managed", "true")
+            builder.label("rumi.type", "function")
+            builder.label("rumi.pack_id", pack_id)
             builder.image(getattr(entry, 'docker_image', '') or FUNCTION_BASE_IMAGE)
             builder.command(["python", "/tmp/function_runner.py", "--input-file", "/input.json"])
             proc = subprocess.run(builder.build(), capture_output=True, text=True, timeout=timeout)
@@ -1784,14 +2823,14 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Function execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_host_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         function_dir, main_py_path = entry.function_dir, entry.main_py_path
         if function_dir is None and main_py_path is None:
             return CapabilityResponse(success=False, error="Host function execution is not configured", error_type="not_implemented", latency_ms=(time.time() - start_time) * 1000)
         allow_host = os.environ.get("RUMI_ALLOW_HOST_EXECUTION", "").lower()
         if allow_host not in ("1", "true"):
             return CapabilityResponse(success=False, error="Host execution is disabled. Set RUMI_ALLOW_HOST_EXECUTION=1 to enable.", error_type="host_execution_disabled", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         if function_dir is None or not Path(function_dir).is_dir():
             return CapabilityResponse(success=False, error=f"function_dir not found: {function_dir}", error_type="function_dir_not_found", latency_ms=(time.time() - start_time) * 1000)
         if main_py_path is None or not Path(main_py_path).is_file():
@@ -1931,7 +2970,7 @@ class CapabilityExecutor:
                                       error_type=self._core_function_error_type(result), latency_ms=latency_ms)
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
-    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_binary_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         guard_resp = self._host_runtime_guard(entry, "binary", start_time)
         if guard_resp is not None:
             return guard_resp
@@ -1941,7 +2980,7 @@ class CapabilityExecutor:
         func_dir = Path(entry.function_dir).resolve()
         if not Path(binary_path).resolve().is_relative_to(func_dir):
             return CapabilityResponse(success=False, error="Binary path escapes function directory", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
@@ -1951,7 +2990,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Binary exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -1962,7 +3002,7 @@ class CapabilityExecutor:
         except Exception as e:
             return CapabilityResponse(success=False, error=f"Execution error: {e}", error_type="internal_error", latency_ms=(time.time() - start_time) * 1000)
 
-    def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None):
+    def _execute_command_function(self, principal_id, entry, args, request_id, start_time, grant_config=None, request_context=None, timeout_seconds=None):
         guard_resp = self._host_runtime_guard(entry, "command", start_time)
         if guard_resp is not None:
             return guard_resp
@@ -1994,7 +3034,7 @@ class CapabilityExecutor:
                 return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
         elif not Path(command[0]).is_absolute():
             return CapabilityResponse(success=False, error="Command entrypoints must use an absolute executable path", error_type="security_violation", latency_ms=(time.time() - start_time) * 1000)
-        timeout = self._get_function_timeout(entry)
+        timeout = min(float(timeout_seconds or self._get_function_timeout(entry)), MAX_TIMEOUT)
         context = dict(request_context or {}) if isinstance(request_context, dict) else {}
         context.update({"principal_id": principal_id, "pack_id": entry.pack_id, "function_id": entry.function_id, "request_id": request_id, "ts": self._now_ts(), "grant_config": dict(grant_config or {})})
         input_json = json.dumps({"context": context, "args": args}, ensure_ascii=False, default=str)
@@ -2005,7 +3045,8 @@ class CapabilityExecutor:
             if proc.returncode != 0:
                 return CapabilityResponse(success=False, error=_sanitize_error(f"Command exited {proc.returncode}: {(proc.stderr or '').strip()[:500]}"), error_type="function_execution_error", latency_ms=latency_ms)
             stdout = (proc.stdout or "").strip()
-            if not stdout: return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
+            if not stdout:
+                return CapabilityResponse(success=True, output=None, latency_ms=latency_ms)
             if len(stdout.encode("utf-8")) > MAX_RESPONSE_SIZE:
                 return CapabilityResponse(success=False, error="Response too large", error_type="response_too_large", latency_ms=latency_ms)
             return CapabilityResponse(success=True, output=json.loads(stdout), latency_ms=latency_ms)
@@ -2025,7 +3066,8 @@ class CapabilityExecutor:
             return CapabilityResponse(success=False, error="'inputs' must be a dict", error_type="invalid_request", latency_ms=(time.time() - start_time) * 1000)
         if self._kernel is None:
             return CapabilityResponse(success=False, error="Kernel not available for flow.run", error_type="initialization_error", latency_ms=(time.time() - start_time) * 1000)
-        if not hasattr(_flow_call_stack_local, "stack"): _flow_call_stack_local.stack = []
+        if not hasattr(_flow_call_stack_local, "stack"):
+            _flow_call_stack_local.stack = []
         call_stack = _flow_call_stack_local.stack
         if flow_id in call_stack:
             return CapabilityResponse(success=False, error=f"Recursive flow.run detected: {' -> '.join(call_stack + [flow_id])}", error_type="recursive_flow", latency_ms=(time.time() - start_time) * 1000)
@@ -2086,6 +3128,29 @@ class CapabilityExecutor:
         return CapabilityResponse(success=True, output=result, latency_ms=latency_ms)
 
     def _execute_handler_subprocess(self, handler_def, principal_id, permission_id, grant_config, args, timeout_seconds, request_id, start_time, request_context=None):
+        if self._handler_def_requires_managed_sandbox(handler_def, principal_id):
+            entry = types.SimpleNamespace(
+                pack_id=str(getattr(handler_def, "pack_id", "") or ""),
+                function_id=str(getattr(handler_def, "handler_id", "") or ""),
+                qualified_name=str(getattr(handler_def, "handler_id", "") or ""),
+                function_dir=getattr(handler_def, "handler_dir", None),
+                main_py_path=getattr(handler_def, "handler_py_path", None),
+                is_builtin=bool(getattr(handler_def, "is_builtin", False)),
+                calling_convention="subprocess",
+            )
+            sandbox_resp = self._managed_sandbox_response_if_required(
+                entry=entry,
+                principal_id=principal_id,
+                args=args,
+                request_id=request_id,
+                start_time=start_time,
+                request_context=request_context,
+                calling_convention="subprocess",
+                timeout_seconds=timeout_seconds,
+                grant_config=grant_config,
+            )
+            if sandbox_resp is not None:
+                return sandbox_resp
         entrypoint = str(handler_def.entrypoint or "main.py:run")
         ep_file, ep_func = (
             entrypoint.rsplit(":", 1) if ":" in entrypoint else (entrypoint, "run")
@@ -2136,12 +3201,19 @@ class CapabilityExecutor:
             audit = get_audit_logger()
             details = {"principal_id": principal_id, "permission_id": permission_id, "handler_id": handler_id,
                         "request_id": request_id, "latency_ms": response.latency_ms, "args_summary": _summarize_args(args)}
-            if trusted is not None: details["trusted"] = trusted
-            if grant_allowed is not None: details["grant_allowed"] = grant_allowed
-            if grant_reason is not None: details["grant_reason"] = grant_reason
-            if detail_reason is not None: details["detail_reason"] = detail_reason
-            if extra_details: details.update(extra_details)
-            if response.error: details["error"] = response.error; details["error_type"] = response.error_type
+            if trusted is not None:
+                details["trusted"] = trusted
+            if grant_allowed is not None:
+                details["grant_allowed"] = grant_allowed
+            if grant_reason is not None:
+                details["grant_reason"] = grant_reason
+            if detail_reason is not None:
+                details["detail_reason"] = detail_reason
+            if extra_details:
+                details.update(extra_details)
+            if response.error:
+                details["error"] = response.error
+                details["error_type"] = response.error_type
             rejection_reason = str(detail_reason or grant_reason or response.error or "")
             audit.log_permission_event(pack_id=principal_id, permission_type="capability", action="execute",
                                         success=response.success, details=details,

@@ -5,14 +5,12 @@ Each command is registered in COMMANDS and receives the CLISession
 plus the raw argument string.
 """
 
-import json
-
-
 COMMANDS = {}
 
 
 def command(name, description, usage=None):
     """Decorator to register a slash command."""
+
     def decorator(func):
         COMMANDS[name] = {
             "handler": func,
@@ -20,6 +18,7 @@ def command(name, description, usage=None):
             "usage": usage or ("/" + name),
         }
         return func
+
     return decorator
 
 
@@ -29,15 +28,14 @@ def command(name, description, usage=None):
 @command("help", "Show available commands")
 def cmd_help(session, args):
     """Print all available slash commands."""
-    from transport.cli_formatter import c, BOLD, DIM, GREEN, CYAN
+    from transport.cli_formatter import c, BOLD, DIM, GREEN
+
     lines = []
     lines.append(c(BOLD, "Available commands:"))
     lines.append("")
     for name in sorted(COMMANDS.keys()):
         info = COMMANDS[name]
-        lines.append(
-            "  " + c(GREEN, info["usage"].ljust(28)) + c(DIM, info["description"])
-        )
+        lines.append("  " + c(GREEN, info["usage"].ljust(28)) + c(DIM, info["description"]))
     lines.append("")
     lines.append(c(DIM, "Type a message without / to chat with AI."))
     return "\n".join(lines)
@@ -61,9 +59,11 @@ def cmd_new(session, args):
         if conv_id:
             session.conversation_id = conv_id
             from transport.cli_formatter import print_success_message
+
             print_success_message("New conversation: " + conv_id[:8] + " (model: " + model + ")")
             return None
     from transport.cli_formatter import print_error_message
+
     err_msg = "Failed to create conversation"
     if result and result.get("status") == "error":
         err_detail = result.get("error", {})
@@ -88,6 +88,7 @@ def cmd_list(session, args):
         if not conversations:
             return "No conversations found."
         from transport.cli_formatter import c, DIM, GREEN, CYAN, BOLD, YELLOW
+
         lines = []
         lines.append(c(BOLD, "Conversations:"))
         for conv in conversations:
@@ -96,9 +97,13 @@ def cmd_list(session, args):
             created = conv.get("created_at", "?")
             marker = " " + c(YELLOW, "◀") if cid == session.conversation_id else ""
             lines.append(
-                "  " + c(GREEN, cid[:8]) + "  "
-                + c(DIM, "model=") + c(CYAN, model)
-                + "  " + c(DIM, created[:19] if len(created) >= 19 else created)
+                "  "
+                + c(GREEN, cid[:8])
+                + "  "
+                + c(DIM, "model=")
+                + c(CYAN, model)
+                + "  "
+                + c(DIM, created[:19] if len(created) >= 19 else created)
                 + marker
             )
         total = data.get("total", len(conversations))
@@ -121,10 +126,15 @@ def cmd_switch(session, args):
         if len(matches) == 1:
             session.conversation_id = matches[0]["id"]
             from transport.cli_formatter import print_success_message
+
             print_success_message("Switched to " + matches[0]["id"][:8])
             return None
         elif len(matches) > 1:
-            return "Ambiguous prefix — matches " + str(len(matches)) + " conversations. Be more specific."
+            return (
+                "Ambiguous prefix — matches "
+                + str(len(matches))
+                + " conversations. Be more specific."
+            )
         else:
             return "No conversation matching '" + prefix + "'."
     return "Failed to look up conversations."
@@ -143,6 +153,7 @@ def cmd_model(session, args):
             models = result.get("data", {}).get("models", [])
             if models:
                 from transport.cli_formatter import c, DIM, CYAN
+
                 lines.append("")
                 lines.append("Available models:")
                 for m in models:
@@ -154,11 +165,15 @@ def cmd_model(session, args):
     session.save_config()
     # If there's a current conversation, update its model too
     if session.conversation_id:
-        session.backend_call("update_conversation", {
-            "conversation_id": session.conversation_id,
-            "updates": {"model": model},
-        })
+        session.backend_call(
+            "update_conversation",
+            {
+                "conversation_id": session.conversation_id,
+                "updates": {"model": model},
+            },
+        )
     from transport.cli_formatter import print_success_message
+
     print_success_message("Model set to: " + model)
     return None
 
@@ -173,6 +188,7 @@ def cmd_system(session, args):
     session.config["system_prompt"] = prompt_text
     session.save_config()
     from transport.cli_formatter import print_success_message
+
     print_success_message("System prompt updated.")
     return None
 
@@ -181,6 +197,7 @@ def cmd_system(session, args):
 def cmd_config(session, args):
     """Display current CLI configuration."""
     from transport.cli_formatter import c, BOLD, DIM, CYAN
+
     lines = [c(BOLD, "CLI Configuration:")]
     for key, value in sorted(session.config.items()):
         lines.append("  " + c(CYAN, key) + ": " + c(DIM, str(value)))
@@ -194,6 +211,7 @@ def cmd_config(session, args):
 def cmd_clear(session, args):
     """Clear the terminal screen."""
     import os as _os
+
     _os.system("cls" if _os.name == "nt" else "clear")
     return None
 

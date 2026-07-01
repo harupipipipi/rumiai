@@ -521,6 +521,8 @@ def max_tool_calls(context: Dict[str, Any]) -> Optional[int]:
         runtime_profile = context.get("runtime_profile")
         if isinstance(runtime_profile, dict):
             policy = runtime_profile.get("policy")
+    if not isinstance(policy, dict) or "max_tool_calls" not in policy:
+        policy = policy_from_context(context)
     if not isinstance(policy, dict):
         return None
     value = policy.get("max_tool_calls")
@@ -540,12 +542,11 @@ def is_tool_rejected_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> b
     )
     if tool_name and tool_name in denylist:
         return True
-    allowlist = _normalize_policy_tool_list(
-        policy.get("tool_allowlist")
-        or policy.get("enabled_tools")
-        or policy.get("allowed_tools")
+    allowlist, has_allowlist = _normalize_policy_tool_list_from_first_present(
+        policy,
+        ("tool_allowlist", "enabled_tools", "allowed_tools"),
     )
-    if allowlist and tool_name not in allowlist:
+    if has_allowlist and tool_name not in allowlist:
         return True
     category = _tool_metadata_value(tool, "category")
     action_type = _tool_metadata_value(tool, "action_type")
@@ -567,7 +568,23 @@ def _normalize_policy_tool_list(value: Any) -> Set[str]:
     return {str(item).strip() for item in value if str(item).strip()}
 
 
+def _normalize_policy_tool_list_from_first_present(
+    policy: Dict[str, Any],
+    keys: tuple[str, ...],
+) -> tuple[Set[str], bool]:
+    for key in keys:
+        if key in policy:
+            return _normalize_policy_tool_list(policy.get(key)), True
+    return set(), False
+
+
 def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]) -> bool:
+    if isinstance(policy, dict) and (
+        _truthy_policy_value(policy.get("yolo_mode"))
+        or _truthy_policy_value(policy.get("full_access"))
+        or str(policy.get("action_approval_mode") or "").strip().lower() == "full"
+    ):
+        return False
     if _is_write_like_tool_name(tool_name_from_definition(tool)):
         return True
     if _tool_metadata_value(tool, "write_action") is True or _tool_metadata_value(tool, "action_type") in {
@@ -590,6 +607,12 @@ def tool_requires_approval_by_policy(tool: Any, policy: Optional[Dict[str, Any]]
         "create",
         "update",
     }
+
+
+def _truthy_policy_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 def _is_write_like_tool_name(name: str) -> bool:

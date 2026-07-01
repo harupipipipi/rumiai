@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/rumi-template-test-contract.schema.json",
+  "title": "Rumi Template Test Contract",
+  "type": "object",
+  "required": ["contract_id", "assertions"],
+  "additionalProperties": true,
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "route_metadata": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "assertions": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "string",
+            "description": "Legacy documentation-only assertion. Emits a compatibility warning."
+          },
+          {
+            "type": "object",
+            "required": ["type"],
+            "additionalProperties": true,
+            "properties": {
+              "type": {
+                "enum": [
+                  "catalog_contains",
+                  "catalog_excludes",
+                  "route_resolves",
+                  "route_absent",
+                  "function_registered",
+                  "function_absent",
+                  "permission_declared",
+                  "setting_field_exists",
+                  "tool_policy_resolves",
+                  "diagnostic_absent",
+                  "template_projectable",
+                  "template_not_projectable"
+                ]
+              },
+              "bucket": {
+                "type": "string"
+              },
+              "match": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "method": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "function_id": {
+                "type": "string"
+              },
+              "permission_id": {
+                "type": "string"
+              },
+              "template_id": {
+                "type": "string"
+              },
+              "field_id": {
+                "type": "string"
+              },
+              "field_type": {
+                "type": "string"
+              },
+              "policy_id": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

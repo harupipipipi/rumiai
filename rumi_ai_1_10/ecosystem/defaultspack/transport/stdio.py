@@ -41,7 +41,13 @@ def _match_route_spec(method, path):
 def _legacy_module_name(spec):
     if spec is None:
         return None
-    return spec.block_module or spec.fallback_block_module or spec.flow_id or spec.function_name or None
+    return (
+        spec.block_module
+        or spec.fallback_block_module
+        or spec.flow_id
+        or spec.function_name
+        or None
+    )
 
 
 def _match_route(method, path):
@@ -159,7 +165,9 @@ class DefaultsStdioTransport:
         try:
             from domain.function_runtime.bridge import invoke_function
 
-            result = invoke_function(function_name, payload, self._build_context(), principal_id="defaultspack")
+            result = invoke_function(
+                function_name, payload, self._build_context(), principal_id="defaultspack"
+            )
             if isinstance(result, dict) and result.get("status") != "error":
                 return result
             if not fallback_block_module:
@@ -186,7 +194,11 @@ class DefaultsStdioTransport:
                 )
                 if isinstance(result, dict) and result.get("status") != "error":
                     return result
-                error_code = str((result.get("error") or {}).get("code") or "") if isinstance(result, dict) else ""
+                error_code = (
+                    str((result.get("error") or {}).get("code") or "")
+                    if isinstance(result, dict)
+                    else ""
+                )
                 if error_code not in {
                     "FUNCTION_REGISTRY_UNAVAILABLE",
                     "FUNCTION_NOT_FOUND",

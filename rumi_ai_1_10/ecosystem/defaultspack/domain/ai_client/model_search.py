@@ -4,6 +4,7 @@ from copy import deepcopy
 import re
 from typing import Any
 
+from domain.ai_client.audio_capability import metadata_supports_audio_input
 from domain.ai_client.model_groups import normalize_model_groups
 
 
@@ -12,6 +13,9 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
     if profiles is None:
         profiles = _profile_catalog()
     query = str(filters.get("query") or "").strip().casefold()
+    type_filter = _as_set(filters.get("type") or filters.get("model_type"))
+    if not type_filter:
+        type_filter = {"chat", "reasoning"}
     requires = filters.get("requires") if isinstance(filters.get("requires"), dict) else {}
     speed_filter = _as_set(filters.get("speed_tier"))
     provider_id = str(filters.get("provider_id") or filters.get("provider") or "").strip()
@@ -28,7 +32,10 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
 
     matches: list[dict[str, Any]] = []
     for profile in profiles:
-        if not isinstance(profile, dict) or str(profile.get("type") or "chat") not in {"", "chat", "reasoning"}:
+        if not isinstance(profile, dict):
+            continue
+        profile_type = str(profile.get("type") or "chat").strip().lower() or "chat"
+        if profile_type not in type_filter:
             continue
         item = _public_model(profile)
         if query and not _matches_query(item, query):
@@ -52,6 +59,7 @@ def search_models(filters: dict[str, Any] | None = None, *, profiles: list[dict[
         "models": [deepcopy(item) for item in matches[:max_results]],
         "filters_applied": {
             "query": filters.get("query", ""),
+            "type": sorted(type_filter),
             "requires": deepcopy(requires),
             "min_knowledge_level": min_knowledge_level,
             "speed_tier": sorted(speed_filter),
@@ -87,6 +95,8 @@ def get_model_capabilities(profile_id: str, *, profiles: list[dict[str, Any]] | 
                     "display_name": pack.display_name or pack.id,
                     "supports_vision": any(bool(item.get("supports_vision") or item.get("supports_image_input")) for item in member_caps),
                     "supports_image_input": any(bool(item.get("supports_image_input") or item.get("supports_vision")) for item in member_caps),
+                    "supports_audio": any(bool(item.get("supports_audio") or item.get("supports_audio_input")) for item in member_caps),
+                    "supports_audio_input": any(bool(item.get("supports_audio_input") or item.get("supports_audio")) for item in member_caps),
                     "supports_tool_calling": any(bool(item.get("supports_tool_calling")) for item in member_caps),
                     "supports_thinking": any(bool(item.get("supports_thinking")) for item in member_caps),
                     "supports_fast": any(bool(item.get("supports_fast")) for item in member_caps),
@@ -140,7 +150,11 @@ def recommend_model(request: dict[str, Any] | None = None, *, profiles: list[dic
 def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     groups = normalize_model_groups((settings or {}).get("model_groups") if isinstance(settings, dict) else None)
     group = groups.get(str(group_id or "default"), groups["default"])
-    candidates = [_public_model(profile) for profile in (profiles if profiles is not None else _profile_catalog()) if isinstance(profile, dict)]
+    candidates = [
+        _public_model(profile)
+        for profile in (profiles if profiles is not None else _profile_catalog())
+        if isinstance(profile, dict) and _is_chat_routable_profile(profile)
+    ]
     allowed = {str(item) for item in group.get("allowed_models", []) if str(item or "").strip()}
     if allowed:
         candidates = [item for item in candidates if str(item.get("profile_id") or "") in allowed or str(item.get("qualified_model_id") or "") in allowed]
@@ -168,6 +182,33 @@ def models_for_group(group_id: str, settings: dict[str, Any] | None, profiles: l
     return candidates
 
 
+def _is_chat_routable_profile(profile: dict[str, Any]) -> bool:
+    model_type = str(profile.get("type") or "chat").strip().lower()
+    if not model_type or model_type == "chat":
+        return True
+    if model_type != "reasoning":
+        return False
+    defaults = profile.get("defaults") if isinstance(profile.get("defaults"), dict) else {}
+    capabilities = _capability_dict(profile.get("capabilities"))
+    metadata = profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}
+    metadata_capabilities = _capability_dict(metadata.get("capabilities"))
+    return bool(
+        defaults.get("chat")
+        or capabilities.get("chat")
+        or capabilities.get("text")
+        or metadata_capabilities.get("chat")
+        or metadata_capabilities.get("text")
+    )
+
+
+def _capability_dict(value: Any) -> dict[str, bool]:
+    if isinstance(value, dict):
+        return {str(key): bool(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return {str(item): True for item in value if str(item or "").strip()}
+    return {}
+
+
 def _profile_catalog() -> list[dict[str, Any]]:
     profiles: list[dict[str, Any]] = []
     try:
@@ -179,13 +220,88 @@ def _profile_catalog() -> list[dict[str, Any]]:
     except Exception:
         profiles = []
     try:
+        from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
+    except ModuleNotFoundError:
+        from backend.ai_client.provider_catalog import list_model_catalog
+    try:
+        profiles.extend(_embedding_profiles_from_models(list_model_catalog()))
+    except Exception:
+        pass
+    try:
         from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 
         service = ModelRuntimeSettingsService()
         profiles.extend(service.runtime_defined_profiles(service.get_settings()))
     except Exception:
         pass
-    return profiles
+    return _dedupe_profiles(profiles)
+
+
+def _dedupe_profiles(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    positions: dict[str, int] = {}
+    for profile in profiles:
+        if not isinstance(profile, dict):
+            continue
+        key = str(
+            profile.get("qualified_model_id")
+            or profile.get("profile_id")
+            or profile.get("id")
+            or "{}/{}".format(profile.get("provider_id") or profile.get("provider") or "", profile.get("model_id") or profile.get("model") or "")
+        ).strip()
+        if not key:
+            continue
+        if key in positions:
+            existing = output[positions[key]]
+            if _profile_configured(profile) and not _profile_configured(existing):
+                output[positions[key]] = profile
+            continue
+        positions[key] = len(output)
+        output.append(profile)
+    return output
+
+
+def _profile_configured(profile: dict[str, Any]) -> bool:
+    availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    return bool(
+        profile.get("configured")
+        or availability.get("configured")
+        or availability.get("active")
+        or str(availability.get("status") or "").lower() in {"configured", "active"}
+    )
+
+
+def _embedding_profiles_from_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for model in models:
+        if not isinstance(model, dict):
+            continue
+        if str(model.get("type") or "").strip().lower() != "embedding":
+            continue
+        provider_id = str(model.get("provider_id") or model.get("provider") or "").strip()
+        model_id = str(model.get("model_id") or model.get("model") or model.get("id") or "").strip()
+        qualified = str(model.get("qualified_model_id") or model.get("id") or "{}/{}".format(provider_id, model_id)).strip()
+        if not qualified or qualified in seen:
+            continue
+        seen.add(qualified)
+        output.append(
+            {
+                **model,
+                "profile_id": qualified,
+                "qualified_model_id": qualified,
+                "provider_id": provider_id,
+                "provider": provider_id,
+                "model_id": model_id,
+                "model": model_id,
+                "display_name": str(model.get("display_name") or model.get("name") or model_id or qualified),
+                "type": "embedding",
+                "capability_tags": sorted(set([*(model.get("capability_tags") if isinstance(model.get("capability_tags"), list) else []), "embedding"])),
+                "recommended_roles": sorted(set([*(model.get("recommended_roles") if isinstance(model.get("recommended_roles"), list) else []), "tool_embedding"])),
+                "allowed_roles": sorted(set([*(model.get("allowed_roles") if isinstance(model.get("allowed_roles"), list) else []), "tool_embedding"])),
+            }
+        )
+    return output
 
 
 def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
@@ -194,7 +310,9 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
     model_id = str(profile.get("model_id") or profile.get("model") or "").strip()
     label_provider = str(profile.get("provider_display_name") or profile.get("provider_name") or provider_id or "").strip()
     display_name = str(profile.get("display_name") or profile.get("name") or model_id or profile_id).strip()
+    model_type = str(profile.get("type") or "chat").strip().lower() or "chat"
     availability = profile.get("availability") if isinstance(profile.get("availability"), dict) else {}
+    supports_audio = metadata_supports_audio_input(profile)
     configured = bool(
         profile.get("configured")
         or availability.get("configured")
@@ -202,6 +320,13 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         or str(availability.get("status") or "").lower() in {"configured", "active"}
         or provider_id == "stub"
     )
+    capability_tags = list(profile.get("capability_tags") or [])
+    recommended_roles = list(profile.get("recommended_roles") or [])
+    allowed_roles = list(profile.get("allowed_roles") or [])
+    if model_type == "embedding":
+        capability_tags = sorted({*capability_tags, "embedding"})
+        recommended_roles = sorted({*recommended_roles, "tool_embedding"})
+        allowed_roles = sorted({*allowed_roles, "tool_embedding"})
     return {
         "profile_id": profile_id,
         "qualified_model_id": str(profile.get("qualified_model_id") or profile_id),
@@ -210,11 +335,14 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "provider_id": provider_id,
         "provider_display_name": label_provider,
         "model_id": model_id,
+        "type": model_type,
         "configured": configured,
         "local": bool(profile.get("local") or availability.get("local") or provider_id in {"stub", "ollama", "lmstudio", "vllm", "llamacpp"}),
         "requires_api_key": bool(provider_id and provider_id not in {"stub"} and not configured),
         "supports_vision": bool(profile.get("supports_vision")),
         "supports_image_input": bool(profile.get("supports_image_input") or profile.get("supports_vision")),
+        "supports_audio": supports_audio,
+        "supports_audio_input": supports_audio,
         "supports_tool_calling": bool(profile.get("supports_tool_calling")),
         "supports_thinking": bool(profile.get("supports_thinking")),
         "thinking_levels": list(profile.get("thinking_levels") or []),
@@ -224,9 +352,9 @@ def _public_model(profile: dict[str, Any]) -> dict[str, Any]:
         "knowledge_level": int(profile.get("knowledge_level") or 0),
         "knowledge_band": str(profile.get("knowledge_band") or "unknown"),
         "cost_tier": str(profile.get("cost_tier") or "unknown"),
-        "capability_tags": list(profile.get("capability_tags") or []),
-        "recommended_roles": list(profile.get("recommended_roles") or []),
-        "allowed_roles": list(profile.get("allowed_roles") or []),
+        "capability_tags": capability_tags,
+        "recommended_roles": recommended_roles,
+        "allowed_roles": allowed_roles,
         "max_context": profile.get("max_context"),
         "availability": deepcopy(availability),
         "metadata": deepcopy(profile.get("metadata") if isinstance(profile.get("metadata"), dict) else {}),
@@ -250,6 +378,8 @@ def _matches_required_capabilities(item: dict[str, Any], requires: dict[str, Any
     mapping = {
         "vision": "supports_vision",
         "image_input": "supports_image_input",
+        "audio": "supports_audio",
+        "audio_input": "supports_audio",
         "tool_calling": "supports_tool_calling",
         "tools": "supports_tool_calling",
         "thinking": "supports_thinking",
@@ -266,6 +396,7 @@ def _score_model(item: dict[str, Any], filters: dict[str, Any]) -> int:
     score += 25 if item.get("configured") else 0
     score += 10 if item.get("supports_thinking") and (filters.get("requires") or {}).get("thinking") else 0
     score += 10 if item.get("supports_vision") and (filters.get("requires") or {}).get("vision") else 0
+    score += 10 if item.get("supports_audio") and (filters.get("requires") or {}).get("audio") else 0
     score += 8 if item.get("supports_tool_calling") and (filters.get("requires") or {}).get("tool_calling") else 0
     score += 6 if item.get("speed_tier") == "fast" else 0
     score += 4 if item.get("local") else 0
@@ -321,6 +452,8 @@ def _recommendation_reasons(selected: dict[str, Any] | None, request: dict[str, 
     requires = request.get("requires") if isinstance(request.get("requires"), dict) else {}
     if requires.get("vision") and selected.get("supports_vision"):
         reasons.append("requires_vision")
+    if requires.get("audio") and selected.get("supports_audio"):
+        reasons.append("requires_audio")
     if requires.get("tool_calling") and selected.get("supports_tool_calling"):
         reasons.append("requires_tool_calling")
     if requires.get("thinking") and selected.get("supports_thinking"):

@@ -77,6 +77,19 @@ export function TerminalPanel({
   const run = async () => {
     const nextCommand = command.trim();
     if (!nextCommand) return;
+    if (!workspaceId) {
+      pushLog({
+        id: `${Date.now()}:workspace-required`,
+        command: nextCommand,
+        classification: "blocked",
+        risk_reasons: ["Select a trusted coding workspace before running terminal commands."],
+        approval_required: false,
+        exit_code: null,
+        stderr: "workspace required",
+        workspace_id: null,
+      });
+      return;
+    }
     const timeout = 30;
     setBusy(true);
     try {

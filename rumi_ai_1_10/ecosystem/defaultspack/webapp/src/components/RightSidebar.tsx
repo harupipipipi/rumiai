@@ -61,12 +61,14 @@ import { twMerge } from "tailwind-merge";
 
 import type {
   ModelProfile,
+  PromptUsageSummary,
   SettingsSection,
   SidebarAction,
   SidebarCategory,
   SidebarField,
   SidebarItem,
 } from "../lib/api";
+import { toolResources } from "../features/tools/resources/toolResources";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
 import { toolFilterBlockedSummary } from "../lib/toolStatus";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement } from "../lib/placement";
@@ -75,6 +77,7 @@ import { PlacementHtmlRenderer } from "./PlacementHtmlRenderer";
 import { ToolFilterLogWidget, ToolManagerWidget } from "./ToolStatusWidgets";
 import { WorkspaceTabRailPanel, type WorkspaceTab, type WorkspaceTabKind } from "./WorkspaceTabs";
 import { LayerPortal } from "../ui/layers/LayerPortal";
+import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -85,6 +88,35 @@ const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
 const RAIL_MENU_GAP = 8;
+
+type ToolSelectionScope = "turn" | "conversation";
+
+type ToolServiceCard = {
+  id: string;
+  label: string;
+  description: string;
+  items: SidebarItem[];
+};
+
+const TOOL_SERVICE_LABELS: Record<string, { label: string; description: string }> = {
+  web: { label: "Web検索", description: "Web、検索、オンライン情報" },
+  github: { label: "GitHub", description: "リポジトリ、Issue、Pull Request" },
+  files: { label: "Files", description: "ローカルファイルやドキュメント" },
+  coding: { label: "Coding", description: "コード編集、ビルド、開発作業" },
+  terminal: { label: "Terminal", description: "コマンド実行やジョブ操作" },
+  browser: { label: "Browser", description: "ブラウザ、ページ、ダウンロード" },
+  computer: { label: "PC操作", description: "画面上のアプリやPC操作" },
+  calendar: { label: "Calendar", description: "予定やカレンダー" },
+  gmail: { label: "Gmail", description: "メール検索や下書き" },
+  slack: { label: "Slack", description: "Slackメッセージ" },
+  google_drive: { label: "Google Drive", description: "Drive、Docs、Sheets、Slides" },
+  notion: { label: "Notion", description: "NotionページやDB" },
+  memory: { label: "Memory", description: "記憶、知識、会話コンテキスト" },
+  artifacts: { label: "Artifacts", description: "成果物ファイルとプレビュー" },
+  mcp: { label: "MCP", description: "MCP接続と外部サーバー機能" },
+  system: { label: "System", description: "Rumi内部のシステム機能" },
+  other: { label: "Other", description: "その他の機能" },
+};
 
 export function getRailFloatingMenuPosition(
   rect: Pick<DOMRect, "left" | "top">,
@@ -168,7 +200,7 @@ function readStoredStringArrayRecord(key: string): Record<string, string[]> {
 
 const CATEGORY_META: Record<SidebarCategory | "all", { label: string; icon: ReactElement }> = {
   all: { label: "All", icon: <Layers size={16} /> },
-  tool: { label: "Tools", icon: <Wrench size={16} /> },
+  tool: { label: "機能", icon: <Wrench size={16} /> },
   widget: { label: "Widgets", icon: <LayoutGrid size={16} /> },
   system: { label: "System", icon: <Settings size={16} /> },
   integration: { label: "Integrations", icon: <Blocks size={16} /> },
@@ -329,6 +361,66 @@ function baseTagsForItem(item: SidebarItem): string[] {
     tags.push("danger");
   }
   return [...new Set(tags)];
+}
+
+function serviceIdForTool(item: SidebarItem): string {
+  const ui = item.ui as Record<string, unknown> | undefined;
+  const explicit = String(ui?.service_id ?? "").trim().toLowerCase();
+  if (explicit && TOOL_SERVICE_LABELS[explicit]) return explicit;
+  const haystack = `${item.id} ${item.label} ${item.description ?? ""} ${(item.tags ?? []).join(" ")} ${item.ui?.group_id ?? ""}`.toLowerCase();
+  const rules: Array<[string, RegExp]> = [
+    ["github", /github|pull_request|pr_|issue/],
+    ["gmail", /gmail|email|mail/],
+    ["slack", /slack/],
+    ["google_drive", /google_drive|drive|slides|sheet|doc_/],
+    ["calendar", /calendar/],
+    ["notion", /notion/],
+    ["browser", /browser|html_preview|webapp_preview/],
+    ["computer", /computer_use|screen|mouse|keyboard|click/],
+    ["terminal", /terminal|sandbox_exec|python_exec|node_exec|command|shell/],
+    ["coding", /coding|workspace|git_|webapp_build|webapp_lint|project_scaffold|package_install/],
+    ["files", /file|pdf|doc|ocr|audio_transcribe|image_convert|image_resize/],
+    ["artifacts", /artifact|export|zip|preview/],
+    ["memory", /memory|knowledge|source_rank|source_extract/],
+    ["web", /web_search|reddit|research|wide_research/],
+    ["mcp", /mcp__/],
+    ["system", /workflow|job_|tts_generate|image_generate|tool_search/],
+  ];
+  for (const [serviceId, pattern] of rules) {
+    if (pattern.test(haystack)) return serviceId;
+  }
+  return "other";
+}
+
+function toolServiceCards(items: SidebarItem[]): ToolServiceCard[] {
+  const groups = new Map<string, SidebarItem[]>();
+  for (const item of items) {
+    const serviceId = serviceIdForTool(item);
+    groups.set(serviceId, [...(groups.get(serviceId) ?? []), item]);
+  }
+  return [...groups.entries()]
+    .map(([id, groupItems]) => ({
+      id,
+      label: TOOL_SERVICE_LABELS[id]?.label ?? id,
+      description: TOOL_SERVICE_LABELS[id]?.description ?? "追加機能",
+      items: sortedToolUiItems(groupItems),
+    }))
+    .sort((left, right) => right.items.length - left.items.length || compareText(left.label, right.label));
+}
+
+function targetList(value: unknown): Array<{ kind: string; id: string }> {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    if (typeof item === "string") return { kind: "tool", id: item };
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      return {
+        kind: String(record.kind ?? record.type ?? "tool"),
+        id: String(record.id ?? record.tool_id ?? record.service_id ?? ""),
+      };
+    }
+    return { kind: "tool", id: "" };
+  }).filter((item) => item.id.trim());
 }
 
 function compareSidebarItems(left: SidebarItem, right: SidebarItem): number {
@@ -797,9 +889,14 @@ export function RightSidebar({
   selectedProfile = null,
   toolFilterEntries = [],
   runtimeCapabilitySnapshot = null,
+  promptUsage = null,
+  promptProfileId,
+  conversationId = null,
+  showChatPromptUsage = true,
   yoloMode = false,
   workspaceTabs = [],
   activeWorkspaceTabId = null,
+  activeConversationId = null,
   onSettingChange,
   onOpenSettings,
   onOpenSettingsSection,
@@ -807,6 +904,10 @@ export function RightSidebar({
   onWorkspaceTabSelect,
   onWorkspaceTabClose,
   onWorkspaceTabCreate,
+  onLoadPromptActive,
+  onTogglePromptEdge,
+  onToggleChatPromptUsage,
+  onOpenPromptStudio,
   onToolToggle,
   onToolBatchSet,
   onPanelAction,
@@ -822,9 +923,14 @@ export function RightSidebar({
   selectedProfile?: ModelProfile | null;
   toolFilterEntries?: ToolFilterEntry[];
   runtimeCapabilitySnapshot?: RuntimeCapabilitySnapshot | null;
+  promptUsage?: PromptUsageSummary | null;
+  promptProfileId?: string;
+  conversationId?: string | null;
+  showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];
   activeWorkspaceTabId?: string | null;
+  activeConversationId?: string | null;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onOpenSettings: () => void;
   onOpenSettingsSection?: (sectionId: string) => void;
@@ -832,6 +938,10 @@ export function RightSidebar({
   onWorkspaceTabSelect?: (tabId: string) => void;
   onWorkspaceTabClose?: (tabId: string) => void;
   onWorkspaceTabCreate?: (kind: WorkspaceTabKind) => void;
+  onLoadPromptActive?: (params: { profile_id?: string; conversation_id?: string; include_text?: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  onTogglePromptEdge?: (payload: { profile_id?: string; conversation_id?: string; edge_id: string; enabled: boolean; model_profile_id?: string; model?: string }) => Promise<PromptUsageSummary>;
+  onToggleChatPromptUsage?: (visible: boolean) => void;
+  onOpenPromptStudio?: (promptId?: string) => void;
   onToolToggle?: (item: SidebarItem) => void;
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
@@ -841,6 +951,8 @@ export function RightSidebar({
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
   const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
+  const [toolSelectionScope, setToolSelectionScope] = useState<ToolSelectionScope>("turn");
+  const [conversationToolPreferences, setConversationToolPreferences] = useState<Record<string, unknown>>({});
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
@@ -886,6 +998,8 @@ export function RightSidebar({
   const pinnedItemIdSet = useMemo(() => new Set(pinnedItemIds), [pinnedItemIds]);
   const starredItemIdSet = useMemo(() => new Set(starredItemIds), [starredItemIds]);
   const panelWidthPx = clampPanelWidth(panelWidth);
+  const hasPromptWidget = Boolean(onLoadPromptActive && onTogglePromptEdge);
+  const promptRailCount = Number(promptUsage?.active_count ?? promptUsage?.segments?.filter((segment) => segment.status === "active").length ?? promptUsage?.active_segments?.length ?? 0);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
   const placementManifestMap = useMemo(
@@ -909,6 +1023,25 @@ export function RightSidebar({
       // Storage may be unavailable in restricted browser contexts.
     }
   }, [panelWidthPx]);
+
+  useEffect(() => {
+    if (!activeConversationId) {
+      setConversationToolPreferences({});
+      setToolSelectionScope("turn");
+      return;
+    }
+    let cancelled = false;
+    toolResources.getConversationToolPreferences(activeConversationId)
+      .then((result) => {
+        if (!cancelled) setConversationToolPreferences(result.preferences ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setConversationToolPreferences({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeConversationId]);
 
   const startPanelResize = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -942,17 +1075,19 @@ export function RightSidebar({
       "__company_workspace__",
       "__coding_widget__",
       "__workspace_tabs__",
+      "__prompt_usage__",
     ]);
-    if (requestedId && (items.some((item) => item.id === requestedId) || specialPanelIds.has(requestedId))) {
+    if (requestedId && (items.some((item) => item.id === requestedId) || (requestedId !== "__prompt_usage__" && specialPanelIds.has(requestedId)) || (requestedId === "__prompt_usage__" && hasPromptWidget))) {
       setActivePanel(requestedId);
     }
-  }, [activeItemId, items]);
+  }, [activeItemId, hasPromptWidget, items]);
 
   useEffect(() => {
     if (!activePanel) return;
     if (activePanel === "__tool_manager__") return;
     if (activePanel === "__tool_filter_log__") return;
     if (activePanel === "__runtime_status__") return;
+    if (activePanel === "__prompt_usage__" && hasPromptWidget) return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
     if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
@@ -962,7 +1097,7 @@ export function RightSidebar({
     if (!items.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
-  }, [activePanel, codingPanel, companyPanel, items, placementManifestMap, workspaceTabs.length]);
+  }, [activePanel, codingPanel, companyPanel, hasPromptWidget, items, placementManifestMap, workspaceTabs.length]);
 
   useEffect(() => {
     if (!activePanel || categoryFilter === "all") return;
@@ -1086,7 +1221,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1111,6 +1246,12 @@ export function RightSidebar({
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
   ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
+  const serviceCards = useMemo(() => toolServiceCards(toolManagerItems).slice(0, 10), [toolManagerItems]);
+  const conversationServiceTargets = useMemo(() => new Set(
+    targetList(conversationToolPreferences.include)
+      .filter((target) => target.kind === "service")
+      .map((target) => target.id),
+  ), [conversationToolPreferences.include]);
   const toolManagerCandidates = useMemo(() => toolManagerSearchItems.slice(0, 8), [toolManagerSearchItems]);
   const allToolTags = useMemo(() => {
     const counts = new Map<string, number>();
@@ -1167,6 +1308,7 @@ export function RightSidebar({
   const isToolManagerActive = activePanel === "__tool_manager__";
   const isToolFilterLogActive = activePanel === "__tool_filter_log__";
   const isRuntimeStatusActive = activePanel === "__runtime_status__";
+  const isPromptUsageActive = activePanel === "__prompt_usage__" && hasPromptWidget;
   const isCompanyPanelActive = activePanel === "__company_workspace__" && Boolean(companyPanel);
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
   const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
@@ -1364,6 +1506,24 @@ export function RightSidebar({
     onToolBatchSet?.(uniqueToolIds, enabled);
   };
 
+  const setServiceEnabled = (service: ToolServiceCard, enabled: boolean) => {
+    if (toolSelectionScope !== "conversation" || !activeConversationId) {
+      setToolsEnabled(service.items.map((item) => item.id), enabled);
+      return;
+    }
+    const include = targetList(conversationToolPreferences.include)
+      .filter((target) => !(target.kind === "service" && target.id === service.id));
+    const nextPreferences = {
+      ...conversationToolPreferences,
+      mode: enabled ? "manual" : (conversationToolPreferences.mode ?? "auto"),
+      include: enabled ? [...include, { kind: "service", id: service.id }] : include,
+    };
+    setConversationToolPreferences(nextPreferences);
+    void toolResources.updateConversationToolPreferences(activeConversationId, nextPreferences).catch(() => {
+      setConversationToolPreferences(conversationToolPreferences);
+    });
+  };
+
   const toolsWithTag = (tag: string) => allToolItems.filter((item) => tagMap.get(item.id)?.includes(tag)).map((item) => item.id);
 
   const addCustomTag = (itemId: string, rawTag: string) => {
@@ -1515,22 +1675,22 @@ export function RightSidebar({
 
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
+      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
         >
           <div
             role="separator"
-            aria-label="Tool panel幅を変更"
-            title="Tool panel幅を変更"
+            aria-label="機能パネル幅を変更"
+            title="機能パネル幅を変更"
             className="absolute left-0 top-0 rumi-layer-local-popover h-full w-1.5 cursor-col-resize bg-transparent transition-colors hover:bg-zinc-700/60"
             onPointerDown={startPanelResize}
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isToolFilterLogActive ? "Tool filter log" : isRuntimeStatusActive ? "Runtime status" : "Tool manager")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1545,7 +1705,7 @@ export function RightSidebar({
                   "p-1 rounded transition-colors",
                   selectedToolIdSet.has(activeItem.id) ? "text-emerald-400 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800",
                 )}
-                title={selectedToolIdSet.has(activeItem.id) ? "無効にする" : "有効にする"}
+                title={selectedToolIdSet.has(activeItem.id) ? "今回の指定を解除" : "今回使う"}
               >
                 <Power size={14} />
               </button>
@@ -1640,6 +1800,19 @@ export function RightSidebar({
               />
             ) : isPlacementPanelActive && activePlacementManifest ? (
               renderPlacementPanel(activePlacementManifest.id)
+            ) : isPromptUsageActive && onLoadPromptActive && onTogglePromptEdge ? (
+              <PromptSidebarWidget
+                profileId={promptProfileId}
+                conversationId={conversationId}
+                modelProfileId={selectedProfile?.profile_id ?? selectedProfile?.qualified_model_id ?? selectedProfile?.model_id ?? undefined}
+                modelLabel={selectedProfile?.display_name ?? selectedProfile?.model_id ?? undefined}
+                initialUsage={promptUsage}
+                loadPromptActive={onLoadPromptActive}
+                togglePromptEdge={onTogglePromptEdge}
+                showChatPromptUsage={showChatPromptUsage}
+                onToggleChatPromptUsage={onToggleChatPromptUsage}
+                onOpenStudio={onOpenPromptStudio}
+              />
             ) : isToolFilterLogActive ? (
               <ToolFilterLogWidget entries={toolFilterEntries} />
             ) : isRuntimeStatusActive ? (
@@ -1663,6 +1836,10 @@ export function RightSidebar({
               <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
                         ) : (
                           <div className="space-y-3">
+                            <div className="px-1">
+                              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">今回のおすすめ</p>
+                              <p className="mt-0.5 text-[10px] leading-4 text-zinc-500">自動選定、承認待ち、利用不可の状態をまとめます。</p>
+                            </div>
                             <ToolManagerWidget
                               tools={toolManagerBaseItems}
                               disabledToolIds={disabledToolIds}
@@ -1685,7 +1862,7 @@ export function RightSidebar({
                                       setIsToolManagerSearchOpen(true);
                                     }
                                   }}
-                                  placeholder="Tool managerで検索"
+                                  placeholder="機能を検索"
                                   aria-expanded={Boolean(toolManagerSearchQuery.trim() && isToolManagerSearchOpen)}
                                   className="h-9 w-full rounded-lg border border-zinc-800 bg-zinc-950 pl-8 pr-8 text-[12px] text-zinc-200 outline-none placeholder:text-zinc-600 focus:border-zinc-600"
                                 />
@@ -1736,22 +1913,123 @@ export function RightSidebar({
                                       ))}
                                     </div>
                                   ) : (
-                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致するtoolがありません。</p>
+                                    <p className="px-3 py-3 text-[11px] text-zinc-500">一致する機能がありません。</p>
                                   )}
                                 </div>
                               )}
                             </div>
+                            {(pinnedRailItems.length > 0 || pinnedRightSidebarPlacements.length > 0) && (
+                              <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">ピン留め</p>
+                                  <span className="text-[10px] text-zinc-600">{pinnedRailItems.length + pinnedRightSidebarPlacements.length}</span>
+                                </div>
+                                <div className="grid grid-cols-2 gap-1.5">
+                                  {pinnedRailItems.map((item) => (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => setActivePanel(item.id)}
+                                      className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 px-2 py-1.5 text-left text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                                    >
+                                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                        {iconForItem(item)}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block truncate text-[11px] font-medium">{item.label}</span>
+                                        <span className="block truncate text-[9px] text-zinc-500">機能</span>
+                                      </span>
+                                    </button>
+                                  ))}
+                                  {pinnedRightSidebarPlacements.map((placement) => (
+                                    <button
+                                      key={placement.id}
+                                      type="button"
+                                      onClick={() => triggerPlacement(placement.id)}
+                                      className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 px-2 py-1.5 text-left text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                                    >
+                                      <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                        {railIcon(placementIcon(placement.id), 15)}
+                                      </span>
+                                      <span className="min-w-0">
+                                        <span className="block truncate text-[11px] font-medium">{placement.label}</span>
+                                        <span className="block truncate text-[9px] text-zinc-500">{placement.description ?? "ウィジェット"}</span>
+                                      </span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">接続</p>
+                                <div className="inline-grid grid-cols-2 rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+                                  {(["turn", "conversation"] as const).map((scope) => (
+                                    <button
+                                      key={scope}
+                                      type="button"
+                                      disabled={scope === "conversation" && !activeConversationId}
+                                      onClick={() => setToolSelectionScope(scope)}
+                                      className={cn(
+                                        "rounded px-2 py-1 text-[10px] transition-colors disabled:cursor-not-allowed disabled:opacity-40",
+                                        toolSelectionScope === scope ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-200",
+                                      )}
+                                    >
+                                      {scope === "turn" ? "今回" : "この会話で使う"}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="grid gap-1.5">
+                                {serviceCards.map((service) => {
+                                  const serviceToolIds = service.items.map((item) => item.id);
+                                  const turnSelected = serviceToolIds.some((id) => selectedToolIdSet.has(id));
+                                  const conversationSelected = conversationServiceTargets.has(service.id);
+                                  const selected = toolSelectionScope === "conversation" ? conversationSelected : turnSelected;
+                                  const pinnedCount = service.items.filter((item) => pinnedItemIdSet.has(item.id) || starredItemIdSet.has(item.id)).length;
+                                  return (
+                                    <div key={service.id} className="rounded-md border border-zinc-800 bg-zinc-950/55 p-2">
+                                      <div className="flex items-start gap-2">
+                                        <div className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                                          <Wrench size={14} />
+                                        </div>
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center justify-between gap-2">
+                                            <p className="truncate text-[12px] font-medium text-zinc-200">{service.label}</p>
+                                            <span className={cn("h-1.5 w-1.5 flex-shrink-0 rounded-full", selected ? "bg-emerald-400" : "bg-zinc-700")} />
+                                          </div>
+                                          <p className="mt-0.5 truncate text-[10px] text-zinc-500">{service.description}</p>
+                                          <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
+                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.items.length} 機能</span>
+                                            {pinnedCount > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">{pinnedCount} ピン留め</span>}
+                                            {conversationSelected && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200">会話固定</span>}
+                                          </div>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => setServiceEnabled(service, !selected)}
+                                          className={cn("flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md transition-colors", selected ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
+                                          title={selected ? "サービス指定を解除" : "サービスを使う"}
+                                        >
+                                          <Power size={15} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
                             <div className="grid grid-cols-3 gap-2">
                               <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">Tools</p>
+                                <p className="text-[9px] uppercase tracking-wider text-zinc-600">機能</p>
                                 <p className="mt-1 text-lg font-semibold text-zinc-100">{toolManagerItems.length}</p>
                               </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">On</p>
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">今回</p>
                     <p className="mt-1 text-lg font-semibold text-emerald-300">{selectedToolIds.length}</p>
                   </div>
                   <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-2">
-                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">Star</p>
+                    <p className="text-[9px] uppercase tracking-wider text-zinc-600">ピン留め</p>
                     <p className="mt-1 text-lg font-semibold text-amber-300">{starredItemIds.length}</p>
                   </div>
                 </div>
@@ -1762,7 +2040,7 @@ export function RightSidebar({
                     className="flex items-center justify-center gap-1 rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-2 py-1.5 text-[11px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                   >
                     <FolderCheck size={13} />
-                    表示中をON
+                    表示中を今回使う
                   </button>
                               <button
                                 type="button"
@@ -1770,20 +2048,20 @@ export function RightSidebar({
                     className="flex items-center justify-center gap-1 rounded-lg border border-zinc-800 bg-zinc-950/60 px-2 py-1.5 text-[11px] font-medium text-zinc-300 hover:bg-zinc-900"
                   >
                     <FolderX size={13} />
-                    表示中をOFF
+                    今回指定を解除
                   </button>
                 </div>
                 {allToolTags.length > 0 && (
                   <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                     <div className="mb-2 flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tags</p>
+                      <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">タグ</p>
                       {activeTagFilter && (
                         <button
                           type="button"
                           onClick={() => setActiveTagFilter(null)}
                           className="text-[10px] text-zinc-500 hover:text-zinc-200"
                         >
-                          clear
+                          解除
                         </button>
                       )}
                     </div>
@@ -1815,7 +2093,7 @@ export function RightSidebar({
                           onClick={() => setToolsEnabled(toolsWithTag(activeTagFilter), true)}
                           className="rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                         >
-                          tag ON
+                          タグを今回使う
                         </button>
                         <button
                           type="button"
@@ -1825,7 +2103,7 @@ export function RightSidebar({
                             activeTagFilter === "danger" ? "bg-red-500/10 text-red-200 hover:bg-red-500/15" : "bg-zinc-900 text-zinc-300 hover:bg-zinc-800",
                           )}
                         >
-                          tag OFF
+                          タグ指定を解除
                         </button>
                       </div>
                     )}
@@ -1833,13 +2111,13 @@ export function RightSidebar({
                 )}
                 <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
                   <div className="mb-2 flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Tool Filter Log</p>
+                    <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">最近使った</p>
                     <button
                       type="button"
                       onClick={() => setActivePanel("__tool_filter_log__")}
                       className="text-[10px] text-zinc-500 hover:text-zinc-200"
                     >
-                      open
+                      開く
                     </button>
                   </div>
                   <ToolFilterLogWidget entries={toolFilterEntries.slice(0, 4)} />
@@ -1895,7 +2173,7 @@ export function RightSidebar({
                                           type="button"
                                           onClick={() => onToolToggle?.(item)}
                                           className={cn("flex h-7 w-7 items-center justify-center rounded-md transition-colors", enabled ? "text-emerald-300 hover:bg-emerald-500/10" : "text-zinc-600 hover:bg-zinc-800 hover:text-zinc-300")}
-                                          title={enabled ? "無効にする" : "有効にする"}
+                                          title={enabled ? "今回の指定を解除" : "今回使う"}
                                         >
                                           <Power size={15} />
                                         </button>
@@ -1920,13 +2198,13 @@ export function RightSidebar({
                         )}
                         <div className="mt-2 flex flex-wrap gap-1 pl-9">
                           {globallyDisabled && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">OFF by user</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">権限ブロック</span>
                           )}
                           {hidden && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">Hidden</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-zinc-900 text-zinc-400">一覧から隠す</span>
                           )}
                           {item.tool_info?.requires_approval && (
-                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">Needs approval</span>
+                            <span className="rounded px-1.5 py-0.5 text-[9px] bg-sky-500/10 text-sky-200">承認が必要</span>
                           )}
                           {blockedEntry && (
                             <span className="rounded px-1.5 py-0.5 text-[9px] bg-amber-500/10 text-amber-200">
@@ -1984,6 +2262,29 @@ export function RightSidebar({
                       </span>
                     </button>
                   )}
+                  {hasPromptWidget && (
+                    <button
+                      type="button"
+                      tabIndex={buttonTabIndex}
+                      onClick={() => setActivePanel((current) => (current === "__prompt_usage__" ? null : "__prompt_usage__"))}
+                      className={cn(
+                        RAIL_BUTTON_CLASS,
+                        isPromptUsageActive
+                          ? "bg-cyan-500/15 text-cyan-200 ring-1 ring-cyan-500/30"
+                          : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
+                      )}
+                      title="Current prompts"
+                      aria-label="Current prompts"
+                      aria-pressed={isPromptUsageActive}
+                    >
+                      <FileText size={17} className="h-[17px] w-[17px] shrink-0" />
+                      {promptRailCount > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 rounded-full bg-cyan-400 px-0.5 text-[7px] font-bold leading-tight text-black">
+                          {Math.min(promptRailCount, 99)}
+                        </span>
+                      )}
+                    </button>
+                  )}
                   <SidebarSearchControl
                     query={searchQuery}
                     resultCount={searchFilteredItems.length}
@@ -2005,7 +2306,7 @@ export function RightSidebar({
                         ? "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
-                    title="Starred tools"
+                    title="ピン留めした機能"
                   >
             <Star
               size={18}
@@ -2028,7 +2329,7 @@ export function RightSidebar({
                         ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                         : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                     )}
-                    title="Tool manager"
+                    title="機能"
           >
             <SlidersHorizontal size={16} className="h-4 w-4 shrink-0" />
             {selectedToolIds.length > 0 && (
@@ -2056,7 +2357,7 @@ export function RightSidebar({
                   ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
               )}
-              title="Pin widget"
+              title="ウィジェットをピン留め"
             >
               <Plus size={16} className="h-4 w-4 shrink-0" />
             </button>
@@ -2069,8 +2370,8 @@ export function RightSidebar({
                   onPointerDown={(event) => event.stopPropagation()}
                 >
                   <div className="border-b border-zinc-800 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-zinc-200">Pin to sidebar</p>
-                    <p className="text-[10px] text-zinc-500">vertical / configurable</p>
+                    <p className="text-[11px] font-semibold text-zinc-200">サイドバーにピン留め</p>
+                    <p className="text-[10px] text-zinc-500">縦表示 / 設定可</p>
                   </div>
                   <div className="max-h-64 overflow-y-auto py-1">
                     {rightSidebarPlacementCandidates.map((manifest) => (
@@ -2093,7 +2394,7 @@ export function RightSidebar({
                       </button>
                     ))}
                     {rightSidebarPlacementCandidates.length === 0 && (
-                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる candidate はありません。</p>
+                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる候補はありません。</p>
                     )}
                   </div>
                 </div>
@@ -2185,7 +2486,7 @@ export function RightSidebar({
                           {group.path?.length && group.path.length > 1 && (
                             <p className="truncate text-[10px] text-zinc-500">{group.path.join(" / ")}</p>
                           )}
-                          <p className="text-[10px] text-zinc-500">{group.count} tools</p>
+                          <p className="text-[10px] text-zinc-500">{group.count} 機能</p>
                         </div>
                               <div className="grid grid-cols-2 gap-1 border-b border-zinc-800 p-2">
                                 <button
@@ -2195,7 +2496,7 @@ export function RightSidebar({
                                   className="flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 px-2 py-1 text-[10px] font-medium text-emerald-200 hover:bg-emerald-500/15"
                                 >
                           <FolderCheck size={11} />
-                          folder ON
+                          今回使う
                         </button>
                                 <button
                                   type="button"
@@ -2204,7 +2505,7 @@ export function RightSidebar({
                                   className="flex items-center justify-center gap-1 rounded-md bg-zinc-900 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-800"
                                 >
                           <FolderX size={11} />
-                          folder OFF
+                          解除
                         </button>
                       </div>
                       <div className="max-h-64 overflow-y-auto py-1">
@@ -2263,14 +2564,14 @@ export function RightSidebar({
                       ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
                       : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
                   )}
-                  title={`More tools (${hiddenToolGroupCount} groups)`}
+                  title={`その他の機能 (${hiddenToolGroupCount} groups)`}
                 >
                   <MoreVertical size={17} className="h-[17px] w-[17px] shrink-0" />
                   <span className="absolute -top-0.5 -right-0.5 text-[7px] bg-zinc-700 text-zinc-300 px-0.5 rounded-full leading-tight">
                     {hiddenToolGroupCount}
                   </span>
                   <span className="absolute right-full mr-2 px-2 py-1 bg-zinc-800 text-zinc-200 text-[10px] rounded-md opacity-0 group-hover/btn:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-zinc-700 shadow-lg rumi-layer-global-overlay">
-                    More tools
+                    その他の機能
                   </span>
                 </button>
               )}
@@ -2336,7 +2637,7 @@ export function RightSidebar({
                     className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12px] text-zinc-300 hover:bg-zinc-800/80 hover:text-zinc-100"
                   >
                     <Power size={13} className={enabled ? "text-emerald-300" : undefined} />
-                    <span>{enabled ? "Tool を off" : "Tool を on"}</span>
+                    <span>{enabled ? "今回の指定を解除" : "今回使う"}</span>
                   </button>
                 )}
                         <button

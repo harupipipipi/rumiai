@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use log::{error, warn};
 use rand::{distributions::Alphanumeric, Rng};
-use serde::Deserialize;
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
@@ -21,7 +21,8 @@ use crate::desktop_system_info;
 use crate::host_audit::{now_epoch_seconds, summarize_args, write_audit_log, HostAuditEntry};
 use crate::host_broker_types::{
     HostBrokerComputerRunRequest, HostBrokerComputerRunResponse, HostBrokerConnectionInfo,
-    HostBrokerError, HostBrokerStatus,
+    HostBrokerError, HostBrokerIntentRequest, HostBrokerIntentResponse, HostBrokerStatus,
+    HostBrokerStreamStopRequest,
 };
 use crate::process_utils;
 
@@ -30,6 +31,10 @@ const DEFAULT_PORT: u16 = 8770;
 const HEALTH_PATH: &str = "/api/host/health";
 const PERMISSIONS_PATH: &str = "/api/host/permissions";
 const COMPUTER_RUN_PATH: &str = "/api/host/computer/run";
+const HOST_INTENT_EXECUTE_PATH: &str = "/api/host/intent/execute";
+const HOST_STREAM_START_PATH: &str = "/api/host/stream/start";
+const HOST_STREAM_STOP_PATH: &str = "/api/host/stream/stop";
+const HOST_STREAM_EVENTS_PREFIX: &str = "/api/host/stream/events/";
 const PERMISSION_SUBJECT: &str = "Rumi Viewer";
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
@@ -40,6 +45,9 @@ const HELPER_TIMEOUT: Duration = Duration::from_secs(45);
 const APPROVAL_TOKEN_VERSION: &str = "v1";
 const HOST_BROKER_DISABLED_REASON: &str =
     "Viewer host broker is only enabled on macOS and Windows.";
+const IMPLEMENTED_HOST_OPERATIONS: &[&str] =
+    &["host.permission.status", "host.permission.open_settings"];
+const IMPLEMENTED_HOST_STREAM_OPERATIONS: &[&str] = &[];
 
 const ARG_HASH_IGNORE_KEYS: &[&str] = &[
     "approval_token",
@@ -60,7 +68,19 @@ struct HostBrokerShared {
     token: Option<String>,
     status: Mutex<HostBrokerStatus>,
     active_requests: Mutex<usize>,
-    used_approval_tokens: Mutex<HashSet<String>>,
+    active_host_streams: Mutex<HashMap<String, HostStreamSession>>,
+    used_approval_tokens: Mutex<HashMap<String, u64>>,
+}
+
+#[derive(Debug, Clone)]
+struct HostStreamSession {
+    operation: String,
+    caller_pack_id: Option<String>,
+    caller_function_id: Option<String>,
+    conversation_id: Option<String>,
+    started_at: u64,
+    expires_at: u64,
+    stop_token: String,
 }
 
 struct ParsedRequest {
@@ -105,7 +125,8 @@ impl HostBrokerRuntime {
                     token: None,
                     status: Mutex::new(HostBrokerStatus::disabled(HOST_BROKER_DISABLED_REASON)),
                     active_requests: Mutex::new(0),
-                    used_approval_tokens: Mutex::new(HashSet::new()),
+                    active_host_streams: Mutex::new(HashMap::new()),
+                    used_approval_tokens: Mutex::new(HashMap::new()),
                 }),
             });
         }
@@ -156,7 +177,8 @@ impl HostBrokerRuntime {
                         recovery: None,
                     }),
                     active_requests: Mutex::new(0),
-                    used_approval_tokens: Mutex::new(HashSet::new()),
+                    active_host_streams: Mutex::new(HashMap::new()),
+                    used_approval_tokens: Mutex::new(HashMap::new()),
                 }),
             };
 
@@ -293,10 +315,7 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
         ("GET", HEALTH_PATH) => (200, json!({"ok": true, "status": "running"})),
         ("GET", PERMISSIONS_PATH) => {
             if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
-                );
+                return unauthorized_response(error);
             }
             (
                 200,
@@ -308,26 +327,72 @@ fn route_request(request: &ParsedRequest, shared: &Arc<HostBrokerShared>) -> (u1
                 }),
             )
         }
-        ("POST", COMPUTER_RUN_PATH) => {
-            if let Err(error) = authorize_request(request, shared) {
-                return (
-                    401,
-                    json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
+        ("POST", COMPUTER_RUN_PATH) => handle_authorized_json(request, shared, |run_request| {
+            execute_computer_run(shared, run_request)
+        }),
+        ("POST", HOST_INTENT_EXECUTE_PATH) => {
+            handle_authorized_json(request, shared, |intent_request| {
+                execute_host_intent(shared, intent_request)
+            })
+        }
+        ("POST", HOST_STREAM_START_PATH) => {
+            handle_authorized_json(request, shared, |intent_request| {
+                execute_host_stream_start(shared, intent_request)
+            })
+        }
+        ("POST", HOST_STREAM_STOP_PATH) => {
+            handle_authorized_json(request, shared, |stop_request| {
+                execute_host_stream_stop(shared, stop_request)
+            })
+        }
+        _ => {
+            if request.method == "GET" && request.path.starts_with(HOST_STREAM_EVENTS_PREFIX) {
+                if let Err(error) = authorize_request(request, shared) {
+                    return unauthorized_response(error);
+                }
+                let stream_id = percent_decode_path_segment(
+                    request.path.trim_start_matches(HOST_STREAM_EVENTS_PREFIX),
                 );
-            }
-            match serde_json::from_slice::<HostBrokerComputerRunRequest>(&request.body) {
-                Ok(run_request) => (200, execute_computer_run(shared, run_request)),
-                Err(error) => (
-                    400,
-                    json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
-                ),
+                (200, host_stream_events(shared, &stream_id))
+            } else {
+                (
+                    404,
+                    json!({"ok": false, "error": {"code": "NOT_FOUND", "message": "Not found"}}),
+                )
             }
         }
-        _ => (
-            404,
-            json!({"ok": false, "error": {"code": "NOT_FOUND", "message": "Not found"}}),
-        ),
     }
+}
+
+fn handle_authorized_json<T>(
+    request: &ParsedRequest,
+    shared: &HostBrokerShared,
+    handler: impl FnOnce(T) -> Value,
+) -> (u16, Value)
+where
+    T: DeserializeOwned,
+{
+    if let Err(error) = authorize_request(request, shared) {
+        return unauthorized_response(error);
+    }
+    match serde_json::from_slice::<T>(&request.body) {
+        Ok(payload) => (200, handler(payload)),
+        Err(error) => invalid_json_response(error),
+    }
+}
+
+fn unauthorized_response(error: anyhow::Error) -> (u16, Value) {
+    (
+        401,
+        json!({"ok": false, "error": {"code": "UNAUTHORIZED", "message": error.to_string()}}),
+    )
+}
+
+fn invalid_json_response(error: serde_json::Error) -> (u16, Value) {
+    (
+        400,
+        json!({"ok": false, "error": {"code": "INVALID_JSON", "message": format!("Invalid JSON payload: {error}")}}),
+    )
 }
 
 fn authorize_request(request: &ParsedRequest, shared: &HostBrokerShared) -> Result<()> {
@@ -356,6 +421,771 @@ fn parse_auth_token(headers: &HashMap<String, String>) -> Option<String> {
         .get("x-rumi-viewer-broker-token")
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+#[derive(Debug, Clone)]
+struct NormalizedHostIntent {
+    intent_type: String,
+    operation: String,
+    args: Value,
+    stream: Value,
+    reason: Option<String>,
+    caller_pack_id: Option<String>,
+    caller_function_id: Option<String>,
+    conversation_id: Option<String>,
+    host_function_id: Option<String>,
+    approval_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct HostIntentRequestError {
+    code: String,
+    message: String,
+    audit_result: String,
+}
+
+fn normalize_host_intent_request(
+    request: &HostBrokerIntentRequest,
+    force_stream: bool,
+) -> std::result::Result<NormalizedHostIntent, HostIntentRequestError> {
+    let operation = normalize_host_operation(&request.operation);
+    if operation.is_empty() {
+        return Err(host_intent_request_error(
+            "HOST_OPERATION_MISSING",
+            "Host operation is required.",
+            "invalid_intent",
+        ));
+    }
+    if !host_operation_allowed(&operation) {
+        return Err(host_intent_request_error(
+            "HOST_OPERATION_UNKNOWN",
+            "The requested host operation is not registered with the Viewer host broker.",
+            "unknown_operation",
+        ));
+    }
+
+    let args = match &request.args {
+        Value::Object(_) => request.args.clone(),
+        Value::Null => json!({}),
+        _ => {
+            return Err(host_intent_request_error(
+                "HOST_ARGS_INVALID",
+                "Host intent args must be a JSON object.",
+                "invalid_args",
+            ))
+        }
+    };
+    let mut stream = match &request.stream {
+        Value::Object(_) => request.stream.clone(),
+        Value::Null => json!({}),
+        _ => {
+            return Err(host_intent_request_error(
+                "HOST_STREAM_INVALID",
+                "Host intent stream config must be a JSON object.",
+                "invalid_stream",
+            ))
+        }
+    };
+    if force_stream {
+        let mut map = match stream {
+            Value::Object(map) => map,
+            _ => Map::new(),
+        };
+        map.insert("enabled".to_string(), Value::Bool(true));
+        stream = Value::Object(map);
+    }
+    let stream_enabled = host_intent_stream_enabled(&stream);
+    if stream_enabled && !host_operation_stream_allowed(&operation) {
+        return Err(host_intent_request_error(
+            "HOST_STREAM_NOT_ALLOWED",
+            "The requested host operation does not allow streams.",
+            "stream_not_allowed",
+        ));
+    }
+    if !force_stream && stream_enabled {
+        return Err(host_intent_request_error(
+            "HOST_STREAM_ROUTE_REQUIRED",
+            "Stream host intents must use /api/host/stream/start.",
+            "wrong_stream_route",
+        ));
+    }
+
+    let caller = request.caller.as_ref();
+    Ok(NormalizedHostIntent {
+        intent_type: clean_string(&request.intent_type)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| {
+                if stream_enabled {
+                    "host_stream_intent".to_string()
+                } else {
+                    "host_intent".to_string()
+                }
+            }),
+        operation,
+        args,
+        stream,
+        reason: request.reason.as_deref().and_then(clean_string),
+        caller_pack_id: caller
+            .and_then(|item| item.pack_id.as_deref())
+            .and_then(clean_string),
+        caller_function_id: caller
+            .and_then(|item| item.function_id.as_deref())
+            .and_then(clean_string),
+        conversation_id: request.conversation_id.as_deref().and_then(clean_string),
+        host_function_id: request.host_function_id.as_deref().and_then(clean_string),
+        approval_token: request.approval_token.as_deref().and_then(clean_string),
+    })
+}
+
+fn host_intent_request_error(
+    code: &str,
+    message: &str,
+    audit_result: &str,
+) -> HostIntentRequestError {
+    HostIntentRequestError {
+        code: code.to_string(),
+        message: message.to_string(),
+        audit_result: audit_result.to_string(),
+    }
+}
+
+fn clean_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_host_operation(operation: &str) -> String {
+    match operation.trim() {
+        "microphone.capture" => "host.microphone.capture".to_string(),
+        "camera.capture" => "host.camera.capture".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn host_operation_allowed(operation: &str) -> bool {
+    IMPLEMENTED_HOST_OPERATIONS.contains(&operation)
+}
+
+fn host_operation_stream_allowed(operation: &str) -> bool {
+    IMPLEMENTED_HOST_STREAM_OPERATIONS.contains(&operation)
+}
+
+fn host_intent_stream_enabled(stream: &Value) -> bool {
+    stream
+        .get("enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn host_intent_binding_payload(intent: &NormalizedHostIntent) -> Value {
+    json!({
+        "args": intent.args.clone(),
+        "stream": intent.stream.clone(),
+    })
+}
+
+fn validate_host_intent_approval_token(
+    shared: &HostBrokerShared,
+    intent: &NormalizedHostIntent,
+) -> std::result::Result<(), ApprovalValidationError> {
+    validate_host_intent_approval_token_with_consume(shared, intent, true)
+}
+
+fn validate_host_intent_approval_token_with_consume(
+    shared: &HostBrokerShared,
+    intent: &NormalizedHostIntent,
+    consume: bool,
+) -> std::result::Result<(), ApprovalValidationError> {
+    let token = intent.approval_token.as_deref().unwrap_or_default();
+    let binding = host_intent_binding_payload(intent);
+    let raw_function_id = intent
+        .host_function_id
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(&intent.operation);
+    validate_approval_token(
+        shared,
+        token,
+        raw_function_id,
+        &intent.operation,
+        &binding,
+        &binding,
+        intent.caller_pack_id.as_deref().unwrap_or_default(),
+        intent.conversation_id.as_deref().unwrap_or_default(),
+        consume,
+    )
+}
+
+fn execute_host_intent(shared: &HostBrokerShared, request: HostBrokerIntentRequest) -> Value {
+    let audit_id = format!("host-audit-{}", generate_broker_token());
+    let normalized = match normalize_host_intent_request(&request, false) {
+        Ok(intent) => intent,
+        Err(error) => {
+            return serialize_intent_response(
+                &shared.config,
+                HostAuditEntry {
+                    audit_id: audit_id.clone(),
+                    ts: now_epoch_seconds(),
+                    function_id: normalize_host_operation(&request.operation),
+                    profile_id: None,
+                    pack_id: request
+                        .caller
+                        .as_ref()
+                        .and_then(|caller| caller.pack_id.clone()),
+                    conversation_id: request.conversation_id.clone(),
+                    allowed: false,
+                    result_ok: false,
+                    approval_token_present: Some(
+                        request
+                            .approval_token
+                            .as_deref()
+                            .and_then(clean_string)
+                            .is_some(),
+                    ),
+                    approval_result: Some(error.audit_result),
+                    args_summary: summarize_args(&json!({
+                        "args": request.args.clone(),
+                        "stream": request.stream.clone(),
+                    })),
+                },
+                HostBrokerIntentResponse {
+                    ok: false,
+                    operation: normalize_host_operation(&request.operation),
+                    stream_id: None,
+                    result: None,
+                    error: Some(HostBrokerError {
+                        code: error.code,
+                        message: error.message,
+                    }),
+                    audit_id,
+                },
+            );
+        }
+    };
+    execute_approved_host_intent(shared, normalized, audit_id)
+}
+
+fn execute_approved_host_intent(
+    shared: &HostBrokerShared,
+    intent: NormalizedHostIntent,
+    audit_id: String,
+) -> Value {
+    let approval_token_present = intent.approval_token.is_some();
+    if !approval_token_present {
+        return host_intent_missing_approval_response(shared, &intent, audit_id);
+    }
+    if let Err(error) = validate_host_intent_approval_token(shared, &intent) {
+        return host_intent_approval_error_response(shared, &intent, audit_id, error);
+    }
+
+    let result = match intent.operation.as_str() {
+        "host.permission.status" => {
+            let permissions = desktop_system_info::collect_permissions();
+            Ok(json!({
+                "type": "host_permission_status",
+                "permission_subject": PERMISSION_SUBJECT,
+                "permissions": permissions,
+                "host_permissions": desktop_system_info::collect_host_permissions(&permissions),
+                "host_broker": shared.status.lock().map(|status| status.clone()).unwrap_or_else(|_| HostBrokerStatus::disabled("Viewer host broker status is unavailable.")),
+            }))
+        }
+        "host.permission.open_settings" => {
+            let permission_id = intent
+                .args
+                .get("permission_id")
+                .and_then(Value::as_str)
+                .and_then(clean_string)
+                .unwrap_or_else(|| intent.operation.clone());
+            desktop_system_info::open_host_permission_settings(permission_id.clone())
+                .map(|_| {
+                    json!({
+                        "type": "host_permission_settings_opened",
+                        "permission_id": permission_id,
+                        "permission_subject": PERMISSION_SUBJECT,
+                    })
+                })
+                .map_err(|message| HostBrokerError {
+                    code: "HOST_SETTINGS_UNAVAILABLE".to_string(),
+                    message,
+                })
+        }
+        _ => Err(HostBrokerError {
+            code: "HOST_OPERATION_NOT_IMPLEMENTED".to_string(),
+            message: format!(
+                "Host operation '{}' is approved but this Viewer build has no runner for it.",
+                intent.operation
+            ),
+        }),
+    };
+
+    match result {
+        Ok(payload) => serialize_intent_response(
+            &shared.config,
+            host_intent_audit_entry(
+                audit_id.clone(),
+                &intent,
+                true,
+                true,
+                Some("approved".to_string()),
+            ),
+            HostBrokerIntentResponse {
+                ok: true,
+                operation: intent.operation,
+                stream_id: None,
+                result: Some(payload),
+                error: None,
+                audit_id,
+            },
+        ),
+        Err(error) => serialize_intent_response(
+            &shared.config,
+            host_intent_audit_entry(
+                audit_id.clone(),
+                &intent,
+                true,
+                false,
+                Some("approved_no_runner".to_string()),
+            ),
+            HostBrokerIntentResponse {
+                ok: false,
+                operation: intent.operation,
+                stream_id: None,
+                result: None,
+                error: Some(error),
+                audit_id,
+            },
+        ),
+    }
+}
+
+fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerIntentRequest) -> Value {
+    let audit_id = format!("host-audit-{}", generate_broker_token());
+    let normalized = match normalize_host_intent_request(&request, true) {
+        Ok(intent) => intent,
+        Err(error) => {
+            return serialize_intent_response(
+                &shared.config,
+                HostAuditEntry {
+                    audit_id: audit_id.clone(),
+                    ts: now_epoch_seconds(),
+                    function_id: normalize_host_operation(&request.operation),
+                    profile_id: None,
+                    pack_id: request
+                        .caller
+                        .as_ref()
+                        .and_then(|caller| caller.pack_id.clone()),
+                    conversation_id: request.conversation_id.clone(),
+                    allowed: false,
+                    result_ok: false,
+                    approval_token_present: Some(
+                        request
+                            .approval_token
+                            .as_deref()
+                            .and_then(clean_string)
+                            .is_some(),
+                    ),
+                    approval_result: Some(error.audit_result),
+                    args_summary: summarize_args(&json!({
+                        "args": request.args.clone(),
+                        "stream": request.stream.clone(),
+                    })),
+                },
+                HostBrokerIntentResponse {
+                    ok: false,
+                    operation: normalize_host_operation(&request.operation),
+                    stream_id: None,
+                    result: None,
+                    error: Some(HostBrokerError {
+                        code: error.code,
+                        message: error.message,
+                    }),
+                    audit_id,
+                },
+            );
+        }
+    };
+    if normalized.approval_token.is_none() {
+        return host_intent_missing_approval_response(shared, &normalized, audit_id);
+    }
+    if let Err(error) = validate_host_intent_approval_token_with_consume(shared, &normalized, false)
+    {
+        return host_intent_approval_error_response(shared, &normalized, audit_id, error);
+    }
+    if !host_stream_backend_available(shared, &normalized) {
+        return serialize_intent_response(
+            &shared.config,
+            host_intent_audit_entry(
+                audit_id.clone(),
+                &normalized,
+                true,
+                false,
+                Some("stream_backend_unavailable".to_string()),
+            ),
+            HostBrokerIntentResponse {
+                ok: false,
+                operation: normalized.operation,
+                stream_id: None,
+                result: None,
+                error: Some(HostBrokerError {
+                    code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
+                    message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+                }),
+                audit_id,
+            },
+        );
+    }
+    if let Err(error) = validate_host_intent_approval_token(shared, &normalized) {
+        return host_intent_approval_error_response(shared, &normalized, audit_id, error);
+    }
+
+    serialize_intent_response(
+        &shared.config,
+        host_intent_audit_entry(
+            audit_id.clone(),
+            &normalized,
+            true,
+            false,
+            Some("stream_backend_unavailable".to_string()),
+        ),
+        HostBrokerIntentResponse {
+            ok: false,
+            operation: normalized.operation,
+            stream_id: None,
+            result: None,
+            error: Some(HostBrokerError {
+                code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
+                message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+            }),
+            audit_id,
+        },
+    )
+}
+
+fn host_stream_backend_available(
+    _shared: &HostBrokerShared,
+    _intent: &NormalizedHostIntent,
+) -> bool {
+    false
+}
+
+fn execute_host_stream_stop(
+    shared: &HostBrokerShared,
+    request: HostBrokerStreamStopRequest,
+) -> Value {
+    let audit_id = format!("host-audit-{}", generate_broker_token());
+    let stream_id = request.stream_id.trim().to_string();
+    let _requested_operation = request.operation.as_deref().map(normalize_host_operation);
+    let _caller_pack_id = request
+        .caller
+        .as_ref()
+        .and_then(|caller| caller.pack_id.as_deref())
+        .and_then(clean_string);
+    let stop_token = request
+        .stop_token
+        .as_deref()
+        .and_then(clean_string)
+        .unwrap_or_default();
+    let now = now_epoch_seconds();
+    let mut streams = match shared.active_host_streams.lock() {
+        Ok(streams) => streams,
+        Err(_) => {
+            return serialize_stream_stop_response(
+                &shared.config,
+                audit_id,
+                stream_id,
+                None,
+                false,
+                "HOST_STREAM_STATE_UNAVAILABLE",
+                "Host stream state is unavailable.",
+                Some("state_unavailable".to_string()),
+            )
+        }
+    };
+    prune_expired_streams(&mut streams, now);
+    let Some(session) = streams.get(&stream_id).cloned() else {
+        return serialize_stream_stop_response(
+            &shared.config,
+            audit_id,
+            stream_id,
+            request.conversation_id.clone(),
+            false,
+            "HOST_STREAM_NOT_FOUND",
+            "Host stream session was not found.",
+            Some("stream_not_found".to_string()),
+        );
+    };
+    if stop_token.is_empty() || stop_token != session.stop_token {
+        return serialize_stream_stop_response(
+            &shared.config,
+            audit_id,
+            stream_id,
+            session.conversation_id.clone(),
+            false,
+            "HOST_STREAM_STOP_TOKEN_INVALID",
+            "Host stream stop token is invalid.",
+            Some("stop_token_invalid".to_string()),
+        );
+    }
+    streams.remove(&stream_id);
+    serialize_intent_response(
+        &shared.config,
+        HostAuditEntry {
+            audit_id: audit_id.clone(),
+            ts: now,
+            function_id: session.operation.clone(),
+            profile_id: None,
+            pack_id: session.caller_pack_id.clone(),
+            conversation_id: session.conversation_id.clone(),
+            allowed: true,
+            result_ok: true,
+            approval_token_present: Some(true),
+            approval_result: Some("stream_stopped".to_string()),
+            args_summary: summarize_args(&json!({
+                "stream_id": stream_id,
+                "caller_function_id": session.caller_function_id,
+                "started_at": session.started_at,
+            })),
+        },
+        HostBrokerIntentResponse {
+            ok: true,
+            operation: session.operation,
+            stream_id: Some(stream_id.clone()),
+            result: Some(json!({
+                "type": "host_stream_stopped",
+                "stream_id": stream_id,
+                "permission_subject": PERMISSION_SUBJECT,
+                "stopped_at": now,
+            })),
+            error: None,
+            audit_id,
+        },
+    )
+}
+
+fn host_stream_events(shared: &HostBrokerShared, stream_id: &str) -> Value {
+    let now = now_epoch_seconds();
+    let mut streams = match shared.active_host_streams.lock() {
+        Ok(streams) => streams,
+        Err(_) => {
+            return json!({
+                "ok": false,
+                "error": {"code": "HOST_STREAM_STATE_UNAVAILABLE", "message": "Host stream state is unavailable."}
+            })
+        }
+    };
+    prune_expired_streams(&mut streams, now);
+    let Some(session) = streams.get(stream_id) else {
+        return json!({
+            "ok": false,
+            "stream_id": stream_id,
+            "error": {"code": "HOST_STREAM_NOT_FOUND", "message": "Host stream session was not found."}
+        });
+    };
+    json!({
+        "ok": true,
+        "stream_id": stream_id,
+        "result": {
+            "type": "host_stream_events",
+            "stream_id": stream_id,
+            "operation": session.operation,
+            "status": "idle",
+            "events": [],
+            "expires_at": session.expires_at,
+            "media_storage": "not_stored_by_broker",
+        }
+    })
+}
+
+fn host_intent_missing_approval_response(
+    shared: &HostBrokerShared,
+    intent: &NormalizedHostIntent,
+    audit_id: String,
+) -> Value {
+    serialize_intent_response(
+        &shared.config,
+        host_intent_audit_entry(
+            audit_id.clone(),
+            intent,
+            false,
+            false,
+            Some("missing_token".to_string()),
+        ),
+        HostBrokerIntentResponse {
+            ok: false,
+            operation: intent.operation.clone(),
+            stream_id: None,
+            result: Some(host_intent_approval_required_payload(intent)),
+            error: Some(HostBrokerError {
+                code: "APPROVAL_REQUIRED".to_string(),
+                message: "This host operation requires an approval token.".to_string(),
+            }),
+            audit_id,
+        },
+    )
+}
+
+fn host_intent_approval_error_response(
+    shared: &HostBrokerShared,
+    intent: &NormalizedHostIntent,
+    audit_id: String,
+    error: ApprovalValidationError,
+) -> Value {
+    serialize_intent_response(
+        &shared.config,
+        host_intent_audit_entry(
+            audit_id.clone(),
+            intent,
+            false,
+            false,
+            Some(error.audit_result.clone()),
+        ),
+        HostBrokerIntentResponse {
+            ok: false,
+            operation: intent.operation.clone(),
+            stream_id: None,
+            result: None,
+            error: Some(HostBrokerError {
+                code: error.code,
+                message: error.message,
+            }),
+            audit_id,
+        },
+    )
+}
+
+fn serialize_stream_stop_response(
+    config: &AppConfig,
+    audit_id: String,
+    stream_id: String,
+    conversation_id: Option<String>,
+    result_ok: bool,
+    code: &str,
+    message: &str,
+    approval_result: Option<String>,
+) -> Value {
+    serialize_intent_response(
+        config,
+        HostAuditEntry {
+            audit_id: audit_id.clone(),
+            ts: now_epoch_seconds(),
+            function_id: "host.stream.stop".to_string(),
+            profile_id: None,
+            pack_id: None,
+            conversation_id,
+            allowed: false,
+            result_ok,
+            approval_token_present: Some(false),
+            approval_result,
+            args_summary: summarize_args(&json!({"stream_id": stream_id})),
+        },
+        HostBrokerIntentResponse {
+            ok: false,
+            operation: "host.stream.stop".to_string(),
+            stream_id: Some(stream_id),
+            result: None,
+            error: Some(HostBrokerError {
+                code: code.to_string(),
+                message: message.to_string(),
+            }),
+            audit_id,
+        },
+    )
+}
+
+fn host_intent_approval_required_payload(intent: &NormalizedHostIntent) -> Value {
+    json!({
+        "action": intent.operation.clone(),
+        "operation": intent.operation.clone(),
+        "requires_approval": true,
+        "approval_required": true,
+        "approval_hint": "Approve the same HostIntent through Rumi Authority, then retry with the issued execution token.",
+        "host_intent": {
+            "type": intent.intent_type.clone(),
+            "operation": intent.operation.clone(),
+            "args": intent.args.clone(),
+            "stream": intent.stream.clone(),
+            "reason": intent.reason.clone(),
+            "caller": {
+                "pack_id": intent.caller_pack_id.clone(),
+                "function_id": intent.caller_function_id.clone(),
+            },
+            "conversation_id": intent.conversation_id.clone(),
+            "host_function_id": intent.host_function_id.clone(),
+        },
+        "payload": host_intent_binding_payload(intent),
+    })
+}
+
+fn host_intent_audit_entry(
+    audit_id: String,
+    intent: &NormalizedHostIntent,
+    allowed: bool,
+    result_ok: bool,
+    approval_result: Option<String>,
+) -> HostAuditEntry {
+    HostAuditEntry {
+        audit_id,
+        ts: now_epoch_seconds(),
+        function_id: intent.operation.clone(),
+        profile_id: None,
+        pack_id: intent.caller_pack_id.clone(),
+        conversation_id: intent.conversation_id.clone(),
+        allowed,
+        result_ok,
+        approval_token_present: Some(intent.approval_token.is_some()),
+        approval_result,
+        args_summary: summarize_args(&host_intent_binding_payload(intent)),
+    }
+}
+
+fn serialize_intent_response(
+    config: &AppConfig,
+    audit: HostAuditEntry,
+    response: HostBrokerIntentResponse,
+) -> Value {
+    if let Err(error) = write_audit_log(&config.host_broker_audit_log_path(), &audit) {
+        warn!("Failed to write Viewer host broker audit log: {error}");
+    }
+    serde_json::to_value(response).unwrap_or_else(|_| {
+        json!({"ok": false, "error": {"code": "SERIALIZATION_FAILED", "message": "Could not serialize broker response"}})
+    })
+}
+
+fn prune_expired_streams(streams: &mut HashMap<String, HostStreamSession>, now: u64) {
+    streams.retain(|_, session| session.expires_at > now);
+}
+
+fn percent_decode_path_segment(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                output.push((high << 4) | low);
+                index += 3;
+                continue;
+            }
+        }
+        output.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8(output).unwrap_or_else(|_| value.to_string())
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRunRequest) -> Value {
@@ -442,6 +1272,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
             &helper_args,
             request.pack_id.as_deref().unwrap_or_default(),
             request.conversation_id.as_deref().unwrap_or_default(),
+            true,
         );
         if let Err(error) = validation {
             return serialize_run_response(
@@ -772,6 +1603,7 @@ fn validate_approval_token(
     helper_args: &Value,
     pack_id: &str,
     conversation_id: &str,
+    consume: bool,
 ) -> std::result::Result<(), ApprovalValidationError> {
     let payload = decode_approval_token(&shared.config, token)?;
     if payload.version != APPROVAL_TOKEN_VERSION {
@@ -781,7 +1613,8 @@ fn validate_approval_token(
             "invalid_token",
         ));
     }
-    if payload.expires_at < now_epoch_seconds() {
+    let now = now_epoch_seconds();
+    if payload.expires_at < now {
         return Err(approval_error(
             "APPROVAL_EXPIRED",
             "approval token expired",
@@ -836,14 +1669,17 @@ fn validate_approval_token(
             "token_state_error",
         )
     })?;
-    if used.contains(&payload.jti) {
+    used.retain(|_, expires_at| *expires_at >= now);
+    if used.contains_key(&payload.jti) {
         return Err(approval_error(
             "APPROVAL_TOKEN_USED",
             "approval token has already been used",
             "token_used",
         ));
     }
-    used.insert(payload.jti);
+    if consume {
+        used.insert(payload.jti, payload.expires_at);
+    }
     Ok(())
 }
 
@@ -930,11 +1766,15 @@ fn canonicalize_for_hash(value: &Value) -> Value {
     match value {
         Value::Object(map) => {
             let mut canonical = Map::new();
-            for (key, item) in map {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort();
+            for key in keys {
                 if ARG_HASH_IGNORE_KEYS.contains(&key.as_str()) {
                     continue;
                 }
-                canonical.insert(key.clone(), canonicalize_for_hash(item));
+                if let Some(item) = map.get(key) {
+                    canonical.insert(key.clone(), canonicalize_for_hash(item));
+                }
             }
             Value::Object(canonical)
         }
@@ -1247,6 +2087,7 @@ fn write_json_response(stream: &mut TcpStream, status_code: u16, body: &Value) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::host_broker_types::HostBrokerIntentCaller;
 
     #[test]
     fn parse_authorization_header_accepts_bearer_and_custom_token() {
@@ -1271,6 +2112,53 @@ mod tests {
             status.recovery.as_deref(),
             Some(HOST_BROKER_DISABLED_REASON)
         );
+    }
+
+    #[test]
+    fn host_intent_runner_allowlist_matches_canonical_registry_subset() {
+        let registry_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("rumi_ai_1_10")
+            .join("core_runtime")
+            .join("host_permissions")
+            .join("default_registry.json");
+        let registry: Value = serde_json::from_str(
+            &fs::read_to_string(&registry_path).expect("canonical registry should be readable"),
+        )
+        .expect("canonical registry should parse");
+        let registry = registry
+            .as_object()
+            .expect("canonical registry should be a JSON object");
+
+        for operation in IMPLEMENTED_HOST_OPERATIONS {
+            assert!(
+                registry.contains_key(*operation),
+                "{operation} must exist in canonical host permission registry"
+            );
+        }
+        for operation in IMPLEMENTED_HOST_STREAM_OPERATIONS {
+            let definition = registry.get(*operation).unwrap_or_else(|| {
+                panic!("{operation} must exist in canonical host permission registry")
+            });
+            assert_eq!(
+                definition.get("stream_allowed").and_then(Value::as_bool),
+                Some(true),
+                "{operation} must be stream_allowed before Viewer broker advertises it"
+            );
+        }
+        for operation in registry.keys() {
+            assert_eq!(
+                host_operation_allowed(operation),
+                IMPLEMENTED_HOST_OPERATIONS.contains(&operation.as_str()),
+                "{operation} host intent exposure must match implemented runner allowlist"
+            );
+            assert_eq!(
+                host_operation_stream_allowed(operation),
+                IMPLEMENTED_HOST_STREAM_OPERATIONS.contains(&operation.as_str()),
+                "{operation} host stream exposure must match implemented stream runner allowlist"
+            );
+        }
     }
 
     #[test]
@@ -1374,6 +2262,7 @@ mod tests {
             &json!({"x": 10, "y": 10}),
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("fake token should be rejected");
@@ -1409,6 +2298,7 @@ mod tests {
             &args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("wrong action should be rejected");
@@ -1445,6 +2335,7 @@ mod tests {
             &changed_args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("changed args should be rejected");
@@ -1480,10 +2371,51 @@ mod tests {
             &args,
             "defaultspack",
             "conv-1",
+            true,
         );
 
         let error = result.expect_err("expired token should be rejected");
         assert_eq!(error.code, "APPROVAL_EXPIRED");
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn broker_prunes_expired_used_approval_tokens() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"x": 10, "y": 10});
+        shared.used_approval_tokens.lock().unwrap().insert(
+            "tok-reused-after-expiry".to_string(),
+            now_epoch_seconds().saturating_sub(5),
+        );
+        let token = signed_test_approval_token(
+            "secret",
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": "tok-reused-after-expiry",
+                "operation": "computer.click",
+                "function_id": "computer.click",
+                "args_hash": hash_arguments_value(&args),
+                "pack_id": "defaultspack",
+                "conversation_id": "conv-1",
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        );
+
+        let result = validate_approval_token(
+            &shared,
+            &token,
+            "computer.click",
+            "computer.click",
+            &args,
+            &args,
+            "defaultspack",
+            "conv-1",
+            true,
+        );
+
+        assert!(result.is_ok());
+        assert_eq!(shared.used_approval_tokens.lock().unwrap().len(), 1);
         let _ = fs::remove_dir_all(temp_dir);
     }
 
@@ -1558,6 +2490,204 @@ mod tests {
         let _ = fs::remove_dir_all(temp_dir);
     }
 
+    #[test]
+    fn host_intent_rejects_unknown_operation() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let response = execute_host_intent(
+            &shared,
+            HostBrokerIntentRequest {
+                intent_type: "host_intent".to_string(),
+                operation: "host.unknown.magic".to_string(),
+                args: json!({}),
+                stream: json!({}),
+                reason: None,
+                caller: Some(HostBrokerIntentCaller {
+                    pack_id: Some("pack.bad".to_string()),
+                    function_id: Some("do".to_string()),
+                }),
+                conversation_id: Some("conv-1".to_string()),
+                host_function_id: Some("host_magic".to_string()),
+                approval_token: None,
+            },
+        );
+
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_stream_start_rejects_unadvertised_operation_before_approval() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let response = execute_host_stream_start(
+            &shared,
+            host_microphone_stream_request(None, json!({"enabled": true, "max_duration_ms": 1000})),
+        );
+
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_stream_start_rejects_unadvertised_operation_with_token() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let approved_stream = json!({"enabled": true, "max_duration_ms": 1000});
+        let changed_stream = json!({"enabled": true, "max_duration_ms": 2000});
+        let args = json!({"duration_ms": 1000});
+        let token =
+            signed_host_intent_token("secret", "tok-host-stream-tamper", &args, &approved_stream);
+        let mut request = host_microphone_stream_request(Some(token), changed_stream);
+        request.args = args;
+
+        let response = execute_host_stream_start(&shared, request);
+
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_intent_execute_fails_closed_for_unadvertised_operation() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let args = json!({"include_cursor": true});
+        let stream = json!({});
+        let token = signed_host_intent_operation_token(
+            "secret",
+            "tok-host-screen-unimplemented",
+            "host.screen.capture",
+            "host_screen_capture",
+            "defaultspack",
+            "conv-1",
+            &args,
+            &stream,
+        );
+
+        let response = execute_host_intent(
+            &shared,
+            HostBrokerIntentRequest {
+                intent_type: "host_intent".to_string(),
+                operation: "host.screen.capture".to_string(),
+                args,
+                stream,
+                reason: Some("screen read".to_string()),
+                caller: Some(HostBrokerIntentCaller {
+                    pack_id: Some("defaultspack".to_string()),
+                    function_id: Some("screen_read".to_string()),
+                }),
+                conversation_id: Some("conv-1".to_string()),
+                host_function_id: Some("host_screen_capture".to_string()),
+                approval_token: Some(token),
+            },
+        );
+
+        assert_eq!(response.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            response.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        assert!(response.get("result").is_none());
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn host_stream_start_rejects_capture_backend_contract_as_unadvertised() {
+        let (config, temp_dir) = test_config_with_approval_secret("secret");
+        let shared = test_shared(config);
+        let stream = json!({"enabled": true, "max_duration_ms": 1000});
+        let args = json!({"duration_ms": 1000});
+        let token = signed_host_intent_token("secret", "tok-host-stream-ok", &args, &stream);
+        let mut request = host_microphone_stream_request(Some(token), stream);
+        request.args = args;
+
+        let started = execute_host_stream_start(&shared, request.clone());
+        let retried = execute_host_stream_start(&shared, request);
+
+        assert_eq!(started.get("stream_id").and_then(Value::as_str), None,);
+        assert_eq!(started.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            started.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        assert_eq!(retried.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            retried.pointer("/error/code").and_then(Value::as_str),
+            Some("HOST_OPERATION_UNKNOWN")
+        );
+        let _ = fs::remove_dir_all(temp_dir);
+    }
+
+    fn host_microphone_stream_request(
+        token: Option<String>,
+        stream: Value,
+    ) -> HostBrokerIntentRequest {
+        HostBrokerIntentRequest {
+            intent_type: "host_stream_intent".to_string(),
+            operation: "host.microphone.capture".to_string(),
+            args: json!({"duration_ms": 1000}),
+            stream,
+            reason: Some("wake audio".to_string()),
+            caller: Some(HostBrokerIntentCaller {
+                pack_id: Some("rumi_ambient_trigger_pack".to_string()),
+                function_id: Some("ambient_monitor_start".to_string()),
+            }),
+            conversation_id: Some("conv-1".to_string()),
+            host_function_id: Some("host_microphone_capture".to_string()),
+            approval_token: token,
+        }
+    }
+
+    fn signed_host_intent_token(secret: &str, jti: &str, args: &Value, stream: &Value) -> String {
+        signed_host_intent_operation_token(
+            secret,
+            jti,
+            "host.microphone.capture",
+            "host_microphone_capture",
+            "rumi_ambient_trigger_pack",
+            "conv-1",
+            args,
+            stream,
+        )
+    }
+
+    fn signed_host_intent_operation_token(
+        secret: &str,
+        jti: &str,
+        operation: &str,
+        function_id: &str,
+        pack_id: &str,
+        conversation_id: &str,
+        args: &Value,
+        stream: &Value,
+    ) -> String {
+        signed_test_approval_token(
+            secret,
+            json!({
+                "version": APPROVAL_TOKEN_VERSION,
+                "jti": jti,
+                "operation": operation,
+                "function_id": function_id,
+                "args_hash": hash_arguments_value(&json!({"args": args, "stream": stream})),
+                "pack_id": pack_id,
+                "conversation_id": conversation_id,
+                "expires_at": now_epoch_seconds() + 60,
+            }),
+        )
+    }
+
     fn signed_test_approval_token(secret: &str, payload: Value) -> String {
         let encoded = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).unwrap());
         let signature = URL_SAFE_NO_PAD.encode(hmac_sha256(secret.as_bytes(), encoded.as_bytes()));
@@ -1596,7 +2726,8 @@ mod tests {
             token: Some("broker-token".to_string()),
             status: Mutex::new(HostBrokerStatus::disabled("test")),
             active_requests: Mutex::new(0),
-            used_approval_tokens: Mutex::new(HashSet::new()),
+            active_host_streams: Mutex::new(HashMap::new()),
+            used_approval_tokens: Mutex::new(HashMap::new()),
         }
     }
 }

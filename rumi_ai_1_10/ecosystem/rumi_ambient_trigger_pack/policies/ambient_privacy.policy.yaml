@@ -1,0 +1,23 @@
+camera:
+  default_enabled: false
+  preview_visible_when_on: true
+  save_frames: false
+  send_frames_to_model: false
+  local_landmarks_only: true
+  retain_landmarks_ms: 3000
+  audit_event: true
+  require_visible_indicator: true
+microphone:
+  default_enabled: false
+  save_audio: false
+  pinch_hold_recording: true
+  pinch_release_dispatch: true
+  persist_pinch_recording: false
+  save_transcript_for_wake: false
+  wake_phrase_enrollment: audio_embedding
+  string_match_wake_detection: forbidden
+audit:
+  store_trigger_event_only: true
+  include_audio: false
+  include_image: false
+  include_landmark_coordinates: false

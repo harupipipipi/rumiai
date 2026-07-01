@@ -1,9 +1,193 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ChatStreamInterruptedError, api, defaultspackApiHeaders, explainDefaultspackApiError, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiHeaders, defaultspackUrlWithLocalAuth, explainDefaultspackApiError, mergeComposerCommands, normalizeChatStreamEvent, normalizeBrowserComputerApprovalAction, usesBrowserComputerApprovalEndpoint } from "./api";
 import type { ComposerCommandItem } from "./api";
+import { authorityApprovalRuntimeContent } from "./authorityApproval";
+import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
+import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
 import { catalogProfileIdForSelection, frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
+
+const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
+  "Thank you for granting",
+  "approved provider",
+  "approved model",
+  "I can now use",
+  "使用を許可しました",
+];
+
+function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
+  for (const phrase of RISKY_AUTHORITY_FOLLOWUP_PHRASES) {
+    assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
+  }
+}
+
+test("startProviderOAuth posts scope mode and requested services", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "google",
+        authorize_url: "https://accounts.google.com/oauth",
+        redirect_uri: "http://127.0.0.1:8766/api/ai/oauth/google/callback",
+        scope_mode: "google_gmail_metadata",
+        services: ["identity", "gmail_metadata"],
+        scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.startProviderOAuth("google", {
+      scopeMode: "google_gmail_metadata",
+      services: ["identity", "gmail_metadata"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/oauth");
+  assert.deepEqual(requestBody, {
+    action: "start",
+    provider_id: "google",
+    scope_mode: "google_gmail_metadata",
+    services: ["identity", "gmail_metadata"],
+  });
+});
+
+test("importProviderConnection posts credential imports to connections route", async () => {
+  const rawToken = ["cloudflare", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "cloudflare",
+        connection_id: "default",
+        credential_ref: { provider_id: "cloudflare" },
+        capabilities: ["cloudflare.account.read"],
+        approval_required_capabilities: [],
+        rejected_capabilities: [],
+        status: "connected",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.importProviderConnection>> | null = null;
+  try {
+    result = await api.importProviderConnection("cloudflare", `CLOUDFLARE_API_TOKEN=${rawToken}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/import");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    provider_id: "cloudflare",
+    credential_bundle: `CLOUDFLARE_API_TOKEN=${rawToken}`,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
+test("saveCodexAccessToken posts to Codex connection route and redacts response", async () => {
+  const rawToken = ["codex", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        configured: true,
+        status: {
+          provider_id: "codex",
+          configured: true,
+          token_configured: true,
+          token_source: "secret_store",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.saveCodexAccessToken>> | null = null;
+  try {
+    result = await api.saveCodexAccessToken(rawToken);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    action: "save_token",
+    access_token: rawToken,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
+test("saveCodexAppServerConfig serializes safe endpoint config", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        app_server: {
+          configured: true,
+          connection_status: "configured",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.saveCodexAppServerConfig({
+      transport: "websocket_loopback",
+      enabled: true,
+      baseUrl: "http://127.0.0.1:7331",
+      websocketUrl: "ws://127.0.0.1:7331/ws",
+      unixSocketPath: "",
+      wsTokenFile: "/Users/haru/.config/rumi/codex-app-server.token",
+      sharedSecretFile: "",
+      toolSourceEnabled: true,
+      automationEndpointEnabled: false,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.deepEqual(requestBody, {
+    action: "save_app_server",
+    app_server: {
+      transport: "websocket_loopback",
+      enabled: true,
+      base_url: "http://127.0.0.1:7331",
+      websocket_url: "ws://127.0.0.1:7331/ws",
+      unix_socket_path: "",
+      ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+      shared_secret_file: "",
+      tool_source_enabled: true,
+      automation_endpoint_enabled: false,
+    },
+  });
+});
 
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
@@ -58,6 +242,412 @@ test("slash command parsing supports multi-word aliases without treating them as
 
   const explicitOff = parseSlashCommandInput("/ultra yolo off", commands);
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
+});
+
+test("slash command parsing can be disabled by template feature flags", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
+  assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("composer command merge keeps backend command definitions authoritative", () => {
+  const backendCommands: ComposerCommandItem[] = [
+    {
+      id: "goal",
+      name: "goal",
+      label: "Goal",
+      category: "tools",
+      visibility: "default",
+      risk: "medium",
+      execution: { type: "pack_block", qualified_name: "defaultspack:goal.run" },
+    },
+  ];
+  const catalogCommands: ComposerCommandItem[] = [
+    {
+      id: "goal_template",
+      name: "goal",
+      label: "Goal Template",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "template_goal_placeholder" },
+    },
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+
+  const merged = mergeComposerCommands(backendCommands, catalogCommands);
+  assert.deepEqual(merged.map((command) => command.id), ["goal", "context_txt"]);
+  assert.deepEqual(merged[0].execution, backendCommands[0].execution);
+  assert.equal(merged[0].risk, "medium");
+  assert.equal(parseSlashCommandInput("/goal frontend handoff", merged)?.command.id, "goal");
+  assert.equal(parseSlashCommandInput("/context-txt frontend handoff", merged)?.command.id, "context_txt");
+});
+
+test("registered slash command settings create safe frontend shortcuts", () => {
+  const registered = registeredSlashCommandsFromSettings([
+    {
+      name: "/go",
+      action: "toggle_yolo",
+      aliases: ["ship it"],
+      description: "Enable YOLO from settings.",
+      enabled: true,
+    },
+    {
+      name: "/bad",
+      action: "run_arbitrary_code",
+    },
+  ]);
+
+  assert.equal(registered.length, 1);
+  assert.equal(registered[0].name, "go");
+  assert.equal(registered[0].execution.type, "frontend");
+  assert.equal(registered[0].execution.type === "frontend" ? registered[0].execution.action : "", "toggle_yolo");
+
+  const parsed = parseSlashCommandInput("/ship it on", registered);
+  assert.equal(parsed?.command.name, "go");
+  assert.deepEqual(parsed?.args, { enabled: "on" });
+});
+
+test("registered slash commands merge into composer catalog without replacing built-ins", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo" },
+    { name: "doit", action: "toggle_yolo" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, "yolo");
+  assert.equal(merged[0].visibility, "default");
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/doit", merged)?.command.id, "registered:doit");
+});
+
+test("registered slash command aliases are claimed after built-in merges", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "yolo", action: "toggle_yolo", aliases: ["go"] },
+    { name: "go", action: "open_settings" },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, ["go"]);
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "yolo");
+});
+
+test("registered slash commands reject collisions with different actions", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].id, "yolo");
+  assert.deepEqual(merged[0].aliases, undefined);
+  assert.equal(parseSlashCommandInput("/camera", merged), null);
+});
+
+test("registered slash command rejected collisions do not reserve hidden primary names", () => {
+  const builtInYolo: ComposerCommandItem = {
+    id: "yolo",
+    name: "yolo",
+    label: "Yolo Approvals",
+    category: "mode",
+    visibility: "hidden",
+    risk: "medium",
+    execution: { type: "frontend", action: "toggle_yolo" },
+  };
+  const registered = registeredSlashCommandsFromSettings([
+    { name: "camera", action: "open_settings", aliases: ["yolo"] },
+    { name: "go", action: "toggle_yolo", aliases: ["camera"] },
+  ]);
+
+  const merged = mergeRegisteredSlashCommands([builtInYolo], registered);
+
+  assert.equal(merged.length, 2);
+  assert.equal(parseSlashCommandInput("/yolo", merged)?.command.id, "yolo");
+  assert.equal(parseSlashCommandInput("/camera", merged)?.command.id, "registered:go");
+  assert.equal(parseSlashCommandInput("/go", merged)?.command.id, "registered:go");
+});
+
+test("composer command feedback surfaces pack block result messages and paths", () => {
+  const command: ComposerCommandItem = {
+    id: "context_txt",
+    name: "context-txt",
+    label: "Context TXT",
+    category: "tools",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+  };
+
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: {
+        message: "context.txt updated",
+        path: "/tmp/rumi/context.txt",
+      },
+    }),
+    "context.txt updated\n/tmp/rumi/context.txt",
+  );
+  assert.equal(
+    composerCommandResultMessage({
+      command,
+      executed: true,
+      result: { path: "/tmp/rumi/context.txt" },
+    }),
+    "Command wrote /tmp/rumi/context.txt",
+  );
+});
+
+test("template ai input selects composer and tool policy metadata", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "default_ai_input",
+        composer_input: "default_composer",
+        tool_policy: "agent_tools",
+        params: { model: "template/model", max_output_tokens: 2048 },
+        modes: ["agent" as const],
+      },
+    ],
+    composer_inputs: [
+      { id: "default_composer", placeholder: "Ask Rumi" },
+    ],
+    tool_policies: [
+      {
+        id: "agent_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "local_file"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "default_ai_input");
+  assert.deepEqual(templateAiInputParamsPayload(aiInput), {
+    model: "template/model",
+    max_output_tokens: 2048,
+  });
+  assert.equal(composerInput?.id, "default_composer");
+  assert.equal(toolPolicy?.id, "agent_tools");
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.deepEqual(settings.allowedToolIds, ["local_file", "web_search"]);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.equal(settings.parallelToolCalls, true);
+});
+
+test("template ai input composes multiple active inputs and policies deterministically", () => {
+  const catalog = {
+    ai_inputs: [
+      {
+        id: "primary_ai",
+        composer_input: "primary_composer",
+        tool_policy: "primary_tools",
+        widgets: ["web_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_ai",
+        composer_input: "review_composer",
+        tool_policy: "review_tools",
+        widgets: ["review_widget"],
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_only_ai",
+        composer_input: "coding_composer",
+        modes: ["coding" as const],
+      },
+    ],
+    composer_inputs: [
+      {
+        id: "primary_composer",
+        placeholder: "Ask Rumi",
+        accepted_modalities: ["text"],
+        feature_flags: { slash_commands: false, file_attachments: true, voice_input: true },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_composer",
+        help: "Review context",
+        accepted_modalities: ["file", "text"],
+        feature_flags: { slash_commands: true, voice_input: false },
+        modes: ["agent" as const],
+      },
+      {
+        id: "coding_composer",
+        placeholder: "Coding only",
+        modes: ["coding" as const],
+      },
+    ],
+    tool_policies: [
+      {
+        id: "primary_tools",
+        policy: {
+          default_enabled_tools: ["web_search", "local_file"],
+          allowed_tools: ["web_search", "local_file"],
+          tool_choice: "auto",
+          parallel_tool_calls: true,
+        },
+        modes: ["agent" as const],
+      },
+      {
+        id: "review_tools",
+        policy: {
+          default_enabled_tools: ["web_search"],
+          default_disabled_tools: ["terminal"],
+          allowed_tools: ["web_search", "browser_computer"],
+          denied_tools: ["browser_computer"],
+          tool_choice: "required",
+          parallel_tool_calls: false,
+        },
+        modes: ["agent" as const],
+      },
+    ],
+  };
+
+  const aiInput = selectTemplateAiInput(catalog as any, "agent");
+  const composerInput = selectTemplateComposerInput(catalog as any, "agent", aiInput);
+  const toolPolicy = selectTemplateToolPolicy(catalog as any, "agent", aiInput);
+  const settings = templateToolPolicySettings(toolPolicy);
+
+  assert.equal(aiInput?.id, "composed_ai_input:primary_ai+review_ai");
+  assert.deepEqual(aiInput?.widgets, ["web_widget", "review_widget"]);
+  assert.equal(composerInput?.id, "composed_composer_input:primary_composer+review_composer");
+  assert.equal(composerInput?.placeholder, "Ask Rumi");
+  assert.deepEqual(composerInput?.accepted_modalities, ["text", "file"]);
+  assert.equal(templateFeatureFlagEnabled(composerInput, "slash_commands", true), false);
+  assert.deepEqual(composerInput?.feature_flags, { slash_commands: false, file_attachments: true, voice_input: false });
+  assert.match(toolPolicy?.id ?? "", /^composed_tool_policy:[0-9a-f]+$/);
+  assert.deepEqual(settings.ids, ["primary_tools", "review_tools"]);
+  assert.deepEqual(settings.allowedToolIds, ["web_search"]);
+  assert.equal(settings.hasAllowedToolRestriction, true);
+  assert.deepEqual(settings.deniedToolIds, ["browser_computer", "terminal"]);
+  assert.deepEqual(settings.defaultEnabledToolIds, ["web_search"]);
+  assert.deepEqual(settings.defaultDisabledToolIds, ["browser_computer", "terminal"]);
+  assert.equal(settings.toolChoice, "auto");
+  assert.deepEqual(settings.diagnostics.map((item) => item.code), ["template.tool_policy.conflicting_tool_choice"]);
+  assert.equal(settings.parallelToolCalls, false);
+});
+
+test("template composer widgets become safe tool toggle widgets", () => {
+  const catalog = {
+    composer_widgets: [
+      {
+        id: "web_search_toggle",
+        widget: {
+          tool_id: "web_search",
+          label: "Web",
+          widget_kind: "tool_toggle",
+        },
+      },
+      {
+        id: "unsafe_endpoint",
+        widget: {
+          label: "Unsafe",
+          widget_kind: "button",
+          action: { type: "call_endpoint", endpoint: "/api/anything" },
+        },
+      },
+    ],
+  };
+
+  const widgets = templateComposerWidgetsForInput(
+    catalog as any,
+    null,
+    null,
+    [{ id: "web_search", label: "Web Search", category: "tool" }],
+  );
+
+  assert.equal(widgets.length, 1);
+  assert.deepEqual(widgets[0], {
+    id: "web_search_toggle",
+    type: "tool",
+    label: "Web",
+    description: undefined,
+    enabled: true,
+    widgetKind: "tool_toggle",
+    action: { type: "toggle_tool", tool_id: "web_search" },
+    sourceItemId: "web_search",
+    icon: undefined,
+    metadata: {
+      source: "template_catalog_widget",
+      template_id: null,
+      piece_id: null,
+      widget_id: "web_search_toggle",
+      tool: {
+        id: "web_search",
+        label: "Web Search",
+        category: "tool",
+        tags: [],
+      },
+    },
+  });
 });
 
 test("ultra yolo restore state returns to the previous yolo mode", () => {
@@ -284,8 +874,31 @@ test("defaultspack API errors include status and recovery context", () => {
   assert.match(message, /権限|承認/);
 });
 
-test("selected tools are kept after send unless settings opt out", () => {
-  assert.equal(keepSelectedToolsAfterSend({}), true);
+test("browser authority QA disabled errors explain the launch requirement", () => {
+  const message = explainDefaultspackApiError(404, {
+    code: "AUTHORITY_BROWSER_TEST_DISABLED",
+    message: "browser approval test endpoint is disabled",
+  }, "Not Found");
+
+  assert.match(message, /AUTHORITY_BROWSER_TEST_DISABLED/);
+  assert.match(message, /ブラウザ承認QA/);
+  assert.match(message, /Rumi Viewer/);
+  assert.doesNotMatch(message, /対象の会話、モデル、ファイル/);
+});
+
+test("authority ui operator unavailable errors explain the viewer signing secret requirement", () => {
+  const message = explainDefaultspackApiError(503, {
+    code: "AUTHORITY_UI_OPERATOR_UNAVAILABLE",
+    message: "authority ui_operator signing secret is unavailable",
+  }, "Service Unavailable");
+
+  assert.match(message, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
+  assert.match(message, /署名secret/);
+  assert.match(message, /RUMI_PANEL_BOOTSTRAP_SECRET/);
+});
+
+test("selected tools are cleared after send unless settings opt in", () => {
+  assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
 });
@@ -315,6 +928,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
         { name: "photo.png", size: 1024, type: "image/png", truncated: false },
       ],
       tools: ["local_file"],
+      tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
       tool_policy: { selected_tools: ["local_file"] },
       metadata: { selected_tools: ["local_file"] },
     });
@@ -335,6 +949,7 @@ test("sendMessage serializes attachments and selected tools", async () => {
   assert.deepEqual(requestBody?.params, {
     thinking_level: "medium",
     tool_policy: { selected_tools: ["local_file"] },
+    tool_selection: { mode: "manual", include: ["local_file"], scope: "turn", must_use: false },
   });
 });
 
@@ -372,6 +987,21 @@ test("sendMessage preserves an empty selected tools filter", async () => {
 
 test("sendMessage preserves authority followup display metadata", async () => {
   let requestBody: any = null;
+  const hiddenResumeText = "Internal authority resume.";
+  const runtimeContent = authorityApprovalRuntimeContent({
+    requestId: "approval-1",
+    principalId: "local-user",
+    permissionId: "model.invoke",
+    resource: {
+      provider_id: "opencode-go",
+      model_id: "deepseek-v4-pro",
+    },
+  }, "token-1");
+  assertNoRiskyAuthorityFollowupPhrases(hiddenResumeText);
+  assertNoRiskyAuthorityFollowupPhrases(runtimeContent);
+  assert.match(runtimeContent, /never mention approval, authority, API keys, providers, model access/i);
+  assert.match(runtimeContent, /do not thank the user for permission/i);
+
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     requestBody = JSON.parse(String(init?.body ?? "{}"));
@@ -388,7 +1018,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
   }) as typeof fetch;
 
   try {
-    await api.sendMessage("c1", "ユーザーがモデル/API の使用を許可しました。承認済みのリクエストとして続行してください。", {
+    await api.sendMessage("c1", hiddenResumeText, {
       metadata: {
         authority_followup: {
           request_id: "approval-1",
@@ -400,13 +1030,14 @@ test("sendMessage preserves authority followup display metadata", async () => {
           hidden: true,
           reason: "authority_followup",
         },
-        runtime_content: "continue with approved authority",
+        runtime_content: runtimeContent,
       },
     });
   } finally {
     globalThis.fetch = originalFetch;
   }
 
+  assert.equal(requestBody?.message?.content, hiddenResumeText);
   assert.deepEqual(requestBody?.message?.metadata?.authority_followup, {
     request_id: "approval-1",
     permission_id: "model.invoke",
@@ -417,7 +1048,7 @@ test("sendMessage preserves authority followup display metadata", async () => {
     hidden: true,
     reason: "authority_followup",
   });
-  assert.equal(requestBody?.message?.metadata?.runtime_content, "continue with approved authority");
+  assert.equal(requestBody?.message?.metadata?.runtime_content, runtimeContent);
 });
 
 test("approveAuthorityApproval serializes bundled related permissions", async () => {
@@ -448,6 +1079,87 @@ test("approveAuthorityApproval serializes bundled related permissions", async ()
   }
 
   assert.deepEqual(requestBody?.related_permissions, ["api_key.use"]);
+});
+
+test("testPromptStudio posts draft input and selected tools", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        profile_id: "prompt-profile",
+        prompt_id: "default_chat",
+        segments: [],
+        matched_skills: [],
+        verdicts: [],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.testPromptStudio({
+      profile_id: "prompt-profile",
+      prompt_id: "default_chat",
+      draft: "Use the calculator when arithmetic is requested.",
+      user_text: "計算して",
+      selected_tools: ["calculator"],
+      model_profile_id: "openai/gpt-5.1",
+      model: "openai/gpt-5.1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/prompts/test");
+  assert.deepEqual(requestBody, {
+    profile_id: "prompt-profile",
+    prompt_id: "default_chat",
+    draft: "Use the calculator when arithmetic is requested.",
+    user_text: "計算して",
+    selected_tools: ["calculator"],
+    model_profile_id: "openai/gpt-5.1",
+    model: "openai/gpt-5.1",
+  });
+});
+
+test("rollbackPrompt posts conflict precondition body hash", async () => {
+  let requestUrl = "";
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        prompt_id: "default_chat",
+        rolled_back: true,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.rollbackPrompt({
+      profile_id: "default-profile",
+      prompt_id: "default_chat",
+      version_id: "version-2",
+      expected_body_hash: "3d6eb9f8b9f1",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/prompts/default_chat/rollback");
+  assert.deepEqual(requestBody, {
+    profile_id: "default-profile",
+    prompt_id: "default_chat",
+    version_id: "version-2",
+    expected_body_hash: "3d6eb9f8b9f1",
+  });
 });
 
 test("searchConversations serializes spotlight search filters", async () => {
@@ -598,6 +1310,44 @@ test("saveExternalToken serializes named token metadata", async () => {
     kind: "channel_access_token",
     value: "secret",
   });
+});
+
+test("streamMessage serializes auto tool selection without tools", async () => {
+  let requestBody: any = null;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    const body = [
+      'data: {"type":"message","message":{"id":"m2","role":"assistant","content":[{"type":"text","text":"ok"}],"created_at":1,"conversation_id":"c1"}}\n\n',
+    ].join("");
+    return new Response(body, {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream; charset=utf-8" },
+    });
+  }) as typeof fetch;
+
+  try {
+    await api.streamMessage("c1", "hello", {
+      params: { model: "template/model", max_output_tokens: 2048 },
+      thinking_level: "medium",
+      tool_selection: { mode: "auto", include: [], exclude: [], scope: "turn", must_use: false },
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestBody?.tools, undefined);
+  assert.equal(requestBody?.params?.model, "template/model");
+  assert.equal(requestBody?.params?.max_output_tokens, 2048);
+  assert.equal(requestBody?.params?.thinking_level, "medium");
+  assert.deepEqual(requestBody?.params?.tool_selection, {
+    mode: "auto",
+    include: [],
+    exclude: [],
+    scope: "turn",
+    must_use: false,
+  });
+  assert.equal(requestBody?.params?.tool_choice, undefined);
 });
 
 test("deleteExternalToken serializes delete action", async () => {
@@ -986,6 +1736,146 @@ test("safe API requests do not include a local CSRF header", async () => {
   const headers = requestHeaders as Headers | null;
   assert.ok(headers);
   assert.equal(headers.get("X-Rumi-CSRF"), null);
+});
+
+test("API headers consume Viewer local auth from URL fragment", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>();
+  let replacedUrl = "";
+  const fakeWindow = {
+    location: {
+      pathname: "/chat",
+      search: "?chat=c1",
+      hash: "#rumi_local_auth=local-token-1&panel=main",
+    },
+    history: {
+      state: { from: "test" },
+      replaceState: (_state: unknown, _title: string, url: string) => {
+        replacedUrl = url;
+        fakeWindow.location.hash = "#panel=main";
+      },
+    },
+  };
+
+  Object.defineProperty(globalThis, "window", { configurable: true, value: fakeWindow });
+  Object.defineProperty(globalThis, "document", { configurable: true, value: { title: "rumi DP" } });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET");
+    assert.equal(headers.get("Authorization"), "Bearer local-token-1");
+    assert.equal(values.get("rumi-defaultspack-local-auth"), "local-token-1");
+    assert.equal(replacedUrl, "/chat?chat=c1#panel=main");
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousDocument) Object.defineProperty(globalThis, "document", previousDocument);
+    else Reflect.deleteProperty(globalThis, "document");
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("API headers keep explicit Authorization over Viewer local auth", () => {
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    const headers = defaultspackApiHeaders("GET", { Authorization: "Bearer explicit-token" });
+    assert.equal(headers.get("Authorization"), "Bearer explicit-token");
+  } finally {
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("local auth URL helper carries Viewer token into child windows", () => {
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: { location: { origin: "http://127.0.0.1:8766" } },
+  });
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => (key === "rumi-defaultspack-local-auth" ? "local-token-1" : null),
+      setItem: () => {},
+      removeItem: () => {},
+    },
+  });
+
+  try {
+    assert.equal(
+      defaultspackUrlWithLocalAuth("/finger-recording?authority_approved=1"),
+      "/finger-recording?authority_approved=1#rumi_local_auth=local-token-1",
+    );
+  } finally {
+    if (previousWindow) Object.defineProperty(globalThis, "window", previousWindow);
+    else Reflect.deleteProperty(globalThis, "window");
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+});
+
+test("browser authority ui operator forwards browser QA token in query header and body", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestUrl = "";
+  let requestHeaderToken = "";
+  let requestBody = "";
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestHeaderToken = new Headers(init?.headers).get("X-Rumi-Approval-Browser-Token") ?? "";
+    requestBody = String(init?.body ?? "");
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        request_id: "auth_1",
+        ui_operator: {
+          version: 1,
+          kind: "ui_operator",
+          origin: "browser_qa",
+          window_label: "browser",
+          request_id: "auth_1",
+          issued_at: 1,
+          expires_at: 2,
+          nonce: "n",
+          signature: "s",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await api.browserAuthorityUiOperator("auth_1", "ambient-browser-qa");
+
+    assert.equal(result.request_id, "auth_1");
+    assert.equal(requestUrl, "/api/authority/browser-ui-operator?browser_approval_token=ambient-browser-qa");
+    assert.equal(requestHeaderToken, "ambient-browser-qa");
+    assert.equal(JSON.parse(requestBody).browser_approval_token, "ambient-browser-qa");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("streamMessage includes a local CSRF header", async () => {

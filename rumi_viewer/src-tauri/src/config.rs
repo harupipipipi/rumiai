@@ -56,13 +56,19 @@ impl AppConfig {
     /// └── logs/
     /// ```
     pub fn detect_for_tauri(resource_dir: PathBuf, app_data_dir: PathBuf) -> Result<Self> {
-        let mut app_dir = resource_dir.join("app");
-        let dev_workspace_root = if app_dir.exists() {
+        let staged_app_dir = resource_dir.join("app");
+        let detected_workspace_root = find_dev_workspace_root(&resource_dir);
+        let prefer_dev_runtime =
+            cfg!(debug_assertions) && is_cargo_debug_resource_dir(&resource_dir);
+        let dev_workspace_root = if prefer_dev_runtime {
+            detected_workspace_root
+        } else if staged_app_dir.exists() {
             None
         } else {
-            find_dev_workspace_root(&resource_dir)
+            detected_workspace_root
         };
 
+        let mut app_dir = staged_app_dir;
         if let Some(workspace_root) = &dev_workspace_root {
             let candidate = workspace_root.join("rumi_ai_1_10");
             if candidate.join("app.py").exists() {
@@ -333,6 +339,21 @@ fn find_dev_workspace_root(resource_dir: &Path) -> Option<PathBuf> {
     None
 }
 
+fn is_cargo_debug_resource_dir(resource_dir: &Path) -> bool {
+    let mut components = resource_dir.components().rev();
+    matches!(
+        (
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str()),
+            components
+                .next()
+                .and_then(|component| component.as_os_str().to_str()),
+        ),
+        (Some("debug"), Some("target"))
+    )
+}
+
 fn configured_uv_path() -> Option<PathBuf> {
     std::env::var_os(UV_PATH_ENV)
         .filter(|value| !value.is_empty())
@@ -551,6 +572,34 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("rumi_viewer_config_staged_{unique}"));
+        let resource = root.join("resources");
+        let staged_app_py = resource.join("app").join("app.py");
+        let repo_app_py = root.join("rumi_ai_1_10").join("app.py");
+
+        fs::create_dir_all(staged_app_py.parent().unwrap()).unwrap();
+        fs::create_dir_all(repo_app_py.parent().unwrap()).unwrap();
+        fs::write(&staged_app_py, "print('staged')\n").unwrap();
+        fs::write(&repo_app_py, "print('repo')\n").unwrap();
+
+        let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
+
+        assert_eq!(config.app_dir, resource.join("app"));
+        assert_eq!(config.dev_workspace_root, None);
+        assert!(!config.is_dev_workspace());
+
+        fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn detect_for_tauri_prefers_repo_checkout_over_stale_debug_bundle() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("rumi_viewer_config_debug_staged_{unique}"));
         let resource = root
             .join("rumi_viewer")
             .join("src-tauri")
@@ -566,9 +615,9 @@ mod tests {
 
         let config = AppConfig::detect_for_tauri(resource.clone(), root.join("appdata")).unwrap();
 
-        assert_eq!(config.app_dir, resource.join("app"));
-        assert_eq!(config.dev_workspace_root, None);
-        assert!(!config.is_dev_workspace());
+        assert_eq!(config.app_dir, root.join("rumi_ai_1_10"));
+        assert_eq!(config.dev_workspace_root, Some(root.clone()));
+        assert!(config.is_dev_workspace());
 
         fs::remove_dir_all(&root).ok();
     }
@@ -766,11 +815,7 @@ mod tests {
             .unwrap()
             .as_nanos();
         let root = std::env::temp_dir().join(format!("rumi_viewer_pack_shell_staged_{unique}"));
-        let resource = root
-            .join("rumi_viewer")
-            .join("src-tauri")
-            .join("target")
-            .join("debug");
+        let resource = root.join("resources");
         let appdata = root.join("appdata");
         let app_py = root.join("rumi_ai_1_10").join("app.py");
         let manifest = root.join("pack-shell").join("Cargo.toml");

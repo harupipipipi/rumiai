@@ -1,0 +1,208 @@
+{
+  "schema_version": 1,
+  "id": "rumi.backend.prompt_compaction.default",
+  "kind": "backend",
+  "version": "1.0.0",
+  "status": "active",
+  "trust_level": "builtin",
+  "capabilities": {
+    "provides": [
+      "rumi.prompt_compaction",
+      "rumi.context.compaction",
+      "rumi.context.token_estimate"
+    ],
+    "requires": [],
+    "permissions": [
+      "context.compact",
+      "prompt.compact"
+    ]
+  },
+  "metadata": {
+    "title": "Default Prompt And Context Compaction",
+    "template_kind": "backend_template",
+    "local_first": true,
+    "description": "Declarative function bundle for prompt compaction, context packet compaction, restoration, and token estimation."
+  },
+  "pieces": [
+    {
+      "id": "prompt_compaction_settings_section",
+      "kind": "settings_section",
+      "order": 60,
+      "section_id": "context_compaction",
+      "label": "Context Compaction",
+      "description": "Prompt and long-context compaction defaults projected from RumiTemplate.",
+      "fields": []
+    },
+    {
+      "id": "prompt_compaction_target_chars",
+      "kind": "settings_field",
+      "slot": "context_compaction",
+      "order": 61,
+      "section_id": "context_compaction",
+      "type": "number",
+      "renderer": "number",
+      "label": "Target Characters",
+      "default": 6000,
+      "min": 1000,
+      "max": 50000,
+      "step": 500,
+      "help": "Default target length for compacted prompt text."
+    },
+    {
+      "id": "long_context_txt_enabled",
+      "kind": "settings_field",
+      "slot": "context_compaction",
+      "order": 62,
+      "section_id": "context_compaction",
+      "type": "toggle",
+      "renderer": "toggle",
+      "label": "Long Context TXT",
+      "default": true,
+      "help": "Allow composer commands to materialize long context as text/plain artifacts."
+    },
+    {
+      "id": "prompt_compactor_service",
+      "kind": "backend_service",
+      "order": 63,
+      "service_id": "prompt_compactor",
+      "entrypoint": "domain.prompt.prompt_compactor",
+      "lifecycle": "local"
+    },
+    {
+      "id": "context_compaction_service",
+      "kind": "backend_service",
+      "order": 64,
+      "service_id": "context_compaction",
+      "entrypoint": "domain.context_engine.compact_packet",
+      "lifecycle": "local"
+    },
+    {
+      "id": "compact_prompt_action",
+      "kind": "function",
+      "order": 65,
+      "role": "action",
+      "action_id": "compact_prompt",
+      "function_id": "compact_prompt",
+      "handler_ref": "blocks.prompt.compact_prompt:run",
+      "route_path": "/api/prompts/compact",
+      "method": "POST",
+      "requires_approval": false
+    },
+    {
+      "id": "compact_context_action",
+      "kind": "function",
+      "order": 66,
+      "role": "action",
+      "action_id": "compact_context",
+      "function_id": "compact_context",
+      "handler_ref": "blocks.context.compact:run",
+      "route_path": "/api/context/compact",
+      "method": "POST",
+      "requires_approval": false
+    },
+    {
+      "id": "restore_context_action",
+      "kind": "function",
+      "order": 67,
+      "role": "action",
+      "action_id": "restore_compact_context",
+      "function_id": "restore_compact_context",
+      "handler_ref": "blocks.context.restore:run",
+      "route_path": "/api/context/restore",
+      "method": "POST",
+      "requires_approval": false
+    },
+    {
+      "id": "token_estimate_data_source",
+      "kind": "function",
+      "order": 68,
+      "role": "data_source",
+      "data_source": "context_token_estimate",
+      "function_id": "context_token_estimate",
+      "handler_ref": "blocks.context.token_estimate:run",
+      "route_path": "/api/context/token-estimate",
+      "method": "POST",
+      "returns": "estimated_tokens, model_context_limit, usage_ratio"
+    },
+    {
+      "id": "compact_context_command",
+      "kind": "composer_command",
+      "order": 69,
+      "command": {
+        "id": "compact_context",
+        "name": "compact_context",
+        "aliases": [
+          "compact context",
+          "context compact",
+          "long context compact"
+        ],
+        "label": "Compact Context",
+        "description": "Create a compact context packet from the current conversation.",
+        "category": "chat",
+        "visibility": "default",
+        "risk": "medium",
+        "modes": [
+          "chat",
+          "coding",
+          "agent"
+        ],
+        "execution": {
+          "type": "pack_block",
+          "qualified_name": "defaultspack:context.compact"
+        }
+      }
+    },
+    {
+      "id": "long_context_txt_policy",
+      "kind": "context_policy",
+      "order": 70,
+      "policy": {
+        "id": "long_context_txt",
+        "mode": "materialize_txt",
+        "format": "text/plain",
+        "filename": "long-context.txt",
+        "source": "conversation_context",
+        "delivery": "composer_command",
+        "compaction_action": "compact_context",
+        "token_estimate_source": "context_token_estimate"
+      }
+    },
+    {
+      "id": "context_compact_permission",
+      "kind": "permission",
+      "order": 71,
+      "permission_id": "context.compact",
+      "scope": "context",
+      "reason": "Context compaction writes local compact packets and may be restored later."
+    },
+    {
+      "id": "prompt_compact_permission",
+      "kind": "permission",
+      "order": 72,
+      "permission_id": "prompt.compact",
+      "scope": "prompt",
+      "reason": "Prompt compaction transforms user-provided text locally."
+    },
+    {
+      "id": "context_compaction_route_contract",
+      "kind": "test_contract",
+      "order": 73,
+      "contract_id": "defaultspack.template.backend.prompt_compaction.catalog",
+      "route_metadata": {
+        "method": "POST",
+        "path": "/api/context/compact",
+        "block_module": "blocks.context.compact",
+        "diagnostic": "Transport route is registered by defaultspack context setup; this template owns the compaction function bundle metadata."
+      },
+      "assertions": [
+        {"type": "catalog_contains", "bucket": "actions", "match": {"action_id": "compact_prompt"}},
+        {"type": "catalog_contains", "bucket": "actions", "match": {"action_id": "compact_context"}},
+        {"type": "catalog_contains", "bucket": "data_sources", "match": {"data_source": "context_token_estimate"}},
+        {"type": "catalog_contains", "bucket": "commands", "match": {"id": "compact_context"}},
+        {"type": "catalog_contains", "bucket": "context_policies", "match": {"id": "long_context_txt"}},
+        {"type": "route_resolves", "method": "POST", "path": "/api/context/compact"},
+        {"type": "function_registered", "function_id": "context_token_estimate"}
+      ]
+    }
+  ]
+}

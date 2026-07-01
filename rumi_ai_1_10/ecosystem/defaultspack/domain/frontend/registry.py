@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import importlib
 import json
 import re
 from copy import deepcopy
@@ -13,8 +15,11 @@ from core_runtime.profile_workspace import ProfileWorkspaceManager
 from domain.ai_client.client import AIClient
 from domain.ai_client.api_key_store import provider_key_status, set_provider_api_key
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
+from domain.ai_client.oauth_store import provider_oauth_statuses
 from domain.capability.catalog import CapabilityCatalog
 from domain.chat.store import ChatStore
+from domain.codex.app_server import codex_app_server_status
+from domain.codex.connection_store import codex_connection_status
 from domain.components.registry import DomainComponentRegistry, build_domain_component_roots
 from domain.dev.inspector import Inspector
 from domain.extensions.activation import selected_extension_pack_ids
@@ -26,7 +31,17 @@ from domain.external.source_store import ExternalSourceStore, external_source_ke
 from domain.external.token_store import external_token_status
 from domain.tool.registry import ToolRegistry
 from domain.webhook.endpoint_store import WebhookEndpointStore
-from transport.registry import component_http_route_specs, component_route_diagnostics
+from transport.registry import (
+    component_http_route_specs,
+    component_route_diagnostics,
+    template_http_route_specs,
+    template_route_diagnostics,
+)
+
+
+_TRUSTED_PACK_RENDERER_RE = re.compile(
+    r"^/static/packs/([A-Za-z0-9_.-]+)/((?:renderers|assets/renderers)/[^?#]+\.js)(?:[?#].*)?$"
+)
 
 
 class FrontendRegistry:
@@ -40,19 +55,42 @@ class FrontendRegistry:
 
     def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
+        template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
         ui_surfaces = self._load_ui_surfaces()
         profile_preferences = self._profile_frontend_preferences(profile_id)
         selected_frontend_ids = profile_preferences["selected_frontend_ids"]
-        shell = self._filter_shell(
-            self._shell(ui_surfaces, extensions, profile_id=profile_id, shell_variant_id=profile_preferences["shell_variant_id"]),
-            selected_frontend_ids,
+        shell = self._merge_template_shell_catalog(
+            self._shell(
+                ui_surfaces,
+                extensions,
+                profile_id=profile_id,
+                shell_variant_id=profile_preferences["shell_variant_id"],
+            ),
+            template_catalog,
         )
+        shell = self._filter_shell(shell, selected_frontend_ids)
         parts = self._filter_frontend_items(self._parts(ui_surfaces, extensions), selected_frontend_ids)
-        component_bindings = self._filter_frontend_items(self._component_bindings(ui_surfaces, extensions), selected_frontend_ids)
-        sidebar_items = self._filter_frontend_items(self._sidebar_items(ui_surfaces, extensions), selected_frontend_ids)
-        settings_sections = self._filter_frontend_items(self._settings_sections(ui_surfaces, extensions), selected_frontend_ids)
-        chat_renderers = self._filter_frontend_items(self._chat_renderers(ui_surfaces, extensions), selected_frontend_ids)
+        component_bindings = [
+            *self._component_bindings(ui_surfaces, extensions),
+            *template_catalog.get("component_bindings", []),
+        ]
+        component_bindings = self._filter_frontend_items(component_bindings, selected_frontend_ids)
+        sidebar_items = [
+            *self._sidebar_items(ui_surfaces, extensions),
+            *template_catalog.get("sidebar_items", []),
+        ]
+        sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
+        settings_sections = self._merge_settings_sections(
+            self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
+            template_catalog.get("settings_sections", []),
+        )
+        settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
+        chat_renderers = [
+            *self._chat_renderers(ui_surfaces, extensions),
+            *template_catalog.get("chat_renderers", []),
+        ]
+        chat_renderers = self._filter_frontend_items(chat_renderers, selected_frontend_ids)
         return {
             "app": self._app_metadata(ui_surfaces),
             "agent_service": CapabilityCatalog(self._pack_root).manifest(),
@@ -72,14 +110,36 @@ class FrontendRegistry:
             },
             "skills": self._skill_items(),
             "routes": self._route_metadata(),
+            "templates": template_catalog.get("templates", []),
+            "field_renderers": template_catalog.get("field_renderers", []),
+            "data_sources": template_catalog.get("data_sources", []),
+            "actions": template_catalog.get("actions", []),
+            "backend_services": template_catalog.get("backend_services", []),
+            "api_routes": template_catalog.get("api_routes", []),
+            "permissions": template_catalog.get("permissions", []),
+            "template_diagnostics": template_catalog.get("template_diagnostics", []),
+            "commands": template_catalog.get("commands", []),
+            "composer_inputs": template_catalog.get("composer_inputs", []),
+            "ai_inputs": template_catalog.get("ai_inputs", []),
+            "tool_policies": template_catalog.get("tool_policies", []),
+            "composer_widgets": template_catalog.get("composer_widgets", []),
+            "context_policies": template_catalog.get("context_policies", []),
+            "external_io_templates": template_catalog.get("external_io_templates", []),
+            "shell_regions": template_catalog.get("shell_regions", []),
+            "shell_renderers": template_catalog.get("shell_renderers", []),
             "extension_points": self._extension_points(),
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
     def get_settings(self) -> dict[str, Any]:
+        self._load_diagnostics: list[dict[str, Any]] = []
+        template_catalog = self._template_catalog_metadata()
         ui_surfaces = self._load_ui_surfaces()
         return {
-            "sections": self._settings_sections(ui_surfaces, self._load_extensions()),
+            "sections": self._merge_settings_sections(
+                self._settings_sections(ui_surfaces, self._load_extensions(), template_catalog=template_catalog),
+                template_catalog.get("settings_sections", []),
+            ),
             "values": self._read_settings(),
         }
 
@@ -263,8 +323,9 @@ class FrontendRegistry:
                 shell["layout"] = self._deep_merge(shell["layout"], config["shell_layout"])
             renderers = config.get("shell_renderers")
             if isinstance(renderers, list):
+                renderer_items = self._config_list([manifest], "shell_renderers")
                 shell["renderers"] = self._dedupe_by_key(
-                    [*shell["renderers"], *(item for item in renderers if isinstance(item, dict))],
+                    [*shell["renderers"], *renderer_items],
                     "id",
                 )
             variants = config.get("shell_variants")
@@ -277,6 +338,68 @@ class FrontendRegistry:
         if shell_variant_id:
             shell = self._apply_shell_variant(shell, shell_variant_id)
         return shell
+
+    def _merge_template_shell_catalog(
+        self,
+        shell: dict[str, Any],
+        template_catalog: dict[str, Any],
+    ) -> dict[str, Any]:
+        merged = deepcopy(shell)
+        layout = merged.get("layout")
+        if not isinstance(layout, dict):
+            layout = {}
+            merged["layout"] = layout
+
+        template_regions = template_catalog.get("shell_regions")
+        if isinstance(template_regions, list):
+            regions = layout.get("regions") if isinstance(layout.get("regions"), list) else []
+            layout["regions"] = self._merge_template_shell_items(
+                [item for item in regions if isinstance(item, dict)],
+                [item for item in template_regions if isinstance(item, dict)],
+            )
+
+        template_renderers = template_catalog.get("shell_renderers")
+        if isinstance(template_renderers, list):
+            renderers = merged.get("renderers") if isinstance(merged.get("renderers"), list) else []
+            merged["renderers"] = self._merge_template_shell_items(
+                [item for item in renderers if isinstance(item, dict)],
+                [item for item in template_renderers if isinstance(item, dict)],
+            )
+        return merged
+
+    def _merge_template_shell_items(
+        self,
+        base_items: list[dict[str, Any]],
+        template_items: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: list[dict[str, Any]] = []
+        index_by_id: dict[str, int] = {}
+        for item in base_items:
+            current = deepcopy(item)
+            item_id = str(current.get("id") or "").strip()
+            if item_id and item_id in index_by_id:
+                merged[index_by_id[item_id]] = current
+                continue
+            if item_id:
+                index_by_id[item_id] = len(merged)
+            merged.append(current)
+
+        for item in template_items:
+            current = deepcopy(item)
+            item_id = str(current.get("id") or "").strip()
+            if not item_id or item_id not in index_by_id:
+                if item_id:
+                    index_by_id[item_id] = len(merged)
+                merged.append(current)
+                continue
+            self._copy_template_projection_metadata(merged[index_by_id[item_id]], current)
+        return merged
+
+    @staticmethod
+    def _copy_template_projection_metadata(target: dict[str, Any], source: dict[str, Any]) -> None:
+        for key in ("kind", "template_id", "piece_id", "projected_id", "origin", "trust_level", "_source"):
+            if key in source:
+                target[key] = deepcopy(source[key])
 
     def _parts(
         self,
@@ -674,10 +797,12 @@ class FrontendRegistry:
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
+        *,
+        template_catalog: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        template_catalog = external_io_template_catalog(self._pack_root)
-        input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
-        output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
+        external_template_catalog = self._external_io_template_catalog(template_catalog)
+        input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
+        output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         input_profile_options = self._input_profile_options()
         output_profile_options = self._output_profile_options()
         sections = [
@@ -1070,6 +1195,25 @@ class FrontendRegistry:
                 ],
             },
             {
+                "id": "continuity",
+                "label": "Continuity",
+                "description": "API provider route, checkpoint, and device/cloud handoff controls.",
+                "fields": [
+                    {
+                        "id": "handoff",
+                        "label": "Cloud / Device Handoff",
+                        "type": "continuity",
+                        "default": {
+                            "sandbox_id": "logical-sandbox",
+                            "mode": "move",
+                            "destination_node_id": "",
+                            "route_id": "",
+                        },
+                        "help": "Pairs destination nodes, probes provider route portability, and starts fenced handoff operations.",
+                    },
+                ],
+            },
+            {
                 "id": "apis",
                 "label": "APIs / Tokens",
                 "description": "LLM の API キーも、LINE / Discord / Slack の token も、ここで一元管理します。値は再表示しません。",
@@ -1442,8 +1586,8 @@ class FrontendRegistry:
             },
             {
                 "id": "tools",
-                "label": "Tools",
-                "description": "Tool composer defaults and selection behavior.",
+                "label": "機能と接続",
+                "description": "機能の既定動作、権限、接続、高度な選定方式。",
                 "fields": [
                     {
                         "id": "default_target",
@@ -1454,33 +1598,85 @@ class FrontendRegistry:
                         "advanced": True,
                     },
                     {
-                        "id": "keep_selected_tools_after_send",
-                        "label": "Keep Selected Tools",
+                        "id": "default_mode",
+                        "label": "既定の使い方",
+                        "type": "select",
+                        "default": "auto",
+                        "options": [
+                            {"value": "auto", "label": "自動で選ぶ"},
+                            {"value": "review", "label": "使う前に確認"},
+                            {"value": "manual", "label": "自分で選ぶ"},
+                            {"value": "none", "label": "機能を使わない"},
+                        ],
+                    },
+                    {
+                        "id": "selection_strategy",
+                        "label": "選定方式",
+                        "type": "select",
+                        "default": "hybrid",
+                        "options": [
+                            {"value": "hybrid", "label": "自動選定・高精度"},
+                            {"value": "semantic", "label": "意味検索"},
+                            {"value": "catalog_ai", "label": "別AIに全体から選ばせる"},
+                            {"value": "all_with_hints", "label": "全機能＋おすすめ"},
+                            {"value": "all_schemas", "label": "全schemaを公開・デバッグ"},
+                            {"value": "lexical", "label": "軽量検索"},
+                        ],
+                        "help": "通常は自動選定・高精度のままで構いません。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "show_selection_summary",
+                        "label": "選んだ機能を回答内に表示",
                         "type": "toggle",
                         "default": True,
-                        "help": "Keep composer tool selections after a message is sent.",
                     },
                     {
-                        "id": "tool_assist_mode",
-                        "label": "Tool Assist",
+                        "id": "show_selection_reasons",
+                        "label": "選定理由を常に展開して表示",
+                        "type": "toggle",
+                        "default": False,
+                    },
+                    {
+                        "id": "semantic_backend",
+                        "label": "Semantic backend",
                         "type": "select",
-                        "default": "all",
+                        "default": "auto",
                         "options": [
-                            {"value": "all", "label": "All tools: expose every tool"},
-                            {"value": "auto", "label": "Auto: always tools plus relevant vector matches"},
-                            {"value": "vector", "label": "Vector: recommend relevant tools"},
-                            {"value": "off", "label": "Off: only manually selected tools"},
+                            {"value": "auto", "label": "自動"},
+                            {"value": "embedding", "label": "Embedding"},
+                            {"value": "lexical", "label": "軽量検索"},
                         ],
-                        "help": "既定ではすべての tool を AI に渡します。Auto は常時読み込み宣言の tool と、入力文に関連する vector tool だけを渡します。",
+                        "advanced": True,
                     },
                     {
-                        "id": "tool_assist_limit",
-                        "label": "Tool Assist Limit",
+                        "id": "selector_trace",
+                        "label": "Trace",
+                        "type": "select",
+                        "default": "summary",
+                        "options": [
+                            {"value": "none", "label": "保存しない"},
+                            {"value": "summary", "label": "要約のみ"},
+                            {"value": "full", "label": "完全トレース"},
+                        ],
+                        "advanced": True,
+                    },
+                    {
+                        "id": "final_tool_limit",
+                        "label": "最終機能数",
                         "type": "number",
                         "default": 8,
                         "min": 1,
                         "max": 24,
-                        "help": "Vector が AI に推薦する tool 数の上限です。",
+                        "advanced": True,
+                    },
+                    {
+                        "id": "semantic_candidate_limit",
+                        "label": "Semantic候補数",
+                        "type": "number",
+                        "default": 32,
+                        "min": 8,
+                        "max": 64,
                         "advanced": True,
                     },
                 ],
@@ -1580,7 +1776,7 @@ class FrontendRegistry:
         sections.extend(self._config_list(ui_surfaces, "settings_sections"))
         sections.extend(self._config_list(extensions, "settings_sections"))
 
-        return sections
+        return self._suppress_template_owned_base_settings(sections, template_catalog)
 
     def _chat_renderers(
         self,
@@ -2008,7 +2204,8 @@ class FrontendRegistry:
         return surfaces
 
     def _route_metadata(self) -> dict[str, Any]:
-        specs = component_http_route_specs()
+        component_specs = component_http_route_specs()
+        template_specs = template_http_route_specs(defaultspack_root=self._pack_root)
         return {
             "manifest_backed": [
                 {
@@ -2017,9 +2214,21 @@ class FrontendRegistry:
                     "block_module": spec.block_module,
                     "handler_name": spec.handler_name,
                 }
-                for spec in specs
+                for spec in component_specs
             ],
-            "diagnostics": component_route_diagnostics(),
+            "template_backed": [
+                {
+                    "method": spec.method,
+                    "path": spec.pattern,
+                    "function_id": spec.function_id,
+                    "function_name": spec.function_name,
+                }
+                for spec in template_specs
+            ],
+            "diagnostics": [
+                *component_route_diagnostics(),
+                *template_route_diagnostics(defaultspack_root=self._pack_root),
+            ],
         }
 
     def _load_extensions(self) -> list[dict[str, Any]]:
@@ -2192,6 +2401,184 @@ class FrontendRegistry:
             )
         return next_regions
 
+    def _template_catalog_metadata(self) -> dict[str, Any]:
+        try:
+            template_projectors = importlib.import_module("domain.templates.projectors")
+            build_template_catalog = template_projectors.build_template_catalog
+            catalog = build_template_catalog(defaultspack_root=self._pack_root)
+        except Exception as exc:
+            self._add_diagnostic(
+                "warning",
+                "template_catalog_build_failed",
+                f"failed to build template catalog: {exc}",
+                str(self._pack_root / "templates"),
+            )
+            return self._empty_template_catalog()
+        if not isinstance(catalog, dict):
+            self._add_diagnostic(
+                "warning",
+                "template_catalog_invalid",
+                "template catalog projector returned a non-object result.",
+                "domain/templates/projectors",
+            )
+            return self._empty_template_catalog()
+
+        for diagnostic in catalog.get("template_diagnostics", []):
+            if not isinstance(diagnostic, dict):
+                continue
+            self._add_diagnostic(
+                str(diagnostic.get("level") or diagnostic.get("severity") or "warning"),
+                str(diagnostic.get("code") or "template_catalog_diagnostic"),
+                str(diagnostic.get("message") or ""),
+                str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
+            )
+        return catalog
+
+    @staticmethod
+    def _empty_template_catalog() -> dict[str, Any]:
+        try:
+            return importlib.import_module("domain.templates.projectors").empty_template_catalog()
+        except Exception:
+            return {"template_diagnostics": []}
+
+    def _external_io_template_catalog(self, template_catalog: dict[str, Any] | None = None) -> dict[str, Any]:
+        template_items = None
+        if isinstance(template_catalog, dict) and isinstance(template_catalog.get("external_io_templates"), list):
+            template_items = [item for item in template_catalog["external_io_templates"] if isinstance(item, dict)]
+        return external_io_template_catalog(self._pack_root, template_items=template_items)
+
+    def _merge_settings_sections(
+        self,
+        base_sections: list[dict[str, Any]],
+        extra_sections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        try:
+            merge_settings_sections = importlib.import_module("domain.templates.projectors").merge_settings_sections
+            sections, diagnostics = merge_settings_sections([*base_sections, *extra_sections])
+        except Exception as exc:
+            self._add_diagnostic(
+                "warning",
+                "template_settings_merge_failed",
+                f"failed to merge template settings sections: {exc}",
+                "domain/templates/projectors",
+            )
+            return [section for section in [*base_sections, *extra_sections] if isinstance(section, dict)]
+        for diagnostic in diagnostics:
+            if not isinstance(diagnostic, dict):
+                continue
+            self._add_diagnostic(
+                str(diagnostic.get("level") or diagnostic.get("severity") or "warning"),
+                str(diagnostic.get("code") or "template_settings_diagnostic"),
+                str(diagnostic.get("message") or ""),
+                str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
+            )
+        return self._hydrate_dynamic_settings_fields(sections)
+
+    @staticmethod
+    def _template_settings_field_ids(template_catalog: dict[str, Any] | None) -> set[tuple[str, str]]:
+        if not isinstance(template_catalog, dict):
+            return set()
+        owned: set[tuple[str, str]] = set()
+        sections = template_catalog.get("settings_sections")
+        if not isinstance(sections, list):
+            return owned
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            if not section_id:
+                continue
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                continue
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                field_id = str(field.get("id") or "").strip()
+                if field_id:
+                    owned.add((section_id, field_id))
+        return owned
+
+    def _suppress_template_owned_base_settings(
+        self,
+        sections: list[dict[str, Any]],
+        template_catalog: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        template_owned = self._template_settings_field_ids(template_catalog)
+        if not template_owned:
+            return sections
+        filtered_sections: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            fields = section.get("fields")
+            if not section_id or not isinstance(fields, list):
+                filtered_sections.append(section)
+                continue
+            next_section = dict(section)
+            next_section["fields"] = [
+                field
+                for field in fields
+                if not (
+                    isinstance(field, dict)
+                    and (section_id, str(field.get("id") or "").strip()) in template_owned
+                )
+            ]
+            filtered_sections.append(next_section)
+        return filtered_sections
+
+    def _hydrate_dynamic_settings_fields(self, sections: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        provider_rows: list[dict[str, Any]] | None = None
+        model_options: list[dict[str, Any]] | None = None
+        model_route_options: list[dict[str, Any]] | None = None
+        hydrated_sections: list[dict[str, Any]] = []
+        for section in sections:
+            if not isinstance(section, dict):
+                continue
+            section_id = str(section.get("id") or "").strip()
+            fields = section.get("fields")
+            if not isinstance(fields, list):
+                hydrated_sections.append(section)
+                continue
+            next_section = dict(section)
+            next_fields: list[dict[str, Any]] = []
+            for field in fields:
+                if not isinstance(field, dict):
+                    continue
+                item = dict(field)
+                field_id = str(item.get("id") or "").strip()
+                field_type = str(item.get("type") or "").strip()
+                if section_id == "models" and field_id == "preferred_model":
+                    if model_options is None:
+                        model_options = self._model_options()
+                    item["options"] = model_options
+                    item.setdefault("type", "model_select")
+                    item.setdefault("renderer", "model_select")
+                elif str(item.get("type") or "").strip() == "model_select":
+                    if model_options is None:
+                        model_options = self._model_options()
+                    item.setdefault("options", model_options)
+                if section_id == "models" and field_id == "model_api_routes":
+                    if model_route_options is None:
+                        model_route_options = self._model_route_options()
+                    if provider_rows is None:
+                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                    item["options"] = model_route_options
+                    item["api_keys"] = provider_rows
+                    item.setdefault("type", "model_api_routes")
+                    item.setdefault("renderer", "model_routing")
+                if section_id == "apis" and (field_id == "api_keys" or field_type == "api_key_setup"):
+                    if provider_rows is None:
+                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                    item["api_keys"] = provider_rows
+                    item.setdefault("type", "api_key_setup")
+                    item.setdefault("renderer", "api_key_setup")
+                next_fields.append(item)
+            next_section["fields"] = next_fields
+            hydrated_sections.append(next_section)
+        return hydrated_sections
+
     def _diagnostics(
         self,
         shell: dict[str, Any],
@@ -2272,6 +2659,12 @@ class FrontendRegistry:
             module = renderer.get("module")
             if module is not None and not self._is_trusted_renderer_module(module):
                 diagnostics.append(self._diagnostic("warning", "shell_renderer_untrusted_module", f"shell renderer '{renderer_id or index}' module must be a trusted static renderer path.", source))
+            module_pack_id = self._trusted_renderer_module_pack_id(module)
+            source_pack_id = str(renderer.get("source_pack_id") or "").strip()
+            if module_pack_id and source_pack_id and source_pack_id not in {"defaultspack", "user_data"} and module_pack_id != source_pack_id:
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_pack_mismatch", f"shell renderer '{renderer_id or index}' module must be served from its declaring pack.", source))
+            if module_pack_id and renderer.get("trust") == "local" and not str(renderer.get("integrity") or "").startswith("sha256-"):
+                diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_integrity", f"shell renderer '{renderer_id or index}' module requires a static file digest.", source))
             if module is not None and renderer.get("trust") != "local":
                 diagnostics.append(self._diagnostic("warning", "shell_renderer_missing_local_trust", f"shell renderer '{renderer_id or index}' module requires trust='local'.", source))
 
@@ -2296,9 +2689,15 @@ class FrontendRegistry:
         return diagnostics
 
     def _is_trusted_renderer_module(self, module: Any) -> bool:
+        return self._trusted_renderer_module_pack_id(module) is not None
+
+    def _trusted_renderer_module_pack_id(self, module: Any) -> str | None:
         if not isinstance(module, str):
-            return False
-        return module.startswith(("/static/renderers/", "/static/assets/renderers/", "/static/user_renderers/"))
+            return None
+        match = _TRUSTED_PACK_RENDERER_RE.match(module)
+        if not match:
+            return None
+        return match.group(1)
 
     def _add_diagnostic(self, level: str, code: str, message: str, source: str) -> None:
         if not hasattr(self, "_load_diagnostics"):
@@ -2317,8 +2716,68 @@ class FrontendRegistry:
             items = config.get(key, [])
             if not isinstance(items, list):
                 continue
-            values.extend(item for item in items if isinstance(item, dict))
+            values.extend(self._copy_config_item(manifest, item, key) for item in items if isinstance(item, dict))
         return values
+
+    def _copy_config_item(self, manifest: dict[str, Any], item: dict[str, Any], key: str) -> dict[str, Any]:
+        copied = deepcopy(item)
+        source = manifest.get("_source")
+        source_pack_id = manifest.get("source_pack_id")
+        if source and "_source" not in copied:
+            copied["_source"] = str(source)
+        if source_pack_id and "source_pack_id" not in copied:
+            copied["source_pack_id"] = str(source_pack_id)
+        if key == "shell_renderers":
+            copied = self._normalize_shell_renderer_static_module(copied)
+        return copied
+
+    def _normalize_shell_renderer_static_module(self, renderer: dict[str, Any]) -> dict[str, Any]:
+        module = renderer.get("module")
+        source_pack_id = str(renderer.get("source_pack_id") or "").strip()
+        if renderer.get("trust") != "local" or not isinstance(module, str) or not source_pack_id:
+            return renderer
+        if source_pack_id in {"defaultspack", "user_data"}:
+            return renderer
+        rest_path = self._renderer_static_rest_path(module, source_pack_id)
+        if not rest_path:
+            return renderer
+        renderer["module"] = f"/static/packs/{source_pack_id}/{rest_path}"
+        renderer["module_pack_id"] = source_pack_id
+        digest = self._renderer_static_integrity(source_pack_id, rest_path)
+        if digest:
+            renderer["integrity"] = digest
+        return renderer
+
+    def _renderer_static_rest_path(self, module: str, source_pack_id: str) -> str | None:
+        match = _TRUSTED_PACK_RENDERER_RE.match(module)
+        if match:
+            module_pack_id, rest_path = match.group(1), match.group(2)
+            return rest_path if module_pack_id == source_pack_id else None
+        for prefix, target_prefix in (
+            ("/static/renderers/", "renderers/"),
+            ("/static/assets/renderers/", "assets/renderers/"),
+        ):
+            if module.startswith(prefix) and module.endswith(".js"):
+                file_name = module.removeprefix(prefix).split("?", 1)[0].split("#", 1)[0]
+                if file_name and "/" not in file_name and "\\" not in file_name:
+                    return f"{target_prefix}{file_name}"
+        return None
+
+    def _renderer_static_integrity(self, source_pack_id: str, rest_path: str) -> str | None:
+        pack_root = (self._ecosystem_root() / source_pack_id).resolve()
+        static_root = (pack_root / "static").resolve()
+        candidate = (static_root / rest_path).resolve()
+        try:
+            candidate.relative_to(static_root)
+        except ValueError:
+            return None
+        if not candidate.is_file():
+            return None
+        try:
+            digest = hashlib.sha256(candidate.read_bytes()).digest()
+        except OSError:
+            return None
+        return "sha256-" + base64.b64encode(digest).decode("ascii")
 
     def _hydrate_sidebar_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         hydrated: list[dict[str, Any]] = []
@@ -2349,8 +2808,18 @@ class FrontendRegistry:
                 saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 saved = {}
+            saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
         return self._refresh_derived_settings(values)
+
+    def _settings_with_legacy_tool_version(self, saved: Any) -> dict[str, Any]:
+        if not isinstance(saved, dict):
+            return {}
+        normalized = deepcopy(saved)
+        tools = normalized.get("tools")
+        if isinstance(tools, dict) and "settings_version" not in tools:
+            tools["settings_version"] = 1
+        return normalized
 
     def _default_settings(self) -> dict[str, Any]:
         return {
@@ -2384,13 +2853,57 @@ class FrontendRegistry:
             "models": {
                 **ModelRuntimeSettingsService(self._pack_root).default_model_settings(),
             },
+            "continuity": {
+                "handoff": {
+                    "sandbox_id": "logical-sandbox",
+                    "mode": "move",
+                    "destination_node_id": "",
+                    "route_id": "",
+                },
+            },
             "commands": {
                 "show_advanced_commands": False,
             },
             "tools": {
+                "settings_version": 3,
                 "default_target": "",
-                "keep_selected_tools_after_send": True,
-                "tool_assist_mode": "all",
+                "default_mode": "auto",
+                "selection_strategy": "hybrid",
+                "semantic_backend": "auto",
+                "embedding_model": "",
+                "semantic_candidate_limit": 32,
+                "final_tool_limit": 8,
+                "catalog_ai_direct_limit": 80,
+                "selector_trace": "summary",
+                "show_selection_summary": True,
+                "show_selection_reasons": False,
+                "show_selected_tools_in_answer": True,
+                "expand_selection_reasoning": False,
+                "standard_permissions": {
+                    "read": "auto",
+                    "search": "auto",
+                    "create": "confirm",
+                    "update": "confirm",
+                    "send": "confirm",
+                    "execute": "confirm",
+                    "computer": "confirm",
+                    "delete": "confirm",
+                },
+                "action_permissions": {
+                    "read": "auto",
+                    "search": "auto",
+                    "create": "confirm",
+                    "update": "confirm",
+                    "send": "confirm",
+                    "execute": "confirm",
+                    "computer": "confirm",
+                    "delete": "confirm",
+                },
+                "service_permission_overrides": {},
+                "tool_permission_overrides": {},
+                "pinned_service_ids": [],
+                "keep_selected_tools_after_send": False,
+                "tool_assist_mode": "auto",
                 "tool_assist_limit": 8,
                 "disabled_tool_ids": [],
                 "hidden_tool_ids": [],
@@ -2816,6 +3329,13 @@ class FrontendRegistry:
             token_container["external_tokens"] = []
         if isinstance(legacy_external_inputs, dict) and "external_inputs" in sanitized:
             sanitized.pop("external_inputs", None)
+        accounts_connections = sanitized.get("accounts_connections")
+        if isinstance(accounts_connections, dict):
+            accounts_connections.pop("providers", None)
+            accounts_connections["providers"] = {}
+        tools_mcp = sanitized.get("tools_mcp")
+        if isinstance(tools_mcp, dict):
+            tools_mcp.pop("codex_app_server", None)
         models = sanitized.get("models")
         if isinstance(models, dict):
             sanitized["models"] = ModelRuntimeSettingsService(
@@ -2852,16 +3372,47 @@ class FrontendRegistry:
         if not isinstance(tools, dict):
             tools = {}
             refreshed["tools"] = tools
-        tools.setdefault("keep_selected_tools_after_send", True)
+        try:
+            settings_version = int(tools.get("settings_version") or 1)
+        except (TypeError, ValueError):
+            settings_version = 1
+        legacy_tool_assist_mode = str(tools.get("tool_assist_mode") or "auto").strip().lower()
+        if settings_version < 3:
+            if "default_mode" not in tools:
+                if legacy_tool_assist_mode in {"off", "manual"}:
+                    tools["default_mode"] = "manual"
+                else:
+                    tools["default_mode"] = "auto"
+            if "selection_strategy" not in tools:
+                if legacy_tool_assist_mode == "vector":
+                    tools["selection_strategy"] = "lexical"
+                elif legacy_tool_assist_mode == "all_schemas":
+                    tools["selection_strategy"] = "all_schemas"
+                else:
+                    tools["selection_strategy"] = "hybrid"
+        tools["settings_version"] = 3
+        tools["keep_selected_tools_after_send"] = (
+            False
+            if settings_version < 3
+            else self._setting_bool(tools.get("keep_selected_tools_after_send"), False)
+        )
         disabled_tool_ids = tools.get("disabled_tool_ids")
         hidden_tool_ids = tools.get("hidden_tool_ids")
-        tools["disabled_tool_ids"] = list(
+        normalized_disabled_tool_ids = list(
             dict.fromkeys(
                 str(item).strip()
                 for item in (disabled_tool_ids if isinstance(disabled_tool_ids, list) else [])
                 if str(item or "").strip()
             )
         )
+        tool_permission_overrides = tools.get("tool_permission_overrides")
+        if not isinstance(tool_permission_overrides, dict):
+            tool_permission_overrides = {}
+        if settings_version < 3:
+            for tool_id in normalized_disabled_tool_ids:
+                tool_permission_overrides.setdefault(tool_id, "block")
+        tools["tool_permission_overrides"] = tool_permission_overrides
+        tools["disabled_tool_ids"] = normalized_disabled_tool_ids
         tools["hidden_tool_ids"] = list(
             dict.fromkeys(
                 str(item).strip()
@@ -2869,12 +3420,113 @@ class FrontendRegistry:
                 if str(item or "").strip()
             )
         )
-        tool_assist_mode = str(tools.get("tool_assist_mode") or "all").strip().lower()
-        tools["tool_assist_mode"] = tool_assist_mode if tool_assist_mode in {"all", "auto", "vector", "off"} else "all"
+        default_mode = str(tools.get("default_mode") or "auto").strip().lower()
+        tools["default_mode"] = default_mode if default_mode in {"auto", "review", "manual", "none"} else "auto"
+        selection_strategy = str(tools.get("selection_strategy") or "hybrid").strip().lower()
+        tools["selection_strategy"] = selection_strategy if selection_strategy in {"hybrid", "semantic", "catalog_ai", "all_with_hints", "all_schemas", "lexical"} else "hybrid"
+        semantic_backend = str(tools.get("semantic_backend") or "auto").strip().lower()
+        tools["semantic_backend"] = semantic_backend if semantic_backend in {"auto", "embedding", "lexical"} else "auto"
+        selector_trace = str(tools.get("selector_trace") or "summary").strip().lower()
+        tools["selector_trace"] = selector_trace if selector_trace in {"none", "summary", "full"} else "summary"
+        tools["embedding_model"] = str(tools.get("embedding_model") or "").strip()
+        models_settings = refreshed.setdefault("models", {})
+        if not isinstance(models_settings, dict):
+            models_settings = {}
+            refreshed["models"] = models_settings
+        utility_models = models_settings.setdefault("utility_models", {})
+        if not isinstance(utility_models, dict):
+            utility_models = {}
+            models_settings["utility_models"] = utility_models
+        selector_alias = str(tools.get("selector_model") or "").strip()
+        if selector_alias and not str(utility_models.get("tool_selector") or "").strip():
+            utility_models["tool_selector"] = selector_alias
+        tools.pop("selector_model", None)
+        show_summary = self._setting_bool(tools.get("show_selected_tools_in_answer", tools.get("show_selection_summary")), True)
+        show_reasons = self._setting_bool(tools.get("expand_selection_reasoning", tools.get("show_selection_reasons")), False)
+        tools["show_selection_summary"] = show_summary
+        tools["show_selection_reasons"] = show_reasons
+        tools["show_selected_tools_in_answer"] = show_summary
+        tools["expand_selection_reasoning"] = show_reasons
+        standard_permissions = tools.get("standard_permissions")
+        if not isinstance(standard_permissions, dict):
+            standard_permissions = {}
+        action_permissions = tools.get("action_permissions")
+        if not isinstance(action_permissions, dict):
+            action_permissions = {}
+        for action, default in {
+            "read": "auto",
+            "search": "auto",
+            "create": "confirm",
+            "update": "confirm",
+            "send": "confirm",
+            "execute": "confirm",
+            "computer": "confirm",
+            "delete": "confirm",
+        }.items():
+            value = str(standard_permissions.get(action) or action_permissions.get(action) or default).strip().lower()
+            if action == "delete" and value == "auto":
+                value = "confirm"
+            value = value if value in {"auto", "confirm", "block"} else default
+            standard_permissions[action] = value
+            action_permissions[action] = value
+        tools["standard_permissions"] = standard_permissions
+        tools["action_permissions"] = action_permissions
+        service_permission_overrides = tools.get("service_permission_overrides")
+        if not isinstance(service_permission_overrides, dict):
+            service_permission_overrides = {}
+        sanitized_service_overrides: dict[str, dict[str, str] | str] = {}
+        for service_id, raw_override in service_permission_overrides.items():
+            clean_service_id = str(service_id).strip()
+            if not clean_service_id:
+                continue
+            if isinstance(raw_override, str):
+                value = raw_override.strip().lower()
+                if value in {"auto", "confirm", "block"}:
+                    sanitized_service_overrides[clean_service_id] = value
+                continue
+            if not isinstance(raw_override, dict):
+                continue
+            clean_override: dict[str, str] = {}
+            for action, raw_value in raw_override.items():
+                clean_action = str(action).strip()
+                value = str(raw_value or "").strip().lower()
+                if clean_action == "delete" and value == "auto":
+                    value = "confirm"
+                if clean_action and value in {"auto", "confirm", "block"}:
+                    clean_override[clean_action] = value
+            if clean_override:
+                sanitized_service_overrides[clean_service_id] = clean_override
+        tools["service_permission_overrides"] = sanitized_service_overrides
+        pinned_service_ids = tools.get("pinned_service_ids")
+        if not isinstance(pinned_service_ids, list):
+            pinned_service_ids = []
+        tools["pinned_service_ids"] = list(dict.fromkeys(str(item).strip() for item in pinned_service_ids if str(item or "").strip()))
+        tool_assist_mode = legacy_tool_assist_mode
+        if settings_version < 2 and tool_assist_mode in {"all", "auto", "vector"}:
+            tool_assist_mode = "auto"
+        elif tool_assist_mode == "manual":
+            tool_assist_mode = "off"
+        elif tool_assist_mode == "all":
+            tool_assist_mode = "auto"
+        tools["tool_assist_mode"] = (
+            tool_assist_mode if tool_assist_mode in {"auto", "vector", "off", "all_schemas"} else "auto"
+        )
         try:
             tools["tool_assist_limit"] = max(1, min(24, int(tools.get("tool_assist_limit", 8))))
         except (TypeError, ValueError):
             tools["tool_assist_limit"] = 8
+        try:
+            tools["semantic_candidate_limit"] = max(8, min(64, int(tools.get("semantic_candidate_limit", 32))))
+        except (TypeError, ValueError):
+            tools["semantic_candidate_limit"] = 32
+        try:
+            tools["final_tool_limit"] = max(1, min(24, int(tools.get("final_tool_limit", tools.get("tool_assist_limit", 8)))))
+        except (TypeError, ValueError):
+            tools["final_tool_limit"] = 8
+        try:
+            tools["catalog_ai_direct_limit"] = max(20, min(200, int(tools.get("catalog_ai_direct_limit", 80))))
+        except (TypeError, ValueError):
+            tools["catalog_ai_direct_limit"] = 80
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target
@@ -2954,6 +3606,21 @@ class FrontendRegistry:
             legacy_routes = apis.pop("model_api_routes", None)
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
+        accounts_connections = refreshed.setdefault("accounts_connections", {})
+        if not isinstance(accounts_connections, dict):
+            accounts_connections = {}
+            refreshed["accounts_connections"] = accounts_connections
+        connection_providers = accounts_connections.setdefault("providers", {})
+        if not isinstance(connection_providers, dict):
+            connection_providers = {}
+            accounts_connections["providers"] = connection_providers
+        connection_providers.update(provider_oauth_statuses(pack_root=self._pack_root))
+        connection_providers["codex"] = codex_connection_status(pack_root=self._pack_root)
+        tools_mcp = refreshed.setdefault("tools_mcp", {})
+        if not isinstance(tools_mcp, dict):
+            tools_mcp = {}
+            refreshed["tools_mcp"] = tools_mcp
+        tools_mcp["codex_app_server"] = codex_app_server_status(pack_root=self._pack_root)
         refreshed["models"] = ModelRuntimeSettingsService(self._pack_root).refresh_models_settings(models)
         line = refreshed.setdefault("line", {})
         if not isinstance(line, dict):
@@ -2984,9 +3651,10 @@ class FrontendRegistry:
         ).list_endpoints()
         input_profiles = InputProfileRegistry(self._pack_root).list_profiles()
         output_profiles = OutputProfileRegistry(self._pack_root).list_profiles()
-        template_catalog = external_io_template_catalog(self._pack_root)
-        input_templates = template_catalog.get("input") if isinstance(template_catalog.get("input"), list) else []
-        output_templates = template_catalog.get("output") if isinstance(template_catalog.get("output"), list) else []
+        template_catalog = self._template_catalog_metadata()
+        external_template_catalog = self._external_io_template_catalog(template_catalog)
+        input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
+        output_templates = external_template_catalog.get("output") if isinstance(external_template_catalog.get("output"), list) else []
         enabled_count = sum(1 for endpoint in endpoints if endpoint.get("enabled"))
         self._sync_external_input_selection(external_input, input_templates, endpoints=endpoints)
         self._sync_external_output_selection(external_output, output_templates)
@@ -3010,15 +3678,15 @@ class FrontendRegistry:
             {
                 "provider_id": "cloudflare_quick_tunnel",
                 "local_url": "http://127.0.0.1:8766",
-                "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line")),
+                "route_path": self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates),
             },
         )
         if isinstance(external_input.get("public_url_launcher"), dict):
             public_url_launcher = external_input["public_url_launcher"]
             public_url_launcher.setdefault("provider_id", "cloudflare_quick_tunnel")
             public_url_launcher.setdefault("local_url", "http://127.0.0.1:8766")
-            public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"))
-        external_input["provider_route_copy"] = self._provider_route_copy()
+            public_url_launcher["route_path"] = self._route_for_input_provider(str(external_input.get("input_provider") or "line"), input_templates)
+        external_input["provider_route_copy"] = self._provider_route_copy(input_templates)
         external_input["input_template_summary"] = self._template_summary(input_templates)
         external_input["input_profile_summary"] = ", ".join(profile.id for profile in input_profiles) or "No profiles"
         external_input.setdefault("include_source_context", True)
@@ -3053,7 +3721,7 @@ class FrontendRegistry:
         external_output.setdefault("response_summary", "Prompt decisions create action plans; tools/adapters execute after policy checks.")
         external_output.setdefault("response_prompt_preset", "same_source_reply")
         external_output.setdefault("public_url_summary", "Providers: static, cloudflare_quick_tunnel")
-        extension_paths = template_catalog.get("extension_paths") if isinstance(template_catalog.get("extension_paths"), dict) else {}
+        extension_paths = external_template_catalog.get("extension_paths") if isinstance(external_template_catalog.get("extension_paths"), dict) else {}
         external_custom["custom_template_path"] = str(extension_paths.get("templates") or external_custom.get("custom_template_path") or "")
         external_custom["custom_profile_paths"] = ", ".join(
             item
@@ -3133,7 +3801,18 @@ class FrontendRegistry:
         return options or [{"value": "", "label": "No templates"}]
 
     @staticmethod
-    def _provider_route_copy() -> str:
+    def _provider_route_copy(templates: list[Any] | None = None) -> str:
+        lines: list[str] = []
+        for item in templates or []:
+            if not isinstance(item, dict):
+                continue
+            provider = str(item.get("provider") or "").strip()
+            route = FrontendRegistry._template_route(item)
+            if provider and route:
+                label = str(item.get("display_name") or item.get("id") or provider).strip()
+                lines.append(f"{provider.upper()} {label}: {route}")
+        if lines:
+            return "\n".join(dict.fromkeys(lines))
         return "\n".join(
             [
                 "LINE: /api/integrations/line/webhook",
@@ -3230,15 +3909,9 @@ class FrontendRegistry:
         values["output_template_id"] = template_id
         if template.get("output_profile_id"):
             values["output_profile_id"] = str(template.get("output_profile_id"))
-        mode_by_template = {
-            "line.output.default": "reply_to_origin",
-            "discord.output.bot_channel": "discord_bot_channel",
-            "discord.output.webhook": "discord_webhook_url",
-            "slack.output.default": "slack_channel",
-            "generic.output.webhook": "generic_webhook",
-        }
-        if template_id in mode_by_template:
-            values.setdefault("output_send_mode", mode_by_template[template_id])
+        mode = self._output_mode_for_template(template)
+        if mode:
+            values.setdefault("output_send_mode", mode)
 
     def _external_sources_summary(self) -> str:
         try:
@@ -3290,8 +3963,39 @@ class FrontendRegistry:
         return None
 
     @staticmethod
-    def _route_for_input_provider(provider: str) -> str:
+    def _template_route(template: dict[str, Any]) -> str:
+        endpoint = template.get("endpoint") if isinstance(template.get("endpoint"), dict) else {}
+        route = str(endpoint.get("route") or "").strip()
+        if route:
+            return route
+        routes = endpoint.get("routes")
+        if isinstance(routes, list):
+            return str(next((item for item in routes if str(item or "").strip()), "")).strip()
+        return ""
+
+    @staticmethod
+    def _output_mode_for_template(template: dict[str, Any]) -> str:
+        response = template.get("response") if isinstance(template.get("response"), dict) else {}
+        default_response = template.get("default_response") if isinstance(template.get("default_response"), dict) else {}
+        return str(
+            template.get("output_send_mode")
+            or template.get("send_mode")
+            or response.get("mode")
+            or default_response.get("mode")
+            or ""
+        ).strip()
+
+    @staticmethod
+    def _route_for_input_provider(provider: str, templates: list[Any] | None = None) -> str:
         provider = provider.strip().lower()
+        for item in templates or []:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("provider") or "").strip().lower() != provider:
+                continue
+            route = FrontendRegistry._template_route(item)
+            if route:
+                return route
         if provider == "discord":
             return "/api/integrations/discord/interactions"
         if provider == "slack":

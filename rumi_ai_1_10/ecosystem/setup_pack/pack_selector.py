@@ -38,6 +38,9 @@ class PackCandidate:
     marketplace: Dict[str, Any] = field(default_factory=dict)
     signing: Dict[str, Any] = field(default_factory=dict)
     schema_issues: List[Dict[str, Any]] = field(default_factory=list)
+    required_permissions: List[str] = field(default_factory=list)
+    install_surfaces: List[str] = field(default_factory=list)
+    install_prompt: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -58,6 +61,9 @@ class PackCandidate:
             "marketplace": dict(self.marketplace or {}),
             "signing": dict(self.signing or {}),
             "schema_issues": list(self.schema_issues or []),
+            "required_permissions": list(self.required_permissions or []),
+            "install_surfaces": list(self.install_surfaces or []),
+            "install_prompt": dict(self.install_prompt or {}),
         }
 
 
@@ -240,6 +246,17 @@ class PackSelector:
                     marketplace=self._as_dict(data.get("marketplace")),
                     signing=self._as_dict(data.get("signing")),
                     schema_issues=schema_issues,
+                    required_permissions=[
+                        str(item)
+                        for item in data.get("required_permissions", [])
+                        if str(item).strip()
+                    ] if isinstance(data.get("required_permissions"), list) else [],
+                    install_surfaces=[
+                        str(item)
+                        for item in data.get("install_surfaces", [])
+                        if str(item).strip()
+                    ] if isinstance(data.get("install_surfaces"), list) else [],
+                    install_prompt=self._as_dict(data.get("install_prompt")),
                 )
             )
         return candidates
