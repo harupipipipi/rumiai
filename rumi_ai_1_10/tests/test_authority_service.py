@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -509,6 +510,85 @@ def test_authority_batch_consume_one_shots_is_atomic(tmp_path, monkeypatch):
     assert "token_already_consumed" in batch.reason
     assert model_still_valid.allowed is True
     assert model_still_valid.reason == "One-shot approval verified"
+
+
+def test_authority_batch_consume_rolls_back_when_later_token_write_fails(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    model_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+    )
+    api_decision = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+    )
+    model_approval = service.approve_request(
+        model_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(model_decision.request_id),
+    )
+    api_approval = service.approve_request(
+        api_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(api_decision.request_id),
+    )
+    api_token_id = hashlib.sha256(api_approval["token"].encode("utf-8")).hexdigest()
+    original_write_json = store._write_json
+
+    def fail_api_token_consume_write(path, payload):
+        if Path(path).name == f"{api_token_id}.json" and payload.get("consumed") is True:
+            raise OSError("token consume write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_api_token_consume_write)
+
+    batch = service.consume_one_shot_approvals_atomically(
+        [
+            {
+                "request_id": model_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": model_resource,
+                "approval_token": model_approval["token"],
+            },
+            {
+                "request_id": api_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "api_key.use",
+                "resource": api_resource,
+                "approval_token": api_approval["token"],
+            },
+        ]
+    )
+
+    assert batch.allowed is False
+    assert batch.permission_id == "api_key.use"
+    assert "consume_write_failed" in batch.reason
+    assert store.one_shot_matches_request(
+        request_id=model_decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        token=model_approval["token"],
+    )
+    assert store.one_shot_matches_request(
+        request_id=api_decision.request_id,
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        token=api_approval["token"],
+    )
 
 
 def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):

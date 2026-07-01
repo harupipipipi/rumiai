@@ -343,7 +343,7 @@ class AuthorityRequestStore:
 
         with self._lock:
             seen_token_ids: set[str] = set()
-            records: list[tuple[Path, str, dict[str, Any], dict[str, Any]]] = []
+            records: list[tuple[Path, str, dict[str, Any], dict[str, Any], int]] = []
             for index, item in enumerate(items):
                 token = str(item.get("token") or "")
                 if not token:
@@ -370,17 +370,46 @@ class AuthorityRequestStore:
                         "request_id": str(item.get("request_id") or ""),
                         "permission_id": str(item.get("permission_id") or ""),
                     }
-                records.append((path, token_id, record, item))
+                records.append((path, token_id, record, item, index))
 
             now = _now_ts()
-            for path, token_id, record, item in records:
-                record["consumed"] = True
-                record["consumed_at"] = now
-                self._write_json(path, record)
-                self.audit(
-                    "authority_one_shot_consumed",
-                    {"request_id": str(item.get("request_id") or ""), "token_id": token_id},
-                )
+            written: list[tuple[Path, str, dict[str, Any]]] = []
+            failed_index = 0
+            try:
+                for path, token_id, record, item, index in records:
+                    failed_index = index
+                    original_record = dict(record)
+                    updated_record = dict(record)
+                    updated_record["consumed"] = True
+                    updated_record["consumed_at"] = now
+                    self._write_json(path, updated_record)
+                    written.append((path, token_id, original_record))
+                    self.audit(
+                        "authority_one_shot_consumed",
+                        {"request_id": str(item.get("request_id") or ""), "token_id": token_id},
+                    )
+            except Exception as exc:
+                for restore_path, token_id, original_record in reversed(written):
+                    try:
+                        self._write_json(restore_path, original_record)
+                        self.audit(
+                            "authority_one_shot_consume_rollback",
+                            {"token_id": token_id, "reason": "consume_write_failed"},
+                        )
+                    except Exception as rollback_exc:
+                        self.audit(
+                            "authority_one_shot_consume_rollback_failed",
+                            {"token_id": token_id, "error": str(rollback_exc)},
+                        )
+                failed_item = records[failed_index][3]
+                return {
+                    "success": False,
+                    "reason": "consume_write_failed",
+                    "error": str(exc),
+                    "failed_index": failed_index,
+                    "request_id": str(failed_item.get("request_id") or ""),
+                    "permission_id": str(failed_item.get("permission_id") or ""),
+                }
             return {"success": True, "consumed_count": len(records)}
 
     def _one_shot_validation_error(
