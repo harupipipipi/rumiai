@@ -476,15 +476,50 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
-        manager.grant_permission(grant_principal, request.permission_id, grant_config)
-        related = self._approve_related_persistent(
-            request,
-            grant_principal=grant_principal,
-            scope=scope,
-            config=config,
-            related_permissions=related_permissions,
-            operator_audit=operator_audit,
-        )
+        grant_snapshot = self._snapshot_capability_grant(manager, grant_principal)
+        try:
+            manager.grant_permission(grant_principal, request.permission_id, grant_config)
+            related = self._approve_related_persistent(
+                request,
+                grant_principal=grant_principal,
+                scope=scope,
+                config=config,
+                related_permissions=related_permissions,
+                operator_audit=operator_audit,
+            )
+        except AuthorityConfigError as exc:
+            self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+            self._request_store.audit(
+                "authority_request_approval_failed",
+                {
+                    "request_id": request.request_id,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": request.permission_id,
+                    "error": "persistent_grant_config_failed",
+                    **operator_audit,
+                },
+            )
+            return {"success": False, "error": str(exc), "status_code": 400}
+        except Exception as exc:
+            self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+            self._request_store.audit(
+                "authority_request_approval_failed",
+                {
+                    "request_id": request.request_id,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": request.permission_id,
+                    "error": "persistent_grant_failed",
+                    **operator_audit,
+                },
+            )
+            return {
+                "success": False,
+                "error": "Persistent authority grant failed",
+                "status_code": 500,
+                "reason": "persistent_grant_failed",
+            }
         self._request_store.set_request_status(request.request_id, "approved")
         self._request_store.audit(
             "authority_request_approved",
@@ -507,6 +542,79 @@ class AuthorityService:
             "config": grant_config,
             "related_approvals": related,
         }
+
+    @staticmethod
+    def _snapshot_capability_grant(manager: Any, principal_id: str) -> dict[str, Any] | None:
+        get_grant = getattr(manager, "get_grant", None)
+        grant = get_grant(principal_id) if callable(get_grant) else None
+        if grant is None:
+            return None
+        return {
+            "principal_id": grant.principal_id,
+            "enabled": bool(grant.enabled),
+            "granted_at": str(grant.granted_at or ""),
+            "updated_at": str(grant.updated_at or ""),
+            "permissions": {
+                permission_id: {
+                    "enabled": bool(permission.enabled),
+                    "config": dict(permission.config or {}),
+                }
+                for permission_id, permission in dict(grant.permissions).items()
+            },
+        }
+
+    @staticmethod
+    def _restore_capability_grant(
+        manager: Any,
+        principal_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> None:
+        if snapshot is None:
+            delete_grant = getattr(manager, "delete_grant", None)
+            if callable(delete_grant):
+                delete_grant(principal_id)
+            return
+
+        from ..capability_grant_manager import CapabilityGrant, CapabilityPermissionGrant
+
+        def restore() -> None:
+            grants = getattr(manager, "_grants", None)
+            if not isinstance(grants, dict):
+                return
+            grant = grants.get(principal_id)
+            if grant is None:
+                grant = CapabilityGrant(
+                    principal_id=str(snapshot.get("principal_id") or principal_id),
+                    enabled=bool(snapshot.get("enabled")),
+                    granted_at=str(snapshot.get("granted_at") or ""),
+                    updated_at=str(snapshot.get("updated_at") or ""),
+                )
+                grants[principal_id] = grant
+            grant.principal_id = str(snapshot.get("principal_id") or principal_id)
+            grant.enabled = bool(snapshot.get("enabled"))
+            grant.granted_at = str(snapshot.get("granted_at") or grant.granted_at)
+            grant.updated_at = str(snapshot.get("updated_at") or grant.updated_at)
+            grant.permissions = {
+                permission_id: CapabilityPermissionGrant(
+                    enabled=bool(permission.get("enabled")),
+                    config=dict(permission.get("config") or {}),
+                )
+                for permission_id, permission in dict(snapshot.get("permissions") or {}).items()
+                if isinstance(permission, dict)
+            }
+            tampered = getattr(manager, "_tampered_principals", None)
+            if isinstance(tampered, set):
+                tampered.discard(principal_id)
+            save_grant = getattr(manager, "_save_grant", None)
+            if callable(save_grant):
+                save_grant(grant)
+
+        lock = getattr(manager, "_lock", None)
+        if lock is None:
+            restore()
+            return
+        with lock:
+            restore()
 
     def _normalized_related_permissions(
         self,
@@ -605,11 +713,18 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return []
-        approvals: list[dict[str, Any]] = []
+        grant_items: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         for permission_id in self._normalized_related_permissions(request, related_permissions):
-            related_request = self._create_related_request(request, permission_id)
-            grant_config = self._grant_config_for_persistent_approval(related_request.resource, config)
+            resource = self._resource_for_related_permission(request.resource, permission_id)
+            grant_config = self._grant_config_for_persistent_approval(resource, config)
+            grant_items.append((permission_id, resource, grant_config))
+
+        for permission_id, _, grant_config in grant_items:
             manager.grant_permission(grant_principal, permission_id, grant_config)
+
+        approvals: list[dict[str, Any]] = []
+        for permission_id, _, grant_config in grant_items:
+            related_request = self._create_related_request(request, permission_id)
             self._request_store.set_request_status(related_request.request_id, "approved")
             self._request_store.audit(
                 "authority_request_approved",
