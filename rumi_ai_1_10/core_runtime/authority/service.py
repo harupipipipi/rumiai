@@ -321,6 +321,16 @@ class AuthorityService:
             approval_required=True,
         )
 
+    @staticmethod
+    def _settlement_failure_response(settlement: dict[str, Any]) -> dict[str, Any]:
+        request = settlement.get("request")
+        if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        status = getattr(request, "status", "pending")
+        if status == "expired":
+            return {"success": False, "error": "Authority request expired", "status_code": 409}
+        return {"success": False, "error": f"Authority request is {status}", "status_code": 409}
+
     def approve_request(
         self,
         request_id: str,
@@ -436,14 +446,27 @@ class AuthorityService:
             else (expires_in_seconds or 86400)
         )
         if scope == "once":
-            token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
-            self._request_store.set_request_status(request.request_id, "approved")
-            related = self._approve_related_once(
-                request,
-                related_permissions=related_permissions,
-                expires_in_seconds=expires,
-                operator_audit=operator_audit,
+            def settle_once(settled_request: AuthorityRequest) -> dict[str, Any]:
+                token = self._request_store.issue_one_shot(settled_request, expires_in_seconds=expires)
+                related = self._approve_related_once(
+                    settled_request,
+                    related_permissions=related_permissions,
+                    expires_in_seconds=expires,
+                    operator_audit=operator_audit,
+                )
+                return {"token": token, "related": related}
+
+            settlement = self._request_store.settle_pending_request(
+                request.request_id,
+                "approved",
+                settle_once,
             )
+            if not settlement.get("settled"):
+                return self._settlement_failure_response(settlement)
+            request = settlement["request"]
+            settled_result = settlement.get("result") or {}
+            token = settled_result["token"]
+            related = settled_result["related"]
             self._request_store.audit(
                 "authority_request_approved",
                 {
@@ -476,16 +499,28 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
-        manager.grant_permission(grant_principal, request.permission_id, grant_config)
-        related = self._approve_related_persistent(
-            request,
-            grant_principal=grant_principal,
-            scope=scope,
-            config=config,
-            related_permissions=related_permissions,
-            operator_audit=operator_audit,
+
+        def settle_persistent(settled_request: AuthorityRequest) -> dict[str, Any]:
+            manager.grant_permission(grant_principal, settled_request.permission_id, grant_config)
+            related = self._approve_related_persistent(
+                settled_request,
+                grant_principal=grant_principal,
+                scope=scope,
+                config=config,
+                related_permissions=related_permissions,
+                operator_audit=operator_audit,
+            )
+            return {"related": related}
+
+        settlement = self._request_store.settle_pending_request(
+            request.request_id,
+            "approved",
+            settle_persistent,
         )
-        self._request_store.set_request_status(request.request_id, "approved")
+        if not settlement.get("settled"):
+            return self._settlement_failure_response(settlement)
+        request = settlement["request"]
+        related = (settlement.get("result") or {})["related"]
         self._request_store.audit(
             "authority_request_approved",
             {
@@ -699,15 +734,27 @@ class AuthorityService:
                 )
                 return {"success": False, "error": operator_error, "status_code": 403}
             operator_audit = ui_operator_audit_record(operator_payload)
-        self._request_store.set_request_status(request.request_id, "denied")
-        deny_record = None
-        if persist:
-            deny_record = self._request_store.add_deny(
-                principal_id=request.principal_id,
-                permission_id=request.permission_id,
-                resource=request.resource,
-                reason=reason or request.reason,
-            )
+
+        def settle_deny(settled_request: AuthorityRequest) -> dict[str, Any]:
+            deny_record = None
+            if persist:
+                deny_record = self._request_store.add_deny(
+                    principal_id=settled_request.principal_id,
+                    permission_id=settled_request.permission_id,
+                    resource=settled_request.resource,
+                    reason=reason or settled_request.reason,
+                )
+            return {"deny": deny_record}
+
+        settlement = self._request_store.settle_pending_request(
+            request.request_id,
+            "denied",
+            settle_deny,
+        )
+        if not settlement.get("settled"):
+            return self._settlement_failure_response(settlement)
+        request = settlement["request"]
+        deny_record = (settlement.get("result") or {}).get("deny")
         self._request_store.audit(
             "authority_request_denied",
             {

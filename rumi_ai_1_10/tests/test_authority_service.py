@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -880,6 +882,122 @@ def test_authority_request_cannot_be_approved_twice(tmp_path, monkeypatch):
     assert first["success"] is True
     assert second["success"] is False
     assert second["status_code"] == 409
+
+
+def test_authority_concurrent_once_approval_issues_single_token(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    original_issue_one_shot = store.issue_one_shot
+    issue_count = 0
+    issue_lock = threading.Lock()
+
+    def slow_issue_one_shot(*args, **kwargs):
+        nonlocal issue_count
+        with issue_lock:
+            issue_count += 1
+        time.sleep(0.05)
+        return original_issue_one_shot(*args, **kwargs)
+
+    monkeypatch.setattr(store, "issue_one_shot", slow_issue_one_shot)
+    start = threading.Barrier(2)
+    results = []
+    results_lock = threading.Lock()
+
+    def approve_once():
+        start.wait(timeout=2)
+        result = service.approve_request(
+            decision.request_id,
+            scope="once",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+        with results_lock:
+            results.append(result)
+
+    threads = [threading.Thread(target=approve_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    successes = [result for result in results if result["success"]]
+    failures = [result for result in results if not result["success"]]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert failures[0]["status_code"] == 409
+    assert issue_count == 1
+    assert store.get_request(decision.request_id).status == "approved"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        token=successes[0]["token"],
+    )
+
+
+def test_authority_concurrent_persistent_approve_and_deny_settles_once(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    original_grant_permission = grants.grant_permission
+    grant_entered = threading.Event()
+    release_grant = threading.Event()
+
+    def blocking_grant_permission(*args, **kwargs):
+        result = original_grant_permission(*args, **kwargs)
+        grant_entered.set()
+        assert release_grant.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(grants, "grant_permission", blocking_grant_permission)
+    results = {}
+
+    def approve_persistent():
+        results["approve"] = service.approve_request(
+            decision.request_id,
+            scope="profile",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+
+    def deny_request():
+        results["deny"] = service.deny_request(
+            decision.request_id,
+            reason="not now",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+
+    approve_thread = threading.Thread(target=approve_persistent)
+    approve_thread.start()
+    assert grant_entered.wait(timeout=5)
+    deny_thread = threading.Thread(target=deny_request)
+    deny_thread.start()
+    time.sleep(0.05)
+    release_grant.set()
+    approve_thread.join(timeout=5)
+    deny_thread.join(timeout=5)
+    assert not approve_thread.is_alive()
+    assert not deny_thread.is_alive()
+
+    assert results["approve"]["success"] is True
+    assert results["deny"]["success"] is False
+    assert results["deny"]["status_code"] == 409
+    assert store.get_request(decision.request_id).status == "approved"
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert "model.invoke" in grant.permissions
 
 
 def test_authority_rejects_global_scope(tmp_path, monkeypatch):

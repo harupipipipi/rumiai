@@ -281,6 +281,44 @@ class AuthorityRequestStore:
             self.audit("authority_request_status", {"request_id": request_id, "status": status})
             return AuthorityRequest.from_dict(data)
 
+    def settle_pending_request(self, request_id: str, status: str, settle_callback=None) -> dict[str, Any]:
+        if status not in {"approved", "denied"}:
+            raise ValueError("invalid authority terminal status")
+        with self._lock:
+            path = self._request_path(request_id)
+            data = self._read_json(path)
+            if not data:
+                return {"settled": False, "request": None, "reason": "not_found"}
+            request = AuthorityRequest.from_dict(data)
+            if request.status != "pending":
+                return {
+                    "settled": False,
+                    "request": request,
+                    "reason": "not_pending",
+                }
+            if self.request_expired(request):
+                data["status"] = "expired"
+                self._write_json(path, data)
+                self.audit(
+                    "authority_request_status",
+                    {"request_id": request_id, "status": "expired"},
+                )
+                return {
+                    "settled": False,
+                    "request": AuthorityRequest.from_dict(data),
+                    "reason": "expired",
+                }
+
+            result = settle_callback(request) if callable(settle_callback) else None
+            data["status"] = status
+            self._write_json(path, data)
+            self.audit("authority_request_status", {"request_id": request_id, "status": status})
+            return {
+                "settled": True,
+                "request": AuthorityRequest.from_dict(data),
+                "result": result,
+            }
+
     def issue_one_shot(self, request: AuthorityRequest, *, expires_in_seconds: int = 86400) -> dict[str, Any]:
         token = secrets.token_urlsafe(32)
         token_id = hashlib.sha256(token.encode("utf-8")).hexdigest()
