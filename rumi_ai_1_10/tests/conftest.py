@@ -337,10 +337,10 @@ def _install_capability_handler_registry_shim() -> None:
 
 def _force_real_import(module_name: str) -> None:
     """collection 時の sys.modules 汚染を、必要なテストの前に実 module へ戻す。"""
-    sys.modules.pop(module_name, None)
+    _remove_module_binding(module_name)
     alias_name = _alias_for_module(module_name)
     if alias_name:
-        sys.modules.pop(alias_name, None)
+        _remove_module_binding(alias_name)
     module = importlib.import_module(module_name)
     _bind_parent_module(module_name, module)
     if alias_name:
@@ -537,8 +537,14 @@ def _remove_module_binding(module_name: str) -> None:
 def _clear_collection_module_mocks() -> None:
     for module_name in (
         "backend_core.ecosystem.active_ecosystem",
+        "backend_core.ecosystem.uuid_utils",
+        "backend_core.ecosystem.json_patch",
+        "backend_core.ecosystem.spec.schema.validator",
+        "backend_core.ecosystem.spec.schema",
+        "backend_core.ecosystem.spec",
         "backend_core.ecosystem.mounts",
         "backend_core.ecosystem.registry",
+        "core_runtime.paths",
         "rumi_ai_1_10.core_runtime.paths",
         "rumi_ai_1_10.core_runtime.logging_utils",
         "rumi_ai_1_10.core_runtime.profiling",
@@ -562,6 +568,40 @@ def _restore_collection_aliases() -> None:
             pass
 
 
+def _restore_schema_validator_modules() -> Any | None:
+    for module_name in (
+        "backend_core.ecosystem.spec.schema.validator",
+        "backend_core.ecosystem.spec.schema",
+        "backend_core.ecosystem.spec",
+    ):
+        _remove_module_binding(module_name)
+    try:
+        return importlib.import_module("backend_core.ecosystem.spec.schema.validator")
+    except Exception:
+        return None
+
+
+def _restore_schema_validator_bindings(test_module) -> None:
+    validator_module = _restore_schema_validator_modules()
+    if validator_module is None or test_module is None:
+        return
+    binding_names = (
+        "validate",
+        "validate_ecosystem",
+        "validate_component_manifest",
+        "validate_addon",
+        "validate_json_patch_operations",
+        "SchemaValidationError",
+        "get_schema",
+        "list_available_schemas",
+    )
+    if not any(hasattr(test_module, attr_name) for attr_name in binding_names[1:]):
+        return
+    for attr_name in binding_names:
+        if hasattr(test_module, attr_name) and hasattr(validator_module, attr_name):
+            setattr(test_module, attr_name, getattr(validator_module, attr_name))
+
+
 def _restore_real_modules() -> None:
     for _mod_name in _RESTORE_REAL_MODULES:
         try:
@@ -580,6 +620,8 @@ def pytest_runtest_setup(item):
     if _should_skip_restore(item.nodeid):
         _restore_test_module_mocks(getattr(item, "module", None))
         return
+    if "test_wave19f_json_size_limit.py" not in item.nodeid:
+        _restore_schema_validator_bindings(getattr(item, "module", None))
     for _mod_name in _BIND_ONLY_MODULES:
         try:
             _bind_parent_module(_mod_name)
@@ -595,6 +637,7 @@ def pytest_runtest_setup(item):
 def pytest_collectreport(report):
     _reset_package_roots()
     _clear_collection_module_mocks()
+    _restore_schema_validator_modules()
     _restore_real_di_container()
     _restore_collection_aliases()
     _install_capability_handler_registry_shim()

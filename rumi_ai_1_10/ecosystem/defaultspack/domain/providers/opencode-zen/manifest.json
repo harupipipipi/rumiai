@@ -19,7 +19,7 @@
   "capabilities": {
     "chat": true,
     "streaming": true,
-    "tool_calls": true,
+    "tool_calls": false,
     "anthropic_compatible": true,
     "vision": true,
     "reasoning": true
@@ -39,7 +39,7 @@
       "coding": "minimax-m3-free",
       "reasoning": "minimax-m3-free"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "anthropic_compatible", "vision", "reasoning"]
+    "capabilities": ["chat", "streaming", "anthropic_compatible", "vision", "reasoning"]
   },
   "provider_manifest": {
     "id": "opencode-zen",
@@ -64,7 +64,7 @@
       "reasoning": "minimax-m3-free"
     },
     "capabilities": {
-      "native_tool_calling": true,
+      "native_tool_calling": false,
       "structured_outputs": false,
       "vision": true,
       "embeddings": false,

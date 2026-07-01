@@ -28,14 +28,23 @@ class _Manager:
 
 
 class _ModelSettingsService:
-    def get_settings(self):
+    def get_settings(self, *, resolve_api_keys=True):
+        del resolve_api_keys
         return {
             "deepthink_enabled": False,
             "preferred_model_group": "default",
             "auto_route_within_group": False,
         }
 
-    def get_effective_thinking_level(self, *, profile_id=None, conversation_id=None):
+    def get_effective_thinking_level(
+        self,
+        *,
+        profile_id=None,
+        conversation_id=None,
+        settings=None,
+        resolve_api_keys=True,
+    ):
+        del profile_id, conversation_id, settings, resolve_api_keys
         return {"level": "none"}
 
 
@@ -65,19 +74,20 @@ class _RoutingDecision:
         }
 
 
-def _test_model_capabilities(model):
+def _test_model_capabilities(model, *, profiles=None):
+    del profiles
     model_id = str(model or "stub/default")
     if model_id.startswith("opencode-zen/") or model_id.startswith("opencode/"):
         return {
             "provider_id": "opencode-zen",
             "model_id": "minimax-m3-free",
-            "supports_tool_calling": True,
+            "supports_tool_calling": False,
             "supports_vision": True,
             "supports_thinking": True,
             "metadata": {
                 "transport": "anthropic_messages",
                 "endpoint_path": "/v1/messages",
-                "capabilities": {"tool_calls": True, "vision": True, "reasoning": True},
+                "capabilities": {"tool_calls": False, "vision": True, "reasoning": True},
                 "quirks": {"supports_stream_tool_calls": False},
             },
         }
@@ -98,7 +108,7 @@ def _test_provider_capabilities(model, raw):
         return {
             "provider_id": "opencode-zen",
             "api_family": "anthropic_messages",
-            "supports_tool_calling": True,
+            "supports_tool_calling": False,
             "supports_parallel_tool_calls": False,
             "tool_choice_modes": ["auto", "none"],
             "metadata": {"endpoint_path": "/v1/messages"},
@@ -142,7 +152,7 @@ def _setup_store(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         "domain.chat.run_request.route_model_request",
-        lambda request: _RoutingDecision(getattr(request, "preferred_model", "stub/default")),
+        lambda request, **kwargs: _RoutingDecision(getattr(request, "preferred_model", "stub/default")),
     )
     monkeypatch.setattr("domain.chat.run_request.get_model_capabilities", _test_model_capabilities)
     monkeypatch.setattr("domain.chat.run_request.get_model_provider_capabilities", _test_provider_capabilities)

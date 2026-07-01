@@ -343,7 +343,6 @@ def prepare_chat_run(
     if requested_model:
         model = requested_model
     model_settings_service = ModelRuntimeSettingsService()
-    model_settings = model_settings_service.get_settings()
     route_override = _consume_turn_model_route_override(
         store, conversation_id, conversation, metadata
     )
@@ -359,6 +358,9 @@ def prepare_chat_run(
     )
     if requested_route_model and not requested_model:
         model = requested_route_model
+    resolve_runtime_settings = not str(model or "").strip().startswith("stub/")
+    routing_profiles = None if resolve_runtime_settings else []
+    model_settings = model_settings_service.get_settings(resolve_api_keys=resolve_runtime_settings)
     if "thinking_level" not in params:
         params["thinking_level"] = (
             str(route_override.get("requested_thinking_level") or "").strip()
@@ -367,6 +369,7 @@ def prepare_chat_run(
             else model_settings_service.get_effective_thinking_level(
                 profile_id=model,
                 conversation_id=conversation_id,
+                settings=model_settings,
             )["level"]
         )
     if "deepthink_enabled" not in params:
@@ -566,10 +569,11 @@ def prepare_chat_run(
                 "modalities": modalities,
             },
             settings=model_settings,
-        )
+        ),
+        profiles=routing_profiles,
     )
     model = routing_decision.selected_model
-    selected_capabilities = get_model_capabilities(model) or {}
+    selected_capabilities = get_model_capabilities(model, profiles=routing_profiles) or {}
     selected_metadata = selected_capabilities.get("metadata") if isinstance(selected_capabilities.get("metadata"), dict) else {}
     provider_capabilities = get_model_provider_capabilities(
         model,
