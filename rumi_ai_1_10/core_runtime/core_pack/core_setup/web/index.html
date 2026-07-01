@@ -302,24 +302,39 @@
         const allOkText = pack.supports_all_ok
           ? "Supports selective all OK grants"
           : "Installs without all OK grants";
-        card.innerHTML = `
-          <header>
-            <div>
-              <strong>${pack.display_name}</strong>
-              <div>${pack.description || ""}</div>
-              <div>${allOkText}</div>
-            </div>
-            <div class="pill ${pack.recommended ? "recommended" : riskClass}">
-              ${pack.recommended ? "Recommended" : "Risk: " + pack.risk_level}
-            </div>
-          </header>
-          <div class="mini-actions">
-            <label>
-              <input type="checkbox" data-select-pack="${pack.pack_id}" ${checked ? "checked" : ""}>
-              Include in setup
-            </label>
-          </div>
-        `;
+        const header = document.createElement("header");
+        const details = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = pack.display_name || "";
+        const description = document.createElement("div");
+        description.textContent = pack.description || "";
+        const allOk = document.createElement("div");
+        allOk.textContent = allOkText;
+        details.appendChild(name);
+        details.appendChild(description);
+        details.appendChild(allOk);
+
+        const pill = document.createElement("div");
+        pill.className = "pill" + (
+          pack.recommended ? " recommended" : (riskClass ? " " + riskClass : "")
+        );
+        pill.textContent = pack.recommended ? "Recommended" : "Risk: " + pack.risk_level;
+        header.appendChild(details);
+        header.appendChild(pill);
+
+        const miniActions = document.createElement("div");
+        miniActions.className = "mini-actions";
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.dataset.selectPack = pack.pack_id || "";
+        input.checked = Boolean(checked);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(" Include in setup"));
+        miniActions.appendChild(label);
+
+        card.appendChild(header);
+        card.appendChild(miniActions);
         listEl.appendChild(card);
       }
     }
