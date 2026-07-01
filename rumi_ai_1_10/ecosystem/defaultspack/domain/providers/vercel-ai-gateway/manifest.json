@@ -1,0 +1,92 @@
+{
+  "id": "vercel-ai-gateway",
+  "provider_id": "vercel-ai-gateway",
+  "category": "providers",
+  "kind": "llm_provider",
+  "version": "1",
+  "status": "stable",
+  "display_name": "Vercel AI Gateway",
+  "entrypoints": {
+    "adapter": "../ai_client/providers/openai_compatible_provider.py",
+    "models": "models.json"
+  },
+  "security": {
+    "credential_required": true,
+    "privacy": "external_api_key_gateway"
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "tool_calls": true,
+    "reasoning": true,
+    "vision": true,
+    "openai_compatible": true
+  },
+  "provider_metadata": {
+    "display_name": "Vercel AI Gateway",
+    "kind": "aggregator",
+    "env_vars": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"],
+    "base_url_envs": ["AI_GATEWAY_BASE_URL"],
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_base_url": "https://ai-gateway.vercel.sh/v1",
+    "default_model": "xiaomi/mimo-v2.5",
+    "default_model_for": {
+      "chat": "xiaomi/mimo-v2.5",
+      "coding": "xiaomi/mimo-v2.5",
+      "agent": "xiaomi/mimo-v2.5",
+      "reasoning": "xiaomi/mimo-v2.5",
+      "fast": "zai/glm-4.7-flashx",
+      "cheap": "zai/glm-4.7-flashx",
+      "vision": "xiaomi/mimo-v2.5"
+    },
+    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
+  },
+  "provider_manifest": {
+    "id": "vercel-ai-gateway",
+    "category": "llm_provider",
+    "version": "1",
+    "display_name": "Vercel AI Gateway",
+    "enabled": true,
+    "priority": 55,
+    "adapter": "openai_compatible",
+    "api_key_env": ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"],
+    "base_url_env": "AI_GATEWAY_BASE_URL",
+    "credential_required": true,
+    "catalog_only": false,
+    "supports_invoke": true,
+    "default_base_url": "https://ai-gateway.vercel.sh/v1",
+    "default_model": "xiaomi/mimo-v2.5",
+    "default_model_for": {
+      "chat": "xiaomi/mimo-v2.5",
+      "coding": "xiaomi/mimo-v2.5",
+      "agent": "xiaomi/mimo-v2.5",
+      "reasoning": "xiaomi/mimo-v2.5",
+      "fast": "zai/glm-4.7-flashx",
+      "cheap": "zai/glm-4.7-flashx",
+      "vision": "xiaomi/mimo-v2.5"
+    },
+    "capabilities": {
+      "native_tool_calling": true,
+      "structured_outputs": true,
+      "vision": true,
+      "embeddings": false,
+      "streaming": true,
+      "reasoning": true
+    },
+    "config": {
+      "api_compatibility": "openai",
+      "model_sync": "remote_merge",
+      "model_list_path": "/models",
+      "model_cache_ttl_seconds": 21600,
+      "privacy": "external_api_key_gateway"
+    }
+  },
+  "aliases": {
+    "provider_ids": ["vercel-ai-gateway", "vercel_ai_gateway", "ai-gateway"]
+  },
+  "compatibility": {
+    "legacy_ids": ["vercel-ai-gateway"]
+  },
+  "source_pack_id": "defaultspack"
+}
