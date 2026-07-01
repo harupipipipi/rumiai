@@ -4,9 +4,35 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
+    "transport": {
+      "type": "string",
+      "enum": ["off", "stdio", "unix", "websocket_loopback", "websocket_remote"],
+      "default": "off",
+      "description": "Codex App Server transport. Remote websocket transports require App Server-specific auth."
+    },
     "server_url": {
       "type": "string",
-      "description": "Local or remote Codex-style app server URL."
+      "description": "Backward-compatible local or remote Codex-style app server URL."
+    },
+    "base_url": {
+      "type": "string",
+      "description": "HTTP base URL for status/probe requests."
+    },
+    "websocket_url": {
+      "type": "string",
+      "description": "WebSocket URL for Codex App Server event and turn transport."
+    },
+    "unix_socket_path": {
+      "type": "string",
+      "description": "Local Unix socket path for the unix transport."
+    },
+    "ws_token_file": {
+      "type": "string",
+      "description": "Path to a Codex App Server WebSocket token file. Raw tokens must not appear in config or CLI arguments."
+    },
+    "shared_secret_file": {
+      "type": "string",
+      "description": "Path to a Codex App Server shared-secret file. Raw secrets must not appear in config or CLI arguments."
     },
     "workspace_root": {
       "type": "string",

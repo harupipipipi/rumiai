@@ -14,6 +14,43 @@ from ..models import ActionResult, ComputerCapabilities, ComputerTarget, Observe
 from .base import ComputerDriver
 
 
+_AX_SET_VALUE_UNSAFE_APP_NAMES = {
+    "arc",
+    "brave",
+    "brave browser",
+    "chrome",
+    "chromium",
+    "google chrome",
+    "microsoft edge",
+    "opera",
+    "opera gx",
+    "vivaldi",
+}
+
+_AX_SET_VALUE_UNSAFE_BUNDLE_IDS = {
+    "com.vivaldi.Vivaldi",
+    "com.google.Chrome",
+    "com.google.Chrome.beta",
+    "com.google.Chrome.canary",
+    "com.microsoft.edgemac",
+    "com.microsoft.edgemac.Beta",
+    "com.microsoft.edgemac.Canary",
+    "com.brave.Browser",
+    "company.thebrowser.Browser",
+    "com.operasoftware.Opera",
+    "com.operasoftware.OperaGX",
+}
+
+_AX_SET_VALUE_UNSAFE_BUNDLE_PREFIXES = (
+    "com.google.Chrome.",
+    "com.microsoft.edgemac.",
+    "com.vivaldi.Vivaldi.",
+    "com.brave.Browser.",
+    "company.thebrowser.Browser.",
+    "com.operasoftware.Opera.",
+)
+
+
 class MacAccessibilityDriver(ComputerDriver):
     """Driver using macOS Accessibility API (AX) for semantic interaction.
 
@@ -34,6 +71,8 @@ class MacAccessibilityDriver(ComputerDriver):
         return ComputerCapabilities(
             can_capture_background_window=False,
             can_semantic_action=True,
+            can_background_click=True,
+            can_background_type=True,
             can_pid_event=False,
             can_foreground_action=False,
             can_parallel_user_work=True,
@@ -147,6 +186,18 @@ class MacAccessibilityDriver(ComputerDriver):
         Returns:
             ActionResult.
         """
+        if self._target_avoids_ax_set_value(target):
+            return ActionResult(
+                action="type_text",
+                driver=self.name,
+                executed=False,
+                can_parallel_user_work=True,
+                uses_physical_input=False,
+                notes=[
+                    "Skipping AXSetValue for Chromium-family apps because it can crash Vivaldi/Chromium; falling back to CGEventPostToPid.",
+                ],
+            )
+
         from ..mac.ax import ax_set_value
 
         try:
@@ -292,3 +343,22 @@ class MacAccessibilityDriver(ComputerDriver):
         from ..mac.ax import ax_is_trusted
 
         return ax_is_trusted()
+
+    @staticmethod
+    def _target_avoids_ax_set_value(target: ComputerTarget) -> bool:
+        app_name = MacAccessibilityDriver._normalized_app_name(target.app)
+        if app_name in _AX_SET_VALUE_UNSAFE_APP_NAMES:
+            return True
+        bundle_id = str(target.bundle_id or "").strip()
+        if not bundle_id:
+            return False
+        return bundle_id in _AX_SET_VALUE_UNSAFE_BUNDLE_IDS or any(
+            bundle_id.startswith(prefix) for prefix in _AX_SET_VALUE_UNSAFE_BUNDLE_PREFIXES
+        )
+
+    @staticmethod
+    def _normalized_app_name(value: Any) -> str:
+        text = str(value or "").strip().lower()
+        if text.endswith(".app"):
+            text = text[:-4]
+        return " ".join(part for part in text.replace("_", " ").replace("-", " ").split() if part)

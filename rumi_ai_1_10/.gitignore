@@ -6,6 +6,8 @@ __pycache__/
 *.zip
 *.bak
 *.bak.*
+.env
+oauth.env
 chats/
 userdata/
 user_data/

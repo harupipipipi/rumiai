@@ -489,6 +489,38 @@ jobs:
         run: |
           pytest tests/test_mac_cgevent_pid_driver.py tests/test_browser_cdp_driver.py tests/test_computer_fallback_order.py tests/test_computer_seat_service.py tests/test_computer_seat_default_factory.py -v
 
+  mac-computer-use-visuals:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            rumi_ai_1_10/requirements.txt
+            rumi_ai_1_10/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: rumi_ai_1_10
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+          pip install -e .
+
+      - name: Compile and self-test EdgeHaze helper
+        run: |
+          swiftc rumi_ai_1_10/ecosystem/rumi_default_tools_pack/domain/computer/mac/EdgeHaze.swift -o "${RUNNER_TEMP}/edge_haze"
+          "${RUNNER_TEMP}/edge_haze" --self-test
+
+      - name: Run mac computer-use visual/control tests
+        working-directory: rumi_ai_1_10
+        run: |
+          pytest tests/test_computer_use_haze.py tests/test_computer_desktop_action_delegation.py tests/test_computer_seat_service.py tests/test_browser_computer_seat_delegation.py -v
+
   windows-python-smoke:
     runs-on: windows-latest
     steps:

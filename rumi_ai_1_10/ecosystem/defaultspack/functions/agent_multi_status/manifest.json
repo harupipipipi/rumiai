@@ -1,6 +1,6 @@
 {
   "function_id": "agent_multi_status",
-  "description": "Read compatibility CompanySlackRuntime thread status.",
+  "description": "Get compatibility CompanySlackRuntime thread status.",
   "tags": [
     "agent"
   ],

@@ -114,6 +114,10 @@ class _CryptoBackend:
                 dir=str(self._key_path.parent), prefix=".secrets_key_tmp_"
             )
             try:
+                try:
+                    safe_chmod(tmp_path, 0o600)
+                except (OSError, AttributeError):
+                    pass
                 os.write(fd, new_key if isinstance(new_key, bytes) else new_key.encode("utf-8"))
                 os.close(fd)
                 fd = -1
@@ -243,6 +247,10 @@ def _atomic_write_json(path: Path, data: Dict[str, Any]) -> None:
         dir=str(path.parent), prefix=f".{path.stem}_tmp_", suffix=".json"
     )
     try:
+        try:
+            safe_chmod(tmp_path, 0o600)
+        except (OSError, AttributeError):
+            pass
         os.write(fd, content.encode("utf-8"))
         os.close(fd)
         fd = -1
@@ -298,7 +306,7 @@ class SecretsStore:
         if not key:
             return "Key is empty"
         if not KEY_PATTERN.match(key):
-            return f"Invalid key: must match ^[A-Z0-9_]{{1,64}}$"
+            return "Invalid key: must match ^[A-Z0-9_]{1,64}$"
         return None
 
     def _key_path(self, key: str) -> Path:

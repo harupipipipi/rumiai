@@ -18,6 +18,19 @@ from domain.function_runtime.security import HIGH_RISK_CALLER_REQUIREMENT  # noq
 
 
 AMBIENT_CUSTOM_WRAPPER_FUNCTIONS = frozenset({"ambient_monitor_start"})
+FACTORY_OWNED_MANIFEST_KEYS = {
+    "function_id",
+    "description",
+    "tags",
+    "risk",
+    "requires",
+    "caller_requires",
+    "host_execution",
+    "calling_convention",
+    "entrypoint",
+    "vocab_aliases",
+    "extensions",
+}
 
 
 def _manifest(function_id: str) -> dict:
@@ -70,32 +83,30 @@ def run(context, args):
 
 
 def test_ambient_function_manifests_and_wrappers_follow_factory_specs():
-    factory_owned_manifest_keys = {
-        "function_id",
-        "description",
-        "tags",
-        "risk",
-        "requires",
-        "caller_requires",
-        "host_execution",
-        "calling_convention",
-        "entrypoint",
-        "vocab_aliases",
-        "extensions",
-    }
-
     for function_id, spec in FUNCTION_SPECS_BY_ID.items():
         if not function_id.startswith("ambient_"):
             continue
         committed = _manifest(function_id)
         generated = manifest_for(spec)
-        for key in factory_owned_manifest_keys:
+        for key in FACTORY_OWNED_MANIFEST_KEYS:
             assert committed.get(key) == generated.get(key), f"{function_id}:{key}"
         main_path = DEFAULTSPACK_ROOT / "functions" / function_id / "main.py"
         if function_id in AMBIENT_CUSTOM_WRAPPER_FUNCTIONS:
             assert main_path.read_text(encoding="utf-8") != _generated_main_template(function_id)
         else:
             assert main_path.read_text(encoding="utf-8") == _generated_main_template(function_id)
+
+
+def test_adaptive_function_manifests_and_wrappers_follow_factory_specs():
+    for function_id, spec in FUNCTION_SPECS_BY_ID.items():
+        if not function_id.startswith("adaptive_"):
+            continue
+        committed = _manifest(function_id)
+        generated = manifest_for(spec)
+        for key in FACTORY_OWNED_MANIFEST_KEYS | {"input_schema", "output_schema"}:
+            assert committed.get(key) == generated.get(key), f"{function_id}:{key}"
+        main_path = DEFAULTSPACK_ROOT / "functions" / function_id / "main.py"
+        assert main_path.read_text(encoding="utf-8") == _generated_main_template(function_id)
 
 
 def test_high_risk_functions_declare_caller_requirements():

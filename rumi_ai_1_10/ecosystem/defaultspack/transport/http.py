@@ -50,6 +50,7 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.chat.get_conversation",
     "blocks.chat.list_conversations",
     "blocks.external.templates",
+    "blocks.connections.codex",
     "blocks.tool.list",
     "blocks.ui.catalog",
     "blocks.ui.commands",
@@ -1396,6 +1397,8 @@ _SENSITIVE_INTEGRATION_PATHS = {
 }
 _SENSITIVE_INTEGRATION_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
+    "/api/connections/codex": {"POST"},
+    "/api/connections/import": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
     "/api/external/templates": {"POST", "PUT", "DELETE"},
@@ -1415,8 +1418,11 @@ _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
+    "/api/connections/codex": {"POST"},
+    "/api/connections/import": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
+    "/api/onboarding/apply": {"POST"},
 }
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -1498,6 +1504,27 @@ def _browser_api_origin_error(method, path, headers, client_address=None):
     origin = _header_value(headers, "Origin")
     if origin and not _is_allowed_sensitive_origin(origin):
         return (403, "origin not allowed for local defaultspack API", "ORIGIN_DENIED")
+    return None
+
+
+def _is_websocket_upgrade(headers):
+    upgrade = _header_value(headers, "Upgrade").strip().lower()
+    connection = _header_value(headers, "Connection").strip().lower()
+    return upgrade == "websocket" and "upgrade" in connection
+
+
+def _websocket_auth_error(headers, client_address=None):
+    if not _is_websocket_upgrade(headers):
+        return None
+    if _local_is_loopback_request(
+        {str(key): str(value) for key, value in getattr(headers, "items", lambda: [])()},
+        client_address,
+    ):
+        return None
+    if not _configured_local_auth_tokens():
+        return (403, "websocket auth token is not configured", "AUTH_REQUIRED")
+    if not _local_auth_token_authorized(headers):
+        return (401, "websocket auth token required", "AUTH_REQUIRED")
     return None
 
 
@@ -1699,6 +1726,10 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             parsed_url = urllib.parse.urlsplit(self.path)
             path = parsed_url.path
+            websocket_error = _websocket_auth_error(self.headers, self.client_address)
+            if websocket_error:
+                self._send_json(websocket_error[0], error(websocket_error[1], websocket_error[2]))
+                return
             query_params = {
                 key: values[-1]
                 for key, values in urllib.parse.parse_qs(

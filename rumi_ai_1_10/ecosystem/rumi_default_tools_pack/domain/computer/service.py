@@ -133,6 +133,61 @@ class ComputerSeatService:
         payload = {"x": x, "y": y, "button": button}
         return self._fallback_chain("click", target, payload)
 
+    def background_action(
+        self,
+        action: str,
+        target: ComputerTarget | dict[str, Any],
+        payload: dict[str, Any],
+        *,
+        verified_only: bool = False,
+    ) -> dict[str, Any]:
+        """Run an action only through non-physical background-capable drivers."""
+        target = self._normalize_target(target)
+        return self._fallback_chain(action, target, payload, background_only=True, verified_only=verified_only)
+
+    def pid_event(
+        self,
+        action: str,
+        target: ComputerTarget | dict[str, Any],
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Run an action only through PID/PostMessage-capable transports."""
+        target = self._normalize_target(target)
+        normalized_action = str(action or "").strip()
+        if normalized_action not in {"click", "type_text", "key", "scroll"}:
+            return self._pid_event_failure(normalized_action, target, [f"Unsupported pid_event action: {normalized_action}"])
+
+        errors: list[str] = []
+        for driver in self._registry.get_driver_chain(self._platform):
+            if not self._driver_supports_pid_event(driver, normalized_action):
+                continue
+            method = getattr(driver, normalized_action, None)
+            if method is None:
+                continue
+            try:
+                result: ActionResult = self._dispatch(method, target, payload)
+            except Exception as exc:
+                errors.append(f"{driver.name}: {exc}")
+                continue
+            if not result.executed:
+                errors.extend(result.notes or [f"{driver.name}: not executed"])
+                continue
+            if result.uses_physical_input or result.requires_foreground or not result.can_parallel_user_work:
+                errors.append(f"{driver.name}: result was not PID/background safe")
+                continue
+            result.is_fallback = bool(errors)
+            self._audit.record(
+                action=f"pid_event.{normalized_action}",
+                driver=driver.name,
+                target_app=target.app or "",
+                target_pid=target.pid,
+                approval_required=requires_approval("computer.pid_event"),
+                result=asdict(result),
+            )
+            return asdict(result)
+
+        return self._pid_event_failure(normalized_action, target, errors or ["No PID/PostMessage driver accepted the action"])
+
     def type_text(
         self,
         target: ComputerTarget | dict[str, Any],
@@ -295,6 +350,9 @@ class ComputerSeatService:
         action: str,
         target: ComputerTarget,
         payload: dict[str, Any],
+        *,
+        background_only: bool = False,
+        verified_only: bool = False,
     ) -> dict[str, Any]:
         """Try each driver in the chain until one succeeds.
 
@@ -312,6 +370,12 @@ class ComputerSeatService:
         is_fallback = False
 
         for driver in chain:
+            if not background_only and self._driver_is_explicit_background_transport(driver):
+                continue
+            if background_only and verified_only and self._driver_is_explicit_background_transport(driver):
+                continue
+            if background_only and not self._driver_supports_background_action(driver, action):
+                continue
             try:
                 method = getattr(driver, action, None)
                 if method is None:
@@ -321,6 +385,14 @@ class ComputerSeatService:
                 result: ActionResult = self._dispatch(method, target, payload)
 
                 if result.executed:
+                    if background_only and verified_only and self._result_is_post_only(result):
+                        errors.append(f"{driver.name}: background transport is not effect-verified")
+                        is_fallback = True
+                        continue
+                    if background_only and result.uses_physical_input:
+                        errors.append(f"{driver.name}: physical input is not background-safe")
+                        is_fallback = True
+                        continue
                     result.is_fallback = is_fallback
                     self._audit.record(
                         action=action,
@@ -354,6 +426,82 @@ class ComputerSeatService:
             target_app=target.app or "",
             target_pid=target.pid,
             approval_required=requires_approval(action),
+            result=asdict(failure),
+        )
+        return asdict(failure)
+
+    @staticmethod
+    def _driver_is_explicit_background_transport(driver: Any) -> bool:
+        return str(getattr(driver, "name", "") or "") in {"mac_cgevent_pid", "windows_postmessage"}
+
+    @staticmethod
+    def _result_is_post_only(result: ActionResult) -> bool:
+        confidence = str(result.confidence or "").strip().lower()
+        if confidence in {"experimental", "best_effort", "posted_only", "posted only"}:
+            return True
+        return result.driver in {"mac_cgevent_pid", "windows_postmessage"}
+
+    @staticmethod
+    def _driver_supports_background_action(driver: Any, action: str) -> bool:
+        try:
+            caps = driver.capabilities()
+        except Exception:
+            return False
+        if bool(getattr(caps, "requires_foreground_for_capture", False)):
+            return False
+        if not bool(getattr(caps, "can_parallel_user_work", False)):
+            return False
+        if action == "click":
+            return bool(getattr(caps, "can_background_click", False))
+        if action == "type_text":
+            return bool(getattr(caps, "can_background_type", False))
+        if action == "key":
+            return bool(getattr(caps, "can_background_key", False))
+        if action == "scroll":
+            return bool(getattr(caps, "can_background_scroll", False))
+        if action == "semantic_action":
+            return bool(getattr(caps, "can_semantic_action", False))
+        return False
+
+    @staticmethod
+    def _driver_supports_pid_event(driver: Any, action: str) -> bool:
+        try:
+            caps = driver.capabilities()
+        except Exception:
+            return False
+        if not bool(getattr(caps, "can_pid_event", False)):
+            return False
+        if bool(getattr(caps, "can_foreground_action", False)):
+            return False
+        if not bool(getattr(caps, "can_parallel_user_work", False)):
+            return False
+        if action == "click":
+            return bool(getattr(caps, "can_background_click", False))
+        if action == "type_text":
+            return bool(getattr(caps, "can_background_type", False))
+        if action == "key":
+            return bool(getattr(caps, "can_background_key", False))
+        if action == "scroll":
+            return bool(getattr(caps, "can_background_scroll", False))
+        return False
+
+    def _pid_event_failure(self, action: str, target: ComputerTarget, notes: list[str]) -> dict[str, Any]:
+        failure = ActionResult(
+            action=action,
+            driver="none",
+            executed=False,
+            confidence="failed",
+            can_parallel_user_work=True,
+            requires_foreground=False,
+            uses_physical_input=False,
+            notes=notes,
+        )
+        self._audit.record(
+            action=f"pid_event.{action}",
+            driver="none",
+            target_app=target.app or "",
+            target_pid=target.pid,
+            approval_required=requires_approval("computer.pid_event"),
             result=asdict(failure),
         )
         return asdict(failure)

@@ -1,0 +1,62 @@
+{
+  "schema": "rumi.settings.v1",
+  "pack_id": "cloudflare_core",
+  "contributions": [
+    {
+      "id": "cloudflare.accounts.connection",
+      "owner": "cloudflare_core",
+      "title": {
+        "en": "Cloudflare",
+        "ja": "Cloudflare"
+      },
+      "description": {
+        "en": "Connect Cloudflare for cloud continuation in the user's account.",
+        "ja": "ユーザーのCloudflareアカウントでクラウド継続を有効にします。"
+      },
+      "section": "accounts_connections",
+      "priority": 30,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "AccountsConnectionsPanel.CloudflareCard",
+      "requires": [
+        "provider.cloudflare"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "cloudflare",
+        "cloud continuation",
+        "oauth",
+        "runner"
+      ]
+    },
+    {
+      "id": "cloudflare.computer.cloud_continuation",
+      "owner": "cloudflare_core",
+      "title": {
+        "en": "Cloud continuation",
+        "ja": "クラウド継続"
+      },
+      "description": {
+        "en": "Continue tasks in Cloudflare when this computer is offline.",
+        "ja": "PCがオフラインの時にCloudflareで作業を継続します。"
+      },
+      "section": "computer_automation",
+      "priority": 30,
+      "frequency": "weekly",
+      "audience": "normal",
+      "risk": "medium",
+      "component": "ComputerAutomationPanel.CloudContinuationCard",
+      "requires": [
+        "connection.cloudflare"
+      ],
+      "profileAware": true,
+      "searchKeywords": [
+        "cloudflare",
+        "sleep",
+        "resume",
+        "checkpoint"
+      ]
+    }
+  ]
+}

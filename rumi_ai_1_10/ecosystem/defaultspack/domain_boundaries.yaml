@@ -1,4 +1,9 @@
 domains:
+  adaptive:
+    may_import:
+    - domain/coding
+    - domain/tool_policy
+    path: domain/adaptive
   agent:
     may_import:
     - domain/agent_runtime
@@ -18,6 +23,7 @@ domains:
     may_import:
     - domain/chat
     - domain/components
+    - domain/connections
     - domain/extensions
     - domain/human_operator
     - domain/temporal_context
@@ -84,6 +90,9 @@ domains:
   components:
     may_import: []
     path: domain/components
+  connections:
+    may_import: []
+    path: domain/connections
   context:
     may_import:
     - domain/chat
@@ -96,6 +105,10 @@ domains:
   context_engine:
     may_import: []
     path: domain/context_engine
+  codex:
+    may_import:
+    - domain/connections
+    path: domain/codex
   dev:
     may_import: []
     path: domain/dev
@@ -119,6 +132,7 @@ domains:
     - domain/capability
     - domain/chat
     - domain/components
+    - domain/codex
     - domain/dev
     - domain/extensions
     - domain/external
@@ -127,6 +141,7 @@ domains:
     path: domain/frontend
   function_runtime:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/browser
     - domain/external
@@ -250,6 +265,7 @@ domains:
     path: domain/templates
   tool:
     may_import:
+    - domain/adaptive
     - domain/ai_client
     - domain/artifact
     - domain/capabilities

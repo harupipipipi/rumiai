@@ -22,6 +22,173 @@ function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
   }
 }
 
+test("startProviderOAuth posts scope mode and requested services", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "google",
+        authorize_url: "https://accounts.google.com/oauth",
+        redirect_uri: "http://127.0.0.1:8766/api/ai/oauth/google/callback",
+        scope_mode: "google_gmail_metadata",
+        services: ["identity", "gmail_metadata"],
+        scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.metadata"],
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.startProviderOAuth("google", {
+      scopeMode: "google_gmail_metadata",
+      services: ["identity", "gmail_metadata"],
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/oauth");
+  assert.deepEqual(requestBody, {
+    action: "start",
+    provider_id: "google",
+    scope_mode: "google_gmail_metadata",
+    services: ["identity", "gmail_metadata"],
+  });
+});
+
+test("importProviderConnection posts credential imports to connections route", async () => {
+  const rawToken = ["cloudflare", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "cloudflare",
+        connection_id: "default",
+        credential_ref: { provider_id: "cloudflare" },
+        capabilities: ["cloudflare.account.read"],
+        approval_required_capabilities: [],
+        rejected_capabilities: [],
+        status: "connected",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.importProviderConnection>> | null = null;
+  try {
+    result = await api.importProviderConnection("cloudflare", `CLOUDFLARE_API_TOKEN=${rawToken}`);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/import");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    provider_id: "cloudflare",
+    credential_bundle: `CLOUDFLARE_API_TOKEN=${rawToken}`,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
+test("saveCodexAccessToken posts to Codex connection route and redacts response", async () => {
+  const rawToken = ["codex", "api", "token"].join("-");
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        configured: true,
+        status: {
+          provider_id: "codex",
+          configured: true,
+          token_configured: true,
+          token_source: "secret_store",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  let result: Awaited<ReturnType<typeof api.saveCodexAccessToken>> | null = null;
+  try {
+    result = await api.saveCodexAccessToken(rawToken);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.ok(result);
+  assert.deepEqual(requestBody, {
+    action: "save_token",
+    access_token: rawToken,
+  });
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(rawToken));
+});
+
+test("saveCodexAppServerConfig serializes safe endpoint config", async () => {
+  let requestUrl = "";
+  let requestBody: Record<string, unknown> = {};
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestBody = JSON.parse(String(init?.body ?? "{}"));
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider_id: "codex",
+        app_server: {
+          configured: true,
+          connection_status: "configured",
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.saveCodexAppServerConfig({
+      transport: "websocket_loopback",
+      enabled: true,
+      baseUrl: "http://127.0.0.1:7331",
+      websocketUrl: "ws://127.0.0.1:7331/ws",
+      unixSocketPath: "",
+      wsTokenFile: "/Users/haru/.config/rumi/codex-app-server.token",
+      sharedSecretFile: "",
+      toolSourceEnabled: true,
+      automationEndpointEnabled: false,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/connections/codex");
+  assert.deepEqual(requestBody, {
+    action: "save_app_server",
+    app_server: {
+      transport: "websocket_loopback",
+      enabled: true,
+      base_url: "http://127.0.0.1:7331",
+      websocket_url: "ws://127.0.0.1:7331/ws",
+      unix_socket_path: "",
+      ws_token_file: "/Users/haru/.config/rumi/codex-app-server.token",
+      shared_secret_file: "",
+      tool_source_enabled: true,
+      automation_endpoint_enabled: false,
+    },
+  });
+});
+
 test("frontend command args prefer backend-coerced values", () => {
   assert.deepEqual(
     frontendCommandArgs({ enabled: "false" }, { enabled: false }),

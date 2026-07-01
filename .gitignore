@@ -30,8 +30,10 @@ __pycache__/
 *.zip
 *.bak
 *.bak.*
+.env
 .env.local
 .env.*
+oauth.env
 apikey.env
 sample.env.local
 .desktop_api_token

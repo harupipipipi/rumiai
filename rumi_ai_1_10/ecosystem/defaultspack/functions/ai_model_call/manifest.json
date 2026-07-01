@@ -7,7 +7,9 @@
     "delegation"
   ],
   "risk": "medium",
-  "requires": [],
+  "requires": [
+    "ai.model.call"
+  ],
   "caller_requires": [],
   "host_execution": false,
   "calling_convention": "subprocess",

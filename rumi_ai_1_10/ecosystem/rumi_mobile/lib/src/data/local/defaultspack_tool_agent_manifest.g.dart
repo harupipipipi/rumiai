@@ -111,7 +111,7 @@ const defaultspackToolAgentManifestCatalog =
   ),
   DefaultspackToolAgentManifestEntry(
     id: "agent_multi_message",
-    description: "Post a compatibility message to CompanySlackRuntime.",
+    description: "Post compatibility message to CompanySlackRuntime.",
     tags: <String>["agent"],
     aliases: <String>[
       "defaults.agent.multi.message",
@@ -126,7 +126,7 @@ const defaultspackToolAgentManifestCatalog =
   ),
   DefaultspackToolAgentManifestEntry(
     id: "agent_multi_status",
-    description: "Read compatibility CompanySlackRuntime thread status.",
+    description: "Get compatibility CompanySlackRuntime thread status.",
     tags: <String>["agent"],
     aliases: <String>[
       "defaults.agent.multi.status",
@@ -2932,7 +2932,7 @@ const defaultspackToolAgentManifestCatalog =
   ),
   DefaultspackToolAgentManifestEntry(
     id: "tool_subagent",
-    description: "Run the default delegation tool.",
+    description: "Run the default subagent tool.",
     tags: <String>["agent", "tool"],
     aliases: <String>["defaults.tool.subagent", "defaultspack.tool.subagent"],
     inputSchema: <String, dynamic>{
@@ -2951,7 +2951,9 @@ const defaultspackToolAgentManifestCatalog =
       "workspace"
     ],
     aliases: <String>[
+      "defaults.tool.task.board",
       "defaults.tool.task_board",
+      "defaultspack.tool.task.board",
       "defaultspack.tool.task_board"
     ],
     inputSchema: <String, dynamic>{
@@ -3085,9 +3087,9 @@ const defaultspackToolAgentManifestCatalog =
       "tool_registry"
     ],
     aliases: <String>[
-      "defaults.tool.task_board.agent.session",
+      "defaults.tool.task.board.agent.session",
       "defaults.tool.task_board_agent_session",
-      "defaultspack.tool.task_board.agent.session",
+      "defaultspack.tool.task.board.agent.session",
       "defaultspack.tool.task_board_agent_session"
     ],
     inputSchema: <String, dynamic>{

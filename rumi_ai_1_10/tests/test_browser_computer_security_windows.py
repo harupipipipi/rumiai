@@ -258,14 +258,16 @@ def test_background_click_uses_seat_and_skips_virtual_cursor(tmp_path, monkeypat
     controller = _controller(tmp_path)
     seat_calls = []
 
-    def fake_seat(action, payload):
-        seat_calls.append((action, dict(payload)))
+    def fake_seat(action, payload, **kwargs):
+        seat_calls.append((action, dict(payload), dict(kwargs)))
         return {
             "action": "click",
             "driver": "windows_postmessage",
             "executed": True,
             "confidence": "best_effort",
             "can_parallel_user_work": True,
+            "requires_foreground": False,
+            "uses_physical_input": False,
             "data": {
                 "hwnd": 123,
                 "input_space": "screen",
@@ -292,17 +294,21 @@ def test_background_click_passes_hwnd_and_coordinate_space_to_seat(tmp_path, mon
     captured = {}
 
     class FakeSeat:
-        def click(self, target, x=0, y=0, button="left"):
+        def background_action(self, action, target, payload, **kwargs):
             captured["target"] = dict(target)
-            captured["point"] = {"x": x, "y": y, "button": button}
+            captured["point"] = dict(payload)
             return {
-                "action": "click",
+                "action": action,
                 "driver": "windows_postmessage",
                 "executed": True,
+                "confidence": "best_effort",
+                "can_parallel_user_work": True,
+                "requires_foreground": False,
+                "uses_physical_input": False,
                 "data": {
                     "hwnd": target["hwnd"],
                     "input_space": target["coordinate_space"],
-                    "screen": {"x": x, "y": y},
+                    "screen": {"x": payload["x"], "y": payload["y"]},
                     "client": {"x": 50, "y": 40},
                 },
             }
@@ -316,6 +322,7 @@ def test_background_click_passes_hwnd_and_coordinate_space_to_seat(tmp_path, mon
             "x": 150,
             "y": 90,
             "hwnd": 9001,
+            "window": {"hwnd": 9001, "x": 100, "y": 50, "width": 400, "height": 300},
             "coordinate_space": "screen",
             "background": True,
         },
