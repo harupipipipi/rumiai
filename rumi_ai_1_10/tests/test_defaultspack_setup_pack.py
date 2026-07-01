@@ -580,6 +580,84 @@ class TestSetupPackManager(unittest.TestCase):
             )
             self.assertFalse((base / "selection.json").exists())
 
+    def test_install_rolls_back_prior_pack_when_later_all_ok_grant_fails(self):
+        class FakeApprovalManager:
+            _initialized = True
+
+            def __init__(self):
+                self.calls = []
+
+            def scan_packs(self):
+                self.calls.append("scan_packs")
+
+            def get_status(self, pack_id):
+                self.calls.append(f"get_status:{pack_id}")
+                return SimpleNamespace(value="installed")
+
+            def approve(self, pack_id):
+                self.calls.append(f"approve:{pack_id}")
+                return SimpleNamespace(success=True, error=None)
+
+            def remove_approval(self, pack_id):
+                self.calls.append(f"remove_approval:{pack_id}")
+                return True
+
+        class SecondGrantFailsManager(_FakeGrantManager):
+            def batch_grant(self, grants):
+                self.batch_calls.append(grants)
+                if len(self.batch_calls) == 2:
+                    return _FakeGrantResult(
+                        granted_count=1,
+                        failed_count=len(grants) - 1,
+                    )
+                return _FakeGrantResult(granted_count=len(grants), failed_count=0)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "firstpack", "firstpack", True)
+            self._write_pack(root, "secondpack", "secondpack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake_approval = FakeApprovalManager()
+            fake_grants = SecondGrantFailsManager()
+
+            ctx = self._install_context(
+                base,
+                [
+                    self._target(base, "firstpack", "rumi:ecosystem/firstpack"),
+                    self._target(base, "secondpack", "rumi:ecosystem/secondpack"),
+                ],
+                fake_grants=fake_grants,
+                fake_approval=fake_approval,
+            )
+            fake_active, _, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install(["firstpack", "secondpack"])
+
+            self.assertFalse(result["success"])
+            self.assertFalse(result["installed"])
+            self.assertEqual(result["status_code"], 400)
+            self.assertEqual(result["installed_setup_pack_ids"], [])
+            self.assertEqual(result["installed_target_pack_ids"], [])
+            self.assertEqual(result["granted_all_ok_target_pack_ids"], [])
+            self.assertEqual(result["errors"][0]["reason"], "all_ok_grant_failed")
+            self.assertIsNone(fake_active.active_pack_identity)
+            self.assertFalse((base / "selection.json").exists())
+            self.assertEqual(len(fake_grants.batch_calls), 2)
+            self.assertEqual(
+                fake_grants.revocations,
+                [
+                    ("secondpack", permission_id)
+                    for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+                ]
+                + [
+                    ("firstpack", permission_id)
+                    for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+                ],
+            )
+            self.assertIn("remove_approval:firstpack", fake_approval.calls)
+            self.assertIn("remove_approval:secondpack", fake_approval.calls)
+
     def test_install_rejects_invalid_setup_pack_metadata_schema_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)

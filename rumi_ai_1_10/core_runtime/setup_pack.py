@@ -685,6 +685,21 @@ class SetupPackManager:
             logger.debug("Failed to roll back setup pack all_ok grants", exc_info=True)
             return 0
 
+    def _rollback_install_side_effects(
+        self,
+        definitions_to_revoke: List[SetupPackDefinition],
+        approved_definitions: List[SetupPackDefinition],
+        approval_results: Dict[str, Dict[str, Any]],
+    ) -> None:
+        for definition in reversed(definitions_to_revoke):
+            if definition.supports_all_ok:
+                self._revoke_all_ok_for_definition(definition)
+        for definition in reversed(approved_definitions):
+            self._rollback_target_pack_approval(
+                definition.target_pack_id,
+                approval_results.get(definition.pack_id, {}),
+            )
+
     def _set_active_pack_identity(self, ecosystem_json_path: Path) -> Optional[str]:
         try:
             from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
@@ -886,12 +901,40 @@ class SetupPackManager:
                         "reason": "all_ok_grant_failed",
                         "grant": grant_result,
                     })
-                    self._revoke_all_ok_for_definition(definition)
-                    self._rollback_target_pack_approval(
-                        definition.target_pack_id,
-                        approval_results.get(definition.pack_id, {}),
+                    self._rollback_install_side_effects(
+                        [*installed_definitions, definition],
+                        installable_definitions,
+                        approval_results,
                     )
-                    continue
+                    self._log_system_event(
+                        "setup_pack.install",
+                        False,
+                        details={
+                            "setup_pack_ids": [
+                                item.pack_id for item in installable_definitions
+                            ],
+                            "target_pack_ids": [
+                                item.target_pack_id for item in installable_definitions
+                            ],
+                            "errors": errors,
+                        },
+                        error="all_ok_grant_failed",
+                    )
+                    return {
+                        "success": False,
+                        "installed": False,
+                        "installed_setup_pack_ids": [],
+                        "installed_target_pack_ids": [],
+                        "installed_setup_target_map": {},
+                        "granted_all_ok_target_pack_ids": [],
+                        "skipped_all_ok_setup_pack_ids": [],
+                        "active_setup_pack_id": None,
+                        "active_target_pack_id": None,
+                        "selection": {},
+                        "errors": errors,
+                        "error": "Setup pack grant failed",
+                        "status_code": 400,
+                    }
                 if definition.target_pack_id not in granted_targets:
                     granted_targets.append(definition.target_pack_id)
             else:
