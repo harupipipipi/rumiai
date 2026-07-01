@@ -12,25 +12,36 @@
   "security": {
     "credential_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true
-  },
   "provider_metadata": {
     "display_name": "OpenRouter",
     "kind": "aggregator",
-    "env_vars": ["OPENROUTER_API_KEY"],
-    "base_url_envs": ["OPENROUTER_BASE_URL"],
+    "env_vars": [
+      "OPENROUTER_API_KEY"
+    ],
+    "base_url_envs": [
+      "OPENROUTER_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_model": "tencent/hy3-preview:free",
-    "capabilities": ["chat", "streaming"]
+    "catalog_features": [
+      "chat",
+      "streaming"
+    ]
   },
   "aliases": {
-    "provider_ids": ["openrouter"]
+    "provider_ids": [
+      "openrouter"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["openrouter"]
+    "legacy_ids": [
+      "openrouter"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming"
+  ]
 }

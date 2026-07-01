@@ -13,28 +13,42 @@
     "credential_required": false,
     "local_endpoint": true
   },
-  "capabilities": {
-    "chat": true,
-    "embedding": true,
-    "local": true,
-    "openai_compatible": true
-  },
   "provider_metadata": {
     "display_name": "Ollama",
     "kind": "local",
     "env_vars": [],
-    "base_url_envs": ["OLLAMA_BASE_URL", "OLLAMA_HOST"],
+    "base_url_envs": [
+      "OLLAMA_BASE_URL",
+      "OLLAMA_HOST"
+    ],
     "catalog_only": true,
     "supports_invoke": false,
     "default_model": "llama3.1:8b",
     "default_base_url": "http://127.0.0.1:11434/v1",
-    "capabilities": ["chat", "embedding", "local", "openai_compatible"]
+    "catalog_features": [
+      "chat",
+      "embedding",
+      "local",
+      "openai_compatible"
+    ]
   },
   "aliases": {
-    "provider_ids": ["ollama", "local"]
+    "provider_ids": [
+      "ollama",
+      "local"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["ollama", "local"]
+    "legacy_ids": [
+      "ollama",
+      "local"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "embedding",
+    "local",
+    "openai_compatible"
+  ]
 }

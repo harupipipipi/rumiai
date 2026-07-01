@@ -8,6 +8,12 @@ from typing import Any, Dict, Iterable, List, Optional
 from ...extensions.loading import import_entrypoint
 from ...extensions.runtime import get_extension_registry
 from ..api_key_store import load_provider_api_keys_into_env, provider_has_api_key
+from ..model_metadata_schema import (
+    context_window_value,
+    normalize_capability_map,
+    normalize_request_features,
+    normalize_routing_defaults,
+)
 from ..oauth_store import provider_has_oauth_connection, provider_oauth_status
 from .component_metadata import (
     model_manifests_from_provider_components,
@@ -670,8 +676,10 @@ def _capability_list(manifest: Dict[str, Any], curated: Dict[str, Any]) -> List[
 
     for item in curated.get("capabilities", []):
         _add(item)
+    for item in curated.get("catalog_features", []):
+        _add(item)
 
-    raw_caps = manifest.get("capabilities", {})
+    raw_caps = manifest.get("capabilities", manifest.get("catalog_features", {}))
     if isinstance(raw_caps, dict):
         for key, enabled in raw_caps.items():
             if enabled:
@@ -679,6 +687,8 @@ def _capability_list(manifest: Dict[str, Any], curated: Dict[str, Any]) -> List[
     elif isinstance(raw_caps, (list, tuple, set)):
         for item in raw_caps:
             _add(str(item))
+    for item in manifest.get("catalog_features", []):
+        _add(item)
 
     adapter = str(manifest.get("adapter", "")).strip()
     if adapter == "openai_compatible":
@@ -1010,13 +1020,17 @@ def _load_models_for_provider(entry: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 
 def _capability_fields(raw_capabilities: Any) -> tuple[List[str], Dict[str, Any]]:
-    if isinstance(raw_capabilities, dict):
-        capability_map = dict(raw_capabilities)
-        return [str(key) for key, value in capability_map.items() if bool(value)], capability_map
-    if isinstance(raw_capabilities, (list, tuple, set)):
-        capability_list = [str(item) for item in raw_capabilities if str(item or "").strip()]
-        return capability_list, {item: True for item in capability_list}
-    return [], {}
+    capability_map = normalize_capability_map(raw_capabilities)
+    public_map = dict(capability_map)
+    legacy_aliases = {
+        "chat": bool(capability_map.get("text_input") or capability_map.get("text_output")),
+        "vision": bool(capability_map.get("image_input")),
+        "reasoning": bool(capability_map.get("thinking")),
+        "tool_calls": bool(capability_map.get("tool_calling")),
+    }
+    for key, value in legacy_aliases.items():
+        public_map.setdefault(key, value)
+    return [str(key) for key, value in public_map.items() if bool(value)], public_map
 
 
 def _normalize_model_token(value: Any) -> str:
@@ -1079,12 +1093,19 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
             if not qualified_model_id:
                 qualified_model_id = "{}/{}".format(model_provider_id, model_id)
             display_name = str(raw.get("display_name") or raw.get("name") or model_id)
-            defaults = dict(raw.get("defaults", {}))
+            defaults = normalize_routing_defaults(raw)
+            routing = dict(raw.get("routing", {})) if isinstance(raw.get("routing"), dict) else {}
             metadata = dict(raw.get("metadata", {}))
             pricing = dict(raw.get("pricing", {})) if isinstance(raw.get("pricing"), dict) else {}
             capabilities, capability_map = _capability_fields(raw.get("capabilities", []))
+            request_features = normalize_request_features(raw.get("request_features", {}))
+            thinking = dict(raw.get("thinking", {})) if isinstance(raw.get("thinking"), dict) else {}
             if capability_map and "capabilities" not in metadata:
                 metadata["capabilities"] = capability_map
+            if request_features and "request_features" not in metadata:
+                metadata["request_features"] = request_features
+            if thinking and "thinking" not in metadata:
+                metadata["thinking"] = thinking
             metadata.update(
                 {
                     "provider_model_key": qualified_model_id,
@@ -1093,8 +1114,10 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                     "availability_status": provider_entry["availability"].get("status"),
                     "defaults": defaults,
                     "pricing": pricing,
+                    "routing": routing,
                 }
             )
+            context_window = context_window_value(raw, default=0)
             item = {
                 "id": qualified_model_id,
                 "qualified_model_id": qualified_model_id,
@@ -1106,8 +1129,11 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 "name": display_name,
                 "display_name": display_name,
                 "type": str(raw.get("type", "chat")),
-                "context_window": int(raw.get("context_window", 0) or 0),
+                "context_window": context_window,
                 "capabilities": capabilities,
+                "request_features": request_features,
+                "routing": routing,
+                "thinking": thinking,
                 "availability": dict(provider_entry["availability"]),
                 "supports_invoke": bool(provider_entry["availability"].get("supports_invoke", False)),
                 "defaults": defaults,
@@ -1120,6 +1146,12 @@ def get_all_known_models(provider_id=None, active_provider_ids=None):
                 item["thinking_levels"] = list(raw.get("thinking_levels", []))
             if "default_thinking_level" in raw:
                 item["default_thinking_level"] = raw.get("default_thinking_level")
+            if thinking:
+                item["supports_thinking"] = bool(thinking.get("supported", item.get("supports_thinking", False)))
+                if isinstance(thinking.get("levels"), list):
+                    item["thinking_levels"] = list(thinking.get("levels") or [])
+                if "default_level" in thinking:
+                    item["default_thinking_level"] = thinking.get("default_level")
             models.append(item)
 
     deduped: Dict[str, Dict[str, Any]] = {}
@@ -1171,6 +1203,9 @@ def build_profile_catalog(active_provider_ids=None, custom_profiles=None):
             "type": model.get("type", "chat"),
             "context_window": int(model.get("context_window", 0) or 0),
             "capabilities": list(model.get("capabilities", [])),
+            "request_features": dict(model.get("request_features", {})) if isinstance(model.get("request_features"), dict) else {},
+            "routing": dict(model.get("routing", {})) if isinstance(model.get("routing"), dict) else {},
+            "thinking": dict(model.get("thinking", {})) if isinstance(model.get("thinking"), dict) else {},
             "defaults": dict(model.get("defaults", {})) if isinstance(model.get("defaults"), dict) else {},
             "pricing": dict(model.get("pricing", {})) if isinstance(model.get("pricing"), dict) else {},
             "metadata": metadata,

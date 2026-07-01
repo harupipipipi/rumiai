@@ -268,6 +268,14 @@ class ModelRuntimeSettingsService:
             "requested_level": level,
             "level": normalized,
         }
+        metadata_mapping = self._thinking_provider_mapping(provider_id, model_id)
+        if metadata_mapping is not None:
+            mapped = metadata_mapping.get(normalized)
+            if isinstance(mapped, dict):
+                result["provider_params"] = dict(mapped)
+            else:
+                result["provider_params"] = {}
+            return result
         if provider in {"openai", "openai_compatible", "openrouter"}:
             effort = "high" if normalized == "xhigh" else normalized
             if effort != "none":
@@ -292,6 +300,33 @@ class ModelRuntimeSettingsService:
         else:
             result["provider_params"] = {"thinking_level": normalized}
         return result
+
+    @staticmethod
+    def _thinking_provider_mapping(provider_id: str, model_id: str) -> dict[str, Any] | None:
+        try:
+            from domain.ai_client.providers import get_all_known_models
+        except Exception:
+            return None
+        provider = str(provider_id or "").strip()
+        raw_model = str(model_id or "").strip()
+        model = raw_model.split("/", 1)[1] if raw_model.startswith(f"{provider}/") else raw_model
+        try:
+            candidates = get_all_known_models(provider)
+        except Exception:
+            return None
+        for item in candidates:
+            if str(item.get("provider_id") or "").strip() != provider:
+                continue
+            if model not in {
+                str(item.get("model_id") or "").strip(),
+                str(item.get("id") or "").strip(),
+                str(item.get("qualified_model_id") or "").strip(),
+            }:
+                continue
+            thinking = item.get("thinking") if isinstance(item.get("thinking"), dict) else {}
+            mapping = thinking.get("provider_mapping")
+            return dict(mapping) if isinstance(mapping, dict) else None
+        return None
 
     def default_model_settings(self) -> dict[str, Any]:
         return {

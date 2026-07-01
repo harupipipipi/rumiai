@@ -7,28 +7,55 @@
       "provider_id": "xiaomi-token-plan-sgp",
       "model_id": "mimo-v2.5-pro",
       "display_name": "MiMo V2.5 Pro",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 1,
-      "defaults": {
-        "chat": true,
-        "coding": true,
-        "agent": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "coding",
+          "agent",
+          "reasoning"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": false
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
       "context_window": 1048576,
-      "max_context": 1048576,
-      "max_context_tokens": 1048576,
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "region": "sgp",
         "token_plan": true,
@@ -48,24 +75,53 @@
       "provider_id": "xiaomi-token-plan-sgp",
       "model_id": "mimo-v2.5",
       "display_name": "MiMo V2.5",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 2,
-      "defaults": {
-        "chat": true,
-        "reasoning": true,
-        "fast": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "reasoning"
+        ],
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": true
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": true,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "region": "sgp",
         "token_plan": true,
@@ -87,69 +143,57 @@
       "provider_id": "xiaomi-token-plan-sgp",
       "model_id": "mimo-v2-pro",
       "display_name": "MiMo V2 Pro",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 3,
-      "defaults": {
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "reasoning"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": false
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "region": "sgp",
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
         "reasoning_content_roundtrip_required_with_tool_calls": true,
-        "request_defaults": {
-          "top_p": 0.95
-        },
-        "token_plan_region_scoped": true
-      }
-    },
-    {
-      "id": "xiaomi-token-plan-sgp/mimo-v2-omni",
-      "category": "llm_model",
-      "version": "1",
-      "provider_id": "xiaomi-token-plan-sgp",
-      "model_id": "mimo-v2-omni",
-      "display_name": "MiMo V2 Omni",
-      "type": "vision",
-      "enabled": true,
-      "priority": 4,
-      "defaults": {
-        "vision": true,
-        "agent": true
-      },
-      "capabilities": {
-        "chat": true,
-        "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": true
-      },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
-      "context_window": 1048576,
-      "max_context": 1048576,
-      "max_context_tokens": 1048576,
-      "metadata": {
-        "region": "sgp",
-        "token_plan": true,
-        "thinking_format": "deepseek",
-        "tool_call_type": "openai",
-        "reasoning_content_roundtrip_required_with_tool_calls": true,
-        "native_multimodal": true,
-        "vision_verified": true,
         "request_defaults": {
           "top_p": 0.95
         },
@@ -165,31 +209,64 @@
       "display_name": "MiMo V2 Omni",
       "type": "chat",
       "enabled": true,
-      "priority": 5,
-      "defaults": {
-        "chat": true,
-        "vision": true
+      "priority": 4,
+      "routing": {
+        "default_for": [
+          "vision",
+          "agent",
+          "chat"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "audio_input": false,
+        "image_input": true,
+        "json_schema": false,
+        "parallel_tool_calls": false,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": true
+        "structured_output": false,
+        "text_input": true,
+        "text_output": true,
+        "thinking": true,
+        "tool_calling": true
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "context_window": 1048576,
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "region": "sgp",
         "token_plan": true,
         "thinking_format": "deepseek",
         "tool_call_type": "openai",
+        "reasoning_content_roundtrip_required_with_tool_calls": true,
+        "native_multimodal": true,
+        "vision_verified": true,
         "request_defaults": {
           "top_p": 0.95
         },
-        "token_plan_region_scoped": true,
-        "vision_verified": true
+        "token_plan_region_scoped": true
       }
     }
   ]

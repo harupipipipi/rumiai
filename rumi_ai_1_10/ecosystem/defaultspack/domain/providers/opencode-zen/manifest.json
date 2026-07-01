@@ -16,19 +16,16 @@
     "fixed_model_allowlist": true,
     "privacy": "external_api_key_gateway"
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "anthropic_compatible": true,
-    "vision": true,
-    "reasoning": true
-  },
   "provider_metadata": {
     "display_name": "OpenCode Zen",
     "kind": "cloud",
     "description": "OpenCode Zen curated model gateway with MiniMax M3 Free.",
-    "env_vars": ["OPENCODE_ZEN_API_KEY"],
-    "base_url_envs": ["OPENCODE_ZEN_BASE_URL"],
+    "env_vars": [
+      "OPENCODE_ZEN_API_KEY"
+    ],
+    "base_url_envs": [
+      "OPENCODE_ZEN_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opencode.ai/zen",
@@ -38,7 +35,13 @@
       "coding": "minimax-m3-free",
       "reasoning": "minimax-m3-free"
     },
-    "capabilities": ["chat", "streaming", "anthropic_compatible", "vision", "reasoning"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "anthropic_compatible",
+      "vision",
+      "reasoning"
+    ]
   },
   "provider_manifest": {
     "id": "opencode-zen",
@@ -50,7 +53,9 @@
     "priority": 63,
     "adapter": "python_entrypoint",
     "entrypoint": "domain.ai_client.providers.opencode_zen_provider:OpencodeZenProvider",
-    "api_key_env": ["OPENCODE_ZEN_API_KEY"],
+    "api_key_env": [
+      "OPENCODE_ZEN_API_KEY"
+    ],
     "base_url_env": "OPENCODE_ZEN_BASE_URL",
     "credential_required": true,
     "catalog_only": false,
@@ -62,22 +67,28 @@
       "coding": "minimax-m3-free",
       "reasoning": "minimax-m3-free"
     },
-    "capabilities": {
-      "native_tool_calling": false,
-      "structured_outputs": false,
-      "vision": true,
-      "embeddings": false,
-      "streaming": true,
-      "reasoning": true
-    },
     "config": {
       "api_compatibility": "anthropic_messages",
       "source_docs": "opencode_zen",
       "model_sync": "fixed_allowlist_for_user_requested_minimax_m3_free"
+    },
+    "api_surface": {
+      "supports_stream": true,
+      "accepts_content_blocks": [
+        "text",
+        "image_url"
+      ],
+      "supports_tool_call_shape": false,
+      "schema_support": {
+        "json_schema": false
+      }
     }
   },
   "aliases": {
-    "provider_ids": ["opencode-zen", "opencode"]
+    "provider_ids": [
+      "opencode-zen",
+      "opencode"
+    ]
   },
   "compatibility": {
     "legacy_ids": [
@@ -86,5 +97,12 @@
       "opencode/minimax-m3-free"
     ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "anthropic_compatible",
+    "vision",
+    "reasoning"
+  ]
 }

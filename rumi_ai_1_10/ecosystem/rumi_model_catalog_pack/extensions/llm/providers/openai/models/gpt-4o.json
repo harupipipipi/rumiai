@@ -5,11 +5,25 @@
   "provider_id": "openai",
   "model_id": "gpt-4o",
   "display_name": "GPT-4o",
+  "type": "chat",
   "priority": 30,
-  "context_window": 128000,
-  "defaults": {
-    "chat": true,
-    "vision": true
+  "routing": {
+    "default_for": [
+      "chat",
+      "vision"
+    ]
   },
-  "type": "chat"
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": false,
+    "tool_calling": false,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": false,
+    "audio_input": false
+  },
+  "context_window": 128000
 }

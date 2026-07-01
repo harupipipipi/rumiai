@@ -1,18 +1,39 @@
 {
   "provider_id": "openrouter",
-  "api_family": "openai_compatible",
-  "supports_stream": true,
-  "supports_tool_calling": true,
-  "supports_parallel_tool_calls": true,
-  "supports_vision": true,
-  "supports_audio": false,
-  "supports_pdf": false,
-  "supports_file_upload": false,
-  "supports_reasoning": true,
-  "supported_roles": ["system", "user", "assistant", "tool"],
-  "supported_content_blocks": ["text", "image_url", "tool_call", "tool_result", "reasoning"],
-  "tool_choice_modes": ["auto", "none", "required"],
-  "schema_support": {"json_schema": true},
-  "params": {"temperature": true, "max_tokens": true, "top_p": true, "reasoning_effort": true},
-  "quirks": {"unsupported_params": []}
+  "api_surface": {
+    "api_family": "openai_compatible",
+    "supports_stream": true,
+    "accepts_content_blocks": [
+      "text",
+      "image_url",
+      "tool_call",
+      "tool_result",
+      "reasoning"
+    ],
+    "supports_tool_call_shape": true,
+    "supports_parallel_tool_call_shape": true,
+    "tool_choice_modes": [
+      "auto",
+      "none",
+      "required"
+    ],
+    "schema_support": {
+      "json_schema": true
+    },
+    "params": {
+      "temperature": true,
+      "max_tokens": true,
+      "top_p": true,
+      "reasoning_effort": true
+    }
+  },
+  "supported_roles": [
+    "system",
+    "user",
+    "assistant",
+    "tool"
+  ],
+  "quirks": {
+    "unsupported_params": []
+  }
 }

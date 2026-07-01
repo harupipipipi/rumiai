@@ -219,6 +219,10 @@ def test_thinking_level_validation_and_provider_normalization(tmp_path):
     assert normalized["provider_params"]["reasoning_effort"] == "high"
     assert normalized["level"] == "high"
 
+    cerebras = service.normalize_for_provider("cerebras", "gpt-oss-120b", "xhigh")
+    assert cerebras["provider_params"] == {"reasoning_effort": "high"}
+    assert cerebras["level"] == "xhigh"
+
 
 def test_resolve_model_candidates_exact_and_ambiguous_matches(tmp_path, monkeypatch):
     service = ModelRuntimeSettingsService(tmp_path)

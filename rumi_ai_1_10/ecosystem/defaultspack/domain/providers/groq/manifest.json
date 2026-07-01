@@ -13,19 +13,15 @@
   "security": {
     "credential_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "tool_calls": true,
-    "reasoning": true,
-    "vision": true,
-    "openai_compatible": true
-  },
   "provider_metadata": {
     "display_name": "Groq",
     "kind": "cloud",
-    "env_vars": ["GROQ_API_KEY"],
-    "base_url_envs": ["GROQ_BASE_URL"],
+    "env_vars": [
+      "GROQ_API_KEY"
+    ],
+    "base_url_envs": [
+      "GROQ_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://api.groq.com/openai/v1",
@@ -38,7 +34,14 @@
       "cheap": "llama-3.1-8b-instant",
       "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "tool_calls",
+      "reasoning",
+      "vision",
+      "openai_compatible"
+    ]
   },
   "provider_manifest": {
     "id": "groq",
@@ -63,27 +66,44 @@
       "cheap": "llama-3.1-8b-instant",
       "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
     },
-    "capabilities": {
-      "native_tool_calling": true,
-      "structured_outputs": true,
-      "vision": true,
-      "embeddings": false,
-      "streaming": true,
-      "reasoning": true
-    },
     "config": {
       "api_compatibility": "openai",
       "model_sync": "remote_merge",
       "model_list_path": "/models",
       "model_cache_ttl_seconds": 21600,
       "hidden_provider_tool_models_excluded": true
+    },
+    "api_surface": {
+      "supports_stream": true,
+      "accepts_content_blocks": [
+        "text",
+        "image_url",
+        "tool_call",
+        "tool_result"
+      ],
+      "supports_tool_call_shape": true,
+      "schema_support": {
+        "json_schema": true
+      }
     }
   },
   "aliases": {
-    "provider_ids": ["groq"]
+    "provider_ids": [
+      "groq"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["groq"]
+    "legacy_ids": [
+      "groq"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "vision",
+    "openai_compatible"
+  ]
 }

@@ -17,19 +17,16 @@
     "browser_user_agent": true,
     "fixed_model_allowlist": true
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "reasoning": true,
-    "vision": true,
-    "openai_compatible": true
-  },
   "provider_metadata": {
     "display_name": "Gitlawb OpenGateway",
     "kind": "aggregator",
     "description": "Gitlawb OpenGateway allowlist for MiMo. API keys are required for all OpenGateway models.",
-    "env_vars": ["GITLAWB_OPENGATEWAY_API_KEY"],
-    "base_url_envs": ["GITLAWB_OPENGATEWAY_BASE_URL"],
+    "env_vars": [
+      "GITLAWB_OPENGATEWAY_API_KEY"
+    ],
+    "base_url_envs": [
+      "GITLAWB_OPENGATEWAY_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opengateway.gitlawb.com/v1",
@@ -40,7 +37,13 @@
       "fast": "mimo-v2-flash",
       "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "openai_compatible", "reasoning", "vision"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "openai_compatible",
+      "reasoning",
+      "vision"
+    ]
   },
   "provider_manifest": {
     "id": "gitlawb-opengateway",
@@ -62,20 +65,27 @@
       "fast": "mimo-v2-flash",
       "vision": "mimo-v2-omni"
     },
-    "capabilities": {
-      "native_tool_calling": false,
-      "vision": true,
-      "embeddings": false,
-      "streaming": true
-    },
     "config": {
       "model_sync": "fixed_allowlist",
       "privacy": "external_api_key_gateway",
       "optional_api_key": false
+    },
+    "api_surface": {
+      "supports_stream": true,
+      "accepts_content_blocks": [
+        "text",
+        "image_url"
+      ],
+      "supports_tool_call_shape": false,
+      "schema_support": {
+        "json_schema": false
+      }
     }
   },
   "aliases": {
-    "provider_ids": ["gitlawb-opengateway"]
+    "provider_ids": [
+      "gitlawb-opengateway"
+    ]
   },
   "compatibility": {
     "legacy_ids": [
@@ -87,5 +97,12 @@
       "gitlawb-opengateway/mimo-v2.5"
     ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "reasoning",
+    "vision",
+    "openai_compatible"
+  ]
 }

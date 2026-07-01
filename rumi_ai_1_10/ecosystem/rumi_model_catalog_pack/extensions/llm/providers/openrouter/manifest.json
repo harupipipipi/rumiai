@@ -11,13 +11,21 @@
   "base_url_env": "OPENROUTER_BASE_URL",
   "credential_required": true,
   "default_model": "tencent/hy3-preview:free",
-  "capabilities": {
-    "native_tool_calling": false,
-    "vision": false,
-    "embeddings": false,
-    "streaming": true
-  },
   "config": {
     "model_sync": "fixed_allowlist"
+  },
+  "catalog_features": [
+    "chat",
+    "streaming"
+  ],
+  "api_surface": {
+    "supports_stream": true,
+    "accepts_content_blocks": [
+      "text"
+    ],
+    "supports_tool_call_shape": false,
+    "schema_support": {
+      "json_schema": false
+    }
   }
 }

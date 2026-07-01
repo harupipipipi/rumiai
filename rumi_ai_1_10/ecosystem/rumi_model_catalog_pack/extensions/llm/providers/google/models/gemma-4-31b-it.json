@@ -5,14 +5,35 @@
   "provider_id": "google",
   "model_id": "gemma-4-31b-it",
   "display_name": "Gemma 4 31B IT",
-  "priority": 35,
   "type": "chat",
-  "supports_thinking": true,
-  "thinking_levels": ["minimal", "high"],
-  "default_thinking_level": "high",
+  "priority": 35,
   "capabilities": {
-    "chat": true,
-    "tool_calls": true,
-    "vision": true
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": false,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": true,
+    "audio_input": false
+  },
+  "thinking": {
+    "supported": true,
+    "levels": [
+      "minimal",
+      "high"
+    ],
+    "default_level": "high",
+    "provider_mapping": {
+      "minimal": {
+        "reasoning_effort": "minimal"
+      },
+      "high": {
+        "reasoning_effort": "high"
+      },
+      "none": {}
+    }
   }
 }

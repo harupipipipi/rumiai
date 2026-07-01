@@ -13,6 +13,7 @@ from domain.ai_client.model_capability_schema import (
     ThinkingCapability,
     knowledge_band_for_level,
 )
+from domain.ai_client.model_metadata_schema import normalize_capability_map
 
 
 LOCAL_PROVIDERS = {"ollama", "lmstudio", "vllm", "llamacpp"}
@@ -128,8 +129,12 @@ def _supports_vision(model: dict[str, Any]) -> bool:
     explicit = _explicit_bool(model, "supports_vision", "supports_image_input", "image_input")
     if explicit is not None:
         return explicit
+    modalities = model.get("modalities") if isinstance(model.get("modalities"), dict) else {}
+    input_modalities = modalities.get("input") if isinstance(modalities.get("input"), list) else []
+    if "image" in {str(item) for item in input_modalities}:
+        return True
     provider_id, model_id, qualified = _model_identity(model)
-    if _capability_truthy(model, "vision", "image", "images", "multimodal"):
+    if _capability_truthy(model, "image_input"):
         return True
     if provider_id == "stub":
         return True
@@ -143,7 +148,7 @@ def _supports_audio_input(model: dict[str, Any]) -> bool:
     if explicit is True:
         return True
     model_type = str(model.get("type") or "chat").lower()
-    if model_type not in {"chat", "reasoning", "vision"}:
+    if model_type != "chat":
         return False
     if metadata_supports_audio_input(model):
         return True
@@ -157,7 +162,7 @@ def _supports_tool_calling(model: dict[str, Any]) -> bool:
     provider_id, model_id, _qualified = _model_identity(model)
     if provider_id == "stub":
         return False
-    if _capability_truthy(model, "tool_calling", "tool_calls", "native_tool_calling", "tools"):
+    if _capability_truthy(model, "tool_calling"):
         return True
     return provider_id in TOOL_CAPABLE_PROVIDERS and bool(TOOL_MODEL_RE.search(model_id))
 
@@ -175,6 +180,12 @@ def _supports_fast_mode(model: dict[str, Any]) -> bool:
     explicit = _explicit_bool(model, "supports_fast", "fast")
     if explicit is not None:
         return explicit
+    routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+    if str(routing.get("speed_tier") or "").strip().lower() == "fast":
+        return True
+    default_for = routing.get("default_for")
+    if isinstance(default_for, list) and "fast" in {str(item) for item in default_for}:
+        return True
     defaults = model.get("defaults") if isinstance(model.get("defaults"), dict) else {}
     provider_id, model_id, qualified = _model_identity(model)
     return bool(defaults.get("fast") or FAST_MODEL_RE.search(f"{provider_id} {model_id} {qualified}"))
@@ -184,8 +195,11 @@ def _supports_thinking(model: dict[str, Any]) -> bool:
     explicit = _explicit_bool(model, "supports_thinking", "thinking", "reasoning")
     if explicit is not None:
         return explicit
+    thinking = model.get("thinking") if isinstance(model.get("thinking"), dict) else {}
+    if "supported" in thinking:
+        return bool(thinking.get("supported"))
     model_type = str(model.get("type") or "chat").lower()
-    if model_type not in {"chat", "reasoning"}:
+    if model_type != "chat":
         return False
     provider_id, model_id, qualified = _model_identity(model)
     if provider_id == "stub":
@@ -194,6 +208,11 @@ def _supports_thinking(model: dict[str, Any]) -> bool:
 
 
 def _thinking_levels(model: dict[str, Any], supported: bool) -> list[str]:
+    thinking = model.get("thinking") if isinstance(model.get("thinking"), dict) else {}
+    nested = thinking.get("levels")
+    if isinstance(nested, list):
+        levels = [str(item) for item in nested if str(item or "").strip()]
+        return levels if supported else []
     raw = model.get("thinking_levels")
     if isinstance(raw, list):
         levels = [str(item) for item in raw if str(item or "").strip()]
@@ -205,6 +224,9 @@ def _supports_structured_output(model: dict[str, Any]) -> bool:
     explicit = _explicit_bool(model, "structured_output", "json_schema", "response_format")
     if explicit is not None:
         return explicit
+    request_features = model.get("request_features") if isinstance(model.get("request_features"), dict) else {}
+    if request_features.get("response_format") or request_features.get("json_mode"):
+        return True
     provider_id, _model_id, _qualified = _model_identity(model)
     return provider_id in STRUCTURED_OUTPUT_PROVIDERS or _capability_truthy(model, "structured_output", "json_schema")
 
@@ -243,6 +265,10 @@ def _knowledge_level(model: dict[str, Any]) -> int:
 
 
 def _speed_tier(model: dict[str, Any]) -> str:
+    routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+    routed = str(routing.get("speed_tier") or "").strip().lower()
+    if routed in {"fast", "balanced", "slow"}:
+        return routed
     explicit = str(model.get("speed_tier") or "").strip().lower()
     if explicit in {"fast", "balanced", "slow"}:
         return explicit
@@ -256,6 +282,10 @@ def _speed_tier(model: dict[str, Any]) -> str:
 
 
 def _quality_tier(model: dict[str, Any], knowledge_level: int) -> str:
+    routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+    routed = str(routing.get("quality_tier") or "").strip().lower()
+    if routed:
+        return routed
     explicit = str(model.get("quality_tier") or "").strip().lower()
     if explicit:
         return explicit
@@ -272,6 +302,10 @@ def _quality_tier(model: dict[str, Any], knowledge_level: int) -> str:
 
 
 def _cost_tier(model: dict[str, Any]) -> str:
+    routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+    routed = str(routing.get("cost_tier") or "").strip().lower()
+    if routed:
+        return routed
     explicit = str(model.get("cost_tier") or "").strip().lower()
     if explicit:
         return explicit
@@ -311,6 +345,11 @@ def _allowed_roles(
     raw = model.get("model_roles")
     if isinstance(raw, list):
         roles.update(str(role) for role in raw if str(role or "").strip())
+    routing = model.get("routing") if isinstance(model.get("routing"), dict) else {}
+    default_for = routing.get("default_for")
+    if isinstance(default_for, list):
+        role_map = {"coding": "coding", "reasoning": "deep_reasoning", "vision": "vision_ocr", "agent": "tool_selector"}
+        roles.update(role_map[item] for item in (str(value) for value in default_for) if item in role_map)
     return sorted(roles)
 
 
@@ -359,11 +398,9 @@ def _capability_container(model: dict[str, Any]) -> tuple[set[str], dict[str, An
     names: set[str] = set()
     values: dict[str, Any] = {}
     for candidate in (raw, meta_raw):
-        if isinstance(candidate, dict):
-            values.update(candidate)
-            names.update(str(key).lower() for key, value in candidate.items() if bool(value))
-        elif isinstance(candidate, list):
-            names.update(str(item).lower() for item in candidate if str(item or "").strip())
+        normalized = normalize_capability_map(candidate)
+        values.update(normalized)
+        names.update(str(key).lower() for key, value in normalized.items() if bool(value))
     return names, values
 
 

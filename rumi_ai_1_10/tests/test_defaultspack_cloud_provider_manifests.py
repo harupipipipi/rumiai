@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -18,6 +20,105 @@ def _catalog_and_models(provider_id: str):
     catalog = get_provider_catalog_map()
     models = {item["id"]: item for item in get_all_known_models(provider_id)}
     return catalog[provider_id], models
+
+
+def _bundled_model_catalog_paths():
+    yield from (DEFAULTSPACK_ROOT / "domain" / "providers").glob("*/models.json")
+    yield from (
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "extensions"
+        / "llm"
+        / "providers"
+    ).glob("*/models/*.json")
+
+
+def _bundled_provider_manifest_paths():
+    yield from (DEFAULTSPACK_ROOT / "domain" / "providers").glob("*/manifest.json")
+    yield from (
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "extensions"
+        / "llm"
+        / "providers"
+    ).glob("*/manifest.json")
+
+
+def test_bundled_provider_model_json_uses_strict_canonical_schema():
+    from domain.ai_client.metadata_json import load_strict_metadata_json
+    from domain.ai_client.model_metadata_schema import validate_model_catalog_source
+
+    for path in _bundled_model_catalog_paths():
+        payload = load_strict_metadata_json(path)
+        if isinstance(payload, dict) and "models" in payload:
+            validate_model_catalog_source(payload, path=path)
+        else:
+            validate_model_catalog_source({"models": [payload]}, path=path)
+
+
+def test_model_catalog_validation_rejects_duplicate_ids_and_context_drift():
+    from domain.ai_client.model_metadata_schema import (
+        ModelMetadataSchemaError,
+        validate_model_catalog_source,
+    )
+
+    with pytest.raises(ModelMetadataSchemaError, match="duplicate model id"):
+        validate_model_catalog_source(
+            {
+                "models": [
+                    {"id": "p/m", "provider_id": "p", "model_id": "m", "capabilities": {"text_input": True}},
+                    {"id": "p/m", "provider_id": "p", "model_id": "m", "capabilities": {"text_input": True}},
+                ]
+            },
+            path="models.json",
+        )
+
+    with pytest.raises(ModelMetadataSchemaError, match="context aliases disagree"):
+        validate_model_catalog_source(
+            {
+                "models": [
+                    {
+                        "id": "p/m",
+                        "provider_id": "p",
+                        "model_id": "m",
+                        "capabilities": {"text_input": True},
+                        "context_window": 100,
+                        "max_context": 99,
+                    }
+                ]
+            },
+            path="models.json",
+        )
+
+
+def test_provider_source_manifests_do_not_duplicate_model_capability_truth():
+    from domain.ai_client.metadata_json import load_strict_metadata_json
+
+    model_specific_provider_keys = {
+        "supports_vision",
+        "supports_audio",
+        "supports_pdf",
+        "supports_file_upload",
+        "supports_reasoning",
+    }
+    for path in (
+        DEFAULTSPACK_ROOT / "domain" / "ai_client" / "capabilities" / "manifests"
+    ).glob("*.json"):
+        payload = load_strict_metadata_json(path)
+        assert "api_surface" in payload
+        assert not model_specific_provider_keys.intersection(payload)
+
+    for path in _bundled_provider_manifest_paths():
+        payload = load_strict_metadata_json(path)
+        assert "capabilities" not in payload
+        provider_metadata = payload.get("provider_metadata")
+        if isinstance(provider_metadata, dict):
+            assert "capabilities" not in provider_metadata
+        provider_manifest = payload.get("provider_manifest")
+        if isinstance(provider_manifest, dict):
+            assert "capabilities" not in provider_manifest
 
 
 def test_groq_manifest_first_runtime_provider_and_allowlist(monkeypatch):
@@ -102,7 +203,11 @@ def test_openai_compatible_provider_merges_remote_models_into_curated_catalog(tm
     assert "groq/compound-beta" in models
     assert "groq/meta-llama/llama-4-scout-17b-16e-instruct" in models
     assert models["groq/compound-beta"]["capabilities"]["tool_calls"] is False
-    assert models["groq/meta-llama/llama-4-scout-17b-16e-instruct"]["capabilities"]["vision"] is True
+    scout = models["groq/meta-llama/llama-4-scout-17b-16e-instruct"]
+    assert scout["capabilities"]["vision"] is False
+    assert scout["capabilities"]["tool_calls"] is False
+    assert scout["metadata"]["capability_source"] == "remote_models_endpoint"
+    assert scout["metadata"]["capability_confidence"] == "unknown"
     assert cache_path.exists()
 
 
@@ -415,6 +520,8 @@ def test_xiaomi_token_plan_catalog_models_are_runtime_and_tool_capable():
     assert "xiaomi-token-plan-sgp/mimo-v2.5-pro" in models
 
     pro = models["xiaomi-token-plan-sgp/mimo-v2.5-pro"]
-    assert pro["type"] == "reasoning"
+    assert pro["type"] == "chat"
+    assert pro["thinking"]["supported"] is True
+    assert "reasoning" in pro["routing"]["default_for"]
     assert pro["defaults"]["chat"] is True
     assert "tool_calls" in pro["capabilities"]

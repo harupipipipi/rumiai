@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -27,6 +29,56 @@ def test_provider_capability_registry_merges_model_metadata():
 
     assert caps.supports_vision is True
     assert caps.max_context_tokens == 1234
+
+
+def test_provider_api_surface_does_not_leak_aggregator_model_capabilities():
+    from domain.ai_client.capabilities.registry import default_registry
+
+    text_only = default_registry().for_model(
+        "openrouter/example-text",
+        {
+            "provider_id": "openrouter",
+            "capabilities": {
+                "text_input": True,
+                "text_output": True,
+                "image_input": False,
+                "tool_calling": False,
+            },
+        },
+    )
+    vision = default_registry().for_model(
+        "openrouter/example-vision",
+        {
+            "provider_id": "openrouter",
+            "capabilities": {
+                "text_input": True,
+                "text_output": True,
+                "image_input": True,
+                "tool_calling": True,
+            },
+        },
+    )
+
+    assert text_only.api_surface["accepts_content_blocks"]
+    assert text_only.supports_vision is False
+    assert "image_url" not in text_only.supported_content_blocks
+    assert text_only.supports_tool_calling is False
+    assert vision.supports_vision is True
+    assert "image_url" in vision.supported_content_blocks
+    assert vision.supports_tool_calling is True
+
+
+def test_provider_capability_manifest_duplicate_json_keys_fail(tmp_path):
+    from domain.ai_client.capabilities.registry import ProviderCapabilityRegistry
+    from domain.ai_client.metadata_json import MetadataJsonError
+
+    (tmp_path / "broken.json").write_text(
+        '{"provider_id":"broken","api_surface":{},"api_surface":{}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(MetadataJsonError, match="duplicate JSON key: api_surface"):
+        ProviderCapabilityRegistry(tmp_path)
 
 
 def test_provider_capability_registry_cerebras_quirks_and_google_native():

@@ -10,21 +10,51 @@
       "type": "chat",
       "enabled": true,
       "priority": 1,
-      "defaults": {
-        "chat": true,
-        "coding": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "coding",
+          "reasoning"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "tool_calls": false,
-        "vision": true,
-        "reasoning": true
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": true,
+        "audio_input": false
       },
       "context_window": 200000,
-      "max_context_tokens": 200000,
-      "max_tokens": 32000,
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "transport": "anthropic_messages",
         "endpoint_path": "/v1/messages",

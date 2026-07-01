@@ -6,7 +6,10 @@
   "enabled": true,
   "priority": 60,
   "adapter": "openai_compatible",
-  "api_key_env": ["NVIDIA_API_KEY", "NGC_API_KEY"],
+  "api_key_env": [
+    "NVIDIA_API_KEY",
+    "NGC_API_KEY"
+  ],
   "base_url_env": "NVIDIA_BASE_URL",
   "credential_required": true,
   "catalog_only": false,
@@ -20,17 +23,28 @@
     "fast": "nvidia/nvidia-nemotron-nano-9b-v2",
     "coding": "qwen/qwen3-coder-480b-a35b-instruct"
   },
-  "capabilities": {
-    "native_tool_calling": true,
-    "structured_outputs": false,
-    "vision": false,
-    "embeddings": false,
-    "streaming": true,
-    "reasoning": true
-  },
   "config": {
     "api_compatibility": "openai",
     "source_docs": "nvidia_nim_llm_apis",
     "model_sync": "fixed_allowlist"
+  },
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "openai_compatible"
+  ],
+  "api_surface": {
+    "supports_stream": true,
+    "accepts_content_blocks": [
+      "text",
+      "tool_call",
+      "tool_result"
+    ],
+    "supports_tool_call_shape": true,
+    "schema_support": {
+      "json_schema": false
+    }
   }
 }

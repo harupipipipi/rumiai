@@ -5,10 +5,24 @@
   "provider_id": "openai",
   "model_id": "gpt-5.4",
   "display_name": "GPT-5.4",
+  "type": "chat",
   "priority": 10,
-  "defaults": {
-    "chat": true,
-    "large": true
+  "routing": {
+    "default_for": [
+      "chat",
+      "large"
+    ]
   },
-  "type": "chat"
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": false,
+    "tool_calling": false,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": false,
+    "audio_input": false
+  }
 }

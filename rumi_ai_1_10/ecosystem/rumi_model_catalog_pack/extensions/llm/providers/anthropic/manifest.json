@@ -14,9 +14,23 @@
     "fast": "claude-sonnet-4-6",
     "large": "claude-opus-4-6"
   },
-  "capabilities": {
-    "native_tool_calling": true,
-    "vision": true,
-    "streaming": true
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "vision"
+  ],
+  "api_surface": {
+    "supports_stream": true,
+    "accepts_content_blocks": [
+      "text",
+      "image_url",
+      "tool_call",
+      "tool_result"
+    ],
+    "supports_tool_call_shape": true,
+    "schema_support": {
+      "json_schema": false
+    }
   }
 }
