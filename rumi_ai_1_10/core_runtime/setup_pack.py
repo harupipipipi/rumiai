@@ -706,6 +706,8 @@ class SetupPackManager:
 
             eco = json.loads(ecosystem_json_path.read_text(encoding="utf-8"))
             pack_identity = eco.get("pack_identity")
+            if not isinstance(pack_identity, str) or not pack_identity.strip():
+                return None
             active = get_active_ecosystem_manager()
             active.active_pack_identity = pack_identity
             return pack_identity
@@ -861,6 +863,7 @@ class SetupPackManager:
                 })
 
         if errors:
+            self._rollback_install_side_effects([], installable_definitions, approval_results)
             self._log_system_event(
                 "setup_pack.install",
                 False,
@@ -969,7 +972,6 @@ class SetupPackManager:
         active_definition = self._choose_active_definition(installed_definitions)
         active_target = locations[active_definition.target_pack_id]
         active_pack_identity = self._set_active_pack_identity(active_target.ecosystem_json_path)
-        selection = self._write_selection(installed_definitions, active_definition)
 
         if active_pack_identity is None:
             errors.append({
@@ -978,20 +980,54 @@ class SetupPackManager:
                 "error": "Failed to set active pack identity",
                 "reason": "active_pack_switch_failed",
             })
+            self._rollback_install_side_effects(
+                installed_definitions,
+                installable_definitions,
+                approval_results,
+            )
+            self._log_system_event(
+                "setup_pack.install",
+                False,
+                details={
+                    "setup_pack_ids": [definition.pack_id for definition in installed_definitions],
+                    "target_pack_ids": [definition.target_pack_id for definition in installed_definitions],
+                    "active_setup_pack_id": active_definition.pack_id,
+                    "active_target_pack_id": active_definition.target_pack_id,
+                    "errors": errors,
+                },
+                error="active_pack_switch_failed",
+            )
+            return {
+                "success": False,
+                "installed": False,
+                "installed_setup_pack_ids": [],
+                "installed_target_pack_ids": [],
+                "installed_setup_target_map": {},
+                "granted_all_ok_target_pack_ids": [],
+                "skipped_all_ok_setup_pack_ids": [],
+                "active_setup_pack_id": None,
+                "active_target_pack_id": None,
+                "active_pack_identity": None,
+                "selection": {},
+                "errors": errors,
+                "error": "Setup pack active identity switch failed",
+                "status_code": 500,
+            }
 
+        selection = self._write_selection(installed_definitions, active_definition)
         self._log_system_event(
             "setup_pack.install",
-            not errors,
+            True,
             details={
                 "setup_pack_ids": [definition.pack_id for definition in installed_definitions],
                 "target_pack_ids": [definition.target_pack_id for definition in installed_definitions],
                 "active_setup_pack_id": active_definition.pack_id,
                 "active_target_pack_id": active_definition.target_pack_id,
             },
-            error=None if not errors else "partial_install_failure",
+            error=None,
         )
         return {
-            "success": not errors,
+            "success": True,
             "installed": True,
             "installed_setup_pack_ids": [definition.pack_id for definition in installed_definitions],
             "installed_target_pack_ids": [

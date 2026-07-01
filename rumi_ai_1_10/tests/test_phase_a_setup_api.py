@@ -8,9 +8,7 @@ PackAPIHandler のセットアップ API エンドポイントをテストする
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 # core_setup のパスを追加
 _CORE_SETUP_DIR = (
