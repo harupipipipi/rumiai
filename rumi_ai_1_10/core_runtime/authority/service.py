@@ -501,7 +501,7 @@ class AuthorityService:
                 },
             )
             return {"success": False, "error": str(exc), "status_code": 400}
-        except Exception as exc:
+        except Exception:
             self._restore_capability_grant(manager, grant_principal, grant_snapshot)
             self._request_store.audit(
                 "authority_request_approval_failed",
