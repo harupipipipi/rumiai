@@ -1007,6 +1007,7 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
   assert.match(html, /title="Configure self-host OAuth"/);
   assert.match(html, /Cloudflare runtime/);
   assert.match(html, /Sandbox \+ PC bridge/);
+  assert.match(html, /Run diagnostics/);
   assert.match(html, /Sandbox: Workers Paid plan/);
   assert.match(html, /pages\.dev is not a PC tunnel/);
   assert.match(html, /Cloudflare Containers require the Workers Paid plan/);

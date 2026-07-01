@@ -53,6 +53,42 @@ def test_cloudflare_oauth_status_includes_sdk_missing(monkeypatch):
     )
 
 
+def test_cloudflare_oauth_status_can_run_active_diagnostics(monkeypatch):
+    from core_runtime.cloudflare import diagnostics, sdk_client
+    from domain.ai_client.oauth_store import provider_oauth_status
+
+    calls: list[bool] = []
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def fake_environment_status(*, active=False, command_runner=None, env=None):
+        del command_runner, env
+        calls.append(bool(active))
+        return {
+            "schema": "rumi.cloudflare.environment.v1",
+            "active": bool(active),
+            "status": "blocked" if active else "needs_check",
+            "runner_deploy_ready": False,
+            "sandbox_ready": False,
+            "pages_ready": False,
+            "named_tunnel_ready": False,
+            "stable_pc_tunnel_ready": False,
+            "pc_tool_bridge_ready": False,
+            "blockers": [{"code": "CLOUDFLARE_ACTIVE_TEST", "message": "active diagnostics ran"}] if active else [],
+            "constraints": {"cloudflare_sandbox_requires_workers_paid": True},
+        }
+
+    monkeypatch.setattr(diagnostics, "cloudflare_environment_status", fake_environment_status)
+
+    status = provider_oauth_status("cloudflare", active_diagnostics=True)
+
+    assert calls == [True]
+    assert status["cloudflare_environment"]["active"] is True
+    assert status["provisioning"]["blockers"] == [
+        {"code": "CLOUDFLARE_ACTIVE_TEST", "message": "active diagnostics ran"}
+    ]
+
+
 def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_blockers(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 

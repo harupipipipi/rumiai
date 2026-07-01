@@ -1319,7 +1319,12 @@ def _localized_provider_label(value: Any, fallback: str) -> str:
     return label or fallback
 
 
-def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) -> dict[str, Any]:
+def provider_oauth_status(
+    provider_id: str,
+    *,
+    pack_root: Path | None = None,
+    active_diagnostics: bool = False,
+) -> dict[str, Any]:
     provider_id = str(provider_id or "").strip()
     provider = _connection_provider(provider_id, pack_root=pack_root)
     provider_label = _localized_provider_label(provider.display_name, provider_id) if provider else provider_id
@@ -1406,7 +1411,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         try:
             from core_runtime.cloudflare.diagnostics import cloudflare_environment_status
 
-            active = str(os.environ.get("RUMI_CLOUDFLARE_ACTIVE_DIAGNOSTICS") or "").strip().lower() in {
+            active = active_diagnostics or str(os.environ.get("RUMI_CLOUDFLARE_ACTIVE_DIAGNOSTICS") or "").strip().lower() in {
                 "1",
                 "true",
                 "yes",
@@ -1482,8 +1487,16 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
     }
 
 
-def provider_oauth_statuses(*, pack_root: Path | None = None) -> dict[str, dict[str, Any]]:
+def provider_oauth_statuses(
+    *,
+    pack_root: Path | None = None,
+    active_diagnostics: bool = False,
+) -> dict[str, dict[str, Any]]:
     return {
-        provider_id: provider_oauth_status(provider_id, pack_root=pack_root)
+        provider_id: provider_oauth_status(
+            provider_id,
+            pack_root=pack_root,
+            active_diagnostics=active_diagnostics and provider_id == "cloudflare",
+        )
         for provider_id in sorted(_connection_provider_ids(pack_root=pack_root) | _OAUTH_RUNTIME_PROVIDER_IDS)
     }

@@ -3239,10 +3239,10 @@ export function SettingsModalRenderer({
     setActiveSectionId(mapSettingsSectionId(sectionId) ?? "packs_extensions");
     onOpenSection?.(sectionId);
   };
-  const refreshConnectionStatus = (providerId: string) => {
+  const refreshConnectionStatus = (providerId: string, activeDiagnostics = false) => {
     onSettingChange("apis", "api_keys", providerId === "codex"
       ? { action: "oauth_refresh" }
-      : { action: "oauth_refresh", provider_id: providerId });
+      : { action: "oauth_refresh", provider_id: providerId, active_diagnostics: activeDiagnostics });
   };
   const selectedConnectionScopeMode = (card: AccountConnectionPreludeCard): AccountConnectionScopeModeOption | undefined => {
     const selectedId = connectionScopeModes[card.providerId] || card.scopeMode || card.scopeModes[0]?.id || "";
@@ -3653,7 +3653,22 @@ export function SettingsModalRenderer({
                       <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="text-xs font-medium text-zinc-200">Cloudflare runtime</div>
-                          <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Sandbox + PC bridge</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Sandbox + PC bridge</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConnectionMessages((current) => ({
+                                  ...current,
+                                  [card.providerId]: { tone: "success", text: "Cloudflare diagnostics requested." },
+                                }));
+                                refreshConnectionStatus(card.providerId, true);
+                              }}
+                              className="rounded-lg border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+                            >
+                              Run diagnostics
+                            </button>
+                          </div>
                         </div>
                         {cloudflareRows.length > 0 && (
                           <div className="mt-3 grid gap-2 sm:grid-cols-4">
