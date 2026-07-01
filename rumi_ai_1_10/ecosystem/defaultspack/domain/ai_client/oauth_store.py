@@ -1390,6 +1390,7 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
     )
     rejected_capabilities = list(metadata.get("rejected_capabilities") or resolved.get("rejected_capabilities") or [])
     cloudflare_sdk = {}
+    cloudflare_environment = {}
     if provider_id == "cloudflare":
         try:
             from core_runtime.cloudflare.sdk_client import cloudflare_sdk_status
@@ -1402,6 +1403,43 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
                 "package": "cloudflare",
                 "detail": "Cloudflare Python SDK status could not be loaded.",
             }
+        try:
+            from core_runtime.cloudflare.diagnostics import cloudflare_environment_status
+
+            active = str(os.environ.get("RUMI_CLOUDFLARE_ACTIVE_DIAGNOSTICS") or "").strip().lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+            cloudflare_environment = cloudflare_environment_status(active=active)
+        except Exception:
+            cloudflare_environment = {
+                "schema": "rumi.cloudflare.environment.v1",
+                "active": False,
+                "status": "error",
+                "blockers": [
+                    {
+                        "code": "CLOUDFLARE_DIAGNOSTICS_UNAVAILABLE",
+                        "message": "Cloudflare environment diagnostics could not be loaded.",
+                    }
+                ],
+            }
+    provisioning = {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {}
+    if cloudflare_environment:
+        provisioning.update(
+            {
+                "environment": cloudflare_environment,
+                "environment_status": cloudflare_environment.get("status", ""),
+                "runner_deploy_ready": bool(cloudflare_environment.get("runner_deploy_ready")),
+                "sandbox_ready": bool(cloudflare_environment.get("sandbox_ready")),
+                "pages_ready": bool(cloudflare_environment.get("pages_ready")),
+                "named_tunnel_ready": bool(cloudflare_environment.get("named_tunnel_ready")),
+                "stable_pc_tunnel_ready": bool(cloudflare_environment.get("stable_pc_tunnel_ready")),
+                "pc_tool_bridge_ready": bool(cloudflare_environment.get("pc_tool_bridge_ready")),
+                "blockers": cloudflare_environment.get("blockers") or [],
+                "constraints": cloudflare_environment.get("constraints") or {},
+            }
+        )
     return {
         "supported": supported,
         "backend_supported": provider_id in _OAUTH_RUNTIME_PROVIDER_IDS,
@@ -1432,7 +1470,8 @@ def provider_oauth_status(provider_id: str, *, pack_root: Path | None = None) ->
         "scope_modes": _google_scope_mode_rows(pack_root=pack_root) if provider_id == "google" else [],
         "services": list(metadata.get("services") or []),
         "cloudflare_sdk": cloudflare_sdk,
-        "provisioning": {"sdk_status": cloudflare_sdk.get("status", "")} if cloudflare_sdk else {},
+        "cloudflare_environment": cloudflare_environment,
+        "provisioning": provisioning,
         "expires_at": str(metadata.get("expires_at") or ""),
         "has_refresh_token": bool(metadata.get("has_refresh_token")),
         "account_id_configured": bool(metadata.get("account_id")),

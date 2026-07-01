@@ -1,0 +1,592 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+import ipaddress
+import os
+import shlex
+import shutil
+import subprocess
+from typing import Any, Sequence
+
+from .sdk_client import cloudflare_sdk_status
+
+
+CommandRunner = Callable[[Sequence[str], float], "CommandResult"]
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    returncode: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+def cloudflare_environment_status(
+    *,
+    active: bool = False,
+    command_runner: CommandRunner | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
+    """Return a redacted Cloudflare readiness report for Rumi continuation.
+
+    The lightweight default avoids network/process-heavy checks during normal
+    settings rendering. Passing active=True probes Wrangler, cloudflared,
+    Cloudflare Containers, Pages, and Docker so the user can see real blockers.
+    """
+
+    environ = env or os.environ
+    runner = command_runner or _run_command
+    wrangler_cmd = _wrangler_command(environ)
+    cloudflared_cmd = _tool_command("cloudflared")
+    docker_cmd = _tool_command("docker")
+
+    checks: dict[str, dict[str, Any]] = {
+        "python_sdk": cloudflare_sdk_status(),
+        "wrangler": _command_presence("wrangler", wrangler_cmd),
+        "cloudflared": _command_presence("cloudflared", cloudflared_cmd),
+        "docker": _command_presence("docker", docker_cmd),
+        "pages": _not_checked(),
+        "containers": _not_checked(),
+        "named_tunnel": _not_checked(),
+        "pc_tunnel_env": _check_pc_tunnel_env(environ),
+        "pc_tool_bridge_env": _check_pc_tool_bridge_env(environ),
+    }
+
+    if active:
+        checks["wrangler"] = _check_wrangler(wrangler_cmd, runner)
+        checks["pages"] = _check_pages(wrangler_cmd, runner)
+        checks["containers"] = _check_containers(wrangler_cmd, runner)
+        checks["cloudflared"] = _check_cloudflared_version(cloudflared_cmd, runner)
+        checks["named_tunnel"] = _check_named_tunnel(cloudflared_cmd, runner)
+        checks["docker"] = _check_docker(docker_cmd, runner)
+
+    sandbox_ready = checks["containers"].get("status") == "ready" and checks["docker"].get("status") == "ready"
+    pages_ready = checks["pages"].get("status") == "ready"
+    named_tunnel_ready = checks["named_tunnel"].get("status") == "ready"
+    pc_tunnel_env_ready = checks["pc_tunnel_env"].get("status") == "configured"
+    stable_pc_tunnel_ready = named_tunnel_ready and pc_tunnel_env_ready
+    pc_tool_bridge_env_ready = checks["pc_tool_bridge_env"].get("status") == "configured"
+    pc_tool_bridge_ready = stable_pc_tunnel_ready and pc_tool_bridge_env_ready
+    blockers = _blockers(checks, active=active)
+
+    return {
+        "schema": "rumi.cloudflare.environment.v1",
+        "active": active,
+        "status": "ready" if active and sandbox_ready and pages_ready and pc_tool_bridge_ready else ("needs_check" if not active else "blocked"),
+        "runner_deploy_ready": bool(active and sandbox_ready),
+        "sandbox_ready": bool(active and sandbox_ready),
+        "pages_ready": bool(active and pages_ready),
+        "named_tunnel_ready": bool(active and named_tunnel_ready),
+        "stable_pc_tunnel_ready": bool(active and stable_pc_tunnel_ready),
+        "pc_tool_bridge_ready": bool(active and pc_tool_bridge_ready),
+        "free_plan_supported": False if checks["containers"].get("status") == "paid_plan_required" else None,
+        "checks": checks,
+        "blockers": blockers,
+        "deployment": {
+            "sandbox_bridge_scaffold": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge",
+            "sandbox_bridge_url_env": "RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL",
+            "sandbox_bridge_api_key_env": "RUMI_CLOUDFLARE_SANDBOX_API_KEY",
+            "pc_tunnel_scaffold": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tunnel",
+            "pc_tunnel_hostname_env": "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME",
+            "pc_tunnel_origin_url_env": "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL",
+            "pc_tunnel_config_env": "RUMI_CLOUDFLARE_PC_TUNNEL_CONFIG",
+            "stable_pc_tunnel": "named_cloudflare_tunnel_with_dns_hostname",
+            "pc_tool_bridge_scaffold": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge",
+            "pc_tool_bridge_url_env": "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL",
+            "pc_tool_bridge_token_env": "RUMI_PC_TOOL_BRIDGE_TOKEN",
+            "pc_tool_bridge_pc_origin_env": "RUMI_PC_ORIGIN",
+            "pc_tool_bridge_pc_bearer_env": "RUMI_PC_RUNTIME_BEARER",
+            "pc_tool_bridge_allowed_origin_env": "RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN",
+        },
+        "constraints": {
+            "cloudflare_sandbox_requires_workers_paid": True,
+            "sandbox_deploy_requires_docker_running": True,
+            "pages_dev_is_not_a_pc_tunnel_hostname": True,
+            "pages_dev_urls_are_pages_deployments_not_tunnel_hostnames": True,
+            "stable_pc_tunnel_requires_named_tunnel_and_dns_hostname": True,
+            "trycloudflare_urls_are_not_stable_pc_tunnel_hostnames": True,
+            "quick_tunnels_do_not_support_sse": True,
+            "sandbox_preview_urls_require_custom_domain_for_production": True,
+            "all_tools_cloudflare_native_supported": False,
+            "pc_local_tools_require_pc_bridge": True,
+            "pc_tool_bridge_requires_named_tunnel": True,
+            "pc_tool_bridge_does_not_upload_pc_local_tools": True,
+            "pc_tool_bridge_preserves_pc_approval_authority": True,
+        },
+    }
+
+
+def _wrangler_command(env: Mapping[str, str]) -> list[str]:
+    explicit = str(env.get("RUMI_WRANGLER_COMMAND") or "").strip()
+    if explicit:
+        return shlex.split(explicit)
+    wrangler = shutil.which("wrangler")
+    if wrangler:
+        return [wrangler]
+    npx = shutil.which("npx")
+    if npx:
+        return [npx, "wrangler"]
+    return []
+
+
+def _tool_command(name: str) -> list[str]:
+    path = shutil.which(name)
+    return [path] if path else []
+
+
+def _command_presence(name: str, command: Sequence[str]) -> dict[str, Any]:
+    return {
+        "available": bool(command),
+        "status": "available" if command else "missing",
+        "command": _public_command(command),
+        "detail": f"{name} command is available." if command else f"{name} command was not found on PATH.",
+    }
+
+
+def _not_checked() -> dict[str, Any]:
+    return {
+        "available": None,
+        "status": "not_checked",
+        "detail": "Run active Cloudflare diagnostics to verify this requirement.",
+    }
+
+
+def _check_wrangler(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("wrangler", command)
+    version = runner([*command, "--version"], 10)
+    whoami = runner([*command, "whoami"], 20)
+    stdout = f"{version.stdout}\n{whoami.stdout}"
+    stderr = f"{version.stderr}\n{whoami.stderr}"
+    authenticated = whoami.returncode == 0 and "logged in" in stdout.lower()
+    return {
+        "available": version.returncode == 0,
+        "status": "ready" if authenticated else "auth_required",
+        "command": _public_command(command),
+        "authenticated": authenticated,
+        "detail": "Wrangler is logged in." if authenticated else _summarize_output(stdout, stderr, "Wrangler login is required."),
+        "version": _first_nonempty_line(version.stdout),
+    }
+
+
+def _check_pages(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("wrangler", command)
+    result = runner([*command, "pages", "project", "list"], 30)
+    return {
+        "available": result.returncode == 0,
+        "status": "ready" if result.returncode == 0 else "unavailable",
+        "detail": "Cloudflare Pages projects are listable." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Pages project list failed."),
+    }
+
+
+def _check_containers(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("wrangler", command)
+    result = runner([*command, "containers", "list"], 30)
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "workers paid plan" in output or "do not have access to cloudflare containers" in output:
+        return {
+            "available": False,
+            "status": "paid_plan_required",
+            "detail": "Cloudflare Containers/Sandbox access requires the Workers Paid plan for this account.",
+        }
+    return {
+        "available": result.returncode == 0,
+        "status": "ready" if result.returncode == 0 else "unavailable",
+        "detail": "Cloudflare Containers are accessible." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Cloudflare Containers check failed."),
+    }
+
+
+def _check_cloudflared_version(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("cloudflared", command)
+    result = runner([*command, "--version"], 10)
+    return {
+        "available": result.returncode == 0,
+        "status": "available" if result.returncode == 0 else "unavailable",
+        "command": _public_command(command),
+        "version": _first_nonempty_line(result.stdout),
+        "detail": "cloudflared is installed." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "cloudflared version check failed."),
+    }
+
+
+def _check_named_tunnel(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("cloudflared", command)
+    result = runner([*command, "tunnel", "list"], 15)
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "origincert" in output or "origin certificate" in output or "cert.pem" in output:
+        return {
+            "available": False,
+            "status": "origin_cert_missing",
+            "detail": "cloudflared is installed, but a tunnel origin certificate is missing. Run cloudflared tunnel login before creating named tunnel DNS routes.",
+        }
+    return {
+        "available": result.returncode == 0,
+        "status": "ready" if result.returncode == 0 else "unavailable",
+        "detail": "Named tunnel credentials are available." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Named tunnel check failed."),
+    }
+
+
+def _check_pc_tunnel_env(env: Mapping[str, str]) -> dict[str, Any]:
+    hostname = str(env.get("RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME") or "").strip()
+    origin_url = str(env.get("RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL") or "http://127.0.0.1:8765").strip()
+    config_path = str(env.get("RUMI_CLOUDFLARE_PC_TUNNEL_CONFIG") or "").strip()
+    parsed_hostname = _hostname_from_public_hostname(hostname)
+    if hostname and parsed_hostname is None:
+        return {
+            "available": False,
+            "status": "invalid_hostname",
+            "detail": "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME must be a hostname only, not a URL or path.",
+            "hostname": _redact_value(hostname),
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    if parsed_hostname and parsed_hostname.endswith(".pages.dev"):
+        return {
+            "available": False,
+            "status": "pages_dev_not_supported",
+            "detail": "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME must be a Cloudflare Tunnel public hostname on your domain, not a pages.dev Pages deployment URL.",
+            "hostname": parsed_hostname,
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    if parsed_hostname and parsed_hostname.endswith(".trycloudflare.com"):
+        return {
+            "available": False,
+            "status": "trycloudflare_not_stable",
+            "detail": "trycloudflare.com hostnames are random quick tunnels. Use a named Cloudflare Tunnel hostname on your domain for stable phone-to-PC access.",
+            "hostname": parsed_hostname,
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    if parsed_hostname and _is_private_or_loopback_hostname(parsed_hostname):
+        return {
+            "available": False,
+            "status": "not_public_hostname",
+            "detail": "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME must be a public Cloudflare Tunnel hostname, not localhost or a private LAN address.",
+            "hostname": parsed_hostname,
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    if not hostname:
+        return {
+            "available": False,
+            "status": "not_configured",
+            "detail": "Set RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME to a named Cloudflare Tunnel hostname for stable phone-to-PC access.",
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    if not origin_url.startswith(("http://", "https://")):
+        return {
+            "available": False,
+            "status": "invalid_origin_url",
+            "detail": "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL must be an http(s) local service URL.",
+            "hostname": hostname,
+            "origin_url": origin_url,
+            "config_path": config_path,
+        }
+    return {
+        "available": True,
+        "status": "configured",
+        "detail": "Stable PC tunnel environment is configured. cloudflared must still be running and routed to this hostname.",
+        "hostname": parsed_hostname or hostname,
+        "origin_url": origin_url,
+        "config_path": config_path,
+    }
+
+
+def _check_pc_tool_bridge_env(env: Mapping[str, str]) -> dict[str, Any]:
+    bridge_url = str(env.get("RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL") or "").strip()
+    bridge_token_configured = bool(str(env.get("RUMI_PC_TOOL_BRIDGE_TOKEN") or "").strip())
+    pc_runtime_bearer_configured = bool(str(env.get("RUMI_PC_RUNTIME_BEARER") or "").strip())
+    allowed_origin = str(env.get("RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN") or "").strip()
+    pc_origin = str(env.get("RUMI_PC_ORIGIN") or "").strip()
+    tunnel_hostname = str(env.get("RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME") or "").strip()
+
+    bridge = _parse_https_origin_url(bridge_url)
+    if not bridge_url:
+        return _pc_tool_bridge_env_result(
+            "not_configured",
+            "Set RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL to the deployed PC Tool Bridge Worker URL.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if bridge is None:
+        return _pc_tool_bridge_env_result(
+            "invalid_bridge_url",
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL must be an HTTPS Worker URL without path, query, or fragment.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if bridge.hostname.endswith(".pages.dev"):
+        return _pc_tool_bridge_env_result(
+            "pages_dev_not_supported",
+            "The PC Tool Bridge scaffold is a Worker. Do not use a pages.dev Pages deployment URL for this bridge.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if _is_private_or_loopback_hostname(bridge.hostname):
+        return _pc_tool_bridge_env_result(
+            "bridge_url_not_public",
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL must be a public Worker/custom-domain HTTPS URL.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if not bridge_token_configured:
+        return _pc_tool_bridge_env_result(
+            "bridge_token_missing",
+            "Set RUMI_PC_TOOL_BRIDGE_TOKEN as a Worker secret and matching client secret.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if not pc_runtime_bearer_configured:
+        return _pc_tool_bridge_env_result(
+            "pc_runtime_bearer_missing",
+            "Set RUMI_PC_RUNTIME_BEARER as a Worker secret for upstream PC API authentication.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+
+    origin_check = _pc_tool_bridge_pc_origin_check(pc_origin, tunnel_hostname)
+    if origin_check["status"] != "configured":
+        return _pc_tool_bridge_env_result(
+            str(origin_check["status"]),
+            str(origin_check["detail"]),
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    if allowed_origin and _parse_https_origin_url(allowed_origin) is None:
+        return _pc_tool_bridge_env_result(
+            "invalid_allowed_origin",
+            "RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN must be an HTTPS origin without path, query, or fragment.",
+            bridge_url=bridge_url,
+            bridge_token_configured=bridge_token_configured,
+            pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+            allowed_origin=allowed_origin,
+            pc_origin=pc_origin,
+            tunnel_hostname=tunnel_hostname,
+        )
+    return _pc_tool_bridge_env_result(
+        "configured",
+        "PC Tool Bridge environment is configured. Deploy the Worker and run the named PC tunnel before using it.",
+        bridge_url=bridge_url,
+        bridge_token_configured=bridge_token_configured,
+        pc_runtime_bearer_configured=pc_runtime_bearer_configured,
+        allowed_origin=allowed_origin,
+        pc_origin=pc_origin,
+        tunnel_hostname=tunnel_hostname,
+    )
+
+
+def _pc_tool_bridge_pc_origin_check(pc_origin: str, tunnel_hostname: str) -> dict[str, str]:
+    raw = pc_origin or tunnel_hostname
+    if not raw:
+        return {
+            "status": "pc_origin_not_configured",
+            "detail": "Set RUMI_PC_ORIGIN or RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME to the named Tunnel HTTPS origin.",
+        }
+    candidate = raw if "://" in raw else f"https://{raw}"
+    parsed = _parse_https_origin_url(candidate)
+    if parsed is None:
+        return {
+            "status": "invalid_pc_origin",
+            "detail": "RUMI_PC_ORIGIN must be an HTTPS origin without path, query, or fragment.",
+        }
+    hostname = parsed.hostname
+    if hostname.endswith(".pages.dev"):
+        return {
+            "status": "pages_dev_not_supported",
+            "detail": "RUMI_PC_ORIGIN must point to a named Cloudflare Tunnel hostname, not a pages.dev Pages deployment URL.",
+        }
+    if hostname.endswith(".trycloudflare.com"):
+        return {
+            "status": "trycloudflare_not_stable",
+            "detail": "RUMI_PC_ORIGIN must be stable. Random trycloudflare.com quick tunnel URLs are not supported for production.",
+        }
+    if _is_private_or_loopback_hostname(hostname):
+        return {
+            "status": "pc_origin_not_public",
+            "detail": "RUMI_PC_ORIGIN must be a public named Tunnel hostname, not localhost or a private LAN address.",
+        }
+    return {"status": "configured", "detail": "PC origin is a stable public HTTPS origin."}
+
+
+def _pc_tool_bridge_env_result(
+    status: str,
+    detail: str,
+    *,
+    bridge_url: str,
+    bridge_token_configured: bool,
+    pc_runtime_bearer_configured: bool,
+    allowed_origin: str,
+    pc_origin: str,
+    tunnel_hostname: str,
+) -> dict[str, Any]:
+    return {
+        "available": status == "configured",
+        "status": status,
+        "detail": detail,
+        "bridge_url": _redact_url(bridge_url),
+        "bridge_token_configured": bridge_token_configured,
+        "pc_runtime_bearer_configured": pc_runtime_bearer_configured,
+        "allowed_origin": _redact_url(allowed_origin),
+        "pc_origin": _redact_url(pc_origin),
+        "tunnel_hostname": _hostname_from_public_hostname(tunnel_hostname) or _redact_value(tunnel_hostname),
+    }
+
+
+def _check_docker(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
+    if not command:
+        return _command_presence("docker", command)
+    result = runner([*command, "info", "--format", "{{json .ServerVersion}}"], 10)
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    if "cannot connect to the docker daemon" in output:
+        return {
+            "available": True,
+            "status": "daemon_unavailable",
+            "detail": "Docker CLI is installed, but the Docker daemon is not running.",
+        }
+    return {
+        "available": result.returncode == 0,
+        "status": "ready" if result.returncode == 0 else "unavailable",
+        "detail": "Docker is running." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Docker check failed."),
+        "version": _first_nonempty_line(result.stdout).strip('"'),
+    }
+
+
+def _blockers(checks: Mapping[str, Mapping[str, Any]], *, active: bool) -> list[dict[str, str]]:
+    if not active:
+        return [
+            {
+                "code": "CLOUDFLARE_ACTIVE_DIAGNOSTICS_NOT_RUN",
+                "message": "Run active Cloudflare diagnostics before deploying a cloud sandbox runner.",
+            }
+        ]
+    blockers: list[dict[str, str]] = []
+    for key in ("wrangler", "pages", "containers", "cloudflared", "named_tunnel", "pc_tunnel_env", "pc_tool_bridge_env", "docker"):
+        status = str(checks.get(key, {}).get("status") or "")
+        if status in {"ready", "available", "configured"}:
+            continue
+        blockers.append(
+            {
+                "code": f"CLOUDFLARE_{key.upper()}_{status.upper() or 'BLOCKED'}",
+                "message": str(checks.get(key, {}).get("detail") or f"{key} is not ready."),
+            }
+        )
+    return blockers
+
+
+def _run_command(argv: Sequence[str], timeout: float) -> CommandResult:
+    try:
+        proc = subprocess.run(
+            list(argv),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            close_fds=True,
+        )
+    except FileNotFoundError:
+        return CommandResult(127, "", "command not found")
+    except subprocess.TimeoutExpired:
+        return CommandResult(124, "", "command timed out")
+    return CommandResult(proc.returncode, proc.stdout or "", proc.stderr or "")
+
+
+def _public_command(command: Sequence[str]) -> str:
+    return " ".join(shlex.quote(str(part)) for part in command[:2])
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:160]
+    return ""
+
+
+def _hostname_from_public_hostname(value: str) -> str | None:
+    clean = str(value or "").strip().lower().rstrip(".")
+    if not clean:
+        return ""
+    if "://" in clean or "/" in clean or ":" in clean:
+        return None
+    if clean.startswith(".") or ".." in clean:
+        return None
+    return clean
+
+
+def _parse_https_origin_url(value: str) -> Any | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    from urllib.parse import urlparse
+
+    parsed = urlparse(raw)
+    if parsed.scheme != "https" or not parsed.hostname:
+        return None
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        return None
+    return parsed
+
+
+def _is_private_or_loopback_hostname(hostname: str) -> bool:
+    clean = str(hostname or "").strip().lower()
+    if clean in {"localhost", "localhost.localdomain"} or clean.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(clean)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def _redact_value(value: str) -> str:
+    text = str(value or "")
+    if len(text) <= 160:
+        return text
+    return f"{text[:120]}...{text[-16:]}"
+
+
+def _redact_url(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) <= 200:
+        return text
+    return _redact_value(text)
+
+
+def _summarize_output(stdout: str, stderr: str, fallback: str) -> str:
+    text = _first_nonempty_line(stderr) or _first_nonempty_line(stdout)
+    return text or fallback

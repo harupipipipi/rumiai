@@ -27,7 +27,13 @@
         "cloudflare",
         "cloud continuation",
         "oauth",
-        "runner"
+        "runner",
+        "sandbox",
+        "bridge",
+        "pc tool bridge",
+        "tunnel",
+        "named tunnel",
+        "pages.dev"
       ]
     },
     {
@@ -55,7 +61,13 @@
         "cloudflare",
         "sleep",
         "resume",
-        "checkpoint"
+        "checkpoint",
+        "sandbox",
+        "bridge",
+        "pc tool bridge",
+        "tunnel",
+        "named tunnel",
+        "pages.dev"
       ]
     }
   ]

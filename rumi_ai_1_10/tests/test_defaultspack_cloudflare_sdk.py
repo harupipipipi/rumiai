@@ -36,6 +36,238 @@ def test_cloudflare_oauth_status_includes_sdk_missing(monkeypatch):
 
     assert status["cloudflare_sdk"]["status"] == "sdk_missing"
     assert status["provisioning"]["sdk_status"] == "sdk_missing"
+    assert status["cloudflare_environment"]["schema"] == "rumi.cloudflare.environment.v1"
+    assert status["cloudflare_environment"]["status"] == "needs_check"
+    assert status["provisioning"]["runner_deploy_ready"] is False
+    assert status["provisioning"]["constraints"]["cloudflare_sandbox_requires_workers_paid"] is True
+    assert status["provisioning"]["constraints"]["all_tools_cloudflare_native_supported"] is False
+    assert status["provisioning"]["constraints"]["pc_local_tools_require_pc_bridge"] is True
+    assert status["provisioning"]["constraints"]["pc_tool_bridge_requires_named_tunnel"] is True
+    assert (
+        status["provisioning"]["environment"]["deployment"]["sandbox_bridge_scaffold"]
+        == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge"
+    )
+    assert (
+        status["provisioning"]["environment"]["deployment"]["pc_tool_bridge_scaffold"]
+        == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge"
+    )
+
+
+def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_blockers(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics.shutil,
+        "which",
+        lambda name: f"/usr/local/bin/{name}" if name in {"cloudflared", "docker"} else None,
+    )
+
+    def runner(argv, _timeout):
+        args = tuple(argv)
+        if args == ("/usr/local/bin/npx", "wrangler", "--version"):
+            return diagnostics.CommandResult(0, "4.106.0\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "whoami"):
+            return diagnostics.CommandResult(0, "You are logged in with an OAuth Token.\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "pages", "project", "list"):
+            return diagnostics.CommandResult(0, "rumi-line-webhook-relay\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "containers", "list"):
+            return diagnostics.CommandResult(
+                1,
+                "",
+                "Unauthorized: You do not have access to Cloudflare Containers. Deploying containers requires the Workers Paid plan.",
+            )
+        if args == ("/usr/local/bin/cloudflared", "--version"):
+            return diagnostics.CommandResult(0, "cloudflared version 2026.3.0\n", "")
+        if args == ("/usr/local/bin/cloudflared", "tunnel", "list"):
+            return diagnostics.CommandResult(1, "", "No file cert.pem; client didn't specify origincert path")
+        if args == ("/usr/local/bin/docker", "info", "--format", "{{json .ServerVersion}}"):
+            return diagnostics.CommandResult(1, "", "Cannot connect to the Docker daemon")
+        return diagnostics.CommandResult(127, "", f"unexpected command: {args}")
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=runner,
+        env={"RUMI_WRANGLER_COMMAND": "/usr/local/bin/npx wrangler"},
+    )
+
+    assert status["status"] == "blocked"
+    assert status["pages_ready"] is True
+    assert status["sandbox_ready"] is False
+    assert status["runner_deploy_ready"] is False
+    assert status["named_tunnel_ready"] is False
+    assert status["stable_pc_tunnel_ready"] is False
+    assert status["pc_tool_bridge_ready"] is False
+    assert status["free_plan_supported"] is False
+    assert status["checks"]["containers"]["status"] == "paid_plan_required"
+    assert status["checks"]["named_tunnel"]["status"] == "origin_cert_missing"
+    assert status["checks"]["pc_tunnel_env"]["status"] == "not_configured"
+    assert status["checks"]["pc_tool_bridge_env"]["status"] == "not_configured"
+    assert status["checks"]["docker"]["status"] == "daemon_unavailable"
+    assert status["deployment"]["sandbox_bridge_url_env"] == "RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL"
+    assert status["deployment"]["pc_tunnel_scaffold"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tunnel"
+    assert status["deployment"]["pc_tool_bridge_scaffold"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge"
+    assert status["constraints"]["quick_tunnels_do_not_support_sse"] is True
+    assert status["constraints"]["trycloudflare_urls_are_not_stable_pc_tunnel_hostnames"] is True
+    assert status["constraints"]["all_tools_cloudflare_native_supported"] is False
+    assert status["constraints"]["pc_local_tools_require_pc_bridge"] is True
+    assert status["constraints"]["pc_tool_bridge_does_not_upload_pc_local_tools"] is True
+    assert status["constraints"]["pc_tool_bridge_preserves_pc_approval_authority"] is True
+    assert {item["code"] for item in status["blockers"]} >= {
+        "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED",
+        "CLOUDFLARE_NAMED_TUNNEL_ORIGIN_CERT_MISSING",
+        "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED",
+        "CLOUDFLARE_PC_TOOL_BRIDGE_ENV_NOT_CONFIGURED",
+        "CLOUDFLARE_DOCKER_DAEMON_UNAVAILABLE",
+    }
+
+
+def test_cloudflare_environment_rejects_pages_dev_as_stable_pc_tunnel(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _name: None)
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "rumi.pages.dev",
+            "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL": "http://127.0.0.1:8765",
+        },
+    )
+
+    assert status["checks"]["pc_tunnel_env"]["status"] == "pages_dev_not_supported"
+    assert status["checks"]["pc_tunnel_env"]["hostname"] == "rumi.pages.dev"
+    assert status["constraints"]["pages_dev_is_not_a_pc_tunnel_hostname"] is True
+    assert "CLOUDFLARE_PC_TUNNEL_ENV_PAGES_DEV_NOT_SUPPORTED" in {
+        item["code"] for item in status["blockers"]
+    }
+
+
+def test_cloudflare_environment_rejects_quick_tunnel_and_private_hosts(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _name: None)
+
+    quick = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "random.trycloudflare.com",
+            "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL": "http://127.0.0.1:8765",
+        },
+    )
+    private = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "192.168.1.20",
+            "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL": "http://127.0.0.1:8765",
+        },
+    )
+    url = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "https://rumi-pc.example.com/path",
+            "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL": "http://127.0.0.1:8765",
+        },
+    )
+
+    assert quick["checks"]["pc_tunnel_env"]["status"] == "trycloudflare_not_stable"
+    assert private["checks"]["pc_tunnel_env"]["status"] == "not_public_hostname"
+    assert url["checks"]["pc_tunnel_env"]["status"] == "invalid_hostname"
+
+
+def test_cloudflare_environment_accepts_configured_pc_tool_bridge_env(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics.shutil,
+        "which",
+        lambda name: f"/usr/local/bin/{name}" if name in {"cloudflared", "docker"} else None,
+    )
+
+    def runner(argv, _timeout):
+        args = tuple(argv)
+        if args == ("/usr/local/bin/npx", "wrangler", "--version"):
+            return diagnostics.CommandResult(0, "4.106.0\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "whoami"):
+            return diagnostics.CommandResult(0, "You are logged in with an OAuth Token.\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "pages", "project", "list"):
+            return diagnostics.CommandResult(0, "rumi-pages\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "containers", "list"):
+            return diagnostics.CommandResult(0, "container-id\n", "")
+        if args == ("/usr/local/bin/cloudflared", "--version"):
+            return diagnostics.CommandResult(0, "cloudflared version 2026.3.0\n", "")
+        if args == ("/usr/local/bin/cloudflared", "tunnel", "list"):
+            return diagnostics.CommandResult(0, "rumi-pc\n", "")
+        if args == ("/usr/local/bin/docker", "info", "--format", "{{json .ServerVersion}}"):
+            return diagnostics.CommandResult(0, '"29.0.0"\n', "")
+        return diagnostics.CommandResult(127, "", f"unexpected command: {args}")
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=runner,
+        env={
+            "RUMI_WRANGLER_COMMAND": "/usr/local/bin/npx wrangler",
+            "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME": "rumi-pc.example.com",
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL": "https://rumi-cloudflare-pc-tool-bridge.example.workers.dev",
+            "RUMI_PC_TOOL_BRIDGE_TOKEN": "client-secret",
+            "RUMI_PC_RUNTIME_BEARER": "pc-runtime-secret",
+            "RUMI_PC_ORIGIN": "https://rumi-pc.example.com",
+            "RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN": "https://app.example.com",
+        },
+    )
+
+    assert status["status"] == "ready"
+    assert status["pc_tool_bridge_ready"] is True
+    assert status["stable_pc_tunnel_ready"] is True
+    assert status["checks"]["pc_tool_bridge_env"]["status"] == "configured"
+    assert status["checks"]["pc_tool_bridge_env"]["bridge_token_configured"] is True
+    assert status["checks"]["pc_tool_bridge_env"]["pc_runtime_bearer_configured"] is True
+    assert status["checks"]["pc_tool_bridge_env"]["allowed_origin"] == "https://app.example.com"
+    assert status["checks"]["pc_tool_bridge_env"]["pc_origin"] == "https://rumi-pc.example.com"
+    assert status["blockers"] == []
+
+
+def test_cloudflare_environment_rejects_invalid_pc_tool_bridge_env(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda _name: None)
+
+    pages = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL": "https://rumi.pages.dev",
+            "RUMI_PC_TOOL_BRIDGE_TOKEN": "client-secret",
+            "RUMI_PC_RUNTIME_BEARER": "pc-runtime-secret",
+            "RUMI_PC_ORIGIN": "https://rumi-pc.example.com",
+        },
+    )
+    private_pc_origin = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL": "https://rumi-tool.example.workers.dev",
+            "RUMI_PC_TOOL_BRIDGE_TOKEN": "client-secret",
+            "RUMI_PC_RUNTIME_BEARER": "pc-runtime-secret",
+            "RUMI_PC_ORIGIN": "http://192.168.1.20:8765",
+        },
+    )
+    missing_secret = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda _argv, _timeout: diagnostics.CommandResult(127, "", "missing"),
+        env={
+            "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL": "https://rumi-tool.example.workers.dev",
+            "RUMI_PC_RUNTIME_BEARER": "pc-runtime-secret",
+            "RUMI_PC_ORIGIN": "https://rumi-pc.example.com",
+        },
+    )
+
+    assert pages["checks"]["pc_tool_bridge_env"]["status"] == "pages_dev_not_supported"
+    assert private_pc_origin["checks"]["pc_tool_bridge_env"]["status"] == "invalid_pc_origin"
+    assert missing_secret["checks"]["pc_tool_bridge_env"]["status"] == "bridge_token_missing"
 
 
 def test_cloudflare_sdk_adapter_routes_pages_operations_through_sdk(monkeypatch):
