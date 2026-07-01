@@ -4,30 +4,12 @@ import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { useT } from '@/src/lib/i18n';
 import { panelRoutes } from '@/src/lib/routes';
-import { apiFetch } from '@/src/lib/api';
+import {
+  SETUP_PACK_RETURN_PARAM,
+  hasSelectedSetupPack,
+  setupPackSelectionUrl,
+} from '@/src/lib/setupPacks';
 import { Loader2, CheckCircle2 } from 'lucide-react';
-
-type SetupPacksPayload = {
-  selected_setup_pack_ids?: unknown;
-};
-
-const PANEL_BASE_PATH = '/panel';
-const SETUP_PACK_RETURN_PARAM = 'setup_pack_done';
-
-export function selectedSetupPackIds(payload: unknown): string[] {
-  if (!payload || typeof payload !== 'object') return [];
-  const selected = (payload as SetupPacksPayload).selected_setup_pack_ids;
-  if (!Array.isArray(selected)) return [];
-  return selected
-    .map(item => String(item || '').trim())
-    .filter(Boolean);
-}
-
-export function setupPackSelectionUrl(
-  returnTo = `${PANEL_BASE_PATH}${panelRoutes.setup}?${SETUP_PACK_RETURN_PARAM}=1`,
-): string {
-  return `/setup?return_to=${encodeURIComponent(returnTo)}`;
-}
 
 export function Setup() {
   const navigate = useNavigate();
@@ -41,11 +23,6 @@ export function Setup() {
   const [loading, setLoading] = useState(false);
   const [linked, setLinked] = useState(false);
   const [setupPackError, setSetupPackError] = useState<string | null>(null);
-
-  const hasSelectedSetupPack = async (): Promise<boolean> => {
-    const packs = await apiFetch<SetupPacksPayload>('/api/setup/packs');
-    return selectedSetupPackIds(packs).length > 0;
-  };
 
   const finalizeSetup = async (): Promise<boolean> => {
     if (!await hasSelectedSetupPack()) {

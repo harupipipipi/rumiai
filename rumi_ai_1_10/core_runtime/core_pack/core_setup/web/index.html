@@ -188,6 +188,15 @@
       return error instanceof Error ? error.message : String(error || "request failed");
     }
 
+    function payloadError(payload) {
+      if (!payload || typeof payload !== "object") return "";
+      if (payload.error) return String(payload.error);
+      if (Array.isArray(payload.errors) && payload.errors.length) {
+        return payload.errors.map(String).join("; ");
+      }
+      return "";
+    }
+
     function safeReturnTo(value) {
       if (!value) return "";
       try {
@@ -221,10 +230,11 @@
     async function getJson(url, options) {
       const res = await fetch(url, options);
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || res.statusText || "request failed");
+      const payload = data.data || data;
+      if (!res.ok || data.success === false || (payload && payload.success === false)) {
+        throw new Error(payloadError(payload) || data.error || res.statusText || "request failed");
       }
-      return data.data || data;
+      return payload;
     }
 
     async function installSelectedPacks() {

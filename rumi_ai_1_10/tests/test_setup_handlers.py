@@ -388,6 +388,8 @@ class TestSetupHandlers(unittest.TestCase):
         self.assertIn("return_to", source)
         self.assertIn("active_target_not_selected", source)
         self.assertIn("no active setup pack selected", source)
+        self.assertIn("payloadError", source)
+        self.assertIn("payload.success === false", source)
         self.assertNotIn(
             'migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready"',
             source,
