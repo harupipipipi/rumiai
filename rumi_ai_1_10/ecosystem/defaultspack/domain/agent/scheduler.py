@@ -864,6 +864,11 @@ def _running_execution_started_at(sched: dict[str, Any]) -> tuple[str | None, da
     return None, None
 
 
+def _running_execution_has_parseable_start_marker(sched: dict[str, Any]) -> bool:
+    _started_at, started_dt = _running_execution_started_at(sched)
+    return started_dt is not None
+
+
 def _running_execution_timeout_seconds(sched: dict[str, Any]) -> float:
     running = _running_execution_details(sched) or {}
     task_cfg = sched.get("task") if isinstance(sched.get("task"), dict) else {}
@@ -958,17 +963,15 @@ def _obsolete_running_execution(sched: dict[str, Any]) -> dict[str, Any] | None:
         reason = "execution_input_changed"
 
     message_id = ""
-    if not reason:
+    if not reason and not _running_execution_has_parseable_start_marker(sched):
         task_cfg = sched.get("task") if isinstance(sched.get("task"), dict) else {}
         current_message = str(task_cfg.get("message") or "").strip()
         scheduled_user = _scheduled_user_message_for_running_execution(sched, running)
         if isinstance(scheduled_user, dict):
             previous_message = _scheduled_chat_message_text(scheduled_user)
             if previous_message and current_message and previous_message != current_message:
-                _started_at, started_dt = _running_execution_started_at(sched)
-                if started_dt is None:
-                    reason = "execution_input_message_changed"
-                    message_id = str(scheduled_user.get("id") or "").strip()
+                reason = "execution_input_message_changed"
+                message_id = str(scheduled_user.get("id") or "").strip()
 
     if not reason:
         return None
