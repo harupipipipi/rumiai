@@ -474,8 +474,108 @@ class GoogleProvider(OpenAICompatibleProvider):
                 continue
             native_role = "model" if role == "assistant" else "user"
             contents.append({"role": native_role, "parts": parts})
+        contents = cls._native_normalize_tool_history(contents)
         system_instruction = {"parts": system_parts} if system_parts else None
         return contents, system_instruction
+
+    @classmethod
+    def _native_normalize_tool_history(cls, contents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        pending: Dict[str, Any] | None = None
+
+        def has_call(part: Dict[str, Any]) -> bool:
+            return isinstance(part.get("functionCall"), dict)
+
+        def has_response(part: Dict[str, Any]) -> bool:
+            return isinstance(part.get("functionResponse"), dict)
+
+        def finalize_pending() -> None:
+            nonlocal pending
+            if pending is None:
+                return
+            entry = pending["entry"]
+            answered_indexes = pending["answered_indexes"]
+            kept_parts = [
+                part
+                for index, part in enumerate(entry.get("parts") or [])
+                if not has_call(part) or index in answered_indexes
+            ]
+            if kept_parts:
+                entry["parts"] = kept_parts
+            else:
+                if 0 <= pending["entry_index"] < len(normalized):
+                    normalized.pop(pending["entry_index"])
+            pending = None
+
+        for item in contents:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "user")
+            parts = [part for part in item.get("parts") or [] if isinstance(part, dict)]
+            if not parts:
+                continue
+            if role != "model":
+                parts = [part for part in parts if not has_call(part)]
+            if role != "user":
+                parts = [part for part in parts if not has_response(part)]
+            if not parts:
+                continue
+
+            call_indexes = [index for index, part in enumerate(parts) if has_call(part)]
+            response_indexes = [index for index, part in enumerate(parts) if has_response(part)]
+
+            if pending is not None and not (role == "user" and response_indexes):
+                finalize_pending()
+
+            if role == "user" and response_indexes:
+                kept_response_indexes: set[int] = set()
+                if pending is not None:
+                    for response_index in response_indexes:
+                        response = parts[response_index].get("functionResponse") or {}
+                        for call_index in pending["call_indexes"]:
+                            if call_index in pending["answered_indexes"]:
+                                continue
+                            call_part = pending["entry"]["parts"][call_index].get("functionCall") or {}
+                            if cls._native_tool_parts_match(call_part, response):
+                                pending["answered_indexes"].add(call_index)
+                                kept_response_indexes.add(response_index)
+                                break
+                    if len(pending["answered_indexes"]) >= len(pending["call_indexes"]):
+                        pending = None
+                parts = [
+                    part
+                    for index, part in enumerate(parts)
+                    if not has_response(part) or index in kept_response_indexes
+                ]
+                if not parts:
+                    continue
+
+            entry = {"role": role, "parts": parts}
+            normalized.append(entry)
+            if role == "model" and call_indexes:
+                pending = {
+                    "entry": entry,
+                    "entry_index": len(normalized) - 1,
+                    "call_indexes": call_indexes,
+                    "answered_indexes": set(),
+                }
+
+        finalize_pending()
+        return normalized
+
+    @staticmethod
+    def _native_tool_parts_match(function_call: Dict[str, Any], function_response: Dict[str, Any]) -> bool:
+        call_id = str(function_call.get("id") or "").strip()
+        response_id = str(function_response.get("id") or "").strip()
+        call_name = str(function_call.get("name") or "").strip()
+        response_name = str(function_response.get("name") or "").strip()
+        if call_id and response_id:
+            return call_id == response_id
+        if call_id and not response_id:
+            return bool(call_name and call_name == response_name)
+        if response_id and not call_id:
+            return bool(call_name and call_name == response_name)
+        return bool(call_name and call_name == response_name)
 
     @staticmethod
     def _native_message_text_fallback(message: Dict[str, Any]) -> str:
