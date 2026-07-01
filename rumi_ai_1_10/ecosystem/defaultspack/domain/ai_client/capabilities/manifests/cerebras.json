@@ -9,7 +9,7 @@
       "tool_result"
     ],
     "supports_tool_call_shape": true,
-    "supports_parallel_tool_call_shape": false,
+    "supports_parallel_tool_call_shape": true,
     "tool_choice_modes": [
       "auto",
       "none"

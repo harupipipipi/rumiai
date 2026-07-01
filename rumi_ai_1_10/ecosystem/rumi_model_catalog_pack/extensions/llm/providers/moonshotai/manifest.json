@@ -30,17 +30,5 @@
     "tool_calls",
     "reasoning",
     "openai_compatible"
-  ],
-  "api_surface": {
-    "supports_stream": true,
-    "accepts_content_blocks": [
-      "text",
-      "tool_call",
-      "tool_result"
-    ],
-    "supports_tool_call_shape": true,
-    "schema_support": {
-      "json_schema": true
-    }
-  }
+  ]
 }

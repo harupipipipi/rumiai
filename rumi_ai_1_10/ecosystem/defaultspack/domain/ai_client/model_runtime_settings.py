@@ -307,9 +307,9 @@ class ModelRuntimeSettingsService:
             from domain.ai_client.providers import get_all_known_models
         except Exception:
             return None
-        provider = str(provider_id or "").strip()
+        provider = str(provider_id or "").strip().lower()
         raw_model = str(model_id or "").strip()
-        model = raw_model.split("/", 1)[1] if raw_model.startswith(f"{provider}/") else raw_model
+        lookup_keys = ModelRuntimeSettingsService._model_lookup_keys(provider, raw_model)
         try:
             candidates = get_all_known_models(provider)
         except Exception:
@@ -317,16 +317,32 @@ class ModelRuntimeSettingsService:
         for item in candidates:
             if str(item.get("provider_id") or "").strip() != provider:
                 continue
-            if model not in {
+            item_keys = {
                 str(item.get("model_id") or "").strip(),
                 str(item.get("id") or "").strip(),
                 str(item.get("qualified_model_id") or "").strip(),
-            }:
+            }
+            item_model_id = str(item.get("model_id") or "").strip()
+            if item_model_id:
+                item_keys.add(f"{provider}/{item_model_id}")
+            if lookup_keys.isdisjoint({key for key in item_keys if key}):
                 continue
             thinking = item.get("thinking") if isinstance(item.get("thinking"), dict) else {}
             mapping = thinking.get("provider_mapping")
             return dict(mapping) if isinstance(mapping, dict) else None
         return None
+
+    @staticmethod
+    def _model_lookup_keys(provider_id: str, model_id: str) -> set[str]:
+        provider = str(provider_id or "").strip().lower()
+        raw_model = str(model_id or "").strip()
+        keys = {raw_model} if raw_model else set()
+        if provider and raw_model:
+            qualified = f"{provider}/{raw_model}"
+            keys.add(qualified)
+            if raw_model.startswith(f"{provider}/"):
+                keys.add(raw_model.split("/", 1)[1])
+        return {key for key in keys if key}
 
     def default_model_settings(self) -> dict[str, Any]:
         return {

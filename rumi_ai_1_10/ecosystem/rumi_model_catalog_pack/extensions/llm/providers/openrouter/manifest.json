@@ -17,15 +17,5 @@
   "catalog_features": [
     "chat",
     "streaming"
-  ],
-  "api_surface": {
-    "supports_stream": true,
-    "accepts_content_blocks": [
-      "text"
-    ],
-    "supports_tool_call_shape": false,
-    "schema_support": {
-      "json_schema": false
-    }
-  }
+  ]
 }

@@ -65,18 +65,6 @@
       "api_compatibility": "openai",
       "model_sync": "fixed_allowlist",
       "official_model_ids_need_refresh": true
-    },
-    "api_surface": {
-      "supports_stream": true,
-      "accepts_content_blocks": [
-        "text",
-        "tool_call",
-        "tool_result"
-      ],
-      "supports_tool_call_shape": true,
-      "schema_support": {
-        "json_schema": true
-      }
     }
   },
   "aliases": {

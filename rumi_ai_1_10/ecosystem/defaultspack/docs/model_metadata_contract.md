@@ -4,6 +4,7 @@ Provider/model metadata has one owner for each kind of fact:
 
 - Provider component manifests (`domain/providers/*/manifest.json`) own discovery,
   credentials, entrypoints, catalog labels, and `catalog_features`.
+  They must not define `api_surface` or model capability truth.
 - Provider capability manifests
   (`domain/ai_client/capabilities/manifests/*.json`) own provider API surface:
   API family, accepted content block shapes, request params, schema/tool-call

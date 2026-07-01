@@ -113,12 +113,45 @@ def test_provider_source_manifests_do_not_duplicate_model_capability_truth():
     for path in _bundled_provider_manifest_paths():
         payload = load_strict_metadata_json(path)
         assert "capabilities" not in payload
+        assert "api_surface" not in payload
         provider_metadata = payload.get("provider_metadata")
         if isinstance(provider_metadata, dict):
             assert "capabilities" not in provider_metadata
+            assert "api_surface" not in provider_metadata
         provider_manifest = payload.get("provider_manifest")
         if isinstance(provider_manifest, dict):
             assert "capabilities" not in provider_manifest
+            assert "api_surface" not in provider_manifest
+
+
+def test_provider_api_surface_contract_matches_bundled_model_requirements():
+    from domain.ai_client.metadata_json import load_strict_metadata_json
+    from domain.ai_client.model_metadata_schema import normalize_capability_map
+
+    capability_dir = DEFAULTSPACK_ROOT / "domain" / "ai_client" / "capabilities" / "manifests"
+    provider_surfaces = {
+        path.stem: load_strict_metadata_json(path).get("api_surface", {})
+        for path in capability_dir.glob("*.json")
+    }
+
+    for path in _bundled_model_catalog_paths():
+        payload = load_strict_metadata_json(path)
+        models = payload.get("models") if isinstance(payload, dict) and "models" in payload else [payload]
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            provider_id = str(model.get("provider_id") or model.get("id", "").split("/", 1)[0]).strip()
+            surface = provider_surfaces.get(provider_id)
+            if not isinstance(surface, dict):
+                continue
+            capabilities = normalize_capability_map(model.get("capabilities"))
+            model_label = f"{path}: {model.get('id')}"
+            if capabilities.get("image_input"):
+                blocks = set(surface.get("accepts_content_blocks") or [])
+                assert blocks.intersection({"image", "image_url"}), model_label
+            if capabilities.get("parallel_tool_calls"):
+                assert surface.get("supports_tool_call_shape") is True, model_label
+                assert surface.get("supports_parallel_tool_call_shape") is True, model_label
 
 
 def test_groq_manifest_first_runtime_provider_and_allowlist(monkeypatch):

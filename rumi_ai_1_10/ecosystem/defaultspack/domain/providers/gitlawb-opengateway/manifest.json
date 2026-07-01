@@ -69,17 +69,6 @@
       "model_sync": "fixed_allowlist",
       "privacy": "external_api_key_gateway",
       "optional_api_key": false
-    },
-    "api_surface": {
-      "supports_stream": true,
-      "accepts_content_blocks": [
-        "text",
-        "image_url"
-      ],
-      "supports_tool_call_shape": false,
-      "schema_support": {
-        "json_schema": false
-      }
     }
   },
   "aliases": {

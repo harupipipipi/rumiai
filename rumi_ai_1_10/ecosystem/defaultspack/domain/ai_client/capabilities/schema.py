@@ -31,7 +31,8 @@ class ProviderCapabilities:
     @classmethod
     def from_dict(cls, raw: dict[str, Any] | None) -> "ProviderCapabilities":
         raw = dict(raw or {})
-        api_surface = raw.get("api_surface") if isinstance(raw.get("api_surface"), dict) else {}
+        has_api_surface = isinstance(raw.get("api_surface"), dict)
+        api_surface = raw.get("api_surface") if has_api_surface else {}
         schema_support = raw.get("schema_support", api_surface.get("schema_support", {}))
         params = raw.get("params", api_surface.get("params", {}))
         api_accepts_content_blocks = (
@@ -42,16 +43,21 @@ class ProviderCapabilities:
         )
         supported_content_blocks = raw.get("supported_content_blocks") or api_accepts_content_blocks
         tool_choice_modes = raw.get("tool_choice_modes") or api_surface.get("tool_choice_modes") or ["auto", "none"]
-        supports_tool_shape = bool(
-            raw.get("supports_tool_calling", False)
-            or api_surface.get("supports_tool_call_shape", False)
-            or api_surface.get("supports_tool_calling", False)
-        )
-        supports_parallel_shape = bool(
-            raw.get("supports_parallel_tool_calls", False)
-            or api_surface.get("supports_parallel_tool_call_shape", False)
-            or api_surface.get("supports_parallel_tool_calls", False)
-        )
+        if has_api_surface:
+            supports_tool_shape = bool(
+                api_surface.get("supports_tool_call_shape", api_surface.get("supports_tool_calling", False))
+            )
+            supports_parallel_shape = bool(
+                api_surface.get(
+                    "supports_parallel_tool_call_shape",
+                    api_surface.get("supports_parallel_tool_calls", False),
+                )
+            )
+        else:
+            supports_tool_shape = bool(raw.get("supports_tool_call_shape", raw.get("supports_tool_calling", False)))
+            supports_parallel_shape = bool(
+                raw.get("supports_parallel_tool_call_shape", raw.get("supports_parallel_tool_calls", False))
+            )
         api_family = str(raw.get("api_family") or api_surface.get("api_family") or "unknown")
         return cls(
             provider_id=str(raw.get("provider_id") or raw.get("id") or "unknown"),
@@ -112,7 +118,6 @@ def merge_capabilities(base: ProviderCapabilities, *overrides: dict[str, Any] | 
     merged = base.to_dict()
     api_surface = dict(merged.get("api_surface") or {})
     provider_accepts_tool_calls = bool(api_surface.get("supports_tool_call_shape"))
-    provider_accepts_parallel_tool_calls = bool(api_surface.get("supports_parallel_tool_call_shape"))
     provider_content_blocks = list(api_surface.get("accepts_content_blocks") or merged.get("supported_content_blocks") or ["text"])
     for model_key in (
         "supports_tool_calling",
@@ -145,7 +150,7 @@ def merge_capabilities(base: ProviderCapabilities, *overrides: dict[str, Any] | 
                 merged[key] = value
     if not provider_accepts_tool_calls:
         merged["supports_tool_calling"] = False
-    if not provider_accepts_parallel_tool_calls:
+    if not merged.get("supports_tool_calling"):
         merged["supports_parallel_tool_calls"] = False
     if not merged.get("supports_vision"):
         merged["supported_content_blocks"] = [

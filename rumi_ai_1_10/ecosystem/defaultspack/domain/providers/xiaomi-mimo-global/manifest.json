@@ -106,18 +106,6 @@
       "do_not_reuse_credentials_across_regions": true,
       "model_sync": "fixed_allowlist",
       "runtime_enablement": "manual_base_url_and_docs_required"
-    },
-    "api_surface": {
-      "supports_stream": true,
-      "accepts_content_blocks": [
-        "text",
-        "tool_call",
-        "tool_result"
-      ],
-      "supports_tool_call_shape": true,
-      "schema_support": {
-        "json_schema": false
-      }
     }
   },
   "source_pack_id": "defaultspack",
