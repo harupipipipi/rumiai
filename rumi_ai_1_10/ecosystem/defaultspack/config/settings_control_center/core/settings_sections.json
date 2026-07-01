@@ -1,0 +1,93 @@
+{
+  "schema": "rumi.settings.sections.v1",
+  "sections": [
+    {
+      "id": "quick_setup",
+      "title": {
+        "en": "Quick Setup",
+        "ja": "クイック設定"
+      },
+      "order": 10
+    },
+    {
+      "id": "models_api",
+      "title": {
+        "en": "Models & API",
+        "ja": "モデルとAPI"
+      },
+      "order": 20
+    },
+    {
+      "id": "accounts_connections",
+      "title": {
+        "en": "Accounts & Connections",
+        "ja": "アカウント連携"
+      },
+      "order": 30
+    },
+    {
+      "id": "tools_mcp",
+      "title": {
+        "en": "Tools & MCP",
+        "ja": "ツールとMCP"
+      },
+      "order": 40
+    },
+    {
+      "id": "computer_automation",
+      "title": {
+        "en": "Computer & Automation",
+        "ja": "コンピューター操作"
+      },
+      "order": 50
+    },
+    {
+      "id": "workspace_ui",
+      "title": {
+        "en": "Workspace & UI",
+        "ja": "ワークスペースとUI"
+      },
+      "order": 60
+    },
+    {
+      "id": "profiles",
+      "title": {
+        "en": "Profiles",
+        "ja": "プロファイル"
+      },
+      "order": 70
+    },
+    {
+      "id": "privacy_security",
+      "title": {
+        "en": "Privacy & Security",
+        "ja": "プライバシーとセキュリティ"
+      },
+      "order": 80
+    },
+    {
+      "id": "packs_extensions",
+      "title": {
+        "en": "Packs & Extensions",
+        "ja": "パックと拡張"
+      },
+      "order": 90
+    },
+    {
+      "id": "advanced",
+      "title": {
+        "en": "Advanced",
+        "ja": "高度な設定"
+      },
+      "order": 100
+    },
+    {
+      "id": "diagnostics",
+      "title": {
+        "en": "Diagnostics",
+        "ja": "診断"
+      },
+      "order": 110
+    }
+  ]
+}

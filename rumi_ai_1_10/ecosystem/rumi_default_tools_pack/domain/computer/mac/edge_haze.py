@@ -58,6 +58,8 @@ class ComputerUseEdgeHazeManager:
         self._process: subprocess.Popen[Any] | None = None
         self._sequence_id = _STANDALONE_SEQUENCE_ID
         self._lease_path = self._lease_path_for_binary(self._binary_path)
+        self._status_text_override = ""
+        self._target_window: dict[str, Any] = {}
 
     @classmethod
     def from_pack_root(cls, pack_root: Path) -> "ComputerUseEdgeHazeManager":
@@ -84,6 +86,8 @@ class ComputerUseEdgeHazeManager:
         if binary is None:
             return False
         self._sequence_id = self._sequence_id_from_payload(payload)
+        self._status_text_override = self._status_text_from_payload(payload)
+        self._target_window = self._target_window_from_payload(payload)
         self._lease_path = self._lease_path_for_binary(binary)
         existing = self._read_lease(self._lease_path)
         existing_pid = self._lease_pid(existing)
@@ -150,6 +154,26 @@ class ComputerUseEdgeHazeManager:
         if pid:
             self._terminate_pid(pid)
         self._remove_lease_if_matches(pid=pid, sequence_id=sequence_id)
+
+    def update_virtual_pointer(
+        self,
+        pointer: dict[str, Any],
+        *,
+        action: str = "computer.move",
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Publish a user-independent virtual pointer to the overlay lease."""
+        payload = payload or {}
+        if not self.start(action=action, payload=payload):
+            return {"started": False}
+        lease = self._read_lease(self._lease_path)
+        lease["virtual_pointer"] = self._virtual_pointer_payload(pointer)
+        self._write_lease(self._lease_path, lease)
+        return {
+            "started": True,
+            "lease_path": str(self._lease_path),
+            "sequence_id": lease.get("sequence_id") or self._sequence_id,
+        }
 
     @staticmethod
     def _terminate_process(process: subprocess.Popen[Any] | None) -> None:
@@ -308,15 +332,16 @@ class ComputerUseEdgeHazeManager:
 
     def _deadline_seconds(self, *, active: bool) -> float:
         if self._sequence_id != _STANDALONE_SEQUENCE_ID:
-            if active:
-                return _SEQUENCE_IDLE_SECONDS
-            return max(0.0, float(self.settings().linger_seconds))
+            return _SEQUENCE_IDLE_SECONDS
         if active:
             return max(_STANDALONE_ACTIVE_SECONDS, float(self.settings().linger_seconds))
         return max(0.0, float(self.settings().linger_seconds))
 
     def _write_lease_for_pid(self, pid: int, *, action: str, active: bool) -> None:
         now = time.time()
+        existing = self._read_lease(self._lease_path)
+        virtual_pointer = existing.get("virtual_pointer") if isinstance(existing.get("virtual_pointer"), dict) else None
+        target_window = dict(self._target_window) if self._target_window else {}
         self._write_lease(
             self._lease_path,
             {
@@ -326,8 +351,121 @@ class ComputerUseEdgeHazeManager:
                 "deadline_epoch": now + self._deadline_seconds(active=active),
                 "updated_at_epoch": now,
                 "action": action,
+                "active": bool(active),
+                "status_text": self._status_text(action=action, active=active),
+                **({"virtual_pointer": virtual_pointer} if virtual_pointer else {}),
+                **({"target_window": target_window} if target_window else {}),
             },
         )
+
+    def _status_text(self, *, action: str, active: bool) -> str:
+        action = str(action or "").strip()
+        if active and self._status_text_override:
+            return self._status_text_override
+        if not active:
+            return "考え中"
+        if action in {"computer.screenshot", "computer.observe"}:
+            return "確認中"
+        if action in {"browser.open_url"}:
+            return "移動中"
+        if action in {"computer.type", "computer.key", "computer.click", "computer.move", "computer.drag", "computer.scroll", "computer.semantic_action", "computer.pid_event"}:
+            return "操作中"
+        return "作業中"
+
+    @staticmethod
+    def _status_text_from_payload(payload: dict[str, Any]) -> str:
+        for key in ("status_text", "haze_status_text", "computer_use_status_text"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value[:32]
+        return ""
+
+    @staticmethod
+    def _virtual_pointer_payload(pointer: dict[str, Any]) -> dict[str, Any]:
+        now = time.time()
+
+        def number(key: str, default: float = 0.0) -> float:
+            try:
+                return float(pointer.get(key, default))
+            except Exception:
+                return default
+
+        return {
+            "x": int(round(number("x"))),
+            "y": int(round(number("y"))),
+            "origin": str(pointer.get("origin") or "top_left"),
+            "visible": pointer.get("visible") is not False,
+            "phase": str(pointer.get("phase") or pointer.get("action") or "move")[:24],
+            "updated_at_epoch": now,
+            "expires_at_epoch": now + 8.0,
+        }
+
+    @classmethod
+    def _target_window_from_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        target = payload.get("edge_haze_target_window")
+        if not isinstance(target, dict):
+            target = payload.get("target_window") if isinstance(payload.get("target_window"), dict) else {}
+        values = target if isinstance(target, dict) else {}
+        record: dict[str, Any] = {}
+
+        app = str(
+            values.get("app")
+            or values.get("name")
+            or payload.get("app")
+            or payload.get("application")
+            or payload.get("target_app")
+            or ""
+        ).strip()
+        if app:
+            record["app"] = app[:160]
+
+        title = str(
+            values.get("window_title")
+            or values.get("title")
+            or payload.get("window_title")
+            or payload.get("title")
+            or ""
+        ).strip()
+        if title:
+            record["window_title"] = title[:240]
+
+        for source_key, output_key in (
+            ("pid", "pid"),
+            ("window_id", "window_id"),
+            ("id", "window_id"),
+            ("x", "x"),
+            ("y", "y"),
+            ("width", "width"),
+            ("height", "height"),
+        ):
+            if output_key in record:
+                continue
+            raw_value = values.get(source_key)
+            if raw_value in (None, ""):
+                raw_value = payload.get(source_key)
+            parsed = cls._int_value(raw_value)
+            if parsed is None:
+                continue
+            if output_key in {"pid", "window_id", "width", "height"} and parsed <= 0:
+                continue
+            record[output_key] = parsed
+
+        frame_ids = values.get("frame_window_ids")
+        if isinstance(frame_ids, list):
+            parsed_ids = [item for item in (cls._int_value(value) for value in frame_ids) if item and item > 0]
+            if parsed_ids:
+                record["frame_window_ids"] = parsed_ids[:16]
+
+        return record
+
+    @staticmethod
+    def _int_value(value: Any) -> int | None:
+        try:
+            if value in (None, ""):
+                return None
+            return int(float(value))
+        except Exception:
+            return None
 
     @staticmethod
     def _write_lease(path: Path, value: dict[str, Any]) -> None:

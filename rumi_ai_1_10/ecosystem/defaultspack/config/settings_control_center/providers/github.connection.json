@@ -1,0 +1,119 @@
+{
+  "schema": "rumi.connection.provider.v1",
+  "provider_id": "github",
+  "display_name": {
+    "en": "GitHub",
+    "ja": "GitHub"
+  },
+  "description": {
+    "en": "Connect GitHub identity, repositories, and workflow capabilities through OAuth or token import.",
+    "ja": "OAuthまたはtoken importでGitHub identity、repository、workflow capabilityを接続します。"
+  },
+  "icon": "github",
+  "service_kind": "dev",
+  "auth": {
+    "type": "oauth2",
+    "template": "generic_oauth2_pkce",
+    "token_import_supported": true,
+    "official_broker_supported": false,
+    "self_host_client_supported": true,
+    "pkce_supported": false,
+    "oauth": {
+      "authorization_url": "https://github.com/login/oauth/authorize",
+      "token_url": "https://github.com/login/oauth/access_token",
+      "userinfo_url": "https://api.github.com/user",
+      "default_scopes": ["read:user", "user:email"],
+      "pkce_supported": false,
+      "token_endpoint_auth_method": "client_secret_post"
+    }
+  },
+  "scope_presets": [
+    {
+      "id": "identity",
+      "label": "GitHub identity",
+      "scopes": ["read:user", "user:email"]
+    },
+    {
+      "id": "public_repo",
+      "label": "Public repositories",
+      "scopes": ["read:user", "user:email", "public_repo"]
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "github.user.read",
+      "displayName": {
+        "en": "Read GitHub identity",
+        "ja": "GitHub identityを読む"
+      },
+      "description": {
+        "en": "Read the connected GitHub account profile.",
+        "ja": "接続されたGitHubアカウントのprofileを読みます。"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "github.repo.read",
+      "displayName": {
+        "en": "Read repositories",
+        "ja": "Repositoryを読む"
+      },
+      "description": {
+        "en": "Read repository metadata or contents allowed by the granted token scopes.",
+        "ja": "許可されたtoken scope内でrepository metadataまたはcontentsを読みます。"
+      },
+      "risk": "medium"
+    },
+    {
+      "id": "github.repo.write",
+      "displayName": {
+        "en": "Write repositories",
+        "ja": "Repositoryへ書き込む"
+      },
+      "description": {
+        "en": "Write repository contents or pull request state allowed by the granted token scopes.",
+        "ja": "許可されたtoken scope内でrepository contentsまたはpull request stateを書き込みます。"
+      },
+      "risk": "high"
+    },
+    {
+      "id": "github.actions.workflow",
+      "displayName": {
+        "en": "Manage workflows",
+        "ja": "Workflowを管理"
+      },
+      "description": {
+        "en": "Read or trigger GitHub Actions workflow state when workflow scope is granted.",
+        "ja": "workflow scopeが付与された場合にGitHub Actions workflow stateを読み取り/実行します。"
+      },
+      "risk": "high"
+    }
+  ],
+  "scope_to_capability": [
+    {
+      "scopes": ["read:user", "user:email"],
+      "capabilities": ["github.user.read"]
+    },
+    {
+      "scopes": ["public_repo"],
+      "capabilities": ["github.repo.read"]
+    },
+    {
+      "scopes": ["repo"],
+      "capabilities": ["github.repo.read", "github.repo.write"]
+    },
+    {
+      "scopes": ["workflow"],
+      "capabilities": ["github.actions.workflow"]
+    }
+  ],
+  "adapter": {
+    "python": "ecosystem.defaultspack.domain.connections.github:GitHubConnectionAdapter",
+    "sdk_optional": true
+  },
+  "settings": {
+    "section": "accounts_connections",
+    "priority": 45,
+    "recommended": false
+  }
+}

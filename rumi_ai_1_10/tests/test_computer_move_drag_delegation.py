@@ -21,6 +21,14 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer
 )
 
 
+def _isolate_controller(ctrl: BrowserComputerController, tmp_path) -> None:
+    shared = tmp_path / "user_data" / "shared"
+    ctrl._session_path = shared / "browser_sessions.json"
+    ctrl._approval_path = shared / "browser_computer_approvals.json"
+    ctrl._browser_root = shared / "browser"
+    ctrl._profile_root = ctrl._browser_root / "profiles"
+
+
 class MoveCapableDriver(ComputerDriver):
     @property
     def name(self):
@@ -128,23 +136,27 @@ def test_move_not_supported_returns_clean_result():
     assert result["executed"] is False
 
 
-def test_controller_move_delegates(tmp_path):
+def test_controller_move_delegates(tmp_path, monkeypatch):
     svc = MagicMock()
     svc.move.return_value = asdict(ActionResult(action="move", driver="mac_foreground", executed=True))
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     ctrl = BrowserComputerController(artifact_root=tmp_path)
+    _isolate_controller(ctrl, tmp_path)
     ctrl._computer_seat = svc
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "computer move delegation")
     result = ctrl.run("computer.move", {"x": 100, "y": 200, "physical": True}, yolo_mode=True)
     assert result["executed"] is True
     svc.move.assert_called_once()
 
 
-def test_controller_drag_delegates(tmp_path):
+def test_controller_drag_delegates(tmp_path, monkeypatch):
     svc = MagicMock()
     svc.drag.return_value = asdict(ActionResult(action="drag", driver="mac_foreground", executed=True))
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     ctrl = BrowserComputerController(artifact_root=tmp_path)
+    _isolate_controller(ctrl, tmp_path)
     ctrl._computer_seat = svc
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "computer drag delegation")
     result = ctrl.run("computer.drag", {"x1": 10, "y1": 20, "x2": 30, "y2": 40, "physical": True}, yolo_mode=True)
     assert result["executed"] is True
     svc.drag.assert_called_once()
