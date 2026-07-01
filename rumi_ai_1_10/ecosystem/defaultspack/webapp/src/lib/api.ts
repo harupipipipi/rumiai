@@ -2359,6 +2359,33 @@ async function readStreamEvents(
   return finalMessage;
 }
 
+export type CodexAppServerConfig = {
+  transport?: "off" | "stdio" | "unix" | "websocket_loopback" | "websocket_remote";
+  enabled?: boolean;
+  baseUrl?: string;
+  websocketUrl?: string;
+  unixSocketPath?: string;
+  wsTokenFile?: string;
+  sharedSecretFile?: string;
+  toolSourceEnabled?: boolean;
+  automationEndpointEnabled?: boolean;
+};
+
+export type CodexConnectionStatusResponse = {
+  provider: Record<string, unknown>;
+  app_server: Record<string, unknown>;
+};
+
+export type CodexConnectionActionResponse = Partial<CodexConnectionStatusResponse> & {
+  provider_id?: string;
+  configured?: boolean;
+  cleared?: boolean;
+  created?: boolean;
+  status?: Record<string, unknown>;
+  account?: Record<string, unknown>;
+  probe?: Record<string, unknown>;
+};
+
 export const api = {
   listConversations(options?: ConversationListOptions) {
     return request<{ conversations: Conversation[]; total: number }>(
@@ -2888,12 +2915,54 @@ export const api = {
     });
   },
 
-  startProviderOAuth(providerId: string) {
-    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scopes: string[] }>("/api/ai/oauth", {
+  importConnectionBundle(credentialBundle: string | Record<string, unknown>, providerId?: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/connections/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
+  importProviderConnection(providerId: string, credentialBundle: string) {
+    return request<{
+      provider_id: string;
+      connection_id: string;
+      credential_ref?: Record<string, string>;
+      scopes?: string[];
+      capabilities?: string[];
+      approval_required_capabilities?: string[];
+      rejected_capabilities?: string[];
+      expires_at?: string;
+      status?: string;
+    }>("/api/connections/import", {
+      method: "POST",
+      body: JSON.stringify({
+        provider_id: providerId,
+        credential_bundle: credentialBundle,
+      }),
+    });
+  },
+
+  startProviderOAuth(providerId: string, options: { scopeMode?: string; services?: string[] } = {}) {
+    return request<{ provider_id: string; authorize_url: string; redirect_uri: string; scope_mode?: string; services?: string[]; scopes: string[] }>("/api/ai/oauth", {
       method: "POST",
       body: JSON.stringify({
         action: "start",
         provider_id: providerId,
+        scope_mode: options.scopeMode,
+        services: options.services,
       }),
     });
   },
@@ -2914,6 +2983,67 @@ export const api = {
       body: JSON.stringify({
         action: "clear_client",
         provider_id: providerId,
+      }),
+    });
+  },
+
+  getCodexConnectionStatus() {
+    return request<CodexConnectionStatusResponse>("/api/connections/codex", { cache: "no-store" });
+  },
+
+  saveCodexAccessToken(accessToken: string) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_token",
+        access_token: accessToken,
+      }),
+    });
+  },
+
+  clearCodexAccessToken() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_token",
+      }),
+    });
+  },
+
+  saveCodexAppServerConfig(config: CodexAppServerConfig) {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "save_app_server",
+        app_server: {
+          transport: config.transport,
+          enabled: config.enabled,
+          base_url: config.baseUrl,
+          websocket_url: config.websocketUrl,
+          unix_socket_path: config.unixSocketPath,
+          ws_token_file: config.wsTokenFile,
+          shared_secret_file: config.sharedSecretFile,
+          tool_source_enabled: config.toolSourceEnabled,
+          automation_endpoint_enabled: config.automationEndpointEnabled,
+        },
+      }),
+    });
+  },
+
+  clearCodexAppServerConfig() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "clear_app_server",
+      }),
+    });
+  },
+
+  probeCodexAppServer() {
+    return request<CodexConnectionActionResponse>("/api/connections/codex", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "probe_app_server",
       }),
     });
   },

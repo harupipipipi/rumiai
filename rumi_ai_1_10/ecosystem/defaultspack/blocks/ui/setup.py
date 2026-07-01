@@ -54,6 +54,8 @@ def run(context):
         ("GET", "/api/ui/catalog", _lazy("blocks.ui.catalog"), {}),
         ("GET", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
         ("PUT", "/api/ui/settings", _lazy("blocks.ui.settings"), {}),
+        ("GET", "/api/connections/codex", _lazy("blocks.connections.codex"), {}),
+        ("POST", "/api/connections/codex", _lazy("blocks.connections.codex"), {}),
         ("GET", "/api/ui/commands", _lazy("blocks.ui.commands"), {}),
         ("POST", "/api/ui/commands/execute", _lazy("blocks.ui.commands"), {}),
         ("POST", "/api/ui/clipboard", _lazy("blocks.ui.clipboard"), {}),

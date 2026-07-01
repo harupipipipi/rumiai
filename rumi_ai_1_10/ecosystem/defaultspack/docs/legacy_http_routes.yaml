@@ -2352,6 +2352,27 @@ legacy_routes:
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
 - method: GET
+  pattern: /api/connections/codex
+  legacy_block_module: blocks.connections.codex
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/connections/codex
+  legacy_block_module: blocks.connections.codex
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: POST
+  pattern: /api/connections/import
+  legacy_block_module: blocks.connections.import_bundle
+  replacement_function_id: ''
+  owner: connections
+  reason: tracked compatibility fallback during HTTP function migration
+  remove_after: v2.4
+- method: GET
   pattern: /api/ai/provider-key
   legacy_block_module: blocks.ai.provider_key
   replacement_function_id: ''
