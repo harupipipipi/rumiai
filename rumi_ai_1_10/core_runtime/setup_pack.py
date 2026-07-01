@@ -508,7 +508,60 @@ class SetupPackManager:
         tmp.replace(self.selection_file)
         return selection
 
-    def _grant_all_ok_for_definition(self, definition: SetupPackDefinition) -> Dict[str, Any]:
+    def _snapshot_selection_file(self) -> Dict[str, Any]:
+        try:
+            return {
+                "exists": self.selection_file.is_file(),
+                "content": self.selection_file.read_text(encoding="utf-8")
+                if self.selection_file.is_file()
+                else None,
+            }
+        except OSError:
+            logger.debug("Failed to snapshot setup pack selection file", exc_info=True)
+            return {"exists": False, "content": None}
+
+    def _restore_selection_file(self, snapshot: Dict[str, Any]) -> None:
+        try:
+            if snapshot.get("exists"):
+                self.selection_file.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self.selection_file.with_suffix(".tmp")
+                tmp.write_text(str(snapshot.get("content") or ""), encoding="utf-8")
+                tmp.replace(self.selection_file)
+            elif self.selection_file.exists():
+                self.selection_file.unlink()
+        except OSError:
+            logger.debug("Failed to restore setup pack selection file", exc_info=True)
+
+    def _snapshot_active_pack_identity(self) -> Dict[str, Any]:
+        try:
+            from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
+
+            active = get_active_ecosystem_manager()
+            return {
+                "available": True,
+                "active_pack_identity": getattr(active, "active_pack_identity", None),
+            }
+        except Exception:
+            logger.debug("Failed to snapshot active_pack_identity", exc_info=True)
+            return {"available": False, "active_pack_identity": None}
+
+    def _restore_active_pack_identity(self, snapshot: Dict[str, Any]) -> None:
+        if not snapshot.get("available"):
+            return
+        try:
+            from backend_core.ecosystem.active_ecosystem import get_active_ecosystem_manager
+
+            active = get_active_ecosystem_manager()
+            active.active_pack_identity = snapshot.get("active_pack_identity")
+        except Exception:
+            logger.debug("Failed to restore active_pack_identity", exc_info=True)
+
+    def _grant_all_ok_for_definition(
+        self,
+        definition: SetupPackDefinition,
+        *,
+        rollback_on_failure: bool = False,
+    ) -> Dict[str, Any]:
         from .capability_grant_manager import get_capability_grant_manager
 
         gm = get_capability_grant_manager()
@@ -536,13 +589,46 @@ class SetupPackManager:
             },
             error=None if result.failed_count == 0 else "partial_grant_failure",
         )
+        revoked_count = 0
+        if rollback_on_failure and result.failed_count:
+            revoked = [
+                gm.revoke_permission(definition.target_pack_id, permission_id)
+                for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+            ]
+            revoked_count = sum(1 for item in revoked if item)
+            self._log_permission_event(
+                "revoke_all_ok",
+                True,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": definition.pack_id,
+                    "revoked_count": revoked_count,
+                    "reason": "setup_pack_grant_all_ok_rollback",
+                },
+            )
         return {
             "granted": result.failed_count == 0,
             "principal_id": definition.target_pack_id,
             "permission_ids": list(SETUP_PACK_ALL_OK_PERMISSIONS),
             "granted_count": result.granted_count,
             "failed_count": result.failed_count,
+            "rolled_back": bool(rollback_on_failure and result.failed_count),
+            "revoked_count": revoked_count,
         }
+
+    @staticmethod
+    def _approval_snapshot(manager: Any, target_pack_id: str) -> Dict[str, Any]:
+        get_approval = getattr(manager, "get_approval", None)
+        if not callable(get_approval):
+            return {"available": False, "approval": None}
+        approval = get_approval(target_pack_id)
+        if approval is None:
+            return {"available": True, "approval": None}
+        to_dict = getattr(approval, "to_dict", None)
+        if callable(to_dict):
+            return {"available": True, "approval": to_dict()}
+        return {"available": False, "approval": None}
 
     def _approve_target_pack(self, target_pack_id: str) -> Dict[str, Any]:
         try:
@@ -563,6 +649,7 @@ class SetupPackManager:
             if callable(get_status):
                 status = get_status(target_pack_id)
                 previous_status = getattr(status, "value", status)
+            approval_before = self._approval_snapshot(am, target_pack_id)
             result = am.approve(target_pack_id)
             if not getattr(result, "success", False):
                 return {
@@ -571,11 +658,17 @@ class SetupPackManager:
                     "reason": "target_pack_approval_failed",
                     "error": getattr(result, "error", "approval_failed"),
                 }
+            approval_after = self._approval_snapshot(am, target_pack_id)
+            changed = previous_status != "approved"
+            if approval_before.get("available") and approval_after.get("available"):
+                changed = approval_before.get("approval") != approval_after.get("approval")
             return {
                 "approved": True,
                 "skipped": False,
                 "reason": None,
-                "changed": previous_status != "approved",
+                "changed": changed,
+                "approval_snapshot_available": approval_before.get("available", False),
+                "approval_snapshot": approval_before.get("approval"),
             }
         except Exception as exc:
             logger.debug("Failed to auto-approve setup pack target", exc_info=True)
@@ -650,9 +743,29 @@ class SetupPackManager:
         if not approval_result.get("changed"):
             return
         try:
-            from .approval_manager import get_approval_manager
+            from .approval_manager import PackApproval, get_approval_manager
 
             am = get_approval_manager()
+            if approval_result.get("approval_snapshot_available"):
+                snapshot = approval_result.get("approval_snapshot")
+                restore_approval = getattr(am, "restore_approval", None)
+                if callable(restore_approval):
+                    restore_approval(target_pack_id, snapshot)
+                    return
+                if snapshot is None:
+                    remove_approval = getattr(am, "remove_approval", None)
+                    if callable(remove_approval):
+                        remove_approval(target_pack_id)
+                    return
+                approval = PackApproval.from_dict(snapshot)
+                approvals = getattr(am, "_approvals", None)
+                if isinstance(approvals, dict):
+                    approvals[target_pack_id] = approval
+                save_grant = getattr(am, "_save_grant", None)
+                if callable(save_grant):
+                    save_grant(approval)
+                return
+
             remove_approval = getattr(am, "remove_approval", None)
             if callable(remove_approval):
                 remove_approval(target_pack_id)
@@ -971,6 +1084,8 @@ class SetupPackManager:
 
         active_definition = self._choose_active_definition(installed_definitions)
         active_target = locations[active_definition.target_pack_id]
+        active_identity_snapshot = self._snapshot_active_pack_identity()
+        selection_snapshot = self._snapshot_selection_file()
         active_pack_identity = self._set_active_pack_identity(active_target.ecosystem_json_path)
 
         if active_pack_identity is None:
@@ -985,6 +1100,8 @@ class SetupPackManager:
                 installable_definitions,
                 approval_results,
             )
+            self._restore_active_pack_identity(active_identity_snapshot)
+            self._restore_selection_file(selection_snapshot)
             self._log_system_event(
                 "setup_pack.install",
                 False,
@@ -1014,7 +1131,50 @@ class SetupPackManager:
                 "status_code": 500,
             }
 
-        selection = self._write_selection(installed_definitions, active_definition)
+        try:
+            selection = self._write_selection(installed_definitions, active_definition)
+        except Exception as exc:
+            errors.append({
+                "setup_pack_id": active_definition.pack_id,
+                "target_pack_id": active_definition.target_pack_id,
+                "error": str(exc) or "Failed to persist setup pack selection",
+                "reason": "selection_write_failed",
+            })
+            self._rollback_install_side_effects(
+                installed_definitions,
+                installable_definitions,
+                approval_results,
+            )
+            self._restore_active_pack_identity(active_identity_snapshot)
+            self._restore_selection_file(selection_snapshot)
+            self._log_system_event(
+                "setup_pack.install",
+                False,
+                details={
+                    "setup_pack_ids": [definition.pack_id for definition in installed_definitions],
+                    "target_pack_ids": [definition.target_pack_id for definition in installed_definitions],
+                    "active_setup_pack_id": active_definition.pack_id,
+                    "active_target_pack_id": active_definition.target_pack_id,
+                    "errors": errors,
+                },
+                error="selection_write_failed",
+            )
+            return {
+                "success": False,
+                "installed": False,
+                "installed_setup_pack_ids": [],
+                "installed_target_pack_ids": [],
+                "installed_setup_target_map": {},
+                "granted_all_ok_target_pack_ids": [],
+                "skipped_all_ok_setup_pack_ids": [],
+                "active_setup_pack_id": None,
+                "active_target_pack_id": None,
+                "active_pack_identity": None,
+                "selection": {},
+                "errors": errors,
+                "error": "Setup pack selection write failed",
+                "status_code": 500,
+            }
         self._log_system_event(
             "setup_pack.install",
             True,
@@ -1153,7 +1313,7 @@ class SetupPackManager:
                 "approval": approval_result,
                 "principal_id": definition.target_pack_id,
             }
-        return self._grant_all_ok_for_definition(definition)
+        return self._grant_all_ok_for_definition(definition, rollback_on_failure=True)
 
     def revoke_all_ok(self, setup_pack_id: str) -> Dict[str, Any]:
         definitions = self._load_definitions()
