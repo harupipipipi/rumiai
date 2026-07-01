@@ -210,7 +210,8 @@ domains:
     may_import: []
     path: domain/memory2
   mobile:
-    may_import: []
+    may_import:
+    - domain/tool
     path: domain/mobile
   output_profiles:
     may_import: []
