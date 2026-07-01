@@ -8,7 +8,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from domain.ai_client.model_metadata_schema import (
+from ..model_metadata_schema import (
     context_window_value,
     normalize_capability_map,
     normalize_request_features,
