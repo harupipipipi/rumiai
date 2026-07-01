@@ -9,6 +9,9 @@ crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+# Tauri's schemars 0.8 build graph expects indexmap 1.x with the std
+# hasher default available when preserve_order is enabled.
+indexmap = { version = "1.9.3", features = ["std"] }
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

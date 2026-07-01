@@ -26,7 +26,11 @@ function permissionStatusLabel(permission: DesktopPermissionStatus): string {
   return permission.status || 'Unknown';
 }
 
-export function Settings() {
+interface SettingsProps {
+  initialTab?: 'profile' | 'security' | 'version';
+}
+
+export function Settings({initialTab = 'profile'}: SettingsProps = {}) {
   const t = useT();
   const profile = useAppStore(state => state.profile);
   const updateProfile = useAppStore(state => state.updateProfile);
@@ -49,7 +53,7 @@ export function Settings() {
   const setColorMode = useAppStore(state => state.setColorMode);
   const addToast = useAppStore(state => state.addToast);
 
-  const [activeTab, setActiveTab] = useState<'profile' | 'version'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'security' | 'version'>(initialTab);
   const [formData, setFormData] = useState(profile);
   const [isConnecting, setIsConnecting] = useState(false);
   const [showAvatarPicker, setShowAvatarPicker] = useState(false);
@@ -122,6 +126,8 @@ export function Settings() {
     if (activeTab === 'version') {
       loadUpdates();
       loadUpdateSettings();
+    }
+    if (activeTab === 'security') {
       void loadBackgroundStatus();
       void loadDesktopInfo();
     }
@@ -192,6 +198,19 @@ export function Settings() {
             )}
           >
             <User className="h-4 w-4" /> {t('settings.profile')}
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === 'security'}
+            onClick={() => setActiveTab('security')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px",
+              activeTab === 'security'
+                ? "border-accent text-accent"
+                : "border-transparent text-text-muted hover:text-text-main"
+            )}
+          >
+            <ShieldCheck className="h-4 w-4" /> Security
           </button>
           <button
             role="tab"
@@ -414,6 +433,145 @@ export function Settings() {
           </div>
         )}
 
+        {/* Security Tab */}
+        {activeTab === 'security' && (
+          <div className="flex flex-col gap-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>Runtime Security</CardTitle>
+                <CardDescription>Local execution stays approval-aware across host actions, pack launches, and profile policy.</CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 md:grid-cols-3">
+                {[
+                  ['Client approval flags', 'Never trusted directly'],
+                  ['Write-like actions', 'Approval gated'],
+                  ['Pack execution', 'Grant scoped'],
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-lg border border-border bg-bg-main/50 p-4">
+                    <div className="text-xs uppercase tracking-[0.16em] text-text-muted">{label}</div>
+                    <div className="mt-2 text-sm font-medium text-text-main">{value}</div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            {false && desktopShellAvailable && (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle>Background Control</CardTitle>
+                    <CardDescription>Keep the local Kernel available while the window is hidden.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={loadBackgroundStatus} disabled={backgroundBusy} loading={backgroundBusy}>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Refresh
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Window</span>
+                      <Badge variant={backgroundStatus?.app_visible ? 'secondary' : 'default'}>
+                        {backgroundStatus?.app_visible ? 'Visible' : backgroundStatus ? 'Background' : 'Unknown'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Kernel</span>
+                      <Badge variant={backgroundStatus?.kernel_running ? 'secondary' : 'destructive'}>
+                        {backgroundStatus?.kernel_running ? 'Running' : backgroundStatus ? 'Stopped' : 'Unknown'}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <span className="text-sm text-text-main">Control</span>
+                      <Badge variant={backgroundStatus?.enabled === false ? 'destructive' : 'secondary'}>
+                        {backgroundStatus?.enabled === false ? 'Shutting down' : backgroundStatus ? 'Ready' : 'Unknown'}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span className="text-xs text-text-muted">
+                      Foreground: {backgroundStatus?.foreground_window ?? 'none'}
+                    </span>
+                    <Button onClick={handleSendToBackground} disabled={backgroundBusy || backgroundStatus?.enabled === false} loading={backgroundBusy}>
+                      <MonitorOff className="h-3.5 w-3.5" />
+                      Send to Background
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {desktopShellAvailable && (
+              <Card>
+                <CardHeader className="flex-row items-center justify-between space-y-0">
+                  <div>
+                    <CardTitle>Host Permissions</CardTitle>
+                    <CardDescription>Rumi Viewer owns host permission checks for screen, keyboard, mouse, browser, and computer actions.</CardDescription>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    Refresh
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-lg border border-border bg-bg-main/50 p-4">
+                    <p className="text-sm font-medium text-text-main">Permission subject: {desktopInfo?.permission_subject ?? 'Rumi Viewer'}</p>
+                    <p className="mt-2 text-xs leading-5 text-text-muted">
+                      Host permissions are checked in the viewer bridge before local execution. Defaultspack and other packs can request actions, but the viewer remains the local permission host.
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
+                      <span className="rounded-full border border-border px-2.5 py-1">screen capture</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">clicks and keyboard</span>
+                      <span className="rounded-full border border-border px-2.5 py-1">browser control</span>
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {permissionRows.map((permission) => (
+                      <div key={permission.id} className="rounded-lg border border-border p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-start gap-2">
+                            <ShieldCheck className="mt-0.5 h-4 w-4 flex-shrink-0 text-text-muted" />
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-text-main">{permission.label}</p>
+                              <p className="mt-1 text-xs leading-5 text-text-muted">{permission.detail}</p>
+                            </div>
+                          </div>
+                          <Badge variant={permissionBadgeVariant(permission)}>{permissionStatusLabel(permission)}</Badge>
+                        </div>
+                        {permission.settings_hint && (
+                          <p className="mt-3 rounded-md bg-bg-hover px-3 py-2 text-xs text-text-muted">
+                            {permission.settings_hint}
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {desktopInfoBusy && permissionRows.length === 0 && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Reading host permission status from Rumi Viewer...
+                    </p>
+                  )}
+                  {desktopInfoError && permissionRows.length === 0 && (
+                    <p className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+                      {desktopInfoError}
+                    </p>
+                  )}
+                  {!desktopInfoBusy && !desktopInfoError && desktopInfo && permissionRows.length === 0 && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Rumi Viewer returned no host permission rows. Use Refresh after changing system settings.
+                    </p>
+                  )}
+                  {!desktopInfoBusy && !desktopInfoError && !desktopInfo && (
+                    <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
+                      Click Refresh to read host permission status from Rumi Viewer.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
         {/* Version Tab */}
         {activeTab === 'version' && (
           <div className="flex flex-col gap-6">
@@ -496,7 +654,7 @@ export function Settings() {
               </Card>
             )}
 
-            {desktopShellAvailable && (
+            {false && desktopShellAvailable && (
               <Card>
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>

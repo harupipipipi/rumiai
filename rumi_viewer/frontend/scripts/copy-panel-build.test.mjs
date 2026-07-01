@@ -13,12 +13,12 @@ test("copyPanelBuild replaces panel output with dist contents", async () => {
 
   await writeFile(join(root, "placeholder"), "root", "utf8");
   await mkdir(distDir, { recursive: true });
-  await writeFile(join(distDir, "index.html"), "<main>ok</main>", "utf8");
+  await writeFile(join(distDir, "index.html"), "<main>ok</main>\r\n", "utf8");
   await mkdir(panelDir, { recursive: true });
   await writeFile(join(panelDir, "old.txt"), "old", "utf8");
 
   await copyPanelBuild({ distDir, panelDir });
 
-  assert.equal(await readFile(join(panelDir, "index.html"), "utf8"), "<main>ok</main>");
+  assert.equal(await readFile(join(panelDir, "index.html"), "utf8"), "<main>ok</main>\n");
   await assert.rejects(readFile(join(panelDir, "old.txt"), "utf8"));
 });

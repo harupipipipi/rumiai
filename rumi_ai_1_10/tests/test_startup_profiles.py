@@ -486,6 +486,47 @@ def test_add_pack_to_profile(tmp_path: Path):
     assert "helperpack" in result["profile"]["packs"]
 
 
+def test_add_multiple_tool_packs_keeps_base_pack_and_runtime_selection(tmp_path: Path):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root, "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    _write_pack(eco_root, "searchpack", nodes=["tool"])
+    _write_pack(eco_root, "localpack", nodes=["tool"])
+    locations = _discover_locations(eco_root, ["defaultspack", "searchpack", "localpack"])
+    manager = StartupProfileManager(storage_path=tmp_path / "startup_profiles.json")
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        created = manager.create_profile({"base_pack": "defaultspack", "name": "Tool Mix"})
+        profile_id = created["profile"]["profile_id"]
+        manager.add_pack_to_profile(profile_id, "searchpack")
+        manager.add_pack_to_profile(profile_id, "localpack")
+        result = manager.update_runtime_fields(
+            profile_id,
+            {
+                "metadata": {
+                    "selected": {
+                        "tools": ["searchpack.tool", "localpack.tool"],
+                        "webhooks": [],
+                        "api_routes": [],
+                        "prompts": [],
+                        "frontend": [],
+                        "flows": [],
+                        "nodes": [],
+                    }
+                },
+                "policy": {"tool_allowlist": ["searchpack.tool", "localpack.tool"]},
+            },
+        )
+
+    assert result["updated"] is True
+    assert result["profile"]["packs"] == ["defaultspack", "searchpack", "localpack"]
+    assert result["profile"]["metadata"]["selected"]["tools"] == ["searchpack.tool", "localpack.tool"]
+    assert result["profile"]["policy"]["tool_allowlist"] == ["searchpack.tool", "localpack.tool"]
+
+
 def test_add_pack_to_profile_rejects_pack_without_approval_record(tmp_path: Path):
     eco_root = tmp_path / "ecosystem"
     _write_pack(
@@ -1020,6 +1061,94 @@ def test_launch_profile_persists_graph_surface_launch_target(
     assert capability_graph["surface_launch_target"]["pack_id"] == "frontendpack"
     assert active.metadata["startup_surface_launch_target"]["pack_id"] == "frontendpack"
     assert active.metadata["startup_capability_graph"]["surface_launch_target"]["pack_id"] == "frontendpack"
+
+
+def test_launch_profile_compiles_defaultspack_with_frontend_override_and_multiple_tool_packs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    repo_defaultspack = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
+    eco_root = tmp_path / "ecosystem"
+    _copy_defaultspack_with_host_registration(
+        repo_defaultspack,
+        eco_root / "defaultspack",
+        monkeypatch,
+    )
+    _write_frontendpack(eco_root, component_node=True)
+    _write_pack(eco_root, "searchpack", nodes=["tool"])
+    _write_pack(eco_root, "localpack", nodes=["tool"])
+    selected_tools = ["searchpack.tool", "localpack.tool"]
+    manager = StartupProfileManager(
+        storage_path=tmp_path / "startup_profiles.json",
+        interface_registry=InterfaceRegistry(),
+        approval_manager=_FakeApprovalManager(
+            reason_by_pack={
+                "defaultspack": None,
+                "frontendpack": None,
+                "searchpack": None,
+                "localpack": None,
+            }
+        ),
+        ecosystem_dir=str(eco_root),
+    )
+    active = _FakeActiveEcosystem()
+
+    with patch(
+        "backend_core.ecosystem.active_ecosystem.get_active_ecosystem_manager",
+        return_value=active,
+    ):
+        with patch("core_runtime.api.control_panel_handlers.request_kernel_restart"):
+            created = manager.create_profile({
+                "base_pack": "defaultspack",
+                "name": "Pack Mix",
+                "default_graph": "defaultspack.startup",
+                "capability_profile_id": "defaultspack.startup",
+                "launch_capability_graph": True,
+            })
+            profile_id = created["profile"]["profile_id"]
+            assert manager.add_pack_to_profile(profile_id, "frontendpack")["pack_added"] == "frontendpack"
+            assert manager.add_pack_to_profile(profile_id, "searchpack")["pack_added"] == "searchpack"
+            assert manager.add_pack_to_profile(profile_id, "localpack")["pack_added"] == "localpack"
+            override = manager.set_node_override(profile_id, "frontend.surface", "frontendpack.web_surface")
+            runtime_update = manager.update_runtime_fields(
+                profile_id,
+                {
+                    "metadata": {
+                        "selected": {
+                            "tools": selected_tools,
+                            "webhooks": [],
+                            "api_routes": [],
+                            "prompts": [],
+                            "frontend": [],
+                            "flows": [],
+                            "nodes": [],
+                        }
+                    },
+                    "policy": {"tool_allowlist": selected_tools},
+                },
+            )
+            preview = manager.compile_profile_preview(profile_id)
+            response = manager.launch_profile(profile_id)
+
+    assert runtime_update["updated"] is True
+    assert override["profile"]["node_overrides"]["frontend.surface"] == "frontendpack.web_surface"
+    assert preview["ok"] is True
+    preview_runtime = preview["capability_graph"]["runtime_profile"]
+    assert preview_runtime["policy"]["tool_allowlist"] == selected_tools
+    assert preview_runtime["defaultspack"]["agents"]["agent"]["tools"] == selected_tools
+    assert preview["surface_launch_target"]["pack_id"] == "frontendpack"
+
+    assert response["launched"] is True
+    launch_runtime = response["capability_graph"]["runtime_profile"]
+    assert launch_runtime["policy"]["tool_allowlist"] == selected_tools
+    assert launch_runtime["defaultspack"]["agents"]["agent"]["tools"] == selected_tools
+    assert response["capability_graph"]["surface_launch_target"]["pack_id"] == "frontendpack"
+
+    assert active.active_pack_identity == "rumi:ecosystem/defaultspack"
+    assert active.metadata["startup_base_pack"] == "defaultspack"
+    assert active.metadata["startup_packs"] == ["defaultspack", "frontendpack", "searchpack", "localpack"]
+    assert active.metadata["startup_node_overrides"]["frontend.surface"] == "frontendpack.web_surface"
+    assert active.metadata["startup_surface_launch_target"]["pack_id"] == "frontendpack"
 
 
 def test_compile_profile_preview_uses_draft_node_overrides(

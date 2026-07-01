@@ -159,7 +159,7 @@ function createNodesFromSimpleDocument(doc: FlowDocument, meta: FlowDocumentMeta
 
 export function nodesToYaml(nodes: Node[], edges: Edge[], meta?: Partial<FlowDocumentMeta>): string {
   try {
-    const flowId = deriveFlowId(meta);
+    const flowId = deriveFlowId(meta ?? {});
     const startNode = nodes.find((node) => node.type === 'trigger');
     const executionPlan = buildExecutionPlan(nodes, edges);
     const phases = meta?.phases?.length ? meta.phases : [DEFAULT_GRAPH_PHASE];

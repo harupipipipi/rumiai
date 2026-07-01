@@ -12,6 +12,7 @@ const GENERATED_RESOURCE_DIRS: &[&str] = &[
 
 fn main() {
     println!("cargo:rerun-if-changed=splash/index.html");
+    println!("cargo:rerun-if-changed=splash/rumi_viewer_startup_blade_cut.svg");
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=../../pack-shell/Cargo.toml");
     println!("cargo:rerun-if-changed=../../pack-shell/src");

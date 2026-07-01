@@ -104,7 +104,7 @@ export function useFlowEditor({
     }
   }, [pressedKeys, reactFlowInstance, saveHistory, setNodes]);
 
-  const onPaneContextMenu = useCallback((event: MouseEvent) => {
+  const onPaneContextMenu = useCallback((event: MouseEvent | globalThis.MouseEvent) => {
     event.preventDefault();
     setMenuPos({ x: event.clientX, y: event.clientY });
     setPendingConnection(null);
