@@ -1324,6 +1324,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.github_issue_read
+  defaults.coding.github.pr.create:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.github_pr_create
   defaults.coding.github.pr.read:
     owner: coding
     reason: legacy caller compatibility
@@ -1339,6 +1344,11 @@ aliases:
     reason: legacy caller compatibility
     remove_after: v2.3
     replacement: defaultspack.coding.github_issue_read
+  defaults.coding.github_pr_create:
+    owner: coding
+    reason: legacy caller compatibility
+    remove_after: v2.3
+    replacement: defaultspack.coding.github_pr_create
   defaults.coding.github_pr_read:
     owner: coding
     reason: legacy caller compatibility
