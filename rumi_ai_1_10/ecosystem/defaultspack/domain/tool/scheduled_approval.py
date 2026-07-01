@@ -16,6 +16,14 @@ _DESKTOP_FRAME_TEMPLATES = ("/api/desktops/{id}/frame", "/api/desktops/{seat_id}
 _APPROVAL_REQUIRED_FINISH_REASONS = {"approval_required", "authority_approval_required"}
 _SCHEDULE_AUTO_APPROVAL_EXPIRES_IN_SECONDS = 24 * 60 * 60
 _SCHEDULE_AUTO_APPROVAL_MAX_EXPIRES_IN_SECONDS = 30 * 24 * 60 * 60
+_AUTHORITY_PERMISSION_IDS = {"model.invoke", "api_key.use", "network.egress"}
+_AUTHORITY_PROVIDER_DOMAINS = {
+    "google": {"generativelanguage.googleapis.com"},
+    "opencode-go": {"opencode.ai"},
+    "opencode-zen": {"opencode.ai"},
+    "vercel-ai-gateway": {"ai-gateway.vercel.sh"},
+    "xiaomi-token-plan-sgp": {"token-plan-sgp.xiaomimimo.com"},
+}
 _DISPLAY_TOOL_ALIASES = {
     "desktop_list": "desktop_list",
     "desktop_create": "desktop_create",
@@ -222,10 +230,15 @@ def _first_text_value(source: dict[str, Any], keys: tuple[str, ...]) -> str:
 
 
 def _is_approval_required_mapping(value: dict[str, Any]) -> bool:
-    if value.get("approval_required") is True or value.get("requires_approval") is True:
+    if (
+        value.get("approval_required") is True
+        or value.get("requires_approval") is True
+        or value.get("approvalRequired") is True
+        or value.get("requiresApproval") is True
+    ):
         return True
     status = str(value.get("status") or value.get("state") or value.get("finish_reason") or "").strip().lower()
-    return status in {"approval_required", "requires_approval", "pending_approval"}
+    return status in {"approval_required", "authority_approval_required", "requires_approval", "pending_approval"}
 
 
 def _nested_payload_mapping(value: dict[str, Any]) -> dict[str, Any]:
@@ -237,6 +250,9 @@ def _nested_payload_mapping(value: dict[str, Any]) -> dict[str, Any]:
 
 
 def _pending_approval_from_mapping(value: dict[str, Any]) -> dict[str, Any] | None:
+    authority_pending = _pending_authority_approval_from_mapping(value)
+    if authority_pending:
+        return authority_pending
     if not _is_approval_required_mapping(value):
         return None
 
@@ -270,6 +286,32 @@ def _pending_approval_from_mapping(value: dict[str, Any]) -> dict[str, Any] | No
         "expires_at": value.get("expires_at"),
         "risk_level": value.get("risk_level"),
         "display_summary": value.get("display_summary") or value.get("summary"),
+    }
+    return {key: item for key, item in pending.items() if item not in ("", None)}
+
+
+def _pending_authority_approval_from_mapping(value: dict[str, Any]) -> dict[str, Any] | None:
+    request_id = _first_text_value(
+        value,
+        ("request_id", "requestId", "approval_request_id", "approvalRequestId", "approval_id", "approvalId", "id"),
+    )
+    permission_id = _first_text_value(value, ("permission_id", "permissionId", "permission"))
+    if not request_id or permission_id not in _AUTHORITY_PERMISSION_IDS:
+        return None
+    resource = value.get("resource") if isinstance(value.get("resource"), dict) else {}
+    pending = {
+        "authority_request": True,
+        "approval_required": True,
+        "requires_approval": True,
+        "approval_request_id": request_id,
+        "request_id": request_id,
+        "permission_id": permission_id,
+        "operation": permission_id,
+        "action": permission_id,
+        "resource": dict(resource),
+        "expires_at": value.get("expires_at") or value.get("expiresAt"),
+        "risk_level": value.get("risk_level") or value.get("riskLevel"),
+        "display_summary": value.get("display_summary") or value.get("displaySummary") or value.get("summary"),
     }
     return {key: item for key, item in pending.items() if item not in ("", None)}
 
@@ -404,6 +446,160 @@ def _without_approval_token(value: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
+def _policy_model_allowlist(task_cfg: dict[str, Any]) -> set[str]:
+    policy = task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+    raw = policy.get("model_allowlist")
+    if not isinstance(raw, list):
+        raw = []
+    allowlist = {str(item or "").strip() for item in raw if str(item or "").strip()}
+    model = str(task_cfg.get("model") or "").strip()
+    if model:
+        allowlist.add(model)
+    return allowlist
+
+
+def _authority_resource_model_candidates(resource: dict[str, Any]) -> set[str]:
+    provider_id = str(resource.get("provider_id") or "").strip()
+    model_id = str(resource.get("model_id") or "").strip()
+    model_ref = str(resource.get("model_ref") or "").strip()
+    candidates = {value for value in (model_ref, model_id) if value}
+    if provider_id and model_id:
+        candidates.add(f"{provider_id}/{model_id}")
+    return candidates
+
+
+def _authority_resource_domain(resource: dict[str, Any]) -> str:
+    domain = str(resource.get("domain") or resource.get("host") or "").strip().lower()
+    if domain:
+        return domain
+    endpoint_url = str(resource.get("endpoint_url") or resource.get("url") or "").strip()
+    if endpoint_url:
+        return urlsplit(endpoint_url).netloc.lower()
+    return ""
+
+
+def _authority_request_allowed_for_schedule(
+    task_cfg: dict[str, Any],
+    request: dict[str, Any],
+    *,
+    conversation_id: str,
+) -> bool:
+    if str(request.get("status") or "").strip().lower() != "pending":
+        return False
+    if str(request.get("profile_id") or "").strip() not in {"", _MIMO_CODING_COMPANY_PROFILE_ID}:
+        return False
+    principal_id = str(request.get("principal_id") or "").strip()
+    if principal_id and f"profile:{_MIMO_CODING_COMPANY_PROFILE_ID}" not in principal_id:
+        return False
+    stored_conversation_id = str(request.get("conversation_id") or "").strip()
+    if stored_conversation_id and stored_conversation_id != str(conversation_id or "").strip():
+        return False
+    permission_id = str(request.get("permission_id") or "").strip()
+    if permission_id not in _AUTHORITY_PERMISSION_IDS:
+        return False
+
+    resource = request.get("resource") if isinstance(request.get("resource"), dict) else {}
+    model_candidates = _authority_resource_model_candidates(resource)
+    model_allowlist = _policy_model_allowlist(task_cfg)
+    if not model_candidates or not model_allowlist.intersection(model_candidates):
+        return False
+
+    if permission_id == "network.egress":
+        provider_id = str(resource.get("provider_id") or "").strip()
+        domain = _authority_resource_domain(resource)
+        allowed_domains = _AUTHORITY_PROVIDER_DOMAINS.get(provider_id, set())
+        if not domain or (allowed_domains and domain not in allowed_domains):
+            return False
+    return True
+
+
+def _authority_related_followups(approval: dict[str, Any]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    related = approval.get("related_approvals")
+    if isinstance(related, dict):
+        values = related.values()
+    elif isinstance(related, list):
+        values = related
+    else:
+        values = []
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        token = str(item.get("token") or item.get("approval_token") or "").strip()
+        request_id = str(item.get("request_id") or item.get("approval_request_id") or "").strip()
+        permission_id = str(item.get("permission_id") or "").strip()
+        if token and request_id and permission_id:
+            items.append(
+                {
+                    "request_id": request_id,
+                    "approval_request_id": request_id,
+                    "approval_token": token,
+                    "permission_id": permission_id,
+                    "hidden": True,
+                }
+            )
+    return items
+
+
+def _approve_authority_schedule_pending_approval(
+    task_cfg: dict[str, Any],
+    pending: dict[str, Any],
+    *,
+    conversation_id: str,
+) -> dict[str, Any] | None:
+    request_id = str(pending.get("approval_request_id") or pending.get("request_id") or "").strip()
+    permission_id = str(pending.get("permission_id") or "").strip()
+    if not request_id or permission_id not in _AUTHORITY_PERMISSION_IDS:
+        return None
+    try:
+        from core_runtime.authority import get_authority_service
+        from core_runtime.authority.ui_operator import sign_ui_operator
+    except Exception:
+        return None
+
+    service = get_authority_service()
+    request_result = service.get_request(request_id, profile_id=_MIMO_CODING_COMPANY_PROFILE_ID)
+    if not isinstance(request_result, dict) or not request_result.get("success"):
+        return None
+    request = request_result.get("request") if isinstance(request_result.get("request"), dict) else {}
+    if str(request.get("permission_id") or "").strip() != permission_id:
+        return None
+    if not _authority_request_allowed_for_schedule(task_cfg, request, conversation_id=conversation_id):
+        return None
+
+    approval = service.approve_request(
+        request_id,
+        scope="once",
+        expires_in_seconds=_schedule_auto_approval_expires_in_seconds(task_cfg),
+        related_permissions=["api_key.use", "network.egress"] if permission_id == "model.invoke" else None,
+        ui_operator=sign_ui_operator(request_id, nonce="mimo-scheduled-authority"),
+    )
+    if not isinstance(approval, dict) or not approval.get("approved"):
+        return None
+    token = str(approval.get("token") or approval.get("approval_token") or "").strip()
+    if not token:
+        return None
+    related = _authority_related_followups(approval)
+    followup = {
+        "request_id": request_id,
+        "approval_request_id": request_id,
+        "approval_token": token,
+        "permission_id": permission_id,
+        "hidden": True,
+    }
+    if related:
+        followup["approvals"] = [followup, *related]
+    return {
+        "summary": {
+            "request_id": request_id,
+            "tool_name": "authority",
+            "operation": permission_id,
+            "status": "approved",
+        },
+        "followup": followup,
+    }
+
+
 def _approval_followup_arguments(
     *,
     tool_name: str,
@@ -437,6 +633,15 @@ def approve_schedule_pending_approval(
 ) -> dict[str, Any] | None:
     if not _mimo_schedule_auto_approval_enabled(task_cfg):
         return None
+    normalized_pending = _pending_approval_from_mapping(pending) if isinstance(pending, dict) else None
+    if normalized_pending:
+        pending = normalized_pending
+    if pending.get("authority_request") or str(pending.get("permission_id") or "").strip() in _AUTHORITY_PERMISSION_IDS:
+        return _approve_authority_schedule_pending_approval(
+            task_cfg,
+            pending,
+            conversation_id=conversation_id,
+        )
     request_id = str(pending.get("approval_request_id") or pending.get("request_id") or "").strip()
     tool_name = _canonical_tool_name(pending.get("tool_name"))
     operation = str(pending.get("operation") or pending.get("action") or "").strip()

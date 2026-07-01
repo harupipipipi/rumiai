@@ -37,7 +37,7 @@ COMPANY_ID = "mimo-coding-company"
 COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
 DEFAULT_MAIN_MODEL = "opencode-zen/mimo-v2.5-free"
-DEFAULT_VISION_MODEL = "google/gemma-4-31b-it"
+DEFAULT_VISION_MODEL = "vercel-ai-gateway/google/gemma-4-31b-it"
 DEFAULT_FAST_MODEL = "opencode-zen/mimo-v2.5-free"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 SCHEDULE_CONVERSATION_LANES = {
@@ -760,6 +760,7 @@ class MimoCodingCompanyRuntime:
                         "GET /api/company/status",
                         "GET /api/desktops",
                         "GET /api/health",
+                        "GET /api/tasks",
                     ],
                 },
             )
@@ -3308,6 +3309,8 @@ class MimoCodingCompanyRuntime:
                 "GET /api/desktops",
                 "GET /api/health",
                 "GET /api/remote/host/status",
+                "GET /api/repo/files",
+                "GET /api/tasks",
                 "todo",
                 "subagent",
                 "knowledge_search",

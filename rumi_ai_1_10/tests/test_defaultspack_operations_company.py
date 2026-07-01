@@ -44,7 +44,7 @@ def test_operations_company_profile_coexists_with_default_profile():
     assert manifest["counts"]["profiles"] >= 2
 
 
-def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, monkeypatch):
+def test_mimo_coding_company_allows_opencode_mimo_and_ai_gateway_gemma(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
         DEFAULT_FAST_MODEL,
         DEFAULT_MAIN_MODEL,
@@ -58,6 +58,7 @@ def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, mon
     runtime = MimoCodingCompanyRuntime()
 
     assert "opencode-zen/mimo-v2.5-free" in allowlist
+    assert "vercel-ai-gateway/google/gemma-4-31b-it" in allowlist
     assert "google/gemma-4-31b-it" in allowlist
     assert "opencode-go/mimo-v2.5" not in allowlist
     assert "opencode-go/mimo-v2.5-pro" not in allowlist
@@ -67,8 +68,12 @@ def test_mimo_coding_company_allows_opencode_mimo_and_google_gemma(tmp_path, mon
     assert "cerebras/zai-glm-4.7" not in allowlist
     assert DEFAULT_MAIN_MODEL == "opencode-zen/mimo-v2.5-free"
     assert DEFAULT_FAST_MODEL == "opencode-zen/mimo-v2.5-free"
-    assert DEFAULT_VISION_MODEL == "google/gemma-4-31b-it"
+    assert DEFAULT_VISION_MODEL == "vercel-ai-gateway/google/gemma-4-31b-it"
     assert runtime._allowed_model("opencode-zen/mimo-v2.5-free") == "opencode-zen/mimo-v2.5-free"
+    assert (
+        runtime._allowed_model("vercel-ai-gateway/google/gemma-4-31b-it")
+        == "vercel-ai-gateway/google/gemma-4-31b-it"
+    )
     assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
 
 
@@ -355,6 +360,7 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
     assert "GET /api/company/status" in heartbeat_auto_approve
     assert "GET /api/desktops" in heartbeat_auto_approve
     assert "GET /api/health" in heartbeat_auto_approve
+    assert "GET /api/tasks" in heartbeat_auto_approve
     assert "0/4 workers reported status" in heartbeat_schedule["task"]["message"]
     assert "short read-only heartbeat" in heartbeat_schedule["task"]["message"]
     assert "at most one or two rumi_api GET checks against allowlisted /api paths" in heartbeat_schedule["task"]["message"]
@@ -386,6 +392,8 @@ def test_mimo_coding_company_bootstrap_creates_company_conversation_and_loops(tm
         "GET /api/desktops",
         "GET /api/health",
         "GET /api/remote/host/status",
+        "GET /api/repo/files",
+        "GET /api/tasks",
         "todo",
         "subagent",
         "knowledge_search",
@@ -2281,7 +2289,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "interval",
         mimo_task(
             "qa_loop",
-            model="google/gemma-4-31b-it",
+            model="vercel-ai-gateway/google/gemma-4-31b-it",
             agent_id="browser_qa",
             message="Current Gemma browser QA loop.",
         ),
@@ -2497,7 +2505,7 @@ def test_mimo_coding_company_observability_suppresses_expected_schedule_noise(tm
         "interval",
         {
             "message": "QA loop.",
-            "model": "google/gemma-4-31b-it",
+            "model": "vercel-ai-gateway/google/gemma-4-31b-it",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "browser_qa",
@@ -2825,8 +2833,8 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
 
     assert allowlist == {
         "opencode-zen/mimo-v2.5-free",
-        "google/gemma-4-31b-it",
         "vercel-ai-gateway/google/gemma-4-31b-it",
+        "google/gemma-4-31b-it",
         "stub/default",
     }
 

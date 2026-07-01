@@ -81,7 +81,7 @@
           "id": "model_allowlist",
           "label": "Model Allowlist",
           "type": "textarea",
-          "default": "opencode-zen/mimo-v2.5-free\ngoogle/gemma-4-31b-it\nvercel-ai-gateway/google/gemma-4-31b-it\nstub/default"
+          "default": "opencode-zen/mimo-v2.5-free\nvercel-ai-gateway/google/gemma-4-31b-it\ngoogle/gemma-4-31b-it\nstub/default"
         },
         {
           "id": "qa_targets",

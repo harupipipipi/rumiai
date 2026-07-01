@@ -34,6 +34,11 @@ def _setup_approval_store(tmp_path, monkeypatch):
     return approval
 
 
+class _HmacKey:
+    def get_active_key(self):
+        return "defaultspack-scheduler-authority-test-key-" + ("x" * 32)
+
+
 def _setup_schedule_store(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
@@ -3170,6 +3175,113 @@ def test_scheduler_auto_approval_renews_expired_request_before_followup_replay(t
         [duplicate],
     )
     assert filtered == []
+
+
+def test_mimo_schedule_auto_approves_camelcase_ai_gateway_authority_request(tmp_path, monkeypatch):
+    from core_runtime.authority import AuthorityService
+    from core_runtime.authority.request_store import AuthorityRequestStore
+    from domain.tool.scheduled_approval import (
+        approve_schedule_pending_approval,
+        pending_scheduled_approval_from_chat_result,
+    )
+
+    monkeypatch.setenv("RUMI_PANEL_BOOTSTRAP_SECRET", "authority-window-secret")
+    service = AuthorityService(
+        request_store=AuthorityRequestStore(tmp_path / "authority", hmac_key_manager=_HmacKey())
+    )
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
+
+    conversation_id = "conv-mimo-ai-gateway"
+    resource = {
+        "kind": "model",
+        "provider_id": "vercel-ai-gateway",
+        "model_id": "google/gemma-4-31b-it",
+        "model_ref": "vercel-ai-gateway/google/gemma-4-31b-it",
+        "domain": "ai-gateway.vercel.sh",
+        "endpoint_url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+    }
+    decision = service.check(
+        principal_id="profile:defaultspack.mimo_coding_company",
+        profile_id="defaultspack.mimo_coding_company",
+        conversation_id=conversation_id,
+        permission_id="model.invoke",
+        resource=resource,
+    )
+    assert decision.approval_required is True
+
+    raw_pending = {
+        "approvalRequestId": decision.request_id,
+        "permissionId": "model.invoke",
+        "approvalRequired": True,
+        "resource": resource,
+    }
+    pending = pending_scheduled_approval_from_chat_result(
+        {
+            "status": "ok",
+            "data": {
+                "metadata": {"pendingAuthorityApproval": raw_pending},
+            },
+        }
+    )
+    assert pending is not None
+    assert pending["authority_request"] is True
+    assert pending["request_id"] == decision.request_id
+    assert pending["permission_id"] == "model.invoke"
+
+    task_cfg = {
+        "message": "Run Gemma visual QA through Vercel AI Gateway.",
+        "model": "vercel-ai-gateway/google/gemma-4-31b-it",
+        "profile_id": "defaultspack.mimo_coding_company",
+        "tool_policy": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "model_allowlist": [
+                "opencode-zen/mimo-v2.5-free",
+                "vercel-ai-gateway/google/gemma-4-31b-it",
+            ],
+            "schedule_auto_approve_tool_requests": True,
+        },
+        "metadata": {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+        },
+    }
+
+    approved = approve_schedule_pending_approval(task_cfg, raw_pending, conversation_id=conversation_id)
+    assert approved is not None
+    followup = approved["followup"]
+    assert followup["permission_id"] == "model.invoke"
+    assert followup["approval_token"]
+    related = {
+        item["permission_id"]: item
+        for item in followup["approvals"]
+        if item["permission_id"] != "model.invoke"
+    }
+    assert set(related) == {"api_key.use", "network.egress"}
+
+    replay = service.preflight_check(
+        principal_id="profile:defaultspack.mimo_coding_company",
+        profile_id="defaultspack.mimo_coding_company",
+        conversation_id=conversation_id,
+        permission_id="model.invoke",
+        resource=resource,
+        request_id=followup["request_id"],
+        approval_token=followup["approval_token"],
+    )
+    assert replay.allowed is True
+
+    for permission_id, approval in related.items():
+        related_resource = dict(resource)
+        related_resource["kind"] = "api_key" if permission_id == "api_key.use" else "network"
+        replay = service.preflight_check(
+            principal_id="profile:defaultspack.mimo_coding_company",
+            profile_id="defaultspack.mimo_coding_company",
+            conversation_id=conversation_id,
+            permission_id=permission_id,
+            resource=related_resource,
+            request_id=approval["request_id"],
+            approval_token=approval["approval_token"],
+        )
+        assert replay.allowed is True
 
 
 def test_scheduler_auto_approves_display_name_tool_requests(tmp_path, monkeypatch):
