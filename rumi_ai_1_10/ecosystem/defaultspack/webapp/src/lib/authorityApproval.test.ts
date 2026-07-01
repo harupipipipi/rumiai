@@ -466,11 +466,20 @@ test("authority approval window finalizes hidden resume before broadcasting appr
   const source = authorityApprovalWindowSource();
 
   assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)[\s\S]*closeAuthorityApprovalWindow/);
-  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose \?\? nativeApprovalAvailableRef\.current/);
+  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose[\s\S]*nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
   assert.match(source, /const decision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, decision\);/);
   assert.match(source, /const retriedDecision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, retriedDecision\);/);
   assert.doesNotMatch(source, /settleApprovedDecision\(request,/);
   assert.match(source, /await submitRejectOnce\(\);\s*settleDeniedRequest\(request\);\s*await finalizeDeniedRequest\(request\);/);
+});
+
+test("authority approval window ignores late settlements for a request that is no longer selected", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /const requestIdRef = useRef\(requestId\)/);
+  assert.match(source, /requestIdRef\.current = requestId/);
+  assert.match(source, /if \(requestIdRef\.current !== settledRequest\.request_id\) \{\s*return;\s*\}/);
+  assert.match(source, /setPendingRequests\(\(current\) => current\.filter\(\(item\) => item\.request_id !== settledRequest\.request_id\)\)[\s\S]*if \(requestIdRef\.current !== settledRequest\.request_id\)/);
 });
 
 test("authority approval window treats post failure followed by settled GET as settled", () => {

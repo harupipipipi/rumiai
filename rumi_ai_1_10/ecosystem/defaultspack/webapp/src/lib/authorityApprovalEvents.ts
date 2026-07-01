@@ -8,6 +8,10 @@ export type AuthorityApprovalSettlement = {
   conversationId?: string | null;
 };
 
+type SubscribeAuthorityApprovalSettlementOptions = {
+  replayStored?: boolean;
+};
+
 function isSettlement(value: unknown): value is AuthorityApprovalSettlement {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -43,9 +47,21 @@ export function broadcastAuthorityApprovalSettlement(event: AuthorityApprovalSet
   }
 }
 
+export function readStoredAuthorityApprovalSettlement(): AuthorityApprovalSettlement | null {
+  try {
+    const stored = window.localStorage.getItem(AUTHORITY_APPROVAL_STORAGE_KEY);
+    if (!stored) return null;
+    return settlementFromMessage(JSON.parse(stored));
+  } catch {
+    return null;
+  }
+}
+
 export function subscribeAuthorityApprovalSettlements(
   handler: (event: AuthorityApprovalSettlement) => void,
+  options?: SubscribeAuthorityApprovalSettlementOptions,
 ): () => void {
+  let active = true;
   let channel: BroadcastChannel | null = null;
   try {
     channel = new BroadcastChannel(AUTHORITY_APPROVAL_CHANNEL);
@@ -72,7 +88,20 @@ export function subscribeAuthorityApprovalSettlements(
   };
   window.addEventListener("message", onWindowMessage);
   window.addEventListener("storage", onStorage);
+  if (options?.replayStored) {
+    const replay = () => {
+      if (!active) return;
+      const settlement = readStoredAuthorityApprovalSettlement();
+      if (settlement) handler(settlement);
+    };
+    if (typeof window.queueMicrotask === "function") {
+      window.queueMicrotask(replay);
+    } else {
+      window.setTimeout(replay, 0);
+    }
+  }
   return () => {
+    active = false;
     channel?.close();
     window.removeEventListener("message", onWindowMessage);
     window.removeEventListener("storage", onStorage);

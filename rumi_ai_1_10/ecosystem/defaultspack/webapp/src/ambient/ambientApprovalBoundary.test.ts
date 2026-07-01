@@ -91,6 +91,7 @@ test("generic authority approval settlements schedule window close", () => {
   assert.match(source, /if \(await closeCurrentWindow\(\)\) return/);
   assert.match(source, /window\.close\(\)/);
   assert.match(source, /const settleAuthorityRequest = useCallback[\s\S]*scheduleAuthorityApprovalWindowClose\(\);/);
+  assert.match(source, /nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
   assert.match(source, /await finalizeApprovedDecision\(request, decision\)/);
   assert.match(source, /await finalizeDeniedRequest\(request\)/);
 });
@@ -111,6 +112,16 @@ test("generic authority approval success refetches before settling", () => {
 
   assert.match(source, /const finalizeApprovedDecision = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus/);
   assert.match(source, /const finalizeDeniedRequest = useCallback[\s\S]*readAuthoritySettlementOrNull\(settledRequest\.request_id\)[\s\S]*settleAuthorityRequest\(finalRequest, finalStatus\)/);
+});
+
+test("ambient authority settlement subscribers replay stored browser fallback settlements", () => {
+  const source = readSource("ambient", "AmbientTriggerPanel.tsx");
+  const eventSource = readSource("lib", "authorityApprovalEvents.ts");
+
+  assert.match(eventSource, /readStoredAuthorityApprovalSettlement/);
+  assert.match(eventSource, /options\?\.replayStored/);
+  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*miniAuthorityApproval[\s\S]*\}, \{ replayStored: true \}\)/);
+  assert.match(source, /subscribeAuthorityApprovalSettlements\(\(event\) => \{[\s\S]*AMBIENT_AUTHORITY_REQUEST_ID[\s\S]*\}, \{ replayStored: true \}\)/);
 });
 
 test("generic authority approval stale post failure refetches and settles before error", () => {

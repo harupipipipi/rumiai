@@ -570,7 +570,7 @@ export function AmbientTriggerPanel({
       setMessage("AIが続きを作成しています。");
       void loadMiniConversation({ conversationId: targetConversationId, quiet: true });
       void waitForMiniAuthorityContinuation(miniAuthorityApproval, targetConversationId);
-    });
+    }, { replayStored: true });
   }, [loadMiniConversation, miniAuthorityApproval?.requestId, miniConversation?.id, miniConversationId]);
 
   useEffect(() => {
@@ -619,7 +619,7 @@ export function AmbientTriggerPanel({
     setRumiApprovalOpen(false);
     setMessage(event.status === "approved" ? "使えるようになりました。次にMacのマイク/カメラを確認します。" : "許可しませんでした。必要になったらもう一度許可できます。");
     void refresh({ probeOs: true });
-  }), []);
+  }, { replayStored: true }), []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);

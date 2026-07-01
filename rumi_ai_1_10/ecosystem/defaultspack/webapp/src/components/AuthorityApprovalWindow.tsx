@@ -175,6 +175,8 @@ export function AuthorityApprovalWindow() {
   const [nativeApprovalAvailable, setNativeApprovalAvailable] = useState(hasNativeAuthorityApprovalContext);
   const [browserApprovalToken, setBrowserApprovalToken] = useState("");
   const nativeApprovalAvailableRef = useRef(nativeApprovalAvailable);
+  const browserApprovalTokenRef = useRef(browserApprovalToken);
+  const requestIdRef = useRef(requestId);
   const locallySettledRequestsRef = useRef(new Map<string, AuthorityApprovalSettledStatus>());
   const settlementBroadcastedRef = useRef(new Set<string>());
 
@@ -265,6 +267,14 @@ export function AuthorityApprovalWindow() {
   }, []);
 
   useEffect(() => {
+    browserApprovalTokenRef.current = browserApprovalToken;
+  }, [browserApprovalToken]);
+
+  useEffect(() => {
+    requestIdRef.current = requestId;
+  }, [requestId]);
+
+  useEffect(() => {
     if (hasNativeAuthorityApprovalContext()) return;
     const tokenFromLocation = readBrowserApprovalTokenFromLocation();
     if (tokenFromLocation) {
@@ -284,11 +294,6 @@ export function AuthorityApprovalWindow() {
   ) => {
     const nextRequest: AuthorityRequest = { ...settledRequest, status };
     locallySettledRequestsRef.current.set(settledRequest.request_id, status);
-    setRequest(nextRequest);
-    setError(null);
-    setDecisionState(status === "approved"
-      ? { kind: "approved", decision: options?.decision, resumed: Boolean(options?.resumed) }
-      : { kind: "rejected" });
     setPendingRequests((current) => current.filter((item) => item.request_id !== settledRequest.request_id));
 
     const settlementKey = `${settledRequest.request_id}:${status}`;
@@ -301,7 +306,18 @@ export function AuthorityApprovalWindow() {
       });
     }
 
-    const shouldScheduleClose = options?.scheduleClose ?? nativeApprovalAvailableRef.current;
+    if (requestIdRef.current !== settledRequest.request_id) {
+      return;
+    }
+
+    setRequest(nextRequest);
+    setError(null);
+    setDecisionState(status === "approved"
+      ? { kind: "approved", decision: options?.decision, resumed: Boolean(options?.resumed) }
+      : { kind: "rejected" });
+
+    const shouldScheduleClose = options?.scheduleClose
+      ?? (nativeApprovalAvailableRef.current || Boolean(browserApprovalTokenRef.current));
     if (shouldScheduleClose) {
       scheduleAuthorityApprovalWindowClose();
     }
