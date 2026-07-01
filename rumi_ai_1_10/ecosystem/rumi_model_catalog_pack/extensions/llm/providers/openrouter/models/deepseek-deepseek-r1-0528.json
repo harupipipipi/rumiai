@@ -1,0 +1,74 @@
+{
+  "id": "openrouter/deepseek/deepseek-r1-0528",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "deepseek/deepseek-r1-0528",
+  "display_name": "DeepSeek R1 0528 via OpenRouter",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 7,
+  "defaults": {
+    "reasoning": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": true,
+    "vision": false,
+    "audio": false
+  },
+  "context_window": 163840,
+  "max_context": 163840,
+  "max_context_tokens": 163840,
+  "supports_thinking": true,
+  "thinking_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "default_thinking_level": "high",
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 32768,
+    "supported_parameters": [
+      "frequency_penalty",
+      "include_reasoning",
+      "logit_bias",
+      "logprobs",
+      "max_tokens",
+      "min_p",
+      "presence_penalty",
+      "reasoning",
+      "repetition_penalty",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_logprobs",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.0000005",
+    "completion": "0.00000215"
+  }
+}

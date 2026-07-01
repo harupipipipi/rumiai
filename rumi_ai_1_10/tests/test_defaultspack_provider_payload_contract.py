@@ -131,3 +131,97 @@ def test_openai_compatible_cerebras_reasoning_none_contract(monkeypatch):
 
     assert captured["body"]["max_completion_tokens"] == 7
     assert "reasoning_effort" not in captured["body"]
+
+
+def test_openrouter_chat_body_preserves_curated_gateway_params(monkeypatch):
+    from domain.ai_client.providers.openrouter_provider import OpenRouterProvider
+
+    captured = {}
+    catalog_models = [
+        {
+            "id": "openrouter/tencent/hy3-preview:free",
+            "model_id": "tencent/hy3-preview:free",
+            "display_name": "Tencent Hy3 preview (free)",
+            "provider": "openrouter",
+            "provider_id": "openrouter",
+            "type": "chat",
+        },
+        {
+            "id": "openrouter/cohere/north-mini-code:free",
+            "model_id": "cohere/north-mini-code:free",
+            "display_name": "Cohere North Mini Code (free)",
+            "provider": "openrouter",
+            "provider_id": "openrouter",
+            "type": "chat",
+        },
+    ]
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_catalog_models",
+        classmethod(lambda cls: [dict(model) for model in catalog_models]),
+    )
+    provider = OpenRouterProvider()
+
+    def fake_request_json(path, body):
+        captured["request"] = {"path": path, "body": body}
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(provider, "_request_json", fake_request_json)
+
+    params = {
+        "reasoning": {"effort": "high", "max_tokens": 1024},
+        "include_reasoning": True,
+        "provider": {"order": ["Cerebras", "Groq"], "allow_fallbacks": False},
+        "models": ["openai/gpt-oss-120b", "qwen/qwen3-235b-a22b"],
+        "web_search_options": {"search_context_size": "low"},
+        "structured_outputs": True,
+    }
+    provider.complete("cohere/north-mini-code:free", [{"role": "user", "content": "hi"}], [], params)
+
+    body = captured["request"]["body"]
+    assert captured["request"]["path"] == "/chat/completions"
+    for key, value in params.items():
+        assert body[key] == value
+
+
+def test_groq_tool_messages_omit_name_in_chat_body(monkeypatch):
+    from domain.ai_client.providers.provider_catalog import GroqProvider
+
+    captured = {}
+    provider = GroqProvider()
+
+    def fake_request_json(path, body):
+        captured["request"] = {"path": path, "body": body}
+        return {"choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}]}
+
+    monkeypatch.setattr(provider, "_request_json", fake_request_json)
+
+    provider.complete(
+        "llama-3.3-70b-versatile",
+        [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {"name": "lookup", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "name": "lookup", "content": "{\"ok\":true}"},
+        ],
+        [],
+        {},
+    )
+
+    body = captured["request"]["body"]
+    tool_message = next(message for message in body["messages"] if message["role"] == "tool")
+    assert captured["request"]["path"] == "/chat/completions"
+    assert tool_message == {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": "{\"ok\":true}",
+    }
+    assert body["messages"][0]["tool_calls"][0]["function"]["name"] == "lookup"

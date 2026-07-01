@@ -1,0 +1,70 @@
+{
+  "id": "openrouter/anthropic/claude-sonnet-5",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "anthropic/claude-sonnet-5",
+  "display_name": "Claude Sonnet 5 via OpenRouter",
+  "type": "vision",
+  "enabled": true,
+  "priority": 2,
+  "defaults": {
+    "general": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": true,
+    "vision": true,
+    "audio": false
+  },
+  "context_window": 1000000,
+  "max_context": 1000000,
+  "max_context_tokens": 1000000,
+  "supports_thinking": true,
+  "thinking_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "default_thinking_level": "medium",
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text",
+      "image",
+      "file"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 128000,
+    "unsupported_input_modalities": [
+      "file"
+    ],
+    "supported_parameters": [
+      "include_reasoning",
+      "max_completion_tokens",
+      "max_tokens",
+      "reasoning",
+      "response_format",
+      "stop",
+      "structured_outputs",
+      "tool_choice",
+      "tools",
+      "verbosity"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.000002",
+    "completion": "0.00001"
+  }
+}

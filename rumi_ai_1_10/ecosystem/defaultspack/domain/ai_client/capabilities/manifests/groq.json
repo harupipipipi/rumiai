@@ -14,5 +14,5 @@
   "tool_choice_modes": ["auto", "none"],
   "schema_support": {"json_schema": true},
   "params": {"temperature": true, "max_tokens": true, "top_p": true},
-  "quirks": {"supports_stream_usage": false}
+  "quirks": {"supports_stream_usage": false, "omit_tool_message_name": true}
 }

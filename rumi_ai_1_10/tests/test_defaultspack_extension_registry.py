@@ -67,6 +67,34 @@ def _write_json(path: Path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+OPENROUTER_CURATED_ALLOWLIST = [
+    {
+        "id": "openrouter/tencent/hy3-preview:free",
+        "model_id": "tencent/hy3-preview:free",
+        "name": "Tencent Hy3 preview (free)",
+        "display_name": "Tencent Hy3 preview (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "fast": True},
+    },
+    {
+        "id": "openrouter/cohere/north-mini-code:free",
+        "model_id": "cohere/north-mini-code:free",
+        "name": "Cohere North Mini Code (free)",
+        "display_name": "Cohere North Mini Code (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "coding": True, "fast": True},
+    },
+]
+
+
+def _openrouter_catalog_models():
+    return [dict(model) for model in OPENROUTER_CURATED_ALLOWLIST]
+
+
 def _make_extension_pack(ecosystem_root: Path, pack_id: str) -> Path:
     pack_root = ecosystem_root / pack_id
     _write_json(pack_root / "ecosystem.json", {"pack_id": pack_id})
@@ -411,20 +439,46 @@ def test_get_extension_registry_force_reload_preserves_registry_identity(monkeyp
     assert reloaded.root == second_root
 
 
-def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):
+def test_openrouter_provider_lists_curated_allowlist_from_catalog(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_catalog_models",
+        classmethod(lambda cls: _openrouter_catalog_models()),
+    )
 
     provider = OpenRouterProvider()
     models = provider.list_models()
-    assert [model["id"] for model in models] == ["openrouter/tencent/hy3-preview:free"]
-    assert models[0]["model_id"] == "tencent/hy3-preview:free"
+    assert {model["id"] for model in models} == {model["id"] for model in OPENROUTER_CURATED_ALLOWLIST}
+    assert all(model["provider_id"] == "openrouter" for model in models)
+
+
+def test_openrouter_provider_loads_bundled_curated_catalog():
+    provider = OpenRouterProvider()
+    model_ids = {model["model_id"] for model in provider.list_models()}
+
+    assert {
+        "cohere/north-mini-code:free",
+        "anthropic/claude-sonnet-5",
+        "openai/o3-pro",
+        "google/gemini-2.5-pro",
+        "z-ai/glm-5.2",
+        "moonshotai/kimi-k2.7-code",
+        "deepseek/deepseek-r1-0528",
+        "qwen/qwen3-coder-next",
+    }.issubset(model_ids)
 
 
 def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_catalog_models",
+        classmethod(lambda cls: _openrouter_catalog_models()),
+    )
 
     provider = OpenRouterProvider()
-    with pytest.raises(RuntimeError, match="tencent/hy3-preview:free"):
+    with pytest.raises(RuntimeError, match="unsupported model"):
         provider.complete("openai/gpt-4o-mini", [{"role": "user", "content": "hi"}], [], {})
 
 

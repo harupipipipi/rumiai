@@ -1,0 +1,74 @@
+{
+  "id": "openrouter/z-ai/glm-5.2",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "z-ai/glm-5.2",
+  "display_name": "GLM 5.2 via OpenRouter",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 5,
+  "defaults": {
+    "long_context": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": true,
+    "response_format": true,
+    "vision": false,
+    "audio": false
+  },
+  "context_window": 1048576,
+  "max_context": 1048576,
+  "max_context_tokens": 1048576,
+  "supports_thinking": true,
+  "thinking_levels": [
+    "high",
+    "xhigh"
+  ],
+  "default_thinking_level": "high",
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 32768,
+    "supported_parameters": [
+      "frequency_penalty",
+      "include_reasoning",
+      "logit_bias",
+      "logprobs",
+      "max_tokens",
+      "min_p",
+      "parallel_tool_calls",
+      "presence_penalty",
+      "reasoning",
+      "reasoning_effort",
+      "repetition_penalty",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_logprobs",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.00000093",
+    "completion": "0.000003"
+  }
+}

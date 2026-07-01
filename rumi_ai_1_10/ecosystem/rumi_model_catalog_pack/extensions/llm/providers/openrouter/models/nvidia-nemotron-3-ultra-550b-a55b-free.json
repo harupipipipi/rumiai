@@ -1,0 +1,60 @@
+{
+  "id": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "display_name": "NVIDIA Nemotron 3 Ultra (free) via OpenRouter",
+  "type": "reasoning",
+  "enabled": true,
+  "priority": 9,
+  "defaults": {},
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": false,
+    "json_mode": false,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": false,
+    "vision": false,
+    "audio": false
+  },
+  "context_window": 1000000,
+  "max_context": 1000000,
+  "max_context_tokens": 1000000,
+  "supports_thinking": true,
+  "thinking_levels": [
+    "medium",
+    "high"
+  ],
+  "default_thinking_level": "high",
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "free": true,
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 65536,
+    "supported_parameters": [
+      "include_reasoning",
+      "max_tokens",
+      "reasoning",
+      "seed",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0",
+    "completion": "0"
+  }
+}

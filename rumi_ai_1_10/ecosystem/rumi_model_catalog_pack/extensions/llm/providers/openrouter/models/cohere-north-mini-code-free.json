@@ -1,0 +1,70 @@
+{
+  "id": "openrouter/cohere/north-mini-code:free",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "cohere/north-mini-code:free",
+  "display_name": "Cohere North Mini Code (free) via OpenRouter",
+  "type": "chat",
+  "enabled": true,
+  "priority": 1,
+  "defaults": {
+    "chat": true,
+    "fast": true,
+    "cheap": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": true,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": false,
+    "json_mode": false,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": false,
+    "vision": false,
+    "audio": false
+  },
+  "context_window": 256000,
+  "max_context": 256000,
+  "max_context_tokens": 256000,
+  "supports_thinking": true,
+  "thinking_levels": [
+    "low",
+    "medium",
+    "high",
+    "xhigh"
+  ],
+  "default_thinking_level": "medium",
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "free": true,
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 64000,
+    "supported_parameters": [
+      "frequency_penalty",
+      "include_reasoning",
+      "max_tokens",
+      "presence_penalty",
+      "reasoning",
+      "seed",
+      "stop",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0",
+    "completion": "0"
+  }
+}

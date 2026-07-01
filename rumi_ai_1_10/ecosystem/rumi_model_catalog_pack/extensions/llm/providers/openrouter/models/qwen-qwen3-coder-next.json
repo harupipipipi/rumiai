@@ -1,0 +1,63 @@
+{
+  "id": "openrouter/qwen/qwen3-coder-next",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "qwen/qwen3-coder-next",
+  "display_name": "Qwen3 Coder Next via OpenRouter",
+  "type": "chat",
+  "enabled": true,
+  "priority": 8,
+  "defaults": {
+    "coding": true
+  },
+  "capabilities": {
+    "chat": true,
+    "streaming": true,
+    "reasoning": false,
+    "tool_calls": true,
+    "function_calling": true,
+    "structured_outputs": true,
+    "json_mode": true,
+    "tool_choice": true,
+    "parallel_tool_calls": false,
+    "response_format": true,
+    "vision": false,
+    "audio": false
+  },
+  "context_window": 262144,
+  "max_context": 262144,
+  "max_context_tokens": 262144,
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 262144,
+    "supported_parameters": [
+      "frequency_penalty",
+      "logit_bias",
+      "logprobs",
+      "max_tokens",
+      "presence_penalty",
+      "repetition_penalty",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_logprobs",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.00000011",
+    "completion": "0.0000008"
+  }
+}
