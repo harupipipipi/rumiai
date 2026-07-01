@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 import ipaddress
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -58,7 +59,7 @@ def cloudflare_environment_status(
         checks["pages"] = _check_pages(wrangler_cmd, runner)
         checks["containers"] = _check_containers(wrangler_cmd, runner)
         checks["cloudflared"] = _check_cloudflared_version(cloudflared_cmd, runner)
-        checks["named_tunnel"] = _check_named_tunnel(cloudflared_cmd, runner)
+        checks["named_tunnel"] = _check_named_tunnel(cloudflared_cmd, wrangler_cmd, runner)
         checks["docker"] = _check_docker(docker_cmd, runner)
 
     sandbox_ready = checks["containers"].get("status") == "ready" and checks["docker"].get("status") == "ready"
@@ -105,6 +106,8 @@ def cloudflare_environment_status(
             "pages_dev_is_not_a_pc_tunnel_hostname": True,
             "pages_dev_urls_are_pages_deployments_not_tunnel_hostnames": True,
             "stable_pc_tunnel_requires_named_tunnel_and_dns_hostname": True,
+            "stable_pc_tunnel_requires_cloudflare_managed_zone": True,
+            "pages_projects_do_not_create_cloudflare_dns_zones": True,
             "trycloudflare_urls_are_not_stable_pc_tunnel_hostnames": True,
             "quick_tunnels_do_not_support_sse": True,
             "sandbox_preview_urls_require_custom_domain_for_production": True,
@@ -245,10 +248,34 @@ def _check_cloudflared_version(command: Sequence[str], runner: CommandRunner) ->
     }
 
 
-def _check_named_tunnel(command: Sequence[str], runner: CommandRunner) -> dict[str, Any]:
-    if not command:
-        return _command_presence("cloudflared", command)
-    result = runner([*command, "tunnel", "list"], 15)
+def _check_named_tunnel(
+    cloudflared_command: Sequence[str],
+    wrangler_command: Sequence[str],
+    runner: CommandRunner,
+) -> dict[str, Any]:
+    if wrangler_command:
+        wrangler = runner([*wrangler_command, "tunnel", "list"], 30)
+        if wrangler.returncode == 0:
+            tunnel_count = _count_tunnel_ids(wrangler.stdout)
+            if tunnel_count > 0:
+                return {
+                    "available": True,
+                    "status": "ready",
+                    "manager": "wrangler",
+                    "tunnel_count": tunnel_count,
+                    "detail": "Named Cloudflare Tunnel resources are listable through Wrangler OAuth.",
+                }
+            return {
+                "available": True,
+                "status": "not_created",
+                "manager": "wrangler",
+                "tunnel_count": 0,
+                "detail": "Wrangler can manage Cloudflare Tunnels, but no named tunnel exists yet.",
+            }
+
+    if not cloudflared_command:
+        return _command_presence("cloudflared", cloudflared_command)
+    result = runner([*cloudflared_command, "tunnel", "list"], 15)
     output = f"{result.stdout}\n{result.stderr}".lower()
     if "origincert" in output or "origin certificate" in output or "cert.pem" in output:
         return {
@@ -259,8 +286,13 @@ def _check_named_tunnel(command: Sequence[str], runner: CommandRunner) -> dict[s
     return {
         "available": result.returncode == 0,
         "status": "ready" if result.returncode == 0 else "unavailable",
+        "manager": "cloudflared",
         "detail": "Named tunnel credentials are available." if result.returncode == 0 else _summarize_output(result.stdout, result.stderr, "Named tunnel check failed."),
     }
+
+
+def _count_tunnel_ids(output: str) -> int:
+    return len(set(re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", output, re.IGNORECASE)))
 
 
 def _check_pc_tunnel_env(env: Mapping[str, str]) -> dict[str, Any]:

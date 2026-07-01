@@ -14,6 +14,20 @@ cloudflared tunnel create rumi-pc
 cloudflared tunnel route dns rumi-pc rumi-pc.example.com
 ```
 
+Wrangler OAuth can also create and list the named Tunnel:
+
+```bash
+npx wrangler tunnel create rumi-pc
+npx wrangler tunnel list
+```
+
+That does not remove the DNS requirement. A stable phone-to-PC URL still needs a
+public hostname on a Cloudflare-managed zone, such as `rumi-pc.example.com`.
+Existing `*.pages.dev` project domains cannot be reused as tunnel hostnames. If
+the account has no Cloudflare zone, add or buy a domain in Cloudflare first, then
+create the tunnel public hostname from the Cloudflare dashboard or with
+`cloudflared tunnel route dns`.
+
 Copy `config.example.yml` to your cloudflared config directory, replace placeholders, and run:
 
 ```bash

@@ -43,6 +43,8 @@ def test_cloudflare_oauth_status_includes_sdk_missing(monkeypatch):
     assert status["provisioning"]["constraints"]["all_tools_cloudflare_native_supported"] is False
     assert status["provisioning"]["constraints"]["pc_local_tools_require_pc_bridge"] is True
     assert status["provisioning"]["constraints"]["pc_tool_bridge_requires_named_tunnel"] is True
+    assert status["provisioning"]["constraints"]["stable_pc_tunnel_requires_cloudflare_managed_zone"] is True
+    assert status["provisioning"]["constraints"]["pages_projects_do_not_create_cloudflare_dns_zones"] is True
     assert (
         status["provisioning"]["environment"]["deployment"]["sandbox_bridge_scaffold"]
         == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge"
@@ -183,6 +185,62 @@ def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_
     }
 
 
+def test_cloudflare_environment_accepts_wrangler_managed_named_tunnel(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(
+        diagnostics.shutil,
+        "which",
+        lambda name: f"/usr/local/bin/{name}" if name in {"cloudflared", "docker"} else None,
+    )
+
+    def runner(argv, _timeout):
+        args = tuple(argv)
+        if args == ("/usr/local/bin/npx", "wrangler", "--version"):
+            return diagnostics.CommandResult(0, "4.106.0\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "whoami"):
+            return diagnostics.CommandResult(0, "You are logged in with an OAuth Token.\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "pages", "project", "list"):
+            return diagnostics.CommandResult(0, "rumi-line-webhook-relay\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "containers", "list"):
+            return diagnostics.CommandResult(
+                1,
+                "",
+                "Unauthorized: Deploying containers requires the Workers Paid plan.",
+            )
+        if args == ("/usr/local/bin/npx", "wrangler", "tunnel", "list"):
+            return diagnostics.CommandResult(
+                0,
+                "09fe4401-091d-45b2-ba3a-126dcea4be0c rumi-pc inactive cfd_tunnel\n",
+                "",
+            )
+        if args == ("/usr/local/bin/cloudflared", "--version"):
+            return diagnostics.CommandResult(0, "cloudflared version 2026.3.0\n", "")
+        if args == ("/usr/local/bin/docker", "info", "--format", "{{json .ServerVersion}}"):
+            return diagnostics.CommandResult(0, '"29.1.3"\n', "")
+        return diagnostics.CommandResult(127, "", f"unexpected command: {args}")
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=runner,
+        env={"RUMI_WRANGLER_COMMAND": "/usr/local/bin/npx wrangler"},
+    )
+
+    assert status["named_tunnel_ready"] is True
+    assert status["stable_pc_tunnel_ready"] is False
+    assert status["checks"]["named_tunnel"]["status"] == "ready"
+    assert status["checks"]["named_tunnel"]["manager"] == "wrangler"
+    assert status["checks"]["named_tunnel"]["tunnel_count"] == 1
+    assert "CLOUDFLARE_NAMED_TUNNEL_ORIGIN_CERT_MISSING" not in {
+        item["code"] for item in status["blockers"]
+    }
+    assert {item["code"] for item in status["blockers"]} >= {
+        "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED",
+        "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED",
+        "CLOUDFLARE_PC_TOOL_BRIDGE_ENV_NOT_CONFIGURED",
+    }
+
+
 def test_cloudflare_environment_rejects_pages_dev_as_stable_pc_tunnel(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 
@@ -259,6 +317,12 @@ def test_cloudflare_environment_accepts_configured_pc_tool_bridge_env(monkeypatc
             return diagnostics.CommandResult(0, "rumi-pages\n", "")
         if args == ("/usr/local/bin/npx", "wrangler", "containers", "list"):
             return diagnostics.CommandResult(0, "container-id\n", "")
+        if args == ("/usr/local/bin/npx", "wrangler", "tunnel", "list"):
+            return diagnostics.CommandResult(
+                0,
+                "09fe4401-091d-45b2-ba3a-126dcea4be0c rumi-pc active cfd_tunnel\n",
+                "",
+            )
         if args == ("/usr/local/bin/cloudflared", "--version"):
             return diagnostics.CommandResult(0, "cloudflared version 2026.3.0\n", "")
         if args == ("/usr/local/bin/cloudflared", "tunnel", "list"):
