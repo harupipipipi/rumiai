@@ -454,18 +454,22 @@ test("authority approval window settles already-approved or denied requests on l
     source,
     /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/,
   );
+  assert.doesNotMatch(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
+  assert.doesNotMatch(source, /setRequestId\(activePendingApproval\.requestId\)/);
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
   assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable \|\| browserApprovalAvailable/);
   assert.match(source, /const showApprovalControls = Boolean\(request && request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
 });
 
-test("authority approval window settles and closes immediately after approve or deny post success", () => {
+test("authority approval window finalizes hidden resume before broadcasting approve settlement", () => {
   const source = authorityApprovalWindowSource();
 
   assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)[\s\S]*closeAuthorityApprovalWindow/);
   assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose \?\? nativeApprovalAvailableRef\.current/);
-  assert.match(source, /const decision = await submitApproveOnce\(\);\s*settleApprovedDecision\(request, decision\);\s*await finalizeApprovedDecision\(request, decision\);/);
+  assert.match(source, /const decision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, decision\);/);
+  assert.match(source, /const retriedDecision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, retriedDecision\);/);
+  assert.doesNotMatch(source, /settleApprovedDecision\(request,/);
   assert.match(source, /await submitRejectOnce\(\);\s*settleDeniedRequest\(request\);\s*await finalizeDeniedRequest\(request\);/);
 });
 

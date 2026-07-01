@@ -95,12 +95,12 @@ test("generic authority approval settlements schedule window close", () => {
   assert.match(source, /await finalizeDeniedRequest\(request\)/);
 });
 
-test("generic authority approval load settles already completed backend requests", () => {
+test("generic authority approval load settles already completed backend requests without retargeting", () => {
   const source = readSource("components", "AuthorityApprovalWindow.tsx");
 
   assert.match(source, /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/);
-  assert.match(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
-  assert.match(source, /setRequestId\(activePendingApproval\.requestId\)/);
+  assert.doesNotMatch(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
+  assert.doesNotMatch(source, /setRequestId\(activePendingApproval\.requestId\)/);
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
   assert.match(source, /\{showApprovalControls \? \(/);

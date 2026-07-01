@@ -20,7 +20,6 @@ import {
   authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
-  resolvePendingAuthorityApproval,
   type AuthorityApproval,
   type AuthorityApprovalSettledStatus,
   type AuthorityApprovalScope,
@@ -404,17 +403,6 @@ export function AuthorityApprovalWindow() {
           ?? locallySettledRequestsRef.current.get(single.request_id)
           ?? null;
         if (singleSettledStatus) {
-          const activePendingApproval = resolvePendingAuthorityApproval(requestToApproval(single), list.pending ?? []);
-          if (activePendingApproval && activePendingApproval.requestId !== single.request_id) {
-            const nextUrl = new URL(window.location.href);
-            nextUrl.searchParams.set("request_id", activePendingApproval.requestId);
-            window.history.replaceState(null, "", nextUrl.toString());
-            setAction(null);
-            setError(null);
-            setDecisionState({ kind: "idle" });
-            setRequestId(activePendingApproval.requestId);
-            return;
-          }
           settleAuthorityRequest(single, singleSettledStatus);
           return;
         }
@@ -450,16 +438,6 @@ export function AuthorityApprovalWindow() {
   const refresh = async () => {
     setRefreshNonce((value) => value + 1);
   };
-
-  const settleApprovedDecision = useCallback((
-    settledRequest: AuthorityRequest,
-    decision: AuthorityApprovalDecision,
-  ) => {
-    settleAuthorityRequest({ ...settledRequest, status: "approved" }, "approved", {
-      decision,
-      resumed: false,
-    });
-  }, [settleAuthorityRequest]);
 
   const finalizeApprovedDecision = useCallback(async (
     settledRequest: AuthorityRequest,
@@ -519,14 +497,12 @@ export function AuthorityApprovalWindow() {
     try {
       try {
         const decision = await submitApproveOnce();
-        settleApprovedDecision(request, decision);
         await finalizeApprovedDecision(request, decision);
       } catch (postError) {
         if (await settleFromServer(request.request_id)) return;
         if (!authorityApprovalShouldRetryWithFreshContext(postError)) throw postError;
         try {
           const retriedDecision = await submitApproveOnce();
-          settleApprovedDecision(request, retriedDecision);
           await finalizeApprovedDecision(request, retriedDecision);
         } catch (retryError) {
           if (await settleFromServer(request.request_id)) return;
