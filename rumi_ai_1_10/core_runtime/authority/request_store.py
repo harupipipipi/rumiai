@@ -278,7 +278,7 @@ class AuthorityRequestStore:
                 return None
             data["status"] = status
             self._write_json(self._request_path(request_id), data)
-            self.audit("authority_request_status", {"request_id": request_id, "status": status})
+            self._audit_best_effort("authority_request_status", {"request_id": request_id, "status": status})
             return AuthorityRequest.from_dict(data)
 
     def settle_pending_request(
@@ -305,7 +305,7 @@ class AuthorityRequestStore:
             if self.request_expired(request):
                 data["status"] = "expired"
                 self._write_json(path, data)
-                self.audit(
+                self._audit_best_effort(
                     "authority_request_status",
                     {"request_id": request_id, "status": "expired"},
                 )
@@ -334,7 +334,7 @@ class AuthorityRequestStore:
                             },
                         )
                 raise
-            self.audit("authority_request_status", {"request_id": request_id, "status": status})
+            self._audit_best_effort("authority_request_status", {"request_id": request_id, "status": status})
             return {
                 "settled": True,
                 "request": AuthorityRequest.from_dict(data),
@@ -532,6 +532,12 @@ class AuthorityRequestStore:
             self._audit_path.parent.mkdir(parents=True, exist_ok=True)
             with self._audit_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
+
+    def _audit_best_effort(self, action: str, details: dict[str, Any] | None = None) -> None:
+        try:
+            self.audit(action, details)
+        except Exception:
+            pass
 
     def list_events(self, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit or 200), 1000))

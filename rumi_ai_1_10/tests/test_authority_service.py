@@ -759,6 +759,124 @@ def test_authority_persistent_deny_rolls_back_deny_when_status_write_fails(
     assert store.list_denies() == []
 
 
+def test_authority_once_approval_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_approved"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        token=approval["token"],
+    )
+
+
+def test_authority_persistent_approval_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_approved"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+    assert grants.get_grant("profile:work") is not None
+
+
+def test_authority_deny_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_denied"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    denial = service.deny_request(
+        decision.request_id,
+        reason="not now",
+        persist=True,
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert denial["success"] is True
+    assert store.get_request(decision.request_id).status == "denied"
+    assert len(store.list_denies()) == 1
+
+
 def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     resource = {

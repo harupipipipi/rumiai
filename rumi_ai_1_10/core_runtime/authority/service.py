@@ -504,7 +504,7 @@ class AuthorityService:
             settled_result = settlement.get("result") or {}
             token = settled_result["token"]
             related = settled_result["related"]
-            self._request_store.audit(
+            self._audit_best_effort(
                 "authority_request_approved",
                 {
                     "request_id": request.request_id,
@@ -617,7 +617,7 @@ class AuthorityService:
             return self._settlement_failure_response(settlement)
         request = settlement["request"]
         related = (settlement.get("result") or {})["related"]
-        self._request_store.audit(
+        self._audit_best_effort(
             "authority_request_approved",
             {
                 "request_id": request.request_id,
@@ -964,7 +964,7 @@ class AuthorityService:
             return self._settlement_failure_response(settlement)
         request = settlement["request"]
         deny_record = (settlement.get("result") or {}).get("deny")
-        self._request_store.audit(
+        self._audit_best_effort(
             "authority_request_denied",
             {
                 "request_id": request.request_id,
@@ -979,6 +979,12 @@ class AuthorityService:
             "denied": True,
             "deny": deny_record,
         }
+
+    def _audit_best_effort(self, action: str, details: dict[str, Any]) -> None:
+        try:
+            self._request_store.audit(action, details)
+        except Exception:
+            pass
 
     def list_requests(
         self,
