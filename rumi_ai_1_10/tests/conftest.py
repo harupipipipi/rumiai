@@ -475,6 +475,18 @@ def _restore_test_module_mocks(test_module) -> None:
             sys.modules[module_name] = module
             _bind_parent_module(module_name, module)
     for attr_name, module_name in (
+        ("_m_paths", "rumi_ai_1_10.core_runtime.paths"),
+        ("_m_log", "rumi_ai_1_10.core_runtime.logging_utils"),
+        ("_m_prof", "rumi_ai_1_10.core_runtime.profiling"),
+        ("_m_met", "rumi_ai_1_10.core_runtime.metrics"),
+        ("_m_facade", "rumi_ai_1_10.core_runtime.kernel_facade"),
+        ("_m_di", "rumi_ai_1_10.core_runtime.di_container"),
+    ):
+        module = getattr(test_module, attr_name, None)
+        if module is not None:
+            sys.modules[module_name] = module
+            _bind_parent_module(module_name, module)
+    for attr_name, module_name in (
         ("_hmac_module", "core_runtime.hmac_key_manager"),
         ("_dummy_hmac", "core_runtime.hmac_key_manager"),
         ("_dummy_audit", "core_runtime.audit_logger"),
@@ -522,6 +534,31 @@ def _remove_module_binding(module_name: str) -> None:
             pass
 
 
+def _clear_collection_module_mocks() -> None:
+    for module_name in (
+        "rumi_ai_1_10.core_runtime.paths",
+        "rumi_ai_1_10.core_runtime.logging_utils",
+        "rumi_ai_1_10.core_runtime.profiling",
+        "rumi_ai_1_10.core_runtime.metrics",
+        "rumi_ai_1_10.core_runtime.kernel_facade",
+        "rumi_ai_1_10.core_runtime.di_container",
+    ):
+        _remove_module_binding(module_name)
+
+
+def _restore_collection_aliases() -> None:
+    for alias_name, target_name in (
+        ("rumi_ai_1_10.core_runtime.di_container", "core_runtime.di_container"),
+        ("rumi_ai_1_10.core_runtime.health", "core_runtime.health"),
+        ("rumi_ai_1_10.core_runtime.metrics", "core_runtime.metrics"),
+        ("rumi_ai_1_10.core_runtime.profiling", "core_runtime.profiling"),
+    ):
+        try:
+            _sync_alias_module(alias_name, target_name)
+        except Exception:
+            pass
+
+
 def _restore_real_modules() -> None:
     for _mod_name in _RESTORE_REAL_MODULES:
         try:
@@ -554,22 +591,10 @@ def pytest_runtest_setup(item):
 
 def pytest_collectreport(report):
     _reset_package_roots()
-    if _should_skip_restore(getattr(report, "nodeid", None)):
-        _restore_real_di_container()
-        _restore_real_modules()
-        return
-    _restore_real_modules()
-    for _mod_name in _BIND_ONLY_MODULES:
-        try:
-            _bind_parent_module(_mod_name)
-        except Exception:
-            pass
-    for _alias_name, _target_name in _ALIAS_MODULES:
-        try:
-            _sync_alias_module(_alias_name, _target_name)
-        except Exception:
-            pass
+    _clear_collection_module_mocks()
     _restore_real_di_container()
+    _restore_collection_aliases()
+    _install_capability_handler_registry_shim()
 
 
 _install_capability_handler_registry_shim()
