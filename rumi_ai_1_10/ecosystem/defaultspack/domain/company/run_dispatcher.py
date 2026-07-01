@@ -4,7 +4,7 @@ from typing import Any, Callable
 
 from domain.input.dispatcher import dispatch_input
 from domain.input.envelope import RumiInputEnvelope
-from domain.ai_client.model_search import get_model_capabilities
+from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 
 from .models import DEFAULT_CHANNEL_ID, gen_id, timestamp
 from .runtime_store import CompanyRuntimeStore
@@ -12,6 +12,10 @@ from .store import CompanyStore
 
 
 DispatchCallable = Callable[[RumiInputEnvelope, dict[str, Any] | None], dict[str, Any]]
+
+
+def get_model_capabilities(model: str) -> dict[str, Any]:
+    return get_model_provider_capabilities(model) or {}
 
 
 class CompanyRunDispatcher:
