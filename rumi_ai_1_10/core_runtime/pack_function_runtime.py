@@ -35,7 +35,11 @@ def _is_pack_approved_and_verified(pack_id: str) -> tuple[bool, Optional[str]]:
     return bool(result), None
 
 
-TRUSTED_IN_PROCESS_PACK_IDS = frozenset({"defaultspack", "rumi_default_tools_pack"})
+TRUSTED_IN_PROCESS_PACK_IDS = frozenset({
+    "defaultspack",
+    "rumi_default_tools_pack",
+    "rumi_workspace_surfaces",
+})
 
 
 def _pack_function_policy_module():

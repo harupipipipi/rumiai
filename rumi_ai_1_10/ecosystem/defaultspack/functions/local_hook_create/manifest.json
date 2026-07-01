@@ -1,0 +1,14 @@
+{
+  "function_id": "local_hook_create",
+  "description": "Create a localhost local hook backed by inbound webhook endpoints.",
+  "tags": ["local_hook", "webhook", "input"],
+  "risk": "medium",
+  "requires": ["local_hook.create"],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": ["defaults.local_hook.create", "defaultspack.local_hook.create"],
+  "input_schema": {"type": "object", "additionalProperties": true},
+  "output_schema": {"type": "object", "additionalProperties": true}
+}

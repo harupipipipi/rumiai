@@ -1,0 +1,27 @@
+{
+  "function_id": "goal_refresh",
+  "description": "Refresh an isolated goal checker run.",
+  "tags": ["goal", "ui", "monitor"],
+  "risk": "medium",
+  "requires": ["goal.refresh"],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.goal.refresh",
+    "defaultspack.goal.refresh"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true,
+    "required": ["goal_run_id"],
+    "properties": {
+      "goal_run_id": {"type": "string"}
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": true
+  }
+}

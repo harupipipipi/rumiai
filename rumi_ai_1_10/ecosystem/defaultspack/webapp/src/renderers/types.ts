@@ -248,6 +248,7 @@ export type RightSidebarRendererProps = {
   promptUsage?: PromptUsageSummary | null;
   promptProfileId?: string;
   conversationId?: string | null;
+  conversationToolPreferencesSnapshot?: Record<string, unknown> | null;
   showChatPromptUsage?: boolean;
   yoloMode?: boolean;
   workspaceTabs?: WorkspaceTab[];

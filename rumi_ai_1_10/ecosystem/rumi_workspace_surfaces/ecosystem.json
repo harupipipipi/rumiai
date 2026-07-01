@@ -1,0 +1,20 @@
+{
+  "pack_id": "rumi_workspace_surfaces",
+  "pack_identity": "rumi:ecosystem/rumi_workspace_surfaces",
+  "display_name": "Rumi Workspace Surfaces",
+  "version": "0.1.0",
+  "description": "Reference sidecar surface pack for write, image, slide, and movie workspace modes.",
+  "dependencies": {
+    "defaultspack": ">=2.0.0"
+  },
+  "runtime": {
+    "type": "python"
+  },
+  "required_secrets": [],
+  "required_network": [],
+  "host_execution": false,
+  "metadata": {
+    "local_first": true,
+    "network_policy": "none_by_default"
+  }
+}

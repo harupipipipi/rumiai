@@ -150,7 +150,12 @@ _HOST_WINDOWS_PATH_RE = re.compile(r"^[A-Za-z]:[\\/]")
 
 logger = logging.getLogger(__name__)
 FUNCTION_RUNNER_PATH = Path(__file__).with_name("function_runner.py")
-TRUSTED_BUILTIN_PACK_IDS = {"defaultspack", "rumi_default_tools_pack", "rumi_host_capabilities_pack"}
+TRUSTED_BUILTIN_PACK_IDS = {
+    "defaultspack",
+    "rumi_default_tools_pack",
+    "rumi_host_capabilities_pack",
+    "rumi_workspace_surfaces",
+}
 
 # デフォルトタイムアウト
 DEFAULT_TIMEOUT = 30.0

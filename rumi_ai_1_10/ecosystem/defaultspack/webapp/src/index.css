@@ -842,6 +842,15 @@ body {
   .rumi-activity-preview-pane {
     display: none;
   }
+
+  .rumi-workspace-main.has-activity-preview.has-sidecar-surface .rumi-chat-pane {
+    display: none;
+  }
+
+  .rumi-workspace-main.has-activity-preview.has-sidecar-surface .rumi-activity-preview-pane {
+    display: block;
+    flex: 1 1 auto;
+  }
 }
 
 @keyframes rumi-rail-enter {

@@ -1748,11 +1748,11 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
             next(command for command in commands if command["id"] == "commit")["risk"], "high"
         )
 
-        with patch(
-            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
-        ) as service_cls:
-            service = service_cls.return_value
-            service.set_thinking_level.return_value = {"level": "high", "scope": "profile"}
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+            invoke_function.return_value = {
+                "status": "ok",
+                "data": {"level": "high", "scope": "profile"},
+            }
             result = registry.execute(
                 {
                     "command": "thinking",
@@ -1769,24 +1769,32 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["data"]["executed"])
-        service.set_thinking_level.assert_called_once_with(
-            "high",
-            "profile",
-            "google/gemma-4-31b-it",
-            "conv-1",
+        invoke_function.assert_called_once()
+        qualified_name, args, context = invoke_function.call_args.args[:3]
+        self.assertEqual(qualified_name, "defaultspack:ai_set_thinking_level")
+        self.assertEqual(
+            args,
+            {
+                "level": "high",
+                "scope": "profile",
+                "profile_id": "google/gemma-4-31b-it",
+                "conversation_id": "conv-1",
+            },
         )
+        self.assertEqual(context, {})
+        self.assertEqual(invoke_function.call_args.kwargs["principal_id"], "defaultspack")
 
     def test_slash_command_registry_executes_deepthink_toggle_with_warning(self):
         from domain.frontend.command_registry import SlashCommandRegistry
 
         registry = SlashCommandRegistry(DEFAULTSPACK_ROOT)
-        with patch(
-            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService"
-        ) as service_cls:
-            service = service_cls.return_value
-            service.set_deepthink_enabled.return_value = {
-                "enabled": True,
-                "message": "DeepThinkをONにしました。タスクには数時間かかる可能性があります。",
+        with patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+            invoke_function.return_value = {
+                "status": "ok",
+                "data": {
+                    "enabled": True,
+                    "message": "DeepThinkをONにしました。タスクには数時間かかる可能性があります。",
+                },
             }
             result = registry.execute(
                 {"command": "deepthink", "mode": "chat", "args": {"enabled": "on"}},
@@ -1796,7 +1804,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["data"]["executed"])
         self.assertIn("数時間", result["data"]["message"])
-        service.set_deepthink_enabled.assert_called_once_with(True)
+        invoke_function.assert_called_once()
+        qualified_name, args, _context = invoke_function.call_args.args[:3]
+        self.assertEqual(qualified_name, "defaultspack:ai_set_deepthink_enabled")
+        self.assertEqual(args, {"enabled": True})
 
     def test_slash_command_registry_model_command_opens_picker_without_query(self):
         from domain.frontend.command_registry import SlashCommandRegistry
@@ -1955,7 +1966,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(missing_result["status"], "error")
         self.assertEqual(missing_result["error"]["code"], "MISSING_ARGUMENT")
 
-    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_non_allowlisted_default(
+    def test_slash_command_registry_rejects_user_manifest_rumi_function_and_cross_pack_default(
         self,
     ):
         from domain.frontend.command_registry import SlashCommandRegistry
@@ -1975,7 +1986,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
                             "modes": ["chat"],
                             "execution": {
                                 "type": "rumi_function",
-                                "qualified_name": "defaultspack:not_allowlisted",
+                                "qualified_name": "otherpack:run",
                             },
                         }
                     ]
