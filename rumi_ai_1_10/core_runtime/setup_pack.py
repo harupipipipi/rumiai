@@ -565,6 +565,7 @@ class SetupPackManager:
         from .capability_grant_manager import get_capability_grant_manager
 
         gm = get_capability_grant_manager()
+        grant_snapshot = self._snapshot_capability_grant(gm, definition.target_pack_id)
         result = gm.batch_grant([
             {
                 "principal_id": definition.target_pack_id,
@@ -591,22 +592,11 @@ class SetupPackManager:
         )
         revoked_count = 0
         if rollback_on_failure and result.failed_count:
-            revoked = [
-                gm.revoke_permission(definition.target_pack_id, permission_id)
-                for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
-            ]
-            revoked_count = sum(1 for item in revoked if item)
-            self._log_permission_event(
-                "revoke_all_ok",
-                True,
-                principal_id=definition.target_pack_id,
-                permission_id="*",
-                details={
-                    "setup_pack_id": definition.pack_id,
-                    "revoked_count": revoked_count,
-                    "reason": "setup_pack_grant_all_ok_rollback",
-                },
-            )
+            revoked_count = self._restore_all_ok_for_definition(definition, {
+                "grant_snapshot_available": grant_snapshot.get("available", False),
+                "grant_snapshot": grant_snapshot.get("grant"),
+                "rollback_reason": "setup_pack_grant_all_ok_rollback",
+            })
         return {
             "granted": result.failed_count == 0,
             "principal_id": definition.target_pack_id,
@@ -615,7 +605,44 @@ class SetupPackManager:
             "failed_count": result.failed_count,
             "rolled_back": bool(rollback_on_failure and result.failed_count),
             "revoked_count": revoked_count,
+            "grant_snapshot_available": grant_snapshot.get("available", False),
+            "grant_snapshot": grant_snapshot.get("grant"),
         }
+
+    @staticmethod
+    def _snapshot_capability_grant(manager: Any, principal_id: str) -> Dict[str, Any]:
+        get_grant = getattr(manager, "get_grant", None)
+        if not callable(get_grant):
+            return {"available": False, "grant": None}
+        grant = get_grant(principal_id)
+        if grant is None:
+            return {"available": True, "grant": None}
+        to_dict = getattr(grant, "to_dict", None)
+        if callable(to_dict):
+            return {"available": True, "grant": to_dict()}
+        return {"available": False, "grant": None}
+
+    @staticmethod
+    def _restore_capability_grant(
+        manager: Any,
+        principal_id: str,
+        snapshot: Dict[str, Any] | None,
+    ) -> None:
+        if snapshot is None:
+            delete_grant = getattr(manager, "delete_grant", None)
+            if callable(delete_grant):
+                delete_grant(principal_id)
+            return
+
+        from .capability_grant_manager import CapabilityGrant
+
+        grant = CapabilityGrant.from_dict(snapshot)
+        grants = getattr(manager, "_grants", None)
+        if isinstance(grants, dict):
+            grants[principal_id] = grant
+        save_grant = getattr(manager, "_save_grant", None)
+        if callable(save_grant):
+            save_grant(grant)
 
     @staticmethod
     def _approval_snapshot(manager: Any, target_pack_id: str) -> Dict[str, Any]:
@@ -798,15 +825,50 @@ class SetupPackManager:
             logger.debug("Failed to roll back setup pack all_ok grants", exc_info=True)
             return 0
 
+    def _restore_all_ok_for_definition(
+        self,
+        definition: SetupPackDefinition,
+        grant_result: Dict[str, Any],
+    ) -> int:
+        if grant_result.get("grant_snapshot_available"):
+            try:
+                from .capability_grant_manager import get_capability_grant_manager
+
+                gm = get_capability_grant_manager()
+                self._restore_capability_grant(
+                    gm,
+                    definition.target_pack_id,
+                    grant_result.get("grant_snapshot"),
+                )
+                self._log_permission_event(
+                    "restore_all_ok",
+                    True,
+                    principal_id=definition.target_pack_id,
+                    permission_id="*",
+                    details={
+                        "setup_pack_id": definition.pack_id,
+                        "reason": grant_result.get("rollback_reason")
+                        or "setup_pack_install_rollback",
+                    },
+                )
+                return int(grant_result.get("granted_count") or 0)
+            except Exception:
+                logger.debug("Failed to restore setup pack all_ok grant snapshot", exc_info=True)
+        return self._revoke_all_ok_for_definition(definition)
+
     def _rollback_install_side_effects(
         self,
         definitions_to_revoke: List[SetupPackDefinition],
         approved_definitions: List[SetupPackDefinition],
         approval_results: Dict[str, Dict[str, Any]],
+        grant_results: Dict[str, Dict[str, Any]] | None = None,
     ) -> None:
         for definition in reversed(definitions_to_revoke):
             if definition.supports_all_ok:
-                self._revoke_all_ok_for_definition(definition)
+                self._restore_all_ok_for_definition(
+                    definition,
+                    (grant_results or {}).get(definition.pack_id, {}),
+                )
         for definition in reversed(approved_definitions):
             self._rollback_target_pack_approval(
                 definition.target_pack_id,
@@ -1004,11 +1066,13 @@ class SetupPackManager:
             }
 
         installed_definitions: List[SetupPackDefinition] = []
+        grant_results: Dict[str, Dict[str, Any]] = {}
         granted_targets: List[str] = []
         skipped_all_ok_setup_pack_ids: List[str] = []
         for definition in installable_definitions:
             if definition.supports_all_ok:
                 grant_result = self._grant_all_ok_for_definition(definition)
+                grant_results[definition.pack_id] = grant_result
                 if not grant_result.get("granted"):
                     errors.append({
                         "setup_pack_id": definition.pack_id,
@@ -1021,6 +1085,7 @@ class SetupPackManager:
                         [*installed_definitions, definition],
                         installable_definitions,
                         approval_results,
+                        grant_results,
                     )
                     self._log_system_event(
                         "setup_pack.install",
@@ -1099,6 +1164,7 @@ class SetupPackManager:
                 installed_definitions,
                 installable_definitions,
                 approval_results,
+                grant_results,
             )
             self._restore_active_pack_identity(active_identity_snapshot)
             self._restore_selection_file(selection_snapshot)
@@ -1144,6 +1210,7 @@ class SetupPackManager:
                 installed_definitions,
                 installable_definitions,
                 approval_results,
+                grant_results,
             )
             self._restore_active_pack_identity(active_identity_snapshot)
             self._restore_selection_file(selection_snapshot)

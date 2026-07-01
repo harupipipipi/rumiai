@@ -10,6 +10,10 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from core_runtime.capability_grant_manager import (
+    CapabilityGrant,
+    CapabilityPermissionGrant,
+)
 from core_runtime.setup_pack import SETUP_PACK_ALL_OK_PERMISSIONS, SetupPackManager
 
 
@@ -34,6 +38,55 @@ class _FakeGrantManager:
     def revoke_permission(self, principal_id, permission_id):
         self.revocations.append((principal_id, permission_id))
         return True
+
+
+class _SnapshotGrantManager(_FakeGrantManager):
+    def __init__(self, *, fail=False):
+        super().__init__(fail=fail)
+        self._grants = {
+            "defaultspack": CapabilityGrant(
+                principal_id="defaultspack",
+                enabled=True,
+                granted_at="2026-01-01T00:00:00Z",
+                updated_at="2026-01-01T00:00:00Z",
+                permissions={
+                    "function.call": CapabilityPermissionGrant(
+                        enabled=True,
+                        config={"mode": "manual", "source": "existing"},
+                    )
+                },
+            )
+        }
+        self.saved = []
+        self.deleted = []
+
+    def get_grant(self, principal_id):
+        return self._grants.get(principal_id)
+
+    def delete_grant(self, principal_id):
+        self.deleted.append(principal_id)
+        return self._grants.pop(principal_id, None) is not None
+
+    def _save_grant(self, grant):
+        self.saved.append(grant.to_dict())
+        return True
+
+    def batch_grant(self, grants):
+        self.batch_calls.append(grants)
+        grant = self._grants["defaultspack"]
+        first = grants[0]
+        grant.permissions[first["permission_id"]] = CapabilityPermissionGrant(
+            enabled=True,
+            config=dict(first.get("config") or {}),
+        )
+        if self.fail:
+            return _FakeGrantResult(granted_count=1, failed_count=len(grants) - 1)
+        for item in grants[1:]:
+            grant.permissions[item["permission_id"]] = CapabilityPermissionGrant(
+                enabled=True,
+                config=dict(item.get("config") or {}),
+            )
+        return _FakeGrantResult(granted_count=len(grants), failed_count=0)
 
 
 class _FakeApprovalManager:
@@ -931,6 +984,49 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(fake_approval.record.to_dict()["file_hashes"], {"old.py": "old"})
             self.assertIn("restore_approval:defaultspack", fake_approval.calls)
 
+    def test_install_rolls_back_all_ok_grants_to_existing_snapshot(self):
+        class FakeApprovalManager:
+            _initialized = True
+
+            def scan_packs(self):
+                pass
+
+            def get_status(self, pack_id):
+                return SimpleNamespace(value="installed")
+
+            def approve(self, pack_id):
+                return SimpleNamespace(success=True, error=None)
+
+            def remove_approval(self, pack_id):
+                return True
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake_grants = _SnapshotGrantManager(fail=True)
+
+            ctx = self._install_context(
+                base,
+                [self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+                fake_grants=fake_grants,
+                fake_approval=FakeApprovalManager(),
+            )
+            _, _, *patches = ctx
+            with patches[0], patches[1], patches[2], patches[3]:
+                result = manager.install("defaultspack")
+
+            restored = fake_grants._grants["defaultspack"]
+            self.assertFalse(result["success"])
+            self.assertEqual(result["errors"][0]["reason"], "all_ok_grant_failed")
+            self.assertEqual(fake_grants.revocations, [])
+            self.assertEqual(
+                restored.permissions["function.call"].config,
+                {"mode": "manual", "source": "existing"},
+            )
+            self.assertTrue(restored.permissions["function.call"].enabled)
+
     def test_install_rejects_invalid_setup_pack_metadata_schema_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -1183,6 +1279,43 @@ class TestSetupPackManager(unittest.TestCase):
                     for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
                 ],
             )
+
+    def test_grant_all_ok_restores_existing_grant_snapshot_on_partial_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            (base / "selection.json").write_text(
+                json.dumps({"setup_pack_ids": ["defaultspack"]}) + "\n",
+                encoding="utf-8",
+            )
+            fake_grants = _SnapshotGrantManager(fail=True)
+            fake_approval = _FakeApprovalManager(approved=True)
+            setup_pack_module = sys.modules[SetupPackManager.__module__]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                return_value=[self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=fake_approval,
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake_grants,
+            ):
+                result = manager.grant_all_ok("defaultspack")
+
+            restored = fake_grants._grants["defaultspack"]
+            self.assertFalse(result["granted"])
+            self.assertTrue(result["rolled_back"])
+            self.assertEqual(fake_grants.revocations, [])
+            self.assertEqual(
+                restored.permissions["function.call"].config,
+                {"mode": "manual", "source": "existing"},
+            )
+            self.assertTrue(restored.permissions["function.call"].enabled)
 
     def test_revoke_all_ok_allows_cleanup_without_selection_or_target_approval(self):
         with tempfile.TemporaryDirectory() as tmp:
