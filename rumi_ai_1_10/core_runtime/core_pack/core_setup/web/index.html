@@ -209,7 +209,8 @@
       if (!value) return "";
       try {
         const url = new URL(value, window.location.origin);
-        if (url.origin !== window.location.origin || !url.pathname.startsWith("/panel")) {
+        const isPanelReturnPath = url.pathname === "/panel" || url.pathname.startsWith("/panel/");
+        if (url.origin !== window.location.origin || !isPanelReturnPath) {
           return "";
         }
         return url.pathname + url.search + url.hash;

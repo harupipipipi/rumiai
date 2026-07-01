@@ -393,8 +393,11 @@ class TestSetupHandlers(unittest.TestCase):
         self.assertIn("PANEL_CSRF_STORAGE_KEY", source)
         self.assertIn('"X-Rumi-CSRF"', source)
         self.assertIn('credentials: "same-origin"', source)
+        self.assertIn('url.pathname === "/panel"', source)
+        self.assertIn('url.pathname.startsWith("/panel/")', source)
         self.assertIn("!packs.active_target_pack_id", source)
         self.assertIn("payload.success === false", source)
+        self.assertNotIn('url.pathname.startsWith("/panel"))', source)
         self.assertNotIn("payload.errors.map(String)", source)
         self.assertNotIn(
             'migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready"',
