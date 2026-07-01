@@ -385,6 +385,20 @@ class TestSetupHandlers(unittest.TestCase):
             source,
         )
         self.assertIn("Installs without all OK grants", source)
+        self.assertIn("return_to", source)
+        self.assertIn("active_target_not_selected", source)
+        self.assertIn("no active setup pack selected", source)
+        self.assertNotIn(
+            'migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready"',
+            source,
+        )
+        install_error_pattern = (
+            r'async function installSelectedPacks\(\)[\s\S]*'
+            r'getJson\("/api/setup/packs/install"[\s\S]*'
+            r'catch \(error\) \{[\s\S]*'
+            r'setStatus\("Setup pack install failed"'
+        )
+        self.assertRegex(source, install_error_pattern)
 
 
 if __name__ == "__main__":

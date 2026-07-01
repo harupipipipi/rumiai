@@ -4,7 +4,30 @@ import { useAppStore } from '@/src/store';
 import { Button } from '@/src/components/ui/Button';
 import { useT } from '@/src/lib/i18n';
 import { panelRoutes } from '@/src/lib/routes';
+import { apiFetch } from '@/src/lib/api';
 import { Loader2, CheckCircle2 } from 'lucide-react';
+
+type SetupPacksPayload = {
+  selected_setup_pack_ids?: unknown;
+};
+
+const PANEL_BASE_PATH = '/panel';
+const SETUP_PACK_RETURN_PARAM = 'setup_pack_done';
+
+export function selectedSetupPackIds(payload: unknown): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const selected = (payload as SetupPacksPayload).selected_setup_pack_ids;
+  if (!Array.isArray(selected)) return [];
+  return selected
+    .map(item => String(item || '').trim())
+    .filter(Boolean);
+}
+
+export function setupPackSelectionUrl(
+  returnTo = `${PANEL_BASE_PATH}${panelRoutes.setup}?${SETUP_PACK_RETURN_PARAM}=1`,
+): string {
+  return `/setup?return_to=${encodeURIComponent(returnTo)}`;
+}
 
 export function Setup() {
   const navigate = useNavigate();
@@ -17,9 +40,23 @@ export function Setup() {
   const t = useT();
   const [loading, setLoading] = useState(false);
   const [linked, setLinked] = useState(false);
+  const [setupPackError, setSetupPackError] = useState<string | null>(null);
 
-  const finalizeSetup = async () => {
+  const hasSelectedSetupPack = async (): Promise<boolean> => {
+    const packs = await apiFetch<SetupPacksPayload>('/api/setup/packs');
+    return selectedSetupPackIds(packs).length > 0;
+  };
+
+  const finalizeSetup = async (): Promise<boolean> => {
+    if (!await hasSelectedSetupPack()) {
+      return false;
+    }
     setSetupDone(true);
+    return true;
+  };
+
+  const openSetupPackSelection = () => {
+    window.location.assign(setupPackSelectionUrl());
   };
 
   useEffect(() => {
@@ -50,22 +87,40 @@ export function Setup() {
     const error = searchParams.get('error');
 
     if (isLinked === 'true') {
-      setLinked(true);
-      setSetupDone(true);
-      addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
-      const timer = setTimeout(() => {
-        navigate(panelRoutes.home);
-      }, 1500);
-      return () => clearTimeout(timer);
+      let alive = true;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      setLoading(true);
+      void finalizeSetup()
+        .then((completed) => {
+          if (!alive) return;
+          if (!completed) {
+            openSetupPackSelection();
+            return;
+          }
+          setLinked(true);
+          addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+          timer = setTimeout(() => {
+            navigate(panelRoutes.home);
+          }, 1500);
+        })
+        .catch((setupError) => {
+          if (!alive) return;
+          setSetupPackError(setupError instanceof Error ? setupError.message : 'Setup pack selection failed');
+          setLoading(false);
+        });
+      return () => {
+        alive = false;
+        if (timer) clearTimeout(timer);
+      };
     }
 
     if (error) {
       addToast(`OAuth error: ${error}`, 'error');
     }
-  }, [searchParams, setSetupDone, addToast, navigate, t]);
+  }, [searchParams, addToast, navigate, t]);
 
   useEffect(() => {
-    if (!profile.connected || linked) {
+    if (searchParams.get(SETUP_PACK_RETURN_PARAM) !== '1') {
       return;
     }
 
@@ -73,8 +128,46 @@ export function Setup() {
     let timer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
     void finalizeSetup()
-      .then(() => {
+      .then((completed) => {
         if (!alive) return;
+        if (!completed) {
+          setSetupPackError('Choose and install a setup pack before opening the panel.');
+          setLoading(false);
+          return;
+        }
+        setLinked(true);
+        addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
+        timer = setTimeout(() => {
+          navigate(panelRoutes.home);
+        }, 800);
+      })
+      .catch((setupError) => {
+        if (!alive) return;
+        setSetupPackError(setupError instanceof Error ? setupError.message : 'Setup pack selection failed');
+        setLoading(false);
+      });
+
+    return () => {
+      alive = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [searchParams, addToast, navigate, t]);
+
+  useEffect(() => {
+    if (!profile.connected || linked || searchParams.get(SETUP_PACK_RETURN_PARAM) === '1') {
+      return;
+    }
+
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    setLoading(true);
+    void finalizeSetup()
+      .then((completed) => {
+        if (!alive) return;
+        if (!completed) {
+          openSetupPackSelection();
+          return;
+        }
         setLinked(true);
         addToast(t('setup.link_success') || 'Account linked successfully!', 'success');
         timer = setTimeout(() => {
@@ -91,7 +184,7 @@ export function Setup() {
       alive = false;
       if (timer) clearTimeout(timer);
     };
-  }, [profile.connected, linked, addToast, navigate, t]);
+  }, [profile.connected, linked, searchParams, addToast, navigate, t]);
 
   const handleConnect = async () => {
     setLoading(true);
@@ -109,8 +202,8 @@ export function Setup() {
   };
 
   const handleSkip = () => {
-    setSetupDone(true);
-    navigate(panelRoutes.home);
+    setSetupPackError(null);
+    openSetupPackSelection();
   };
 
   if (linked) {
@@ -155,9 +248,12 @@ export function Setup() {
           <Button size="lg" className="w-full" onClick={handleConnect} disabled={loading} loading={loading}>
             {t('setup.connect_rumi')}
           </Button>
+          {setupPackError ? (
+            <p className="text-sm text-red-500">{setupPackError}</p>
+          ) : null}
           <div className="flex justify-start">
             <Button variant="ghost" onClick={handleSkip} disabled={loading}>
-              {t('setup.skip')}
+              {t('setup.choose_packs')}
             </Button>
           </div>
         </div>

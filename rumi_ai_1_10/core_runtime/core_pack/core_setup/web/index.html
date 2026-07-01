@@ -178,9 +178,44 @@
     const selectionEl = document.getElementById("selection");
     const migrationEl = document.getElementById("migration");
     const listEl = document.getElementById("pack-list");
+    const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
 
     function setStatus(label, payload) {
       statusEl.textContent = label + "\n\n" + JSON.stringify(payload, null, 2);
+    }
+
+    function errorMessage(error) {
+      return error instanceof Error ? error.message : String(error || "request failed");
+    }
+
+    function safeReturnTo(value) {
+      if (!value) return "";
+      try {
+        const url = new URL(value, window.location.origin);
+        if (url.origin !== window.location.origin || !url.pathname.startsWith("/panel")) {
+          return "";
+        }
+        return url.pathname + url.search + url.hash;
+      } catch {
+        return "";
+      }
+    }
+
+    function setupMigrationLabel(migration) {
+      if (migration && migration.available === false) {
+        if (migration.reason === "active_target_not_selected") {
+          return "no active setup pack selected";
+        }
+        return migration.reason ? "migration unavailable: " + migration.reason : "migration unavailable";
+      }
+      return migration && migration.needs_user_migration ? "user.csv migration pending" : "ready";
+    }
+
+    function redirectToReturnTarget(packs) {
+      if (!returnTo || !(packs.selected_setup_pack_ids || []).length) {
+        return;
+      }
+      window.location.assign(returnTo);
     }
 
     async function getJson(url, options) {
@@ -199,11 +234,17 @@
         setStatus("No setup packs checked", {});
         return;
       }
-      const data = await getJson("/api/setup/packs/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ setup_pack_ids: selected })
-      });
+      let data;
+      try {
+        data = await getJson("/api/setup/packs/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ setup_pack_ids: selected })
+        });
+      } catch (error) {
+        setStatus("Setup pack install failed", { error: errorMessage(error) });
+        return;
+      }
       setStatus("Setup packs installed", data);
       await load();
     }
@@ -247,10 +288,11 @@
         const migration = await getJson("/api/setup/migration/status");
         renderPacks(packs);
         selectionEl.textContent = (packs.selected_setup_pack_ids || []).join(", ") || "none";
-        migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready";
+        migrationEl.textContent = setupMigrationLabel(migration);
         setStatus("Setup loaded", { packs, migration });
+        redirectToReturnTarget(packs);
       } catch (error) {
-        setStatus("Setup failed", { error: error.message });
+        setStatus("Setup failed", { error: errorMessage(error) });
       }
     }
 
