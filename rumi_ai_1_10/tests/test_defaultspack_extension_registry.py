@@ -21,11 +21,13 @@ from ecosystem.defaultspack.domain.extensions.manifest import (
 )
 from ecosystem.defaultspack.domain.extensions.registry import ExtensionRegistry
 from ecosystem.defaultspack.domain.extensions.runtime import build_extensions_roots
+from ecosystem.defaultspack.domain.frontend.registry import FrontendRegistry
 from ecosystem.defaultspack.domain.prompt.manager import PromptManager
 from ecosystem.defaultspack.domain.tool.broker import ToolBroker
 from ecosystem.defaultspack.domain.tool.registry import ToolRegistry
 from ecosystem.defaultspack.transport.registry import build_fallback_http_routes
 import ecosystem.defaultspack.domain.ai_client.providers as providers_module
+import ecosystem.defaultspack.domain.frontend.registry as frontend_registry_module
 import ecosystem.defaultspack.domain.prompt.manager as prompt_manager_module
 import ecosystem.defaultspack.domain.tool.registry as tool_registry_module
 import ecosystem.defaultspack.transport.registry as transport_registry_module
@@ -52,6 +54,14 @@ class _FakeLLMRegistry:
         if provider_id:
             models = [m for m in models if m.get("provider_id") == provider_id]
         return models
+
+    def best_model(self, provider_id: str, *, use_case: str = "chat"):
+        candidates = self.models(provider_id=provider_id, enabled_only=True)
+        for model in candidates:
+            defaults = model.get("defaults") if isinstance(model.get("defaults"), dict) else {}
+            if defaults.get(use_case):
+                return model
+        return candidates[0] if candidates else None
 
 
 class _FakeExtensionRegistry:
@@ -411,6 +421,50 @@ def test_get_extension_registry_force_reload_preserves_registry_identity(monkeyp
     assert reloaded.root == second_root
 
 
+def test_provider_catalog_reads_use_cached_extension_registry(monkeypatch):
+    provider_manifest = {
+        "id": "cached_catalog",
+        "category": "llm_provider",
+        "version": "1",
+        "adapter": "openai_compatible",
+        "enabled": True,
+        "credential_required": False,
+        "default_base_url": "https://example.test/v1",
+        "default_model": "cached-chat",
+        "source_path": "test/extensions/llm/providers/cached_catalog/manifest.json",
+    }
+    model_manifest = {
+        "id": "cached_catalog/cached-chat",
+        "category": "llm_model",
+        "version": "1",
+        "provider_id": "cached_catalog",
+        "model_id": "cached-chat",
+        "display_name": "Cached Chat",
+        "type": "chat",
+        "enabled": True,
+        "defaults": {"chat": True},
+    }
+    fake_registry = _FakeExtensionRegistry([provider_manifest], [model_manifest])
+    calls: list[bool] = []
+
+    def fake_get_extension_registry(*, force_reload: bool = False, strict: bool = False):
+        del strict
+        calls.append(force_reload)
+        return fake_registry
+
+    monkeypatch.setattr(providers_module, "get_extension_registry", fake_get_extension_registry)
+
+    catalog = providers_module.get_provider_catalog_map()
+    models = {item["id"]: item for item in providers_module.get_all_known_models("cached_catalog")}
+    best_model = providers_module.get_best_model_for_provider("cached_catalog")
+
+    assert catalog["cached_catalog"]["metadata"]["catalog_source"] == "extension_manifest"
+    assert "cached_catalog/cached-chat" in models
+    assert best_model == "cached-chat"
+    assert calls
+    assert set(calls) == {False}
+
+
 def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
 
@@ -513,7 +567,14 @@ def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):
     )
 
     registry = ExtensionRegistry(extensions_root)
-    monkeypatch.setattr(prompt_manager_module, "get_extension_registry", lambda force_reload=True: registry)
+    calls: list[bool] = []
+
+    def fake_get_extension_registry(*, force_reload: bool = False, strict: bool = False):
+        del strict
+        calls.append(force_reload)
+        return registry
+
+    monkeypatch.setattr(prompt_manager_module, "get_extension_registry", fake_get_extension_registry)
     monkeypatch.setattr(prompt_manager_module, "get_extensions_root", lambda: extensions_root)
     monkeypatch.setattr(
         prompt_manager_module,
@@ -526,6 +587,45 @@ def test_prompt_manager_lists_extension_prompts(monkeypatch, tmp_path: Path):
     assert prompt is not None
     assert prompt["metadata"]["source"] == "extension"
     assert "hello {{name}}" in prompt["body"]
+    assert calls
+    assert set(calls) == {False}
+
+
+def test_frontend_skill_items_use_cached_extension_registry(monkeypatch):
+    calls: list[bool] = []
+
+    class FakeSkillRegistry:
+        def list(self, *, enabled_only: bool = True):
+            assert enabled_only is True
+            return [
+                {
+                    "id": "skill.cached",
+                    "display_name": "Cached Skill",
+                    "description": "Loaded from cached registry",
+                    "triggers": ["cached"],
+                    "applies_to_tools": ["tool.cached"],
+                    "aliases": ["cache"],
+                    "source_path": "test/extensions/skills/cached/manifest.json",
+                }
+            ]
+
+    class FakeRegistry:
+        def skills(self):
+            return FakeSkillRegistry()
+
+    def fake_get_extension_registry(*, force_reload: bool = False, strict: bool = False):
+        del strict
+        calls.append(force_reload)
+        return FakeRegistry()
+
+    monkeypatch.setattr(frontend_registry_module, "get_extension_registry", fake_get_extension_registry)
+
+    items = FrontendRegistry()._skill_items()
+
+    assert items[0]["id"] == "skill.cached"
+    assert items[0]["label"] == "Cached Skill"
+    assert calls
+    assert set(calls) == {False}
 
 
 def test_prompt_manager_rejects_spoofed_builtin_extension_prompt(monkeypatch, tmp_path: Path):

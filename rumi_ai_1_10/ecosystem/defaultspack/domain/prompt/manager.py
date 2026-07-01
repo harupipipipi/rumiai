@@ -164,7 +164,7 @@ class PromptManager:
     def _extension_prompts(self) -> dict[str, dict]:
         prompts: dict[str, dict] = {}
         try:
-            registry = get_extension_registry(force_reload=True)
+            registry = get_extension_registry()
             extensions_root = get_extensions_root()
             for manifest in registry.prompts().list(enabled_only=True):
                 prompt_id = str(manifest.get("id", "")).strip()

@@ -676,7 +676,7 @@ class FrontendRegistry:
 
     def _skill_items(self) -> list[dict[str, Any]]:
         try:
-            skills = get_extension_registry(force_reload=True).skills().list(enabled_only=True)
+            skills = get_extension_registry().skills().list(enabled_only=True)
         except Exception:
             return []
 
