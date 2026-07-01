@@ -9,14 +9,13 @@ test_pack_api_server.py — pack_api_server.py のユニットテスト
 from __future__ import annotations
 
 import io
-import json
 import threading
 import time
 import urllib.request
 from email.message import Message
 from http.server import ThreadingHTTPServer
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -1417,6 +1416,41 @@ class TestPackAPIServer:
 
         assert dispatched is True
         handler._setup_grant_all_ok.assert_not_called()
+        response, status = handler._send_response.call_args.args
+        assert status == 403
+        assert response.error == "Route is not available to scoped tokens"
+
+    def test_scoped_token_cannot_dispatch_core_setup_direct_revoke_route(self) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+
+        fake_registry = SimpleNamespace(packs={})
+        PackAPIHandler.load_api_routes(
+            fake_registry,
+            include_builtin_core_control_panel=True,
+        )
+        handler = _make_handler(
+            _authenticated_principal=AuthenticatedPrincipal(
+                token_id="tok",
+                profile_id="work",
+                surface_id="mobile",
+                device_id="",
+                role="mobile_client",
+                audiences=("kernel_api",),
+                issued_at="",
+                expires_at=None,
+            ),
+        )
+        handler._setup_revoke_all_ok = MagicMock(return_value={"revoked": True})
+
+        dispatched = handler._dispatch_api_route(
+            "POST",
+            "/api/setup/packs/defaultspack/revoke-all-ok",
+            body={},
+            query={},
+        )
+
+        assert dispatched is True
+        handler._setup_revoke_all_ok.assert_not_called()
         response, status = handler._send_response.call_args.args
         assert status == 403
         assert response.error == "Route is not available to scoped tokens"

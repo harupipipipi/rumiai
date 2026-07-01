@@ -36,6 +36,22 @@ class _FakeGrantManager:
         return True
 
 
+class _FakeApprovalManager:
+    _initialized = True
+
+    def __init__(self, *, approved=True, reason=None):
+        self.approved = approved
+        self.reason = reason
+        self.calls = []
+
+    def scan_packs(self):
+        self.calls.append("scan_packs")
+
+    def is_pack_approved_and_verified(self, pack_id):
+        self.calls.append(f"is_pack_approved_and_verified:{pack_id}")
+        return self.approved, self.reason
+
+
 class _FakeAuditLogger:
     def __init__(self):
         self.system = []
@@ -703,6 +719,101 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["principal_id"], "defaultspack")
             self.assertEqual(fake.batch_calls, [])
 
+    def test_grant_all_ok_rejects_unapproved_target_pack_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            (base / "selection.json").write_text(
+                json.dumps({"setup_pack_ids": ["defaultspack"]}) + "\n",
+                encoding="utf-8",
+            )
+            fake_grants = _FakeGrantManager()
+            fake_approval = _FakeApprovalManager(approved=False, reason="not_approved")
+            setup_pack_module = sys.modules[SetupPackManager.__module__]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                return_value=[self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=fake_approval,
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake_grants,
+            ):
+                result = manager.grant_all_ok("defaultspack")
+
+            self.assertEqual(result["status_code"], 403)
+            self.assertEqual(result["reason"], "target_pack_not_approved")
+            self.assertEqual(result["approval"]["reason"], "not_approved")
+            self.assertEqual(
+                fake_approval.calls,
+                ["scan_packs", "is_pack_approved_and_verified:defaultspack"],
+            )
+            self.assertEqual(fake_grants.batch_calls, [])
+
+    def test_grant_all_ok_allows_selected_approved_target_pack(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            (base / "selection.json").write_text(
+                json.dumps({"setup_pack_ids": ["defaultspack"]}) + "\n",
+                encoding="utf-8",
+            )
+            fake_grants = _FakeGrantManager()
+            fake_approval = _FakeApprovalManager(approved=True)
+            setup_pack_module = sys.modules[SetupPackManager.__module__]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                return_value=[self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=fake_approval,
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake_grants,
+            ):
+                result = manager.grant_all_ok("defaultspack")
+
+            self.assertTrue(result["granted"])
+            self.assertEqual(result["principal_id"], "defaultspack")
+            self.assertEqual(len(fake_grants.batch_calls), 1)
+            self.assertEqual(
+                fake_approval.calls,
+                ["scan_packs", "is_pack_approved_and_verified:defaultspack"],
+            )
+
+    def test_revoke_all_ok_allows_cleanup_without_selection_or_target_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake_grants = _FakeGrantManager()
+
+            with patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake_grants,
+            ):
+                result = manager.revoke_all_ok("defaultspack")
+
+            self.assertTrue(result["revoked"])
+            self.assertEqual(result["principal_id"], "defaultspack")
+            self.assertEqual(
+                fake_grants.revocations,
+                [
+                    ("defaultspack", permission_id)
+                    for permission_id in SETUP_PACK_ALL_OK_PERMISSIONS
+                ],
+            )
+
     def test_install_rejects_missing_setup_pack_dependency_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -826,6 +937,7 @@ class TestSetupPackManager(unittest.TestCase):
             )
             audit = _FakeAuditLogger()
             fake = _FakeGrantManager()
+            fake_approval = _FakeApprovalManager(approved=True)
             setup_pack_module = sys.modules[SetupPackManager.__module__]
 
             with patch(
@@ -838,6 +950,9 @@ class TestSetupPackManager(unittest.TestCase):
             ), patch(
                 "core_runtime.capability_grant_manager.get_capability_grant_manager",
                 return_value=fake,
+            ), patch(
+                "core_runtime.approval_manager.get_approval_manager",
+                return_value=fake_approval,
             ):
                 manager.grant_all_ok("defaultspack")
 

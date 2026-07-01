@@ -586,6 +586,62 @@ class SetupPackManager:
                 "error": str(exc),
             }
 
+    def _verify_target_pack_approval(self, target_pack_id: str) -> Dict[str, Any]:
+        try:
+            from .approval_manager import get_approval_manager
+
+            am = get_approval_manager()
+            if not getattr(am, "_initialized", False):
+                return {
+                    "approved": False,
+                    "reason": "approval_manager_uninitialized",
+                }
+            scan_packs = getattr(am, "scan_packs", None)
+            if callable(scan_packs):
+                scan_packs()
+
+            verify = getattr(am, "is_pack_approved_and_verified", None)
+            if callable(verify):
+                approved, reason = verify(target_pack_id)
+                return {
+                    "approved": bool(approved),
+                    "reason": None if approved else reason or "not_approved",
+                }
+
+            get_status = getattr(am, "get_status", None)
+            if not callable(get_status):
+                return {
+                    "approved": False,
+                    "reason": "approval_status_unavailable",
+                }
+            status = get_status(target_pack_id)
+            status_value = getattr(status, "value", status)
+            if status_value != "approved":
+                return {
+                    "approved": False,
+                    "reason": "not_approved",
+                    "status": status_value,
+                }
+
+            verify_hash = getattr(am, "verify_hash", None)
+            if callable(verify_hash) and not verify_hash(target_pack_id, use_cache=False):
+                return {
+                    "approved": False,
+                    "reason": "hash_mismatch",
+                }
+
+            return {
+                "approved": True,
+                "reason": None,
+            }
+        except Exception as exc:
+            logger.debug("Failed to verify setup pack target approval", exc_info=True)
+            return {
+                "approved": False,
+                "reason": "target_pack_approval_check_failed",
+                "error": str(exc),
+            }
+
     def _rollback_target_pack_approval(
         self,
         target_pack_id: str,
@@ -995,6 +1051,27 @@ class SetupPackManager:
                 "error": f"Setup pack is not selected: {setup_pack_id}",
                 "status_code": 409,
                 "reason": "setup_pack_not_selected",
+                "principal_id": definition.target_pack_id,
+            }
+        approval_result = self._verify_target_pack_approval(definition.target_pack_id)
+        if not approval_result.get("approved"):
+            self._log_permission_event(
+                "grant_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": setup_pack_id,
+                    "target_pack_id": definition.target_pack_id,
+                    "approval": approval_result,
+                },
+                error="target_pack_not_approved",
+            )
+            return {
+                "error": f"Target pack is not approved: {definition.target_pack_id}",
+                "status_code": 403,
+                "reason": "target_pack_not_approved",
+                "approval": approval_result,
                 "principal_id": definition.target_pack_id,
             }
         return self._grant_all_ok_for_definition(definition)
