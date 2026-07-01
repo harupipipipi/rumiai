@@ -679,6 +679,30 @@ class TestSetupPackManager(unittest.TestCase):
             self.assertEqual(result["errors"][0]["reason"], "marketplace_blacklisted")
             self.assertEqual(fake.batch_calls, [])
 
+    def test_grant_all_ok_rejects_unselected_setup_pack_before_grants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "setup_pack"
+            self._write_pack(root, "defaultspack", "defaultspack", True)
+            manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            fake = _FakeGrantManager()
+            setup_pack_module = sys.modules[SetupPackManager.__module__]
+
+            with patch.object(
+                setup_pack_module,
+                "discover_pack_locations",
+                return_value=[self._target(base, "defaultspack", "rumi:ecosystem/defaultspack")],
+            ), patch(
+                "core_runtime.capability_grant_manager.get_capability_grant_manager",
+                return_value=fake,
+            ):
+                result = manager.grant_all_ok("defaultspack")
+
+            self.assertEqual(result["status_code"], 409)
+            self.assertEqual(result["reason"], "setup_pack_not_selected")
+            self.assertEqual(result["principal_id"], "defaultspack")
+            self.assertEqual(fake.batch_calls, [])
+
     def test_install_rejects_missing_setup_pack_dependency_before_grants(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -796,6 +820,10 @@ class TestSetupPackManager(unittest.TestCase):
             root = base / "setup_pack"
             self._write_pack(root, "defaultspack", "defaultspack", True)
             manager = SetupPackManager(root=root, selection_file=base / "selection.json")
+            (base / "selection.json").write_text(
+                json.dumps({"setup_pack_ids": ["defaultspack"]}) + "\n",
+                encoding="utf-8",
+            )
             audit = _FakeAuditLogger()
             fake = _FakeGrantManager()
             setup_pack_module = sys.modules[SetupPackManager.__module__]

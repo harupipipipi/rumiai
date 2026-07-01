@@ -239,6 +239,19 @@ class SetupPackManager:
             return {}
         return data if isinstance(data, dict) else {}
 
+    def _selected_setup_pack_ids(self) -> set[str]:
+        selection = self.get_selection()
+        selected: set[str] = set()
+        for setup_pack_id in selection.get("setup_pack_ids") or []:
+            normalized = str(setup_pack_id or "").strip()
+            if normalized:
+                selected.add(normalized)
+        for key in ("setup_pack_id", "active_setup_pack_id"):
+            normalized = str(selection.get(key) or "").strip()
+            if normalized:
+                selected.add(normalized)
+        return selected
+
     def _log_system_event(
         self,
         action: str,
@@ -964,6 +977,24 @@ class SetupPackManager:
                 "status_code": 400,
                 "reason": "setup_pack_contract_validation_failed",
                 "errors": contract_errors,
+                "principal_id": definition.target_pack_id,
+            }
+        if setup_pack_id not in self._selected_setup_pack_ids():
+            self._log_permission_event(
+                "grant_all_ok",
+                False,
+                principal_id=definition.target_pack_id,
+                permission_id="*",
+                details={
+                    "setup_pack_id": setup_pack_id,
+                    "target_pack_id": definition.target_pack_id,
+                },
+                error="setup_pack_not_selected",
+            )
+            return {
+                "error": f"Setup pack is not selected: {setup_pack_id}",
+                "status_code": 409,
+                "reason": "setup_pack_not_selected",
                 "principal_id": definition.target_pack_id,
             }
         return self._grant_all_ok_for_definition(definition)
