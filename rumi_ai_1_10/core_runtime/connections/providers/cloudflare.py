@@ -5,7 +5,7 @@ from ..models import ConnectionProvider, OAuthConfig, ProviderCapability
 CLOUDFLARE_PROVIDER = ConnectionProvider(
     provider_id="cloudflare",
     display_name="Cloudflare",
-    description="Continue Rumi tasks in the user's own Cloudflare account when this computer is offline.",
+    description="Run cloud-capable sandbox work in the user's Cloudflare account and bridge PC-bound tools through a named Tunnel.",
     icon="cloudflare",
     service_kind="cloud",
     auth_type="oauth2",

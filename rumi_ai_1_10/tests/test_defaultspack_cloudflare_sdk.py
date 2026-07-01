@@ -89,6 +89,32 @@ def test_cloudflare_oauth_status_can_run_active_diagnostics(monkeypatch):
     ]
 
 
+def test_cloudflare_environment_prefers_local_wrangler_before_npx(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    local_bin = "/repo/rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge/node_modules/.bin/wrangler"
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda name: "/usr/local/bin/npx" if name == "npx" else None)
+    monkeypatch.setattr(
+        diagnostics.os.path,
+        "abspath",
+        lambda path: "/repo/rumi_ai_1_10" if str(path).endswith("../..") else str(path),
+    )
+    monkeypatch.setattr(diagnostics.os.path, "isfile", lambda path: path == local_bin)
+    monkeypatch.setattr(diagnostics.os, "access", lambda path, _mode: path == local_bin)
+
+    assert diagnostics._wrangler_command({}) == [local_bin]
+
+
+def test_cloudflare_environment_uses_noninteractive_npx_wrangler(monkeypatch):
+    from core_runtime.cloudflare import diagnostics
+
+    monkeypatch.setattr(diagnostics.shutil, "which", lambda name: "/usr/local/bin/npx" if name == "npx" else None)
+    monkeypatch.setattr(diagnostics.os.path, "isfile", lambda _path: False)
+
+    assert diagnostics._wrangler_command({}) == ["/usr/local/bin/npx", "--yes", "wrangler"]
+
+
 def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_blockers(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 

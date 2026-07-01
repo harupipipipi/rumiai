@@ -223,8 +223,8 @@
         "ja": "Rumi runnerを配置"
       },
       "description": {
-        "en": "Create/update runner resources for cloud continuation.",
-        "ja": "クラウド継続用runnerリソースを作成/更新します。"
+        "en": "Create/update Cloudflare Sandbox Bridge and PC Tool Bridge runner resources.",
+        "ja": "Cloudflare Sandbox BridgeとPC Tool Bridgeのrunnerリソースを作成/更新します。"
       },
       "risk": "high"
     }

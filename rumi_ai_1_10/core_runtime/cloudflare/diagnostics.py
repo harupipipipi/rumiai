@@ -124,15 +124,48 @@ def _wrangler_command(env: Mapping[str, str]) -> list[str]:
     wrangler = shutil.which("wrangler")
     if wrangler:
         return [wrangler]
+    local_wrangler = _local_wrangler_command()
+    if local_wrangler:
+        return local_wrangler
     npx = shutil.which("npx")
     if npx:
-        return [npx, "wrangler"]
+        return [npx, "--yes", "wrangler"]
     return []
 
 
 def _tool_command(name: str) -> list[str]:
     path = shutil.which(name)
     return [path] if path else []
+
+
+def _local_wrangler_command() -> list[str]:
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    candidates = [
+        os.path.join(
+            repo_root,
+            "ecosystem",
+            "defaultspack",
+            "cloudflare",
+            "pc_tool_bridge",
+            "node_modules",
+            ".bin",
+            "wrangler",
+        ),
+        os.path.join(
+            repo_root,
+            "ecosystem",
+            "defaultspack",
+            "cloudflare",
+            "sandbox_bridge",
+            "node_modules",
+            ".bin",
+            "wrangler",
+        ),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return [candidate]
+    return []
 
 
 def _command_presence(name: str, command: Sequence[str]) -> dict[str, Any]:
@@ -156,7 +189,7 @@ def _check_wrangler(command: Sequence[str], runner: CommandRunner) -> dict[str, 
     if not command:
         return _command_presence("wrangler", command)
     version = runner([*command, "--version"], 10)
-    whoami = runner([*command, "whoami"], 20)
+    whoami = runner([*command, "whoami"], 45)
     stdout = f"{version.stdout}\n{whoami.stdout}"
     stderr = f"{version.stderr}\n{whoami.stderr}"
     authenticated = whoami.returncode == 0 and "logged in" in stdout.lower()

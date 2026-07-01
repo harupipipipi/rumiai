@@ -95,7 +95,7 @@ SETTING_SECTIONS: list[SettingSection] = [
     SettingSection(SettingSectionId.MODELS_API, {"en": "Models & API", "ja": "モデルとAPI"}, {"en": "Models, providers, API keys, routing, and fallback.", "ja": "モデル、APIキー、ルーティングを管理します。"}, "brain", 20),
     SettingSection(SettingSectionId.ACCOUNTS_CONNECTIONS, {"en": "Accounts & Connections", "ja": "アカウント連携"}, {"en": "OAuth and API-key account connections.", "ja": "OAuth/APIキー連携を管理します。"}, "plug", 30),
     SettingSection(SettingSectionId.TOOLS_MCP, {"en": "Tools & MCP", "ja": "ツールとMCP"}, {"en": "Tools, MCP servers, and tool permission policy.", "ja": "ツール、MCP、許可設定です。"}, "wrench", 40),
-    SettingSection(SettingSectionId.COMPUTER_AUTOMATION, {"en": "Computer & Automation", "ja": "コンピューター操作"}, {"en": "Computer control, browser automation, and cloud continuation.", "ja": "画面操作、自動化、クラウド継続です。"}, "monitor", 50),
+    SettingSection(SettingSectionId.COMPUTER_AUTOMATION, {"en": "Computer & Automation", "ja": "コンピューター操作"}, {"en": "Computer control, browser automation, and cloud integrations.", "ja": "画面操作、自動化、クラウド連携です。"}, "monitor", 50),
     SettingSection(SettingSectionId.WORKSPACE_UI, {"en": "Workspace & UI", "ja": "ワークスペースとUI"}, {"en": "Theme, layout, panes, shortcuts, and visual indicators.", "ja": "テーマ、レイアウト、表示です。"}, "layout", 60),
     SettingSection(SettingSectionId.PROFILES, {"en": "Profiles", "ja": "プロファイル"}, {"en": "Profile-specific runtime presets.", "ja": "実行環境プリセットです。"}, "user-cog", 70),
     SettingSection(SettingSectionId.PRIVACY_SECURITY, {"en": "Privacy & Security", "ja": "プライバシーとセキュリティ"}, {"en": "Credentials, approvals, audit logs, and retention.", "ja": "認証情報、承認、監査、保持設定です。"}, "shield", 80),
