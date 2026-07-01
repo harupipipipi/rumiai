@@ -572,6 +572,53 @@ class TestCheckAuth:
         assert captured["profile_id"] == "work"
         assert captured["node_id"] is None
         assert captured["graph_id"] is None
+        assert captured["consume_approval_token"] is False
+
+    def test_authority_check_requires_explicit_consume_approval_token(self, monkeypatch) -> None:
+        from core_runtime.api.security import authority_handlers
+
+        captured = []
+
+        class FakeDecision:
+            def to_dict(self):
+                return {"allowed": True}
+
+        class FakeAuthorityService:
+            def check(self, **kwargs):
+                captured.append(kwargs)
+                return FakeDecision()
+
+        monkeypatch.setattr(
+            authority_handlers,
+            "_authority_service",
+            lambda: FakeAuthorityService(),
+        )
+        handler = _make_handler()
+
+        default_result = handler._authority_check(
+            {
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": {"kind": "model"},
+                "request_id": "req-1",
+                "approval_token": "tok",
+            }
+        )
+        consuming_result = handler._authority_check(
+            {
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": {"kind": "model"},
+                "request_id": "req-1",
+                "approval_token": "tok",
+                "consume_approval_token": True,
+            }
+        )
+
+        assert default_result["allowed"] is True
+        assert consuming_result["allowed"] is True
+        assert captured[0]["consume_approval_token"] is False
+        assert captured[1]["consume_approval_token"] is True
 
     def test_scoped_authority_grants_handler_passes_actor_principal(self, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal

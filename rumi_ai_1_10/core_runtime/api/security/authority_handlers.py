@@ -69,6 +69,7 @@ class AuthorityHandlersMixin:
                 graph_id=graph_id,
                 request_id=body.get("request_id"),
                 approval_token=body.get("approval_token"),
+                consume_approval_token=bool(body.get("consume_approval_token") is True),
             )
             return decision.to_dict()
         except Exception as exc:
