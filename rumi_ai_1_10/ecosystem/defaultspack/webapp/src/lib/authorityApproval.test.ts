@@ -483,7 +483,12 @@ test("authority approval browser fallback returns same-tab approvals to a safe a
 
   assert.match(source, /function approvalReturnToFromLocation\(\)/);
   assert.match(source, /url\.origin !== window\.location\.origin/);
-  assert.match(source, /!url\.pathname\.startsWith\("\/finger-recording"\) && !url\.pathname\.startsWith\("\/ambient-debug"\)/);
+  assert.match(source, /const APPROVAL_RETURN_TO_PATHS = \["\/finger-recording", "\/ambient-debug"\] as const/);
+  assert.match(source, /function isApprovalReturnToPathAllowed\(pathname: string\)/);
+  assert.match(source, /pathname === allowedPath \|\| pathname\.startsWith\(`\$\{allowedPath\}\/`\)/);
+  assert.match(source, /!isApprovalReturnToPathAllowed\(url\.pathname\)/);
+  assert.doesNotMatch(source, /startsWith\("\/finger-recording"\)/);
+  assert.doesNotMatch(source, /startsWith\("\/ambient-debug"\)/);
   assert.match(source, /window\.location\.replace\(defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\(fallbackReturnTo\)\)\)/);
 });
 

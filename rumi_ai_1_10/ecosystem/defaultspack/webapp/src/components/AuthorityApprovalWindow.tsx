@@ -50,6 +50,8 @@ type TauriAuthorityWindow = Window & {
   __TAURI__?: unknown;
 };
 
+const APPROVAL_RETURN_TO_PATHS = ["/finger-recording", "/ambient-debug"] as const;
+
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
   conversation: "会話",
@@ -65,13 +67,19 @@ function requestIdFromLocation(): string {
   }
 }
 
+function isApprovalReturnToPathAllowed(pathname: string): boolean {
+  return APPROVAL_RETURN_TO_PATHS.some(
+    (allowedPath) => pathname === allowedPath || pathname.startsWith(`${allowedPath}/`),
+  );
+}
+
 function approvalReturnToFromLocation(): string {
   try {
     const value = new URLSearchParams(window.location.search).get("return_to")?.trim() ?? "";
     if (!value) return "";
     const url = new URL(value, window.location.origin);
     if (url.origin !== window.location.origin) return "";
-    if (!url.pathname.startsWith("/finger-recording") && !url.pathname.startsWith("/ambient-debug")) {
+    if (!isApprovalReturnToPathAllowed(url.pathname)) {
       return "";
     }
     return `${url.pathname}${url.search}${url.hash}`;
