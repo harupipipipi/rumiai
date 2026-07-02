@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -11,6 +13,57 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.chat.browser_state import emit_browser_state_events  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_chat_model_catalog(monkeypatch):
+    class FakeRoutingDecision:
+        def __init__(self, model: str) -> None:
+            self.selected_model = model
+            self.original_model = model
+            self.selected_group = "default"
+            self.reason_codes = ["test_model_routing"]
+            self.warnings = []
+            self.bridge_required = False
+            self.bridge_plan = {}
+
+        def to_dict(self) -> dict:
+            return {"selected_model": self.selected_model}
+
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "openai/gpt-5.4",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "deepthink_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda self, **kwargs: {"level": "none"},
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.get_model_capabilities",
+        lambda model: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_thinking": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.route_model_request",
+        lambda request: FakeRoutingDecision(request.preferred_model or "openai/gpt-5.4"),
+    )
+    monkeypatch.setattr(
+        "domain.chat.tool_selection_service.search_models",
+        lambda *args, **kwargs: {"models": []},
+    )
+    monkeypatch.setattr(
+        "domain.chat.tool_selection_orchestrator.call_model",
+        lambda *args, **kwargs: {"status": "ok", "model": "openai/gpt-5.4", "output": {}},
+    )
 
 
 def _coding_file_read_result(text: str) -> dict:
