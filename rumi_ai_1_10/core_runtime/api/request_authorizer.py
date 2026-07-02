@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import unquote
 
 from .auth_principal import AuthenticatedPrincipal
 from ..authority.config_lattice import meet_authority_configs
@@ -20,6 +21,7 @@ class RouteAuthorization:
 
 
 _AUTHORITY_REQUEST_RE = re.compile(r"^/api/authority/requests/([^/]+)(?:/(challenge|approve|deny))?$")
+_AUTHORITY_GRANT_RE = re.compile(r"^/api/authority/grants/([^/]+)/([^/]+)$")
 
 
 def _get_capability_grant_manager():
@@ -61,6 +63,8 @@ def route_permission(method: str, path: str, route_entry: dict[str, Any] | None 
         return "authority.request.read"
     if path == "/api/authority/grants":
         return "authority.grant.read" if method == "GET" else "authority.grant.manage"
+    if method == "DELETE" and _AUTHORITY_GRANT_RE.match(path):
+        return "authority.grant.manage"
     if path == "/api/authority/events" and method == "GET":
         return ""
     if path == "/api/packs" or path.startswith("/api/packs/"):
@@ -74,6 +78,10 @@ def route_permission(method: str, path: str, route_entry: dict[str, Any] | None 
 
 def route_resource(method: str, path: str, route_entry: dict[str, Any] | None = None) -> dict[str, Any]:
     resource = {"kind": "api_route", "method": str(method or "").upper(), "path": str(path or "")}
+    grant_match = _AUTHORITY_GRANT_RE.match(str(path or ""))
+    if grant_match:
+        resource["target_principal_id"] = unquote(grant_match.group(1))
+        resource["target_permission_id"] = unquote(grant_match.group(2))
     if route_entry:
         pack_id = str(route_entry.get("pack_id") or "").strip()
         owner_pack_id = str(route_entry.get("owner_pack_id") or pack_id).strip()

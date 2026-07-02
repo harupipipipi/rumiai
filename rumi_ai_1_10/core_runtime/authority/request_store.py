@@ -278,8 +278,68 @@ class AuthorityRequestStore:
                 return None
             data["status"] = status
             self._write_json(self._request_path(request_id), data)
-            self.audit("authority_request_status", {"request_id": request_id, "status": status})
+            self._audit_best_effort("authority_request_status", {"request_id": request_id, "status": status})
             return AuthorityRequest.from_dict(data)
+
+    def settle_pending_request(
+        self,
+        request_id: str,
+        status: str,
+        settle_callback=None,
+        rollback_callback=None,
+    ) -> dict[str, Any]:
+        if status not in {"approved", "denied"}:
+            raise ValueError("invalid authority terminal status")
+        with self._lock:
+            path = self._request_path(request_id)
+            data = self._read_json(path)
+            if not data:
+                return {"settled": False, "request": None, "reason": "not_found"}
+            request = AuthorityRequest.from_dict(data)
+            if request.status != "pending":
+                return {
+                    "settled": False,
+                    "request": request,
+                    "reason": "not_pending",
+                }
+            if self.request_expired(request):
+                data["status"] = "expired"
+                self._write_json(path, data)
+                self._audit_best_effort(
+                    "authority_request_status",
+                    {"request_id": request_id, "status": "expired"},
+                )
+                return {
+                    "settled": False,
+                    "request": AuthorityRequest.from_dict(data),
+                    "reason": "expired",
+                }
+
+            result = None
+            try:
+                result = settle_callback(request) if callable(settle_callback) else None
+                data["status"] = status
+                self._write_json(path, data)
+            except Exception:
+                if callable(rollback_callback):
+                    try:
+                        rollback_callback(request, result)
+                    except Exception as rollback_exc:
+                        self.audit(
+                            "authority_request_settlement_rollback_failed",
+                            {
+                                "request_id": request_id,
+                                "status": status,
+                                "error": str(rollback_exc),
+                            },
+                        )
+                raise
+            self._audit_best_effort("authority_request_status", {"request_id": request_id, "status": status})
+            return {
+                "settled": True,
+                "request": AuthorityRequest.from_dict(data),
+                "result": result,
+            }
 
     def issue_one_shot(self, request: AuthorityRequest, *, expires_in_seconds: int = 86400) -> dict[str, Any]:
         token = secrets.token_urlsafe(32)
@@ -299,6 +359,27 @@ class AuthorityRequestStore:
             self._write_json(self._one_shot_dir / f"{token_id}.json", record)
             self.audit("authority_one_shot_issued", {"request_id": request.request_id, "token_id": token_id})
         return {"token": token, "token_id": token_id, "expires_at": record["expires_at"]}
+
+    def revoke_one_shots(self, token_ids: list[str] | tuple[str, ...], *, reason: str = "rollback") -> int:
+        revoked = 0
+        with self._lock:
+            for token_id in token_ids or ():
+                normalized = str(token_id or "").strip().lower()
+                if not re.fullmatch(r"[0-9a-f]{64}", normalized):
+                    continue
+                path = self._one_shot_dir / f"{normalized}.json"
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    continue
+                revoked += 1
+                self.audit(
+                    "authority_one_shot_revoked",
+                    {"token_id": normalized, "reason": reason},
+                )
+        return revoked
 
     def consume_one_shot(
         self,
@@ -331,8 +412,115 @@ class AuthorityRequestStore:
             record["consumed"] = True
             record["consumed_at"] = _now_ts()
             self._write_json(path, record)
-            self.audit("authority_one_shot_consumed", {"request_id": request_id, "token_id": token_id})
+            self._audit_best_effort(
+                "authority_one_shot_consumed",
+                {"request_id": request_id, "token_id": token_id},
+            )
             return True
+
+    def consume_one_shots_atomically(self, items: list[dict[str, Any]]) -> dict[str, Any]:
+        """Consume multiple one-shot approvals only if every token is still valid."""
+        if not isinstance(items, list):
+            return {"success": False, "reason": "invalid_items", "failed_index": 0}
+        if not items:
+            return {"success": True, "consumed_count": 0}
+
+        with self._lock:
+            seen_token_ids: set[str] = set()
+            records: list[tuple[Path, str, dict[str, Any], dict[str, Any], int]] = []
+            for index, item in enumerate(items):
+                token = str(item.get("token") or "")
+                if not token:
+                    return {"success": False, "reason": "missing_token", "failed_index": index}
+                token_id = hashlib.sha256(token.encode("utf-8")).hexdigest()
+                if token_id in seen_token_ids:
+                    return {"success": False, "reason": "duplicate_token", "failed_index": index}
+                seen_token_ids.add(token_id)
+
+                path = self._one_shot_dir / f"{token_id}.json"
+                record = self._read_json(path)
+                reason = self._one_shot_validation_error(
+                    record,
+                    request_id=str(item.get("request_id") or ""),
+                    principal_id=str(item.get("principal_id") or ""),
+                    permission_id=str(item.get("permission_id") or ""),
+                    resource=item.get("resource") if isinstance(item.get("resource"), dict) else {},
+                )
+                if reason:
+                    return {
+                        "success": False,
+                        "reason": reason,
+                        "failed_index": index,
+                        "request_id": str(item.get("request_id") or ""),
+                        "permission_id": str(item.get("permission_id") or ""),
+                    }
+                records.append((path, token_id, record, item, index))
+
+            now = _now_ts()
+            written: list[tuple[Path, str, dict[str, Any]]] = []
+            failed_index = 0
+            try:
+                for path, token_id, record, item, index in records:
+                    failed_index = index
+                    original_record = dict(record)
+                    updated_record = dict(record)
+                    updated_record["consumed"] = True
+                    updated_record["consumed_at"] = now
+                    self._write_json(path, updated_record)
+                    written.append((path, token_id, original_record))
+                    self._audit_best_effort(
+                        "authority_one_shot_consumed",
+                        {"request_id": str(item.get("request_id") or ""), "token_id": token_id},
+                    )
+            except Exception as exc:
+                for restore_path, token_id, original_record in reversed(written):
+                    try:
+                        self._write_json(restore_path, original_record)
+                        self._audit_best_effort(
+                            "authority_one_shot_consume_rollback",
+                            {"token_id": token_id, "reason": "consume_write_failed"},
+                        )
+                    except Exception as rollback_exc:
+                        self._audit_best_effort(
+                            "authority_one_shot_consume_rollback_failed",
+                            {"token_id": token_id, "error": str(rollback_exc)},
+                        )
+                failed_item = records[failed_index][3]
+                return {
+                    "success": False,
+                    "reason": "consume_write_failed",
+                    "error": str(exc),
+                    "failed_index": failed_index,
+                    "request_id": str(failed_item.get("request_id") or ""),
+                    "permission_id": str(failed_item.get("permission_id") or ""),
+                }
+            return {"success": True, "consumed_count": len(records)}
+
+    def _one_shot_validation_error(
+        self,
+        record: dict[str, Any],
+        *,
+        request_id: str,
+        principal_id: str,
+        permission_id: str,
+        resource: dict[str, Any],
+    ) -> str:
+        if not record:
+            return "missing_token"
+        if record.get("consumed"):
+            return "token_already_consumed"
+        expires_at = _parse_ts(str(record.get("expires_at") or ""))
+        if expires_at and expires_at <= _now_utc():
+            return "token_expired"
+        if str(record.get("request_id") or "") != str(request_id or ""):
+            return "request_mismatch"
+        if str(record.get("principal_id") or "") != str(principal_id or ""):
+            return "principal_mismatch"
+        if str(record.get("permission_id") or "") != str(permission_id or ""):
+            return "permission_mismatch"
+        if str(record.get("resource_hash") or "") != self.resource_hash(resource):
+            return "resource_mismatch"
+        return ""
 
     def one_shot_matches_request(
         self,
@@ -394,6 +582,21 @@ class AuthorityRequestStore:
             )
         return record
 
+    def remove_deny(self, deny_id: str, *, reason: str = "rollback") -> bool:
+        normalized = str(deny_id or "").strip()
+        if not normalized:
+            return False
+        path = self._deny_dir / f"{_safe_filename(normalized)}.json"
+        with self._lock:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                return False
+            except OSError:
+                return False
+            self.audit("authority_deny_removed", {"deny_id": normalized, "reason": reason})
+            return True
+
     def list_denies(self) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         for path in sorted(self._deny_dir.glob("*.json")):
@@ -436,6 +639,12 @@ class AuthorityRequestStore:
             self._audit_path.parent.mkdir(parents=True, exist_ok=True)
             with self._audit_path.open("a", encoding="utf-8") as handle:
                 handle.write(line + "\n")
+
+    def _audit_best_effort(self, action: str, details: dict[str, Any] | None = None) -> None:
+        try:
+            self.audit(action, details)
+        except Exception:
+            pass
 
     def list_events(self, limit: int = 200) -> list[dict[str, Any]]:
         limit = max(1, min(int(limit or 200), 1000))
