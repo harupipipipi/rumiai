@@ -21,11 +21,53 @@ from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_goal_model_routing(monkeypatch):
+    class FakeRoutingDecision:
+        def __init__(self, model: str) -> None:
+            self.selected_model = model
+            self.original_model = model
+            self.selected_group = "default"
+            self.reason_codes = ["test_model_routing"]
+            self.warnings = []
+            self.bridge_required = False
+            self.bridge_plan = {}
+
+        def to_dict(self) -> dict:
+            return {"selected_model": self.selected_model}
+
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.route_model_request",
+        lambda request: FakeRoutingDecision(request.preferred_model or "stub/default"),
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.get_model_capabilities",
+        lambda model: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_fast": True,
+            "supports_image_input": True,
+            "supports_audio_input": True,
+            "supports_thinking": True,
+        },
+    )
 
 
 class _ScriptedCallHandler:
