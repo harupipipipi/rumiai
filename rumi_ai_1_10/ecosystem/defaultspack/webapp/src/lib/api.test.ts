@@ -60,6 +60,33 @@ test("startProviderOAuth posts scope mode and requested services", async () => {
   });
 });
 
+test("providerOAuthStatus can request active diagnostics", async () => {
+  let requestUrl = "";
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requestUrl = String(input);
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        provider: {
+          provider_id: "cloudflare",
+          provisioning: {
+            environment_status: "blocked",
+          },
+        },
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await api.providerOAuthStatus("cloudflare", { activeDiagnostics: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requestUrl, "/api/ai/oauth?provider_id=cloudflare&active_diagnostics=true");
+});
+
 test("importProviderConnection posts credential imports to connections route", async () => {
   const rawToken = ["cloudflare", "api", "token"].join("-");
   let requestUrl = "";

@@ -45,7 +45,13 @@ from ecosystem.defaultspack.backend.sandbox.models import (
 from ecosystem.defaultspack.backend.sandbox.lifecycle_sweeper import LifecycleSweeper
 from ecosystem.defaultspack.backend.sandbox.operation_store import RuntimeOperationStore
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
-from ecosystem.defaultspack.backend.sandbox.providers import DockerProvider, LinuxNativeProvider, MacLimaProvider, WindowsWslProvider
+from ecosystem.defaultspack.backend.sandbox.providers import (
+    CloudflareSandboxBridgeProvider,
+    DockerProvider,
+    LinuxNativeProvider,
+    MacLimaProvider,
+    WindowsWslProvider,
+)
 from ecosystem.defaultspack.backend.sandbox.sandbox_manager import SandboxManager
 from ecosystem.defaultspack.backend.sandbox.template_catalog import sandbox_template_catalog
 
@@ -63,6 +69,7 @@ class _SandboxApiService:
         self.provider_registry.register(MacLimaProvider())
         self.provider_registry.register(WindowsWslProvider())
         self.provider_registry.register(DockerProvider())
+        self.provider_registry.register(CloudflareSandboxBridgeProvider())
         self.manager = SandboxManager(provider_registry=self.provider_registry)
         self.operation_store = RuntimeOperationStore(self.manager.state_dir / "runtime_operations.json")
         self.operation_cancellations = CancellationRegistry()
@@ -119,6 +126,8 @@ def run(input_data: dict[str, Any] | None, context: dict[str, Any] | None = None
             return _sandbox_get(service, payload)
         if handler == "sandbox_exec":
             return _sandbox_exec(service, payload, context_payload)
+        if handler == "sandbox_files_read":
+            return _sandbox_files_read(service, payload)
         if handler == "sandbox_files_apply_patch":
             return _sandbox_files_apply_patch(service, payload)
         if handler == "sandbox_port_expose":
@@ -601,6 +610,14 @@ def _sandbox_exec(service: _SandboxApiService, payload: dict[str, Any], context:
     if result.get("ok") is not True:
         return _api_error(str(result.get("error") or "Sandbox exec failed"), str(result.get("code") or "SANDBOX_EXEC_FAILED"), int(result.get("status_code") or 400), details=result.get("details"))
     return ok(result)
+
+
+def _sandbox_files_read(service: _SandboxApiService, payload: dict[str, Any]):
+    sandbox_id = str(payload.get("sandbox_id") or "")
+    result = service.manager.read_file(sandbox_id, payload)
+    if result.get("ok") is True:
+        return ok(result)
+    return _api_error(str(result.get("error") or "Sandbox file read failed"), str(result.get("code") or "SANDBOX_FILES_NOT_READY"), int(result.get("status_code") or 501), details=result.get("details"))
 
 
 def _sandbox_files_apply_patch(service: _SandboxApiService, payload: dict[str, Any]):
@@ -1122,6 +1139,7 @@ def _provider_label(provider_id: str) -> str:
         "windows_wsl": "RumiUbuntu WSL2",
         "mac_lima": "Rumi-managed Lima Ubuntu",
         "docker": "Docker-compatible runtime",
+        "cloudflare_sandbox_bridge": "Cloudflare Sandbox Bridge",
     }.get(provider_id, provider_id or "Unknown provider")
 
 
@@ -1151,6 +1169,17 @@ def _provider_isolation(provider_id: str, ready: bool) -> dict[str, Any]:
             "sandbox_cgroup_scope": "docker_container",
             "sandbox_operation_binding": "container_id",
             "summary": "Optional provider only; Docker Desktop is never installed silently.",
+        }
+    if provider_id == "cloudflare_sandbox_bridge":
+        return {
+            "mode": "cloudflare_container" if ready else "cloudflare_pending",
+            "container": True,
+            "sandbox_workspace_shared": False,
+            "sandbox_process_namespace_shared": False,
+            "sandbox_network_namespace_shared": False,
+            "sandbox_cgroup_scope": "cloudflare_container",
+            "sandbox_operation_binding": "bridge_sandbox_id",
+            "summary": "Runs supported argv/file operations in Cloudflare Containers through the Sandbox Bridge. PC-local desktop, terminal, browser, and workspace tools are not uploaded.",
         }
     if provider_id == "mac_lima":
         return {

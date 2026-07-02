@@ -2899,9 +2899,22 @@ export const api = {
     });
   },
 
-  providerOAuthStatus(providerId?: string) {
-    const suffix = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : "";
+  providerOAuthStatus(providerId?: string, options: { activeDiagnostics?: boolean } = {}) {
+    const params = new URLSearchParams();
+    if (providerId) params.set("provider_id", providerId);
+    if (options.activeDiagnostics) params.set("active_diagnostics", "true");
+    const suffix = params.toString() ? `?${params.toString()}` : "";
     return request<{ provider?: Record<string, unknown>; providers?: Record<string, Record<string, unknown>> }>(`/api/ai/oauth${suffix}`, { cache: "no-store" });
+  },
+
+  runProviderOAuthDiagnostics(providerId: string) {
+    return request<{ provider_id: string; provider?: Record<string, unknown> }>("/api/ai/oauth", {
+      method: "POST",
+      body: JSON.stringify({
+        action: "cloudflare_diagnostics",
+        provider_id: providerId,
+      }),
+    });
   },
 
   saveProviderOAuthClientConfig(providerId: string, clientConfig: string) {

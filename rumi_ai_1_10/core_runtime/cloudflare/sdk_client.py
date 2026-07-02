@@ -88,6 +88,9 @@ class CloudflareSDKAdapter:
         account_id = self._require_account_id(account_id)
         return self._call(lambda client: _serialize_resource(client.accounts.get(account_id=account_id)))
 
+    def list_zones(self, *, per_page: int = 50) -> list[dict[str, Any]]:
+        return self._call(lambda client: _serialize_collection(client.zones.list(per_page=per_page)))
+
     def list_pages_projects(self, *, account_id: str | None = None, per_page: int = 10) -> list[dict[str, Any]]:
         account_id = self._require_account_id(account_id)
         return self._call(

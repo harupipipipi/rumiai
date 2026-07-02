@@ -8,6 +8,8 @@ from core_runtime.connections.providers.codex import CODEX_PROVIDER
 from core_runtime.connections.providers.cloudflare import CLOUDFLARE_PROVIDER
 from core_runtime.connections.providers.github import GITHUB_PROVIDER
 from core_runtime.connections.providers.google import GOOGLE_PROVIDER
+from core_runtime.connections.templates import CredentialBundle
+from ecosystem.defaultspack.domain.connections.cloudflare import CloudflareConnectionAdapter
 
 
 def test_connections_registry_orders_providers():
@@ -33,6 +35,16 @@ def test_provider_safe_payload_has_no_secret():
     assert payload["tokenImportSupported"] is True
     assert payload["scopeToCapability"][0]["capabilities"] == ["cloudflare.account.read"]
     assert payload["capabilities"][0]["displayName"] == "Read account metadata"
+    assert payload["metadata"]["pc_tunnel_scaffold_path"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tunnel"
+    assert payload["metadata"]["pc_tool_bridge_scaffold_path"] == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge"
+    assert "not uploaded to Cloudflare" in payload["metadata"]["pc_tool_bridge_note"]
+    assert payload["metadata"]["tool_coverage_surface"] == "/api/tools/catalog"
+    assert payload["metadata"]["all_tools_cloudflare_native_supported"] is False
+    assert payload["metadata"]["pc_bridge_required_for_host_tools"] is True
+    assert "pages.dev" in payload["metadata"]["stable_pc_tunnel_note"]
+    assert "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME" in payload["metadata"]["self_host_env"]
+    assert "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL" in payload["metadata"]["self_host_env"]
+    assert "RUMI_PC_TOOL_BRIDGE_TOKEN" in payload["metadata"]["self_host_env"]
 
 
 def test_cloudflare_pages_write_requires_approval():
@@ -89,6 +101,69 @@ def test_cloudflare_full_runner_scope_requires_approval_for_runner_deploy():
     assert resolved.capabilities == []
     assert resolved.approval_required_capabilities == ["cloudflare.runner.deploy"]
     assert resolved.rejected_capabilities == []
+
+
+def test_cloudflare_connection_adapter_normalizes_context_without_secret_leak(monkeypatch):
+    monkeypatch.setenv("CLOUDFLARE_ACCOUNT_ID", "env-account")
+    monkeypatch.setenv("CLOUDFLARE_API_TOKEN_REQUESTED_CAPABILITIES", "cloudflare.worker.read,cloudflare.d1.read")
+    bundle = CredentialBundle.from_dict(
+        {
+            "provider_id": "cloudflare",
+            "connection_id": "default",
+            "api_key": "cf-secret-token",
+            "token_metadata": {
+                "account_id": "metadata-account",
+                "account_name": "Rumi Ops",
+                "api_key": "cf-secret-token",
+            },
+        }
+    )
+    secret_material = bundle.secret_material()
+    secret_material["context"] = {"account_id": "context-account", "zone_id": "context-zone"}
+
+    metadata = CloudflareConnectionAdapter().normalize_token_metadata(
+        provider=CLOUDFLARE_PROVIDER,
+        credential_bundle=bundle,
+        secret_material=secret_material,
+    )
+
+    assert metadata["provider_id"] == "cloudflare"
+    assert metadata["account_id"] == "metadata-account"
+    assert metadata["zone_id"] == "context-zone"
+    assert metadata["account_id_configured"] is True
+    assert metadata["zone_id_configured"] is True
+    assert metadata["cloudflare_account_status"] == "configured"
+    assert metadata["account_label"] == "Cloudflare: Rumi Ops"
+    assert metadata["requested_capabilities"] == ["cloudflare.worker.read", "cloudflare.d1.read"]
+    assert metadata["status"] == "connected"
+    assert "cf-secret-token" not in str(metadata)
+
+
+def test_cloudflare_connection_adapter_prefers_context_then_env(monkeypatch):
+    monkeypatch.setenv("RUMI_CLOUDFLARE_ACCOUNT_ID", "env-account")
+    monkeypatch.setenv("RUMI_CLOUDFLARE_ZONE_ID", "env-zone")
+    bundle = CredentialBundle.from_dict(
+        {
+            "provider_id": "cloudflare",
+            "connection_id": "default",
+            "api_key": "cf-secret-token",
+            "scopes": ["account:read"],
+        }
+    )
+    secret_material = bundle.secret_material()
+    secret_material["context"] = {"account_id": "context-account"}
+
+    metadata = CloudflareConnectionAdapter().normalize_token_metadata(
+        provider=CLOUDFLARE_PROVIDER,
+        credential_bundle=bundle,
+        secret_material=secret_material,
+    )
+
+    assert metadata["account_id"] == "context-account"
+    assert metadata["zone_id"] == "env-zone"
+    assert metadata["requested_capabilities"] == []
+    assert metadata["account_id_configured"] is True
+    assert metadata["zone_id_configured"] is True
 
 
 def test_codex_provider_safe_payload_has_no_token_material():
