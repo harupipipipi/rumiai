@@ -12,9 +12,10 @@ import {
 test("workspace tab options keep the extensible launch catalog", () => {
   assert.deepEqual(
     WORKSPACE_TAB_CREATE_OPTIONS.map((option) => option.kind),
-    ["chat", "coding", "calendar", "kanban", "desktops", "canvas", "tools", "browser"],
+    ["chat", "coding", "calendar", "kanban", "desktops", "subagents", "canvas", "tools", "browser"],
   );
   assert.equal(workspaceTabOption("browser").disabled, true);
+  assert.equal(workspaceTabOption("subagents").label, "Subagents / Teams");
   assert.equal(workspaceTabOption("kanban").label, "Kanban");
   assert.equal(workspaceTabOption("desktops").label, "Desktops");
 });

@@ -1,0 +1,47 @@
+{
+  "function_id": "subagent_task_complete",
+  "description": "Mark a PM-owned subagent task complete without granting user approval.",
+  "tags": [
+    "subagent_team",
+    "goal"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.task.complete"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.task_complete",
+    "defaultspack.subagent.task_complete",
+    "defaults.subagent.task.complete",
+    "defaultspack.subagent.task.complete",
+    "subagent.task.complete"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_task_complete"
+      }
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "function_id": "coding_change_request_viewed_file",
+  "description": "Persist a Rumi Review viewed-file flag.",
+  "tags": [
+    "coding",
+    "change_request"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.change.request.viewed.file"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.change_request_viewed_file",
+    "defaultspack.coding.change_request_viewed_file",
+    "defaults.coding.change.request.viewed.file",
+    "defaultspack.coding.change.request.viewed.file"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.change_request.viewed_files",
+      "default_args": {
+        "_method": "PATCH"
+      }
+    }
+  }
+}

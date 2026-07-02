@@ -1,0 +1,46 @@
+{
+  "function_id": "coding_change_request_refresh",
+  "description": "Refresh a Rumi Review snapshot and drift state.",
+  "tags": [
+    "coding",
+    "change_request"
+  ],
+  "risk": "medium",
+  "requires": [
+    "coding.change.request.refresh"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.change_request_refresh",
+    "defaultspack.coding.change_request_refresh",
+    "defaults.coding.change.request.refresh",
+    "defaultspack.coding.change.request.refresh"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.change_request.refresh",
+      "default_args": {
+        "_method": "POST"
+      }
+    }
+  }
+}

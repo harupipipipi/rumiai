@@ -15,6 +15,7 @@ import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
 import { WarmActionIcon } from "./components/WarmActionIcon";
+import { SubagentTeamWorkspace } from "./subagentTeam";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
   WORKSPACE_TAB_CREATE_OPTIONS,
@@ -2384,6 +2385,7 @@ function ChatApp() {
   const activeWorkspaceKind = activeWorkspaceTab?.kind ?? "chat";
   const isChatWorkspace = activeWorkspaceKind === "chat";
   const isCodingWorkspace = activeWorkspaceKind === "coding";
+  const isSubagentWorkspace = activeWorkspaceKind === "subagents";
   const isCanvasWorkspace = activeWorkspaceKind === "canvas";
   const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
@@ -2696,7 +2698,12 @@ function ChatApp() {
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
   const showActivityInMessages = settingsValues.general?.show_activity_in_messages !== false;
   const showRegion = (regionId: string) => !catalog?.shell || hasShellRegion(catalog, regionId);
-  const isActivityPreviewVisible = showRegion("activity_preview") && effectiveShowPreview && !isCanvasWorkspace && !isDesktopsWorkspace;
+  const isActivityPreviewVisible =
+    showRegion("activity_preview") &&
+    effectiveShowPreview &&
+    !isCanvasWorkspace &&
+    !isDesktopsWorkspace &&
+    !isSubagentWorkspace;
   const activityPreviewWidthPx = clampNumber(activityPreviewWidth, 220, 720, 340);
   const operationsProfileAvailable = hasOperationsProfile(catalog);
   const mimoCodingProfileAvailable = hasMimoCodingProfile(catalog);
@@ -5670,6 +5677,10 @@ function ChatApp() {
                   onWorkspaceTrust={handleCodingWorkspaceTrust}
                   onWorkspacesRefresh={() => void loadCodingWorkspaces()}
                 />
+              </div>
+            ) : isSubagentWorkspace ? (
+              <div className="flex min-h-0 flex-1">
+                <SubagentTeamWorkspace activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />
               </div>
             ) : isCanvasWorkspace ? (
               <div className="flex min-h-0 flex-1 p-1.5">
