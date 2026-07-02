@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import os
 from typing import Any
+from urllib.parse import urlparse
 
 from domain.tool.permission_resolver import ToolPermissionResolver
 from domain.tool.service_catalog import ToolServiceCatalog
 
 
+MOBILE_TOOL_INVOKE_BASIC_SCOPE = "tools.invoke.basic"
+MOBILE_TOOL_INVOKE_CLOUD_SCOPE = "tools.invoke.cloud"
+MOBILE_PC_DELEGATION_ROUTE = "/api/mobile/v1/tools/invoke"
+MOBILE_CLOUD_DELEGATION_ROUTE = "/api/mobile/v1/cloud/tools/invoke"
+MOBILE_CLOUD_DELEGATION_PROVIDER_ID = "cloudflare_sandbox_bridge"
 MOBILE_COMPATIBLE_TAG = "mobile-compatible"
 MOBILE_FLUTTER_TAG = "mobile-flutter"
 MOBILE_IOS_TAG = "mobile-ios"
@@ -197,17 +204,72 @@ def mobile_agent_template() -> dict[str, str]:
     return dict(MOBILE_AGENT_TEMPLATE)
 
 
-def mobile_tool_surface(*, pc_delegation_available: bool = True) -> dict[str, Any]:
+def mobile_cloud_delegation_status() -> dict[str, Any]:
+    base_url = str(os.environ.get("RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL") or "").strip()
+    api_key = str(os.environ.get("RUMI_CLOUDFLARE_SANDBOX_API_KEY") or "").strip()
+    parsed = urlparse(base_url) if base_url else None
+    is_local = _is_local_cloudflare_bridge_url(parsed)
+    remote_plain_http = bool(parsed and parsed.scheme == "http" and not is_local)
+    missing: list[str] = []
+    if not base_url:
+        missing.append("env:RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL")
+    if base_url and remote_plain_http:
+        missing.append("cloudflare_sandbox_bridge_https")
+    if base_url and not api_key and not is_local:
+        missing.append("env:RUMI_CLOUDFLARE_SANDBOX_API_KEY")
+
+    available = bool(base_url) and not missing
+    if available:
+        status = "configured"
+    elif remote_plain_http:
+        status = "insecure_url"
+    elif base_url and not api_key and not is_local:
+        status = "missing_api_key"
+    else:
+        status = "not_configured"
+
+    return {
+        "provider_id": MOBILE_CLOUD_DELEGATION_PROVIDER_ID,
+        "runtime": "cloudflare_sandbox_bridge",
+        "available": available,
+        "configured": bool(base_url),
+        "status": status,
+        "missing_requirements": missing,
+    }
+
+
+def mobile_tool_surface(
+    *,
+    pc_delegation_available: bool = True,
+    cloud_delegation_available: bool | None = None,
+) -> dict[str, Any]:
+    cloud_status = mobile_cloud_delegation_status()
+    if cloud_delegation_available is not None:
+        cloud_status = {
+            **cloud_status,
+            "available": bool(cloud_delegation_available),
+            "status": "configured" if cloud_delegation_available else cloud_status["status"],
+        }
     return {
         "mode": "unified",
         "one_tool_surface": True,
         "phone_local_route": "phone",
-        "pc_delegation_route": "/api/mobile/v1/tools/invoke",
+        "pc_delegation_route": MOBILE_PC_DELEGATION_ROUTE,
         "pc_delegation_available": pc_delegation_available,
+        "pc_delegation_scope": MOBILE_TOOL_INVOKE_BASIC_SCOPE,
+        "cloud_delegation_route": MOBILE_CLOUD_DELEGATION_ROUTE,
+        "cloud_delegation_available": bool(cloud_status.get("available")),
+        "cloud_delegation_scope": MOBILE_TOOL_INVOKE_CLOUD_SCOPE,
+        "cloud_delegation_status": cloud_status,
+        "invoke_scopes": {
+            "basic": MOBILE_TOOL_INVOKE_BASIC_SCOPE,
+            "cloud": MOBILE_TOOL_INVOKE_CLOUD_SCOPE,
+        },
         "routing": (
             "Call the defaultspack tool name directly. Phone-compatible tools run "
             "locally; host-bound tools route to the connected PC when PC delegation "
-            "is available."
+            "is available. Cloud delegation is advertised separately and only becomes "
+            "available when the Cloudflare Sandbox Bridge is configured."
         ),
     }
 
@@ -656,6 +718,13 @@ def _phone_local_plan(tool_id: str) -> dict[str, Any] | None:
             "implementation_status": "implemented_silent_wav_fallback",
         }
     return None
+
+
+def _is_local_cloudflare_bridge_url(parsed: Any) -> bool:
+    if parsed is None:
+        return False
+    hostname = str(getattr(parsed, "hostname", "") or "").strip().lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(".localhost")
 
 
 def _blocked_reason(service_id: str, tags: set[str], tool: dict[str, Any]) -> str:

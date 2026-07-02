@@ -1,4 +1,5 @@
 from .base import GuestAgentClient, NullProgressSink, ProgressSink, RuntimeProvider
+from .cloudflare_bridge import CloudflareSandboxBridgeProvider
 from .docker_provider import DockerProvider
 from .linux_native import LinuxNativeProvider
 from .managed_ubuntu import BwrapHostProvider, MacLimaProvider, ManagedUbuntuProvider, WindowsWslProvider
@@ -8,6 +9,7 @@ WslManagedUbuntuProvider = WindowsWslProvider
 
 __all__ = [
     "BwrapHostProvider",
+    "CloudflareSandboxBridgeProvider",
     "DockerProvider",
     "GuestAgentClient",
     "LimaManagedUbuntuProvider",

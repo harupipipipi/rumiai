@@ -3,12 +3,22 @@ from __future__ import annotations
 from typing import Any
 
 from blocks._common import error
+from blocks.sandbox import api as sandbox_api
 from blocks.coding.sandbox_common import run_sandbox_action
 
 
 def run(input_data: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
     if not input_data.get("path"):
         return error("'path' is required", code="INVALID_INPUT")
+    if str(input_data.get("sandbox_id") or "").strip():
+        return sandbox_api.run(
+            {
+                **input_data,
+                "_handler": "sandbox_files_read",
+                "sandbox_id": str(input_data.get("sandbox_id") or "").strip(),
+            },
+            context or {},
+        )
     return run_sandbox_action(
         input_data,
         context,

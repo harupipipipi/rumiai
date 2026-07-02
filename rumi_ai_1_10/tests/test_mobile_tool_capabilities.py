@@ -11,7 +11,13 @@ sys.path.insert(0, str(DEFAULTSPACK))
 
 
 def test_mobile_tool_records_tag_compatible_tools() -> None:
-    from domain.mobile.tools import MOBILE_COMPATIBLE_TAG, mobile_tool_records
+    from domain.mobile.tools import (
+        MOBILE_CLOUD_DELEGATION_ROUTE,
+        MOBILE_TOOL_INVOKE_BASIC_SCOPE,
+        MOBILE_TOOL_INVOKE_CLOUD_SCOPE,
+        MOBILE_COMPATIBLE_TAG,
+        mobile_tool_records,
+    )
 
     records = mobile_tool_records(
         [
@@ -32,6 +38,11 @@ def test_mobile_tool_records_tag_compatible_tools() -> None:
     assert records[0]["callable"] is True
     assert records[0]["execution_route"] == "pc"
     assert records[0]["automatic_routing"]["one_tool_surface"] is True
+    assert records[0]["automatic_routing"]["selected_route"] == "pc"
+    assert records[0]["automatic_routing"]["pc_delegation_scope"] == MOBILE_TOOL_INVOKE_BASIC_SCOPE
+    assert records[0]["automatic_routing"]["cloud_delegation_route"] == MOBILE_CLOUD_DELEGATION_ROUTE
+    assert records[0]["automatic_routing"]["cloud_delegation_scope"] == MOBILE_TOOL_INVOKE_CLOUD_SCOPE
+    assert "cloud_delegation_status" in records[0]["automatic_routing"]
 
 
 def test_mobile_tool_records_explain_host_bound_tools() -> None:

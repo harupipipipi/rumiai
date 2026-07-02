@@ -22,7 +22,13 @@ from .settings import default_store_path
 DEVICE_ACTIVE = "active"
 DEVICE_REVOKED = "revoked"
 
-DEFAULT_SCOPES = ["chat.read", "chat.write", "tools.observe"]
+DEFAULT_SCOPES = [
+    "chat.read",
+    "chat.write",
+    "tools.observe",
+    "tools.invoke.basic",
+    "tools.invoke.cloud",
+]
 APPROVER_SCOPES = [
     "authority.request.list",
     "authority.request.read",

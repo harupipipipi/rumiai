@@ -69,7 +69,20 @@ MOBILE_ROUTE_CONTRACTS: tuple[MobileRouteContract, ...] = (
         "/api/mobile/v1/tools/invoke",
         block_module="blocks.mobile.tools",
         defaults={"action": "invoke"},
-        device_scope="chat.write",
+        device_scope="tools.invoke.basic",
+        feature="tools",
+        pc_equivalent="POST /api/tools/invoke",
+    ),
+    MobileRouteContract(
+        "POST",
+        "/api/mobile/v1/cloud/tools/invoke",
+        block_module="blocks.mobile.tools",
+        defaults={
+            "action": "invoke",
+            "execution_route": "cloud",
+            "execution_provider": "cloudflare_sandbox_bridge",
+        },
+        device_scope="tools.invoke.cloud",
         feature="tools",
         pc_equivalent="POST /api/tools/invoke",
     ),
@@ -410,6 +423,8 @@ def mobile_capability_flags() -> dict[str, bool]:
     return {
         "chat": "chat" in features and {"chat.read", "chat.write"} <= scopes,
         "tools": "tools" in features or "tools.observe" in scopes,
+        "tool_invoke": "tools.invoke.basic" in scopes,
+        "cloud_delegation": "tools.invoke.cloud" in scopes,
         "approvals": True,
         "credential_transfer": "credential_transfer" in features
         and "credentials.request" in scopes,

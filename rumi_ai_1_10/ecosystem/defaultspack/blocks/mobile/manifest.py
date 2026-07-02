@@ -13,13 +13,16 @@ from domain.mobile.tools import mobile_agent_template
 
 
 def _route_entry(route) -> dict:
-    return {
+    entry = {
         "method": route.method,
         "path": route.pattern,
         "feature": route.feature,
         "device_scope": route.device_scope,
         "pc_equivalent": route.pc_equivalent,
     }
+    if route.defaults:
+        entry["defaults"] = dict(route.defaults)
+    return entry
 
 
 def run(input_data, context=None):
@@ -42,6 +45,8 @@ def run(input_data, context=None):
                         "chat.read",
                         "chat.write",
                         "tools.observe",
+                        "tools.invoke.basic",
+                        "tools.invoke.cloud",
                         *(
                             ["credentials.request"]
                             if mobile_feature_enabled("credential_transfer")

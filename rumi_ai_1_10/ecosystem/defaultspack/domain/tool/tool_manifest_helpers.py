@@ -39,6 +39,7 @@ REQUESTED_AGENT_OS_TOOL_IDS = [
     "job_artifacts",
     "job_history",
     "sandbox_exec",
+    "sandbox_files_read",
     "sandbox_files_apply_patch",
     "sandbox_port_expose",
     "python_exec",

@@ -24,7 +24,13 @@ PAIRING_APPROVED = "approved"
 PAIRING_REJECTED = "rejected"
 PAIRING_EXPIRED = "expired"
 _CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-_DEFAULT_MOBILE_SCOPES = ["chat.read", "chat.write", "tools.observe"]
+_DEFAULT_MOBILE_SCOPES = [
+    "chat.read",
+    "chat.write",
+    "tools.observe",
+    "tools.invoke.basic",
+    "tools.invoke.cloud",
+]
 _LOCK_TIMEOUT_SECONDS = 5.0
 _LOCK_STALE_SECONDS = 30.0
 
@@ -127,7 +133,7 @@ class PairingSession:
     peer_id: str = ""
     peer_fingerprint: str = ""
     peer_label: str = ""
-    capabilities: list[str] = field(default_factory=lambda: ["message"])
+    capabilities: list[str] = field(default_factory=lambda: list(_DEFAULT_MOBILE_SCOPES))
     allowed_company_ids: list[str] = field(default_factory=list)
     accepted_at: int = 0
     rejected_at: int = 0
@@ -156,7 +162,7 @@ class PairingSession:
             peer_id=str(value.get("peer_id") or ""),
             peer_fingerprint=str(value.get("peer_fingerprint") or value.get("fingerprint") or ""),
             peer_label=str(value.get("peer_label") or value.get("label") or ""),
-            capabilities=_string_list(value.get("capabilities")) or ["message"],
+            capabilities=_string_list(value.get("capabilities")) or list(_DEFAULT_MOBILE_SCOPES),
             allowed_company_ids=_string_list(value.get("allowed_company_ids")),
             accepted_at=int(value.get("accepted_at") or 0),
             rejected_at=int(value.get("rejected_at") or 0),
@@ -289,7 +295,7 @@ class PairingManager:
             peer_id=str(peer_id or "").strip(),
             peer_fingerprint=str(peer_fingerprint or "").strip(),
             peer_label=str(peer_label or "").strip(),
-            capabilities=_string_list(capabilities) or ["message"],
+            capabilities=_string_list(capabilities) or list(_DEFAULT_MOBILE_SCOPES),
             allowed_company_ids=_string_list(allowed_company_ids),
         )
         with self._file_lock():
@@ -330,7 +336,11 @@ class PairingManager:
             if not resolved_peer_id:
                 return {"ok": False, "reason": "peer_id is required", "code": "INVALID_INPUT"}
             secret = str(hmac_secret or "").strip() or generate_shared_secret()
-            resolved_capabilities = _string_list(capabilities) or session.capabilities or ["message"]
+            resolved_capabilities = (
+                _string_list(capabilities)
+                or session.capabilities
+                or list(_DEFAULT_MOBILE_SCOPES)
+            )
             resolved_allowed_companies = _string_list(allowed_company_ids) or session.allowed_company_ids
             peer = self.peer_store.approve_peer(
                 resolved_peer_id,

@@ -1,0 +1,6 @@
+RUMI_PC_ORIGIN=https://rumi-pc.example.com
+RUMI_PC_TOOL_BRIDGE_TOKEN=<random-client-token>
+RUMI_PC_RUNTIME_BEARER=<pc-runtime-bearer-token>
+# Optional. Set only when a browser frontend calls this bridge directly.
+# The Worker does not reflect arbitrary Origin headers.
+RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN=https://app.example.com

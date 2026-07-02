@@ -232,6 +232,13 @@ def test_device_token_is_scoped():
 
     tmp = tempfile.mkdtemp()
     ds = DeviceStore(tmp)
+    default_device, default_token, _default_approval_token = ds.issue_tokens("d-default")
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(DEFAULT_SCOPES)
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(default_device.scopes)
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(
+        ds.verify_token(default_token).scopes
+    )
+
     device, token, approval_token = ds.issue_tokens(
         "d1",
         scopes=["chat.read", "tools.observe", "tools.approve"],
@@ -243,6 +250,30 @@ def test_device_token_is_scoped():
     assert "credentials.request" not in device.scopes
     assert ds.verify_token(token).scopes == ["chat.read", "tools.observe"]
     assert ds.verify_token(approval_token).scopes == AUTHORITY_APPROVER_SCOPES
+
+
+def test_pairing_default_mobile_scopes_include_tool_invoke_routes():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    pm = PairingManager(tmp)
+    session = pm.start_pairing()
+
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(session.capabilities)
+
+    claim = pm.claim_pairing(
+        session.pairing_id,
+        code=session.code,
+        device_id="d-default",
+    )
+    assert claim["ok"]
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(
+        claim["pairing"]["claimed_capabilities"]
+    )
+
+    approve = pm.approve_pairing_v2(session.pairing_id)
+    assert approve["ok"]
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(approve["scopes"])
 
 
 def test_device_store_touch_does_not_revive_revoked_device():

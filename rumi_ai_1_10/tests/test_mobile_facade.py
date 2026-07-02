@@ -43,7 +43,17 @@ def test_mobile_manifest_exposes_facade_without_authority_routes():
         "chat.read",
         "chat.write",
         "tools.observe",
+        "tools.invoke.basic",
+        "tools.invoke.cloud",
     ]
+    assert data["capabilities"]["tool_invoke"] is True
+    assert data["capabilities"]["cloud_delegation"] is True
+    routes_by_path = {route["path"]: route for route in routes}
+    assert routes_by_path["/api/mobile/v1/tools/invoke"]["device_scope"] == "tools.invoke.basic"
+    cloud_route = routes_by_path["/api/mobile/v1/cloud/tools/invoke"]
+    assert cloud_route["device_scope"] == "tools.invoke.cloud"
+    assert cloud_route["defaults"]["execution_route"] == "cloud"
+    assert cloud_route["defaults"]["execution_provider"] == "cloudflare_sandbox_bridge"
 
 
 def test_mobile_capabilities_returns_provider_and_model_catalogs():
@@ -166,6 +176,62 @@ def test_mobile_tools_invoke_dispatches_tool_registry_id(monkeypatch):
     assert calls["payload"]["tool_name"] == "python_exec"
     assert calls["payload"]["arguments"] == {"code": "print(1)"}
     assert calls["context"]["_mobile_tool_delegate"] is True
+
+
+def test_mobile_cloud_tools_invoke_rejects_pc_local_tool():
+    import blocks.mobile.tools as mobile_tools
+
+    result = mobile_tools.run(
+        {
+            "action": "invoke",
+            "execution_route": "cloud",
+            "tool_name": "desktop_input",
+            "arguments": {"action": "click"},
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["error"]["code"] == "PC_BRIDGE_REQUIRED"
+    assert result["error"]["details"]["cloudflare"]["route"] == "pc_bridge_required"
+    assert result["error"]["details"]["cloudflare"]["reason"] == "pc_local_surface"
+
+
+def test_mobile_cloud_tools_invoke_injects_cloudflare_provider(monkeypatch):
+    import blocks.mobile.tools as mobile_tools
+
+    calls = {}
+
+    def fake_invoke_tool(payload, context):
+        calls["payload"] = payload
+        calls["context"] = context
+        return {
+            "status": "ok",
+            "data": {
+                "tool_name": "sandbox_exec",
+                "result": "ok",
+                "is_error": False,
+            },
+        }
+
+    monkeypatch.setattr(mobile_tools, "invoke_tool", fake_invoke_tool)
+
+    result = mobile_tools.run(
+        {
+            "action": "invoke",
+            "execution_route": "cloud",
+            "tool_name": "sandbox_exec",
+            "arguments": {"argv": ["python", "-V"]},
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert calls["payload"]["tool_name"] == "sandbox_exec"
+    assert calls["payload"]["arguments"]["argv"] == ["python", "-V"]
+    assert calls["payload"]["arguments"]["provider_id"] == "cloudflare_sandbox_bridge"
+    assert calls["context"]["_mobile_tool_delegate"] is True
+    assert calls["context"]["_mobile_cloud_tool_delegate"] is True
 
 
 def test_mobile_capabilities_provider_filter_narrows_models():
@@ -327,7 +393,11 @@ def test_mobile_device_scope_contract_blocks_unknown_routes():
         == "chat.write"
     )
     assert required_device_scope("GET", "/api/mobile/v1/tools") == "tools.observe"
-    assert required_device_scope("POST", "/api/mobile/v1/tools/invoke") == "chat.write"
+    assert required_device_scope("POST", "/api/mobile/v1/tools/invoke") == "tools.invoke.basic"
+    assert (
+        required_device_scope("POST", "/api/mobile/v1/cloud/tools/invoke")
+        == "tools.invoke.cloud"
+    )
     assert required_device_scope("GET", "/api/packs") == ""
     assert required_device_scope("GET", "/api/mobile/v1/approvals") == ""
     assert required_device_scope("POST", "/api/mobile/v1/approvals/auth_1/approve") == ""
