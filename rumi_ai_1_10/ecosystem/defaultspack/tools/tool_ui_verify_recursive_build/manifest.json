@@ -1,0 +1,17 @@
+{
+  "id": "tool_ui_verify_recursive_build",
+  "description": "Verify recursive UI build evidence, render matrix, compression gates, and npm scripts.",
+  "config": {
+    "tool_id": "tool_ui_verify_recursive_build",
+    "name": "tool_ui_verify_recursive_build",
+    "summary": "Verify recursive UI build.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["frontend", "ui", "verification", "recursive-ui-compiler"],
+    "schema": {"parameters": {"type": "object", "additionalProperties": true, "required": ["ui_tree"], "properties": {"ui_tree": {"type": "object"}}}},
+    "execution": {"type": "local", "handler": "domain.tool.ui_compiler_tools:ui_verify_recursive_build"}
+  }
+}

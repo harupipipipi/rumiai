@@ -2498,6 +2498,20 @@ legacy_routes:
   owner: ui
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: POST
+  pattern: /api/ui/build-recursive
+  legacy_block_module: blocks.ui.build_recursive
+  replacement_function_id: ''
+  owner: ui
+  reason: tracked compatibility fallback for approved recursive UI generation
+  remove_after: v2.4
+- method: GET
+  pattern: /api/ui/generation-status
+  legacy_block_module: blocks.ui.generation_status
+  replacement_function_id: ''
+  owner: ui
+  reason: tracked compatibility fallback for recursive UI run status
+  remove_after: v2.4
 - method: GET
   pattern: /api/ui/commands
   legacy_block_module: blocks.ui.commands
