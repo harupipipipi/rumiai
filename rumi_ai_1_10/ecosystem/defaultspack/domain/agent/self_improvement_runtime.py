@@ -17,9 +17,9 @@ MIMO_PROFILE_ID = "defaultspack.mimo_coding_company"
 MIMO_COMPANY_ID = "mimo-coding-company"
 
 MIMO_ROLE_MAP: dict[str, str] = {
-    "main": "opencode-zen/mimo-v2.5-free",
-    "vision": "google/gemma-4-31b-it",
-    "fast": "opencode-zen/mimo-v2.5-free",
+    "main": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+    "vision": "xiaomi-token-plan-sgp/mimo-v2-omni",
+    "fast": "xiaomi-token-plan-sgp/mimo-v2-flash",
 }
 
 SELF_IMPROVEMENT_TOOLS = [

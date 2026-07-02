@@ -106,8 +106,8 @@ def test_agent_run_subagent_delegate_forwards_profile_authority_context(monkeypa
 
     result = run_subagent_block(
         {
-            "prompt": "Gemma monitor smoke",
-            "model": "google/gemma-4-31b-it",
+            "prompt": "MiMo monitor smoke",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "profile_id": "defaultspack.mimo_coding_company",
             "conversation_id": "conv_1",
             "company_id": "mimo-coding-company",
@@ -138,8 +138,8 @@ def test_agent_run_subagent_delegate_does_not_promote_untrusted_top_level_profil
 
     result = run_subagent_block(
         {
-            "task": "Reply with exactly OK_GEMMA_CONTEXT.",
-            "model": "google/gemma-4-31b-it",
+            "task": "Reply with exactly OK_MIMO_CONTEXT.",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "profile_id": "defaultspack.mimo_coding_company",
             "principal_id": "profile:payload-spoof",
             "authority_principal_id": "profile:payload-spoof",
@@ -166,8 +166,8 @@ def test_agent_run_subagent_delegate_does_not_trust_payload_principal(monkeypatc
 
     result = run_subagent_block(
         {
-            "prompt": "Gemma monitor smoke",
-            "model": "google/gemma-4-31b-it",
+            "prompt": "MiMo monitor smoke",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "profile_id": "profile-from-payload",
             "principal_id": "profile:payload-spoof",
             "authority_principal_id": "profile:payload-spoof",
@@ -199,11 +199,11 @@ def test_agent_run_subagent_delegate_authority_approval_surfaces_status(monkeypa
                     "status": "authority_approval_required",
                     "approval_required": True,
                     "requires_approval": True,
-                    "request_id": "auth_gemma",
-                    "approval_request_id": "auth_gemma",
+                    "request_id": "auth_mimo",
+                    "approval_request_id": "auth_mimo",
                     "permission_id": "model.invoke",
                     "principal_id": "profile:defaultspack.mimo_coding_company",
-                    "message": "Gemma provider needs authority approval",
+                    "message": "MiMo provider needs authority approval",
                 },
                 "result": {"status": "authority_approval_required"},
             },
@@ -213,8 +213,8 @@ def test_agent_run_subagent_delegate_authority_approval_surfaces_status(monkeypa
 
     result = run_subagent_block(
         {
-            "task": "Reply with exactly OK_GEMMA_CONTEXT.",
-            "model": "google/gemma-4-31b-it",
+            "task": "Reply with exactly OK_MIMO_CONTEXT.",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "profile_id": "defaultspack.mimo_coding_company",
         },
         {},
@@ -225,7 +225,7 @@ def test_agent_run_subagent_delegate_authority_approval_surfaces_status(monkeypa
     assert data["status"] == "authority_approval_required"
     assert data["code"] == "authority_approval_required"
     assert data["approval_required"] is True
-    assert data["result"]["request_id"] == "auth_gemma"
+    assert data["result"]["request_id"] == "auth_mimo"
     assert data["result"]["permission_id"] == "model.invoke"
     assert data["result"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
     assert "DELEGATE_RUN_FAILED" not in json.dumps(data, ensure_ascii=False)
@@ -254,7 +254,7 @@ def test_agent_delegate_forwards_profile_authority_context(monkeypatch):
     result = handle(
         RumiInputEnvelope(
             role="user",
-            input="Gemma monitor smoke",
+            input="MiMo monitor smoke",
             chat={},
             source={"type": "compatibility", "provider": "subagent"},
             target={"conversation_id": "conv_1"},
@@ -262,8 +262,8 @@ def test_agent_delegate_forwards_profile_authority_context(monkeypatch):
             attachments=[],
             metadata={"profile_id": "defaultspack.mimo_coding_company"},
             params={
-                "task": "Gemma monitor smoke",
-                "model": "google/gemma-4-31b-it",
+                "task": "MiMo monitor smoke",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "profile_id": "defaultspack.mimo_coding_company",
             },
             tools=[],
@@ -275,7 +275,7 @@ def test_agent_delegate_forwards_profile_authority_context(monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert seen["input_data"]["model"] == "google/gemma-4-31b-it"
+    assert seen["input_data"]["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
     assert seen["context"]["profile_id"] == "defaultspack.mimo_coding_company"
     assert seen["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
     assert seen["context"]["conversation_id"] == "conv_1"
@@ -304,7 +304,7 @@ def test_agent_delegate_does_not_trust_payload_principal(monkeypatch):
     result = handle(
         RumiInputEnvelope(
             role="user",
-            input="Gemma monitor smoke",
+            input="MiMo monitor smoke",
             chat={},
             source={"type": "compatibility", "provider": "subagent"},
             target={"conversation_id": "conv_1"},
@@ -312,8 +312,8 @@ def test_agent_delegate_does_not_trust_payload_principal(monkeypatch):
             attachments=[],
             metadata={"profile_id": "profile-from-metadata", "principal_id": "profile:metadata-spoof"},
             params={
-                "task": "Gemma monitor smoke",
-                "model": "google/gemma-4-31b-it",
+                "task": "MiMo monitor smoke",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "profile_id": "profile-from-payload",
                 "principal_id": "profile:payload-spoof",
                 "authority_principal_id": "profile:payload-spoof",
@@ -324,7 +324,7 @@ def test_agent_delegate_does_not_trust_payload_principal(monkeypatch):
     )
 
     assert result["status"] == "ok"
-    assert seen["input_data"]["model"] == "google/gemma-4-31b-it"
+    assert seen["input_data"]["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
     assert "profile_id" not in seen["context"]
     assert "principal_id" not in seen["context"]
     assert "authority_principal_id" not in seen["context"]
@@ -340,17 +340,17 @@ def test_agent_engine_preserves_authority_approval_model_result(monkeypatch, tmp
             "status": "error",
             "error": {
                 "code": "AUTHORITY_APPROVAL_REQUIRED",
-                "message": "Gemma provider needs authority approval",
+                "message": "MiMo provider needs authority approval",
                 "details": {
                     "status": "authority_approval_required",
                     "approval_required": True,
                     "requires_approval": True,
                     "finish_reason": "authority_approval_required",
-                    "request_id": "auth_gemma",
-                    "approval_request_id": "auth_gemma",
+                    "request_id": "auth_mimo",
+                    "approval_request_id": "auth_mimo",
                     "permission_id": "model.invoke",
                     "principal_id": "profile:defaultspack.mimo_coding_company",
-                    "message": "Gemma provider needs authority approval",
+                    "message": "MiMo provider needs authority approval",
                 },
             },
         }
@@ -358,9 +358,9 @@ def test_agent_engine_preserves_authority_approval_model_result(monkeypatch, tmp
     monkeypatch.setattr("domain.agent.engine.AgentEngine._ai_complete", fake_ai)
 
     result = AgentEngine().execute(
-        "Reply with exactly OK_GEMMA_CONTEXT.",
+        "Reply with exactly OK_MIMO_CONTEXT.",
         [],
-        "google/gemma-4-31b-it",
+        "xiaomi-token-plan-sgp/mimo-v2-omni",
         None,
         {
             "profile_id": "defaultspack.mimo_coding_company",
@@ -370,7 +370,7 @@ def test_agent_engine_preserves_authority_approval_model_result(monkeypatch, tmp
 
     assert result["status"] == "authority_approval_required"
     assert result["approval_required"] is True
-    assert result["authority"]["request_id"] == "auth_gemma"
+    assert result["authority"]["request_id"] == "auth_mimo"
     assert result["result"]["status"] == "authority_approval_required"
     assert result["result"]["steps"][-1]["step_type"] == "authority_approval_required"
 
@@ -383,14 +383,14 @@ def test_agent_engine_preserves_top_level_authority_approval_model_result(monkey
         return {
             "status": "authority_approval_required",
             "code": "authority_approval_required",
-            "error": "Gemma provider needs authority approval",
-            "message": "Gemma provider needs authority approval",
+            "error": "MiMo provider needs authority approval",
+            "message": "MiMo provider needs authority approval",
             "approval_required": True,
             "requires_approval": True,
             "finish_reason": "authority_approval_required",
             "authority": {
                 "status": "authority_approval_required",
-                "request_id": "auth_gemma",
+                "request_id": "auth_mimo",
                 "permission_id": "model.invoke",
                 "principal_id": "profile:defaultspack.mimo_coding_company",
             },
@@ -399,9 +399,9 @@ def test_agent_engine_preserves_top_level_authority_approval_model_result(monkey
     monkeypatch.setattr("domain.agent.engine.AgentEngine._ai_complete", fake_ai)
 
     result = AgentEngine().execute(
-        "Reply with exactly OK_GEMMA_CONTEXT.",
+        "Reply with exactly OK_MIMO_CONTEXT.",
         [],
-        "google/gemma-4-31b-it",
+        "xiaomi-token-plan-sgp/mimo-v2-omni",
         None,
         {
             "profile_id": "defaultspack.mimo_coding_company",
@@ -411,7 +411,7 @@ def test_agent_engine_preserves_top_level_authority_approval_model_result(monkey
 
     assert result["status"] == "authority_approval_required"
     assert result["approval_required"] is True
-    assert result["authority"]["request_id"] == "auth_gemma"
+    assert result["authority"]["request_id"] == "auth_mimo"
     assert result["result"]["steps"][-1]["step_type"] == "authority_approval_required"
 
 
@@ -429,7 +429,7 @@ def test_agent_run_subagent_utility_forwards_authority_context(monkeypatch):
     result = run_subagent_block(
         {
             "role_id": "tool_selector",
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "payload": {"candidate_tools": [{"tool_id": "search_docs"}]},
         },
         {

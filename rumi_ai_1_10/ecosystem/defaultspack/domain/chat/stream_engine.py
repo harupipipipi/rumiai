@@ -3727,11 +3727,7 @@ class ChatRunEngine:
 
     @staticmethod
     def _empty_response_retry_params(prepared: PreparedChatRun) -> dict[str, Any]:
-        retry_params = _params_without_thinking(prepared.params)
-        model = str(prepared.model or "")
-        if model.startswith("google/gemma-4"):
-            retry_params["thinking_level"] = "none"
-        return retry_params
+        return _params_without_thinking(prepared.params)
 
     def _fallback_complete_without_thinking(
         self,

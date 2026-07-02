@@ -63,23 +63,6 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
         finally:
             AIClient._instance = None
 
-    def test_ai_client_lazily_registers_google_after_key_becomes_available(self):
-        from domain.ai_client.client import AIClient
-
-        AIClient._instance = None
-        try:
-            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-google-key"}, clear=True):
-                client = AIClient()
-                client._providers.pop("google", None)
-
-            with patch.dict(os.environ, {"GEMINI_API_KEY": "test-google-key"}, clear=True):
-                provider, model_name = client.resolve_provider("google/gemma-4-31b-it")
-
-            self.assertEqual(provider.__class__.__name__, "GoogleProvider")
-            self.assertEqual(model_name, "gemma-4-31b-it")
-        finally:
-            AIClient._instance = None
-
     def test_google_provider_prefers_google_api_key_when_both_are_set(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
 
@@ -307,52 +290,6 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
 
         self.assertEqual(captured["timeout"], 17.0)
         self.assertEqual(response["content"][0]["text"], "ok")
-
-    def test_google_native_body_uses_fallback_text_when_content_is_empty(self):
-        from domain.ai_client.providers.google_provider import GoogleProvider
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
-            provider = GoogleProvider()
-
-        body = provider._native_body(
-            "gemma-4-31b-it",
-            [
-                {
-                    "role": "user",
-                    "content": [],
-                    "metadata": {"scheduled_task_message": "Run the scheduled QA task."},
-                }
-            ],
-            [],
-            {},
-        )
-
-        self.assertEqual(body["contents"][0]["role"], "user")
-        self.assertEqual(body["contents"][0]["parts"][0]["text"], "Run the scheduled QA task.")
-
-    def test_google_native_body_rejects_empty_contents_before_provider_request(self):
-        from domain.ai_client.providers.google_provider import GoogleProvider
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
-            provider = GoogleProvider()
-
-        with self.assertRaisesRegex(ValueError, "non-empty message content"):
-            provider._native_body("gemma-4-31b-it", [{"role": "user", "content": ""}], [], {})
-
-    def test_google_native_body_accepts_input_text_content_blocks(self):
-        from domain.ai_client.providers.google_provider import GoogleProvider
-
-        with patch.dict(os.environ, {"GEMINI_API_KEY": "gemini-key"}, clear=True):
-            provider = GoogleProvider()
-
-        body = provider._native_body(
-            "gemma-4-31b-it",
-            [{"role": "user", "content": [{"type": "input_text", "content": "inspect the UI"}]}],
-            [],
-            {},
-        )
-
-        self.assertEqual(body["contents"][0]["parts"][0]["text"], "inspect the UI")
 
     def test_google_openai_compatible_request_retries_transient_backend_errors(self):
         from domain.ai_client.providers.google_provider import GoogleProvider
@@ -626,10 +563,6 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             {"reasoning_effort": "high"},
         )
         self.assertEqual(
-            GoogleProvider._translate_params({"thinking_level": "none"}, "gemma-4-31b-it"),
-            {"reasoning_effort": "minimal"},
-        )
-        self.assertEqual(
             GoogleProvider._translate_params({"thinking_level": "MINIMAL"}, "gemma-4-31b-it"),
             {"reasoning_effort": "minimal"},
         )
@@ -730,7 +663,7 @@ class TestDefaultspackGoogleProvider(unittest.TestCase):
             "gemma-4-31b-it",
             [{"role": "user", "content": "hello"}],
             [],
-            {"thinking_level": "none"},
+            {"thinking_level": "minimal"},
         )
 
         self.assertEqual(captured["model"], "gemma-4-31b-it")

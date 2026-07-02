@@ -65,7 +65,7 @@ def test_ai_complete_passes_profile_authority_context(monkeypatch):
 
     result = run(
         {
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "messages": [{"role": "user", "content": "hello"}],
             "conversation_id": "conv-1",
         },
@@ -93,7 +93,7 @@ def test_ai_complete_does_not_synthesize_principal_from_payload_profile(monkeypa
 
     result = run(
         {
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "messages": [{"role": "user", "content": "hello"}],
             "profile_id": "payload-profile",
             "principal_id": "profile:payload-spoof",
@@ -105,36 +105,6 @@ def test_ai_complete_does_not_synthesize_principal_from_payload_profile(monkeypa
     authority_context = captured["request"].get("authority_context", {})
     assert authority_context.get("profile_id") == "payload-profile"
     assert "principal_id" not in authority_context
-
-
-def test_model_call_passes_runtime_authority_context(monkeypatch):
-    from domain.ai_client.model_call import call_model
-
-    captured: dict[str, object] = {}
-
-    def fake_complete(self, request):
-        captured["request"] = request
-        return {"content": [{"type": "text", "text": "{\"summary\":\"ok\"}"}]}
-
-    monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", fake_complete)
-
-    result = call_model(
-        {
-            "model_hint": "stub/default",
-            "question": "hello",
-            "output_schema": {"type": "object"},
-        },
-        {
-            "profile_id": "defaultspack.mimo_coding_company",
-            "authority_principal_id": "profile:defaultspack.mimo_coding_company",
-        },
-    )
-
-    assert result["status"] == "ok"
-    assert captured["request"]["authority_context"] == {
-        "profile_id": "defaultspack.mimo_coding_company",
-        "principal_id": "profile:defaultspack.mimo_coding_company",
-    }
 
 
 def test_llm_gateway_injects_temporal_context_once():

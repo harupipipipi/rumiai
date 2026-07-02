@@ -449,60 +449,6 @@ def test_nvidia_manifest_first_runtime_provider_accepts_either_key(monkeypatch):
     assert "nvidia" in detect_available_providers()
 
 
-def test_vercel_ai_gateway_manifest_first_runtime_provider_accepts_either_key(monkeypatch):
-    from domain.ai_client.providers import detect_available_providers
-
-    provider, models = _catalog_and_models("vercel-ai-gateway")
-
-    assert provider["availability"]["supports_invoke"] is True
-    assert provider["display_name"] == "Vercel AI Gateway"
-    assert provider["metadata"]["adapter"] == "openai_compatible"
-    assert provider["metadata"]["default_base_url"] == "https://ai-gateway.vercel.sh/v1"
-    assert provider["metadata"]["config"]["model_sync"] == "remote_merge"
-    assert provider["metadata"]["config"]["model_list_path"] == "/models"
-    assert provider["env_vars"] == ["AI_GATEWAY_API_KEY", "VERCEL_AI_GATEWAY_API_KEY", "VERCEL_OIDC_TOKEN"]
-    assert provider["base_url_envs"] == ["AI_GATEWAY_BASE_URL"]
-    assert provider["default_model_for"]["chat"] == "xiaomi/mimo-v2.5"
-    assert provider["default_model_for"]["coding"] == "xiaomi/mimo-v2.5"
-    assert provider["default_model_for"]["agent"] == "xiaomi/mimo-v2.5"
-    assert provider["default_model_for"]["reasoning"] == "xiaomi/mimo-v2.5"
-    assert provider["default_model_for"]["fast"] == "zai/glm-4.7-flashx"
-    assert provider["default_model_for"]["cheap"] == "zai/glm-4.7-flashx"
-    assert provider["default_model_for"]["vision"] == "google/gemma-4-31b-it"
-    assert {
-        "vercel-ai-gateway/xiaomi/mimo-v2.5-pro",
-        "vercel-ai-gateway/xiaomi/mimo-v2.5",
-        "vercel-ai-gateway/xiaomi/mimo-v2-flash",
-        "vercel-ai-gateway/google/gemma-4-31b-it",
-        "vercel-ai-gateway/google/gemma-4-26b-a4b-it",
-        "vercel-ai-gateway/deepseek/deepseek-v4-flash",
-        "vercel-ai-gateway/alibaba/qwen3-coder-30b-a3b",
-        "vercel-ai-gateway/alibaba/qwen-3-14b",
-        "vercel-ai-gateway/zai/glm-4.7-flashx",
-        "vercel-ai-gateway/zai/glm-4.6v",
-    }.issubset(models)
-    assert models["vercel-ai-gateway/xiaomi/mimo-v2.5-pro"]["defaults"] == {}
-    assert models["vercel-ai-gateway/xiaomi/mimo-v2.5"]["defaults"]["agent"] is True
-    assert models["vercel-ai-gateway/xiaomi/mimo-v2.5"]["metadata"]["capabilities"]["vision"] is True
-    assert models["vercel-ai-gateway/xiaomi/mimo-v2-flash"]["defaults"] == {}
-    assert models["vercel-ai-gateway/google/gemma-4-31b-it"]["defaults"]["vision"] is True
-    assert models["vercel-ai-gateway/google/gemma-4-31b-it"]["metadata"]["capabilities"]["vision"] is True
-    assert models["vercel-ai-gateway/google/gemma-4-26b-a4b-it"]["defaults"] == {}
-    assert models["vercel-ai-gateway/google/gemma-4-26b-a4b-it"]["metadata"]["capabilities"]["vision"] is True
-    assert models["vercel-ai-gateway/deepseek/deepseek-v4-flash"]["defaults"] == {}
-    assert models["vercel-ai-gateway/zai/glm-4.7-flashx"]["defaults"]["cheap"] is True
-    assert models["vercel-ai-gateway/zai/glm-4.6v"]["defaults"] == {}
-    assert models["vercel-ai-gateway/zai/glm-4.6v"]["metadata"]["capabilities"]["vision"] is True
-
-    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
-    monkeypatch.setenv("VERCEL_AI_GATEWAY_API_KEY", "test-vercel-gateway-key")
-    assert "vercel-ai-gateway" in detect_available_providers()
-
-    monkeypatch.delenv("VERCEL_AI_GATEWAY_API_KEY", raising=False)
-    monkeypatch.setenv("AI_GATEWAY_API_KEY", "test-ai-gateway-key")
-    assert "vercel-ai-gateway" in detect_available_providers()
-
-
 def test_cloud_provider_keys_are_persistable_in_secret_store():
     from domain.ai_client.api_key_store import provider_secret_keys
 
@@ -511,11 +457,6 @@ def test_cloud_provider_keys_are_persistable_in_secret_store():
     assert provider_secret_keys("opencode-go") == ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"]
     assert provider_secret_keys("cerebras") == ["CEREBRAS_API_KEY"]
     assert provider_secret_keys("nvidia") == ["NVIDIA_API_KEY", "NGC_API_KEY"]
-    assert provider_secret_keys("vercel-ai-gateway") == [
-        "AI_GATEWAY_API_KEY",
-        "VERCEL_AI_GATEWAY_API_KEY",
-        "VERCEL_OIDC_TOKEN",
-    ]
     assert provider_secret_keys("xiaomi-token-plan-sgp") == [
         "XIAOMI_MIMO_TOKEN_PLAN_SGP_API_KEY",
         "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",

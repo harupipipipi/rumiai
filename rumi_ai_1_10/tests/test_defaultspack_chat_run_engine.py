@@ -898,7 +898,7 @@ def test_stream_empty_thinking_retry_preserves_tools_for_tool_calls():
 
     assert gateway.complete_requests
     assert gateway.complete_requests[0]["tools"] == provider_tools
-    assert gateway.complete_requests[0]["params"]["thinking_level"] == "none"
+    assert "thinking_level" not in gateway.complete_requests[0]["params"]
     assert "reasoning_effort" not in gateway.complete_requests[0]["params"]
     assert response["metadata"]["recovered_from_empty_stream"] is True
     assert response["metadata"]["fallback_kept_tools"] is True
@@ -919,7 +919,7 @@ def test_final_response_preserves_provider_thinking_metadata():
         content=[],
         metadata=None,
         user_message={"id": "user-1"},
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         params={"thinking_level": "high"},
         request_context={},
         tool_context={},
@@ -1506,7 +1506,7 @@ def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
     store = ChatStore()
-    conversation = store.create_conversation(model="opencode-zen/mimo-v2.5-free")
+    conversation = store.create_conversation(model="xiaomi-token-plan-sgp/mimo-v2.5-pro")
     conversation_id = conversation["id"]
 
     metadata = {
@@ -1542,7 +1542,7 @@ def test_nonstream_scheduled_mimo_initial_run_syncs_draft_before_model_turn(tmp_
         content=[],
         metadata=metadata,
         user_message=user_message,
-        model="opencode-zen/mimo-v2.5-free",
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
         params={},
         request_context={
             "source": "scheduler",

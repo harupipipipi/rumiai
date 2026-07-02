@@ -114,8 +114,6 @@ _OAUTH_RUNTIME_PROVIDER_IDS = {"cloudflare", "google"}
 _PENDING_STATE_TTL_SECONDS = 600
 _ACCESS_TOKEN_SKEW_SECONDS = 60
 _pending_states: dict[str, dict[str, Any]] = {}
-_connection_registry_cache: dict[str, tuple[Any, Any]] = {}
-_connection_provider_ids_cache: dict[str, tuple[Any, set[str]]] = {}
 
 
 def _pack_root() -> Path:
@@ -129,32 +127,13 @@ def _connection_manifest_root(pack_root: Path | None = None) -> Path:
     return _pack_root() / "config" / "settings_control_center" / "providers"
 
 
-def _connection_manifest_signature(root: Path) -> tuple[tuple[str, int, int], ...]:
-    if not root.exists():
-        return ()
-    signature = []
-    for path in root.rglob("*.connection.json"):
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        signature.append((path.relative_to(root).as_posix(), stat.st_mtime_ns, stat.st_size))
-    return tuple(sorted(signature))
-
-
 def _connection_registry(pack_root: Path | None = None):
     from core_runtime.connections.registry import ConnectionsRegistry
 
-    root = _connection_manifest_root(pack_root)
-    cache_key = str(root)
-    signature = _connection_manifest_signature(root)
-    cached = _connection_registry_cache.get(cache_key)
-    if cached is not None and cached[0] == signature:
-        return cached[1]
     registry = ConnectionsRegistry()
+    root = _connection_manifest_root(pack_root)
     if root.exists():
         registry.load_manifest_dir(root)
-    _connection_registry_cache[cache_key] = (signature, registry)
     return registry
 
 
@@ -170,11 +149,6 @@ def _connection_provider(provider_id: str, *, pack_root: Path | None = None):
 
 def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
     root = _connection_manifest_root(pack_root)
-    cache_key = str(root)
-    signature = _connection_manifest_signature(root)
-    cached = _connection_provider_ids_cache.get(cache_key)
-    if cached is not None and cached[0] == signature:
-        return set(cached[1])
     ids: set[str] = set()
     if not root.exists():
         return ids
@@ -186,7 +160,6 @@ def _connection_provider_ids(*, pack_root: Path | None = None) -> set[str]:
         provider_id = str(payload.get("provider_id") or "").strip()
         if provider_id:
             ids.add(provider_id)
-    _connection_provider_ids_cache[cache_key] = (signature, set(ids))
     return ids
 
 

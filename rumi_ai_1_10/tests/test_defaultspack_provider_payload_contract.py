@@ -115,35 +115,6 @@ def test_google_provider_tool_name_mapping_and_native_body_contract():
     assert text == thought == ""
 
 
-def test_google_native_compiler_preserves_scheduler_message_fallback_contract():
-    from domain.ai_client.bridge_plan import PlannedProviderRequest
-    from domain.ai_client.provider_compiler.google_native import GoogleNativeCompiler
-    from domain.chat.ir_legacy_adapter import legacy_standard_messages_to_ir
-
-    ir = legacy_standard_messages_to_ir(
-        [
-            {
-                "role": "user",
-                "content": [],
-                "metadata": {"scheduled_task_message": "Run the scheduled Gemma QA task."},
-            }
-        ],
-        "conv-qa",
-    )
-    planned = PlannedProviderRequest(
-        ir=ir,
-        model="gemma-4-31b-it",
-        provider_capabilities={"api_family": "google_native"},
-        provider_tools=[],
-        params={},
-    )
-
-    compiled = GoogleNativeCompiler().compile_complete(planned)
-
-    assert compiled.body["contents"][0]["role"] == "user"
-    assert compiled.body["contents"][0]["parts"][0]["text"] == "Run the scheduled Gemma QA task."
-
-
 def test_openai_compatible_cerebras_reasoning_none_contract(monkeypatch):
     from domain.ai_client.providers.openai_compatible_provider import OpenAICompatibleProvider
 

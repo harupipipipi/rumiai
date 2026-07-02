@@ -52,13 +52,13 @@ def test_scheduler_chat_payload_preserves_task_message_for_provider_fallback():
         content="Run the scheduled QA task.",
         task_cfg={
             "message": "Run the scheduled QA task.",
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "agent_id": "browser_qa",
         },
         schedule_id="sched-qa",
         exec_id="sexec-qa",
         trigger="scheduled",
-        params={"model": "google/gemma-4-31b-it"},
+        params={"model": "xiaomi-token-plan-sgp/mimo-v2-omni"},
         tools=[],
     )
 
@@ -475,7 +475,7 @@ def test_stale_scheduled_chat_recovery_appends_durable_error(tmp_path, monkeypat
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="opencode-zen/mimo-v2.5-free",
+        model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -510,7 +510,7 @@ def test_stale_scheduled_chat_recovery_appends_durable_error(tmp_path, monkeypat
             "type": "interval",
             "task": {
                 "message": "Run heartbeat.",
-                "model": "opencode-zen/mimo-v2.5-free",
+                "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
                 "conversation_id": conversation_id,
                 "timeout": 600,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -570,7 +570,7 @@ def test_stale_scheduled_chat_recovery_ignores_empty_streaming_assistant(tmp_pat
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -620,7 +620,7 @@ def test_stale_scheduled_chat_recovery_ignores_empty_streaming_assistant(tmp_pat
             "type": "interval",
             "task": {
                 "message": "Run scheduled browser QA.",
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "conversation_id": conversation_id,
                 "timeout": 1800,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -1094,7 +1094,7 @@ def test_task_update_obsoletes_active_running_execution_and_allows_retry(tmp_pat
         "interval",
         {
             "message": "old QA prompt with bare /chat",
-            "model": "opencode-zen/mimo-v2.5-free",
+            "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
             "conversation_id": "conv-mimo",
             "timeout": 1800,
             "tool_policy": {"schedule_initial_tool_choice": "required"},
@@ -1123,7 +1123,7 @@ def test_task_update_obsoletes_active_running_execution_and_allows_retry(tmp_pat
             {
                 "task": {
                     "message": "new QA prompt with http://127.0.0.1:18766/chat?chat=conv-mimo",
-                    "model": "google/gemma-4-31b-it",
+                    "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                     "tool_policy": {
                         "schedule_initial_tool_choice": "required",
                         "schedule_auto_approve_tool_requests": True,
@@ -1143,7 +1143,7 @@ def test_task_update_obsoletes_active_running_execution_and_allows_retry(tmp_pat
         assert retry["result"] == "new prompt completed"
         assert len(calls) == 1
         assert calls[0]["message"]["content"] == "new QA prompt with http://127.0.0.1:18766/chat?chat=conv-mimo"
-        assert calls[0]["params"]["model"] == "google/gemma-4-31b-it"
+        assert calls[0]["params"]["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
 
         saved = load_schedule(schedule_id)
         assert "running_execution" not in saved
@@ -1193,7 +1193,7 @@ def test_started_at_running_execution_message_mismatch_does_not_touch_chat_store
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -1232,7 +1232,7 @@ def test_started_at_running_execution_message_mismatch_does_not_touch_chat_store
             "type": "interval",
             "task": {
                 "message": "Run QA against http://127.0.0.1:18766/chat?chat=" + conversation_id,
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "conversation_id": conversation_id,
                 "timeout": 1800,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -1307,7 +1307,7 @@ def test_legacy_running_execution_without_started_at_message_mismatch_obsoletes(
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -1336,7 +1336,7 @@ def test_legacy_running_execution_without_started_at_message_mismatch_obsoletes(
             "type": "interval",
             "task": {
                 "message": "Run QA against http://127.0.0.1:18766/chat?chat=" + conversation_id,
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "conversation_id": conversation_id,
                 "timeout": 1800,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -1411,7 +1411,7 @@ def test_legacy_running_execution_message_mismatch_recovers_after_timeout(tmp_pa
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -1440,7 +1440,7 @@ def test_legacy_running_execution_message_mismatch_recovers_after_timeout(tmp_pa
             "type": "interval",
             "task": {
                 "message": "Run QA against http://127.0.0.1:18766/chat?chat=" + conversation_id,
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "conversation_id": conversation_id,
                 "timeout": 1800,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -1521,7 +1521,7 @@ def test_approval_followup_message_does_not_obsolete_running_execution(tmp_path,
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -1552,7 +1552,7 @@ def test_approval_followup_message_does_not_obsolete_running_execution(tmp_path,
             "type": "interval",
             "task": {
                 "message": current_message,
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "conversation_id": conversation_id,
                 "timeout": 1800,
                 "profile_id": "defaultspack.mimo_coding_company",
@@ -2097,7 +2097,7 @@ def test_timer_refreshes_persisted_running_execution_before_starting_chat(tmp_pa
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -2108,7 +2108,7 @@ def test_timer_refreshes_persisted_running_execution_before_starting_chat(tmp_pa
         "interval",
         {
             "message": "scheduled QA heartbeat",
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "conversation_id": conversation_id,
             "timeout": 1800,
             "profile_id": "defaultspack.mimo_coding_company",
@@ -2697,7 +2697,7 @@ def test_scheduler_ai_complete_uses_profile_authority_context(tmp_path, monkeypa
             "interval",
             {
                 "message": "visual QA",
-                "model": "google/gemma-4-31b-it",
+                "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
                 "timeout": 30,
                 "profile_id": "defaultspack.mimo_coding_company",
                 "metadata": {"company_id": "mimo-coding-company"},
@@ -2708,7 +2708,7 @@ def test_scheduler_ai_complete_uses_profile_authority_context(tmp_path, monkeypa
         history = scheduler._execute_task(schedule["id"], manual=False)
 
         assert history["status"] == "completed"
-        assert captured["payload"]["model"] == "google/gemma-4-31b-it"
+        assert captured["payload"]["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
         assert captured["context"]["profile_id"] == "defaultspack.mimo_coding_company"
         assert captured["context"]["authority_principal_id"] == "profile:defaultspack.mimo_coding_company"
         assert captured["context"]["principal_id"] == "profile:defaultspack.mimo_coding_company"
@@ -3595,7 +3595,7 @@ def test_scheduled_approval_keeps_current_approved_request_recoverable(tmp_path,
     ChatStore._instance = None
 
 
-def test_mimo_schedule_auto_approves_camelcase_ai_gateway_authority_request(tmp_path, monkeypatch):
+def test_mimo_schedule_auto_approves_camelcase_mimo_provider_authority_request(tmp_path, monkeypatch):
     from core_runtime.authority import AuthorityService
     from core_runtime.authority.request_store import AuthorityRequestStore
     from domain.tool.scheduled_approval import (
@@ -3609,14 +3609,14 @@ def test_mimo_schedule_auto_approves_camelcase_ai_gateway_authority_request(tmp_
     )
     monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: service)
 
-    conversation_id = "conv-mimo-ai-gateway"
+    conversation_id = "conv-mimo-mimo-provider"
     resource = {
         "kind": "model",
-        "provider_id": "vercel-ai-gateway",
-        "model_id": "google/gemma-4-31b-it",
-        "model_ref": "vercel-ai-gateway/google/gemma-4-31b-it",
-        "domain": "ai-gateway.vercel.sh",
-        "endpoint_url": "https://ai-gateway.vercel.sh/v1/chat/completions",
+        "provider_id": "xiaomi-token-plan-sgp",
+        "model_id": "mimo-v2-omni",
+        "model_ref": "xiaomi-token-plan-sgp/mimo-v2-omni",
+        "domain": "token-plan-sgp.xiaomimimo.com",
+        "endpoint_url": "https://token-plan-sgp.xiaomimimo.com/v1/chat/completions",
     }
     decision = service.check(
         principal_id="profile:defaultspack.mimo_coding_company",
@@ -3647,14 +3647,14 @@ def test_mimo_schedule_auto_approves_camelcase_ai_gateway_authority_request(tmp_
     assert pending["permission_id"] == "model.invoke"
 
     task_cfg = {
-        "message": "Run Gemma visual QA through Vercel AI Gateway.",
-        "model": "vercel-ai-gateway/google/gemma-4-31b-it",
+        "message": "Run MiMo visual QA through Xiaomi Token Plan SGP.",
+        "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
         "profile_id": "defaultspack.mimo_coding_company",
         "tool_policy": {
             "profile_id": "defaultspack.mimo_coding_company",
             "model_allowlist": [
-                "opencode-zen/mimo-v2.5-free",
-                "vercel-ai-gateway/google/gemma-4-31b-it",
+                "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+                "xiaomi-token-plan-sgp/mimo-v2-omni",
             ],
             "schedule_auto_approve_tool_requests": True,
         },
@@ -4821,7 +4821,7 @@ def test_scheduled_chat_timeout_after_user_commit_appends_durable_error(tmp_path
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -4852,7 +4852,7 @@ def test_scheduled_chat_timeout_after_user_commit_appends_durable_error(tmp_path
         "once",
         {
             "message": "Run scheduled browser QA.",
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "conversation_id": conversation_id,
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "browser_qa",
@@ -4898,7 +4898,7 @@ def test_scheduled_chat_failure_after_user_commit_appends_redacted_durable_error
     ChatStore._instance = None
     store = ChatStore()
     conversation = store.create_conversation(
-        model="google/gemma-4-31b-it",
+        model="xiaomi-token-plan-sgp/mimo-v2-omni",
         metadata={"profile_id": "defaultspack.mimo_coding_company", "company_id": "mimo-coding-company"},
     )
     conversation_id = conversation["id"]
@@ -4923,7 +4923,7 @@ def test_scheduled_chat_failure_after_user_commit_appends_redacted_durable_error
         "once",
         {
             "message": "Run scheduled browser QA.",
-            "model": "google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "conversation_id": conversation_id,
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "browser_qa",

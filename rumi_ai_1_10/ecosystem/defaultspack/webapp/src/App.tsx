@@ -4562,9 +4562,9 @@ function ChatApp() {
 
   const preferredMimoVisionModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const visionPreferred = allowlist.find((item) => /gemma|omni|vision|vl/i.test(item));
+    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
     if (visionPreferred) return visionPreferred;
-    return "google/gemma-4-31b-it";
+    return "xiaomi-token-plan-sgp/mimo-v2-omni";
   };
 
   const preferredMimoFastModel = () => {

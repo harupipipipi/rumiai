@@ -18,9 +18,9 @@ def test_mimo_profile_assigns_main_vision_fast_models(tmp_path):
 
     runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
 
-    assert runtime.role_map["main"] == "opencode-zen/mimo-v2.5-free"
-    assert runtime.role_map["vision"] == "google/gemma-4-31b-it"
-    assert runtime.role_map["fast"] == "opencode-zen/mimo-v2.5-free"
+    assert runtime.role_map["main"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert runtime.role_map["vision"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
+    assert runtime.role_map["fast"] == "xiaomi-token-plan-sgp/mimo-v2-flash"
 
 
 def test_mimo_profile_uses_local_company_profile_role_map(tmp_path):
@@ -129,8 +129,8 @@ def test_mimo_profile_uses_company_metadata_role_map(tmp_path, monkeypatch):
 def test_live_self_improvement_defaults_to_current_mimo_models():
     from domain.agent.self_improvement_live_loop import run_live_improvement, run_vision_qa
 
-    assert run_live_improvement.__kwdefaults__["model"] == "opencode-zen/mimo-v2.5-free"
-    assert run_vision_qa.__kwdefaults__["model"] == "google/gemma-4-31b-it"
+    assert run_live_improvement.__kwdefaults__["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert run_vision_qa.__kwdefaults__["model"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
 
 
 def test_self_improvement_run_defaults_to_current_mimo_main_model(tmp_path, monkeypatch):
@@ -150,7 +150,7 @@ def test_self_improvement_run_defaults_to_current_mimo_main_model(tmp_path, monk
     result = run({"action": "single", "model": "", "workspace_root": str(tmp_path)}, {})
 
     assert result["status"] == "ok"
-    assert seen["model"] == "opencode-zen/mimo-v2.5-free"
+    assert seen["model"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
 
 
 def test_self_improvement_run_uses_local_profile_default(tmp_path, monkeypatch):
@@ -184,7 +184,7 @@ def test_mimo_vision_role_uses_current_vision_model(tmp_path):
 
     runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
 
-    assert runtime.role_map["vision"] == "google/gemma-4-31b-it"
+    assert runtime.role_map["vision"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
 
 
 def test_coding_role_rejects_non_tool_call_model():

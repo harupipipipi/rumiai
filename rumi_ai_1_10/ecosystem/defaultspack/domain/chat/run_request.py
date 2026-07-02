@@ -24,7 +24,6 @@ from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_search import get_model_capabilities
 from domain.ai_client.request_planner import plan_model_request
-from domain.ai_client.request_timeout import apply_execution_timeout_to_params
 from domain.chat.ir import RumiChatIR
 from domain.chat.ir_blocks import IR_SCHEMA_VERSION
 from domain.chat.ir_legacy_adapter import (
@@ -341,7 +340,6 @@ def prepare_chat_run(
     chat_reference_prompt = _format_chat_references_for_prompt(chat_references)
 
     params = dict(prepared_input.get("params") or {})
-    apply_execution_timeout_to_params(params, prepared_input.get("timeout_seconds"))
     tool_selection = _normalize_tool_selection(prepared_input)
     requested_model = str(params.get("model") or params.get("profile_id") or "").strip()
     tool_selection = _apply_tool_selection_preview_snapshot(

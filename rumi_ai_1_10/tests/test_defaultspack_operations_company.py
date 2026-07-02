@@ -44,7 +44,7 @@ def test_operations_company_profile_coexists_with_default_profile():
     assert manifest["counts"]["profiles"] >= 2
 
 
-def test_mimo_coding_company_allows_opencode_mimo_and_ai_gateway_gemma(tmp_path, monkeypatch):
+def test_mimo_coding_company_uses_xiaomi_mimo_models(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
         DEFAULT_FAST_MODEL,
         DEFAULT_MAIN_MODEL,
@@ -57,24 +57,23 @@ def test_mimo_coding_company_allows_opencode_mimo_and_ai_gateway_gemma(tmp_path,
     allowlist = current_model_allowlist()
     runtime = MimoCodingCompanyRuntime()
 
-    assert "opencode-zen/mimo-v2.5-free" in allowlist
-    assert "vercel-ai-gateway/google/gemma-4-31b-it" in allowlist
-    assert "google/gemma-4-31b-it" in allowlist
+    assert "xiaomi-token-plan-sgp/mimo-v2.5-pro" in allowlist
+    assert "xiaomi-token-plan-sgp/mimo-v2-omni" in allowlist
+    assert "xiaomi-token-plan-sgp/mimo-v2-flash" in allowlist
     assert "opencode-go/mimo-v2.5" not in allowlist
     assert "opencode-go/mimo-v2.5-pro" not in allowlist
     assert "opencode-go/minimax-m3" not in allowlist
-    assert "opencode-zen/minimax-m3-free" not in allowlist
     assert "groq/openai/gpt-oss-20b" not in allowlist
     assert "cerebras/zai-glm-4.7" not in allowlist
-    assert DEFAULT_MAIN_MODEL == "opencode-zen/mimo-v2.5-free"
-    assert DEFAULT_FAST_MODEL == "opencode-zen/mimo-v2.5-free"
-    assert DEFAULT_VISION_MODEL == "vercel-ai-gateway/google/gemma-4-31b-it"
-    assert runtime._allowed_model("opencode-zen/mimo-v2.5-free") == "opencode-zen/mimo-v2.5-free"
+    assert DEFAULT_MAIN_MODEL == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+    assert DEFAULT_FAST_MODEL == "xiaomi-token-plan-sgp/mimo-v2-flash"
+    assert DEFAULT_VISION_MODEL == "xiaomi-token-plan-sgp/mimo-v2-omni"
+    assert runtime._allowed_model("xiaomi-token-plan-sgp/mimo-v2.5-pro") == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
     assert (
-        runtime._allowed_model("vercel-ai-gateway/google/gemma-4-31b-it")
-        == "vercel-ai-gateway/google/gemma-4-31b-it"
+        runtime._allowed_model("xiaomi-token-plan-sgp/mimo-v2-omni")
+        == "xiaomi-token-plan-sgp/mimo-v2-omni"
     )
-    assert runtime._allowed_model("google/gemma-4-31b-it") == "google/gemma-4-31b-it"
+    assert runtime._allowed_model("xiaomi-token-plan-sgp/mimo-v2-flash") == "xiaomi-token-plan-sgp/mimo-v2-flash"
 
 
 def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_idempotently(tmp_path, monkeypatch):
@@ -113,7 +112,7 @@ def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_ide
         group_id="company:mimo-coding-company",
         metadata={"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
     )
-    legacy_xiaomi = chat_store.create_conversation(
+    current_xiaomi = chat_store.create_conversation(
         model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
         system_prompt_id="mimo_coding_company",
         conversation_kind="mimo_coding_company",
@@ -151,12 +150,9 @@ def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_ide
     first = runtime.status(sync_observability=True)
     second = runtime.status(sync_observability=True)
 
-    assert len(first["harness"]["observability"]["legacy_provider_conversations"]["superseded"]) == 2
+    assert len(first["harness"]["observability"]["legacy_provider_conversations"]["superseded"]) == 1
     assert second["harness"]["observability"]["legacy_provider_conversations"]["superseded"] == []
-    for conversation_id, legacy_model in (
-        (legacy_xiaomi["id"], "xiaomi-token-plan-sgp/mimo-v2.5-pro"),
-        (legacy_opencode_go["id"], "opencode-go/mimo-v2.5"),
-    ):
+    for conversation_id, legacy_model in ((legacy_opencode_go["id"], "opencode-go/mimo-v2.5"),):
         conversation = ChatStore().get_conversation(conversation_id)
         metadata = conversation["metadata"]
         markers = [
@@ -176,6 +172,8 @@ def test_mimo_coding_company_status_supersedes_legacy_provider_conversations_ide
         assert markers[0]["metadata"]["source"] == "codex"
         assert markers[0]["metadata"]["attributed_to"] == "Codex"
         assert active["id"] in markers[0]["raw_text"]
+
+    assert ChatStore().get_conversation(current_xiaomi["id"])["metadata"].get("superseded") is not True
 
     active_conversation = ChatStore().get_conversation(active["id"])
     skipped_wrong_profile = ChatStore().get_conversation(wrong_profile["id"])
@@ -2264,7 +2262,7 @@ def test_mimo_coding_company_observability_discovers_mimo_schedule_outside_state
         "once",
         {
             "message": "Dedicated manager schedule.",
-            "model": "opencode-zen/mimo-v2.5-free",
+            "model": "xiaomi-token-plan-sgp/mimo-v2.5-pro",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "project_manager",
@@ -2400,27 +2398,27 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         },
     )
 
-    current_gemma_qa = scheduler.create_schedule(
+    current_mimo_qa = scheduler.create_schedule(
         "interval",
         mimo_task(
             "qa_loop",
-            model="vercel-ai-gateway/google/gemma-4-31b-it",
+            model="xiaomi-token-plan-sgp/mimo-v2-omni",
             agent_id="browser_qa",
-            message="Current Gemma browser QA loop.",
+            message="Current MiMo browser QA loop.",
         ),
         {"value": 240, "unit": "minutes"},
-        name="MiMo Coding Company Gemma QA loop",
+        name="MiMo Coding Company MiMo QA loop",
     )
     append_history(
-        current_gemma_qa["id"],
+        current_mimo_qa["id"],
         {
-            "schedule_id": current_gemma_qa["id"],
-            "execution_id": "exec_current_gemma_qa",
+            "schedule_id": current_mimo_qa["id"],
+            "execution_id": "exec_current_mimo_qa",
             "trigger": "scheduled",
             "status": "error",
             "started_at": "2026-06-29T00:05:00Z",
             "completed_at": "2026-06-29T00:05:08Z",
-            "error": "Current Gemma QA desktop blocker.",
+            "error": "Current MiMo QA desktop blocker.",
         },
     )
 
@@ -2504,7 +2502,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
         "interval",
         mimo_task(
             "qa_loop",
-            model="xiaomi-token-plan-sgp/mimo-v2.5-pro",
+            model="opencode-go/mimo-v2.5",
             agent_id="browser_qa",
             message="Expired Xiaomi active QA loop.",
         ),
@@ -2558,7 +2556,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
     messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", limit=20, offset=0)
 
     observed_schedule_ids = {item["schedule_id"] for item in summary["schedule_history"]["latest"]}
-    assert observed_schedule_ids == {state_kickoff["id"], current_gemma_qa["id"]}
+    assert observed_schedule_ids == {state_kickoff["id"], current_mimo_qa["id"]}
     assert summary["schedule_history"]["checked"] == 2
     assert summary["team_workspace"]["synced_messages"] == 2
     assert total == 2
@@ -2574,7 +2572,7 @@ def test_mimo_coding_company_observability_ignores_stale_schedules_outside_state
 
     for schedule in (
         state_kickoff,
-        current_gemma_qa,
+        current_mimo_qa,
         paused_xiaomi,
         completed_dedicated,
         active_stub,
@@ -2620,7 +2618,7 @@ def test_mimo_coding_company_observability_suppresses_expected_schedule_noise(tm
         "interval",
         {
             "message": "QA loop.",
-            "model": "vercel-ai-gateway/google/gemma-4-31b-it",
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
             "conversation_id": parent["id"],
             "profile_id": "defaultspack.mimo_coding_company",
             "agent_id": "browser_qa",
@@ -2786,7 +2784,7 @@ def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tm
             "started_at": "2026-06-29T01:30:00Z",
             "completed_at": "2026-06-29T01:30:08Z",
             "error": (
-                "CreditsError: insufficient balance for opencode-zen/mimo-v2.5-free. "
+                "CreditsError: insufficient balance for xiaomi-token-plan-sgp/mimo-v2.5-pro. "
                 "HTTP 401 Unauthorized. Authorization: Bearer sk-test-secret"
             ),
         },
@@ -2827,7 +2825,7 @@ def test_mimo_coding_company_observability_classifies_provider_credit_blocker(tm
     assert "insufficient balance" in messages[0]["content"]
     assert "HTTP 401" in messages[0]["content"]
     assert "Do not create GitHub issues" in messages[0]["content"]
-    assert "Gemma/vision QA monitoring active" in messages[0]["content"]
+    assert "MiMo vision QA monitoring active" in messages[0]["content"]
     assert "Authorization" not in messages[0]["content"]
     assert "sk-test-secret" not in messages[0]["content"]
 
@@ -2947,9 +2945,18 @@ def test_mimo_coding_company_manifest_uses_explicit_mimo_and_vision_model_allowl
     allowlist = set(runtime.manifest()["model_self_selection"]["allowlist"])
 
     assert allowlist == {
-        "opencode-zen/mimo-v2.5-free",
-        "vercel-ai-gateway/google/gemma-4-31b-it",
-        "google/gemma-4-31b-it",
+        "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+        "xiaomi-token-plan-sgp/mimo-v2.5",
+        "xiaomi-token-plan-sgp/mimo-v2-pro",
+        "xiaomi-token-plan-sgp/mimo-v2-omni",
+        "xiaomi-token-plan-sgp/mimo-v2-flash",
+        "gitlawb-opengateway/mimo-v2.5-pro",
+        "gitlawb-opengateway/mimo-v2.5",
+        "gitlawb-opengateway/mimo-v2-pro",
+        "gitlawb-opengateway/mimo-v2-omni",
+        "gitlawb-opengateway/mimo-v2-flash",
+        "groq/openai/gpt-oss-120b",
+        "cerebras/gpt-oss-120b",
         "stub/default",
     }
 
@@ -2967,7 +2974,6 @@ def test_mimo_coding_company_bootstrap_block_rejects_catalog_and_free_models(tmp
         "groq/openai/gpt-oss-20b",
         "cerebras/zai-glm-4.7",
         "opencode-go/minimax-m3",
-        "opencode-zen/minimax-m3-free",
     ):
         result = bootstrap.run(
             {

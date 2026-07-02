@@ -161,8 +161,8 @@ def test_agent_subagent_local_mimo_company_route_uses_profile_authority_context(
 
     payload = {
         http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
-        "task": "Gemma visual QA smoke",
-        "model": "google/gemma-4-31b-it",
+        "task": "MiMo visual QA smoke",
+        "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
         "profile_id": "defaultspack.mimo_coding_company",
         "company_id": "mimo-coding-company",
         "principal_id": "profile:payload-spoof",
@@ -193,8 +193,8 @@ def test_agent_subagent_payload_profile_is_not_promoted_without_local_ui_authori
     server._build_context = lambda: {"request_id": "req-1"}
 
     payload = {
-        "task": "Gemma visual QA smoke",
-        "model": "google/gemma-4-31b-it",
+        "task": "MiMo visual QA smoke",
+        "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
         "profile_id": "defaultspack.mimo_coding_company",
         "company_id": "mimo-coding-company",
         "principal_id": "profile:payload-spoof",
@@ -227,8 +227,8 @@ def test_agent_subagent_local_ui_does_not_promote_other_company_profile():
 
     payload = {
         http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
-        "task": "Gemma visual QA smoke",
-        "model": "google/gemma-4-31b-it",
+        "task": "MiMo visual QA smoke",
+        "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
         "profile_id": "defaultspack.mimo_coding_company",
         "company_id": "other-company",
     }

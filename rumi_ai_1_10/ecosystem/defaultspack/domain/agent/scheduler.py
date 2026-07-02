@@ -26,7 +26,6 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import gen_id, timestamp
-from domain.ai_client.request_timeout import apply_execution_timeout_to_params
 from domain.agent.schedule_store import (
     current_schedules_dir,
     save_schedule,
@@ -52,6 +51,9 @@ _SCHEDULED_CONVERSATION_LOCK_WAIT_SECONDS = 1.0
 _SCHEDULED_CONVERSATION_LOCK_MAX_WAIT_SECONDS = 5.0
 _SCHEDULED_CHAT_ERROR_TEXT_LIMIT = 700
 _SCHEDULED_CHAT_ERROR_USER_COMMIT_WAIT_SECONDS = 0.5
+_SCHEDULE_AI_REQUEST_TIMEOUT_RESERVE_SECONDS = 5.0
+_SCHEDULE_AI_REQUEST_TIMEOUT_MIN_SECONDS = 2.0
+_SCHEDULE_AI_REQUEST_TIMEOUT_MAX_SECONDS = 3600.0
 _SCHEDULED_CHAT_SECRET_VALUE_RE = re.compile(
     r"\b(AIza[0-9A-Za-z_-]{20,}|sk-[0-9A-Za-z_-]{20,}|gh[pousr]_[0-9A-Za-z_]{20,})\b"
 )
@@ -100,6 +102,34 @@ def _wait_timeout_seconds(value: float) -> float:
 
 def _remaining_timeout_seconds(deadline: float) -> float:
     return max(0.0, deadline - time.monotonic())
+
+
+def _scheduler_request_timeout_for_execution_timeout(timeout_seconds: Any) -> float | None:
+    try:
+        value = float(timeout_seconds)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(value) or value <= 0:
+        return None
+    return max(
+        _SCHEDULE_AI_REQUEST_TIMEOUT_MIN_SECONDS,
+        min(
+            _SCHEDULE_AI_REQUEST_TIMEOUT_MAX_SECONDS,
+            value - _SCHEDULE_AI_REQUEST_TIMEOUT_RESERVE_SECONDS,
+        ),
+    )
+
+
+def _apply_scheduler_execution_timeout_to_params(
+    params: dict[str, Any],
+    timeout_seconds: Any,
+) -> dict[str, Any]:
+    if "request_timeout" in params or "timeout" in params:
+        return params
+    request_timeout = _scheduler_request_timeout_for_execution_timeout(timeout_seconds)
+    if request_timeout is not None:
+        params["request_timeout"] = request_timeout
+    return params
 
 
 def _scheduled_conversation_lock_wait_seconds(task_cfg: dict[str, Any], remaining_timeout: float) -> float:
@@ -559,7 +589,7 @@ def _scheduler_chat_params_and_tools(
         initial_tool_choice = _initial_tool_choice(task_cfg)
         if initial_tool_choice is not None:
             params["tool_choice"] = initial_tool_choice
-    apply_execution_timeout_to_params(params, timeout_seconds)
+    _apply_scheduler_execution_timeout_to_params(params, timeout_seconds)
     return params, tools
 
 
@@ -2161,7 +2191,7 @@ class Scheduler:
 
                 scheduler_context = _scheduler_chat_context(task_cfg, cancel_event=cancel_event)
                 completion_params: dict[str, Any] = {}
-                apply_execution_timeout_to_params(completion_params, timeout_seconds)
+                _apply_scheduler_execution_timeout_to_params(completion_params, timeout_seconds)
 
                 def run_completion_task():
                     payload = {"messages": messages, "model": model}

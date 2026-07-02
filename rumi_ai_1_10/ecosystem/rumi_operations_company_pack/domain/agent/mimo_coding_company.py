@@ -36,9 +36,9 @@ CONVERSATION_KIND = "mimo_coding_company"
 COMPANY_ID = "mimo-coding-company"
 COMPANY_NAME = "MiMo Coding Company"
 COMPANY_DESCRIPTION = "Self-improving MiMo-first coding company for long-running repo work."
-DEFAULT_MAIN_MODEL = "opencode-zen/mimo-v2.5-free"
-DEFAULT_VISION_MODEL = "vercel-ai-gateway/google/gemma-4-31b-it"
-DEFAULT_FAST_MODEL = "opencode-zen/mimo-v2.5-free"
+DEFAULT_MAIN_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro"
+DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni"
+DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
 SCHEDULE_LOOP_KEYS = {"kickoff_review", "heartbeat", "improvement_loop", "qa_loop"}
 SCHEDULE_CONVERSATION_LANES = {
     "kickoff_review": "review",
@@ -63,13 +63,12 @@ SCHEDULED_DRAFT_GAP_GRACE_SECONDS = SUBAGENT_GAP_GRACE_SECONDS
 MIMO_OBSERVABILITY_HISTORY_LIMIT = 50
 MIMO_OBSERVABILITY_CURRENT_SCHEDULE_GRACE = timedelta(hours=1)
 MIMO_CURRENT_OBSERVABILITY_MODELS = {DEFAULT_MAIN_MODEL, DEFAULT_VISION_MODEL}
-MIMO_PROVIDER_ID = "opencode-zen"
-MIMO_PROVIDER_DISPLAY = "OpenCode Zen"
+MIMO_PROVIDER_ID = "xiaomi-token-plan-sgp"
+MIMO_PROVIDER_DISPLAY = "Xiaomi Token Plan SGP"
 PROVIDER_HEALTH_BLOCKER_SIGNAL = "provider_health_blocker"
 PROVIDER_HEALTH_EXTERNAL_ISSUE_POLICY = "provider_health_only"
 LEGACY_PROVIDER_EXPIRED_SIGNAL = "legacy_provider_expired"
 LEGACY_PROVIDER_EXPIRED_MODELS = (
-    "xiaomi-token-plan-",
     "opencode-go/mimo-v2.5",
 )
 PROVIDER_HEALTH_BLOCKER_PATTERNS = (
@@ -123,7 +122,7 @@ IMPROVEMENT_STREAMS = [
     {
         "id": "provider_search_coverage",
         "title": "Provider and search coverage",
-        "description": "Improve search quality, provider discovery, and model catalogs for OpenCode MiMo V2.5 Free and Google Gemma vision.",
+        "description": "Improve search quality, provider discovery, and model catalogs. Keep Groq, Cerebras, and Xiaomi current.",
         "target_agent_ids": ["toolsmith", "project_manager"],
         "preferred_tools": ["web_search", "knowledge_search", "knowledge_create", "coding_file_patch"],
         "owner_role": "toolsmith",
@@ -219,9 +218,18 @@ FALLBACK_KNOWLEDGE_DOCS = [
 ]
 
 MODEL_ALLOWLIST = [
-    "opencode-zen/mimo-v2.5-free",
-    "google/gemma-4-31b-it",
-    "vercel-ai-gateway/google/gemma-4-31b-it",
+    "xiaomi-token-plan-sgp/mimo-v2.5-pro",
+    "xiaomi-token-plan-sgp/mimo-v2.5",
+    "xiaomi-token-plan-sgp/mimo-v2-pro",
+    "xiaomi-token-plan-sgp/mimo-v2-omni",
+    "xiaomi-token-plan-sgp/mimo-v2-flash",
+    "gitlawb-opengateway/mimo-v2.5-pro",
+    "gitlawb-opengateway/mimo-v2.5",
+    "gitlawb-opengateway/mimo-v2-pro",
+    "gitlawb-opengateway/mimo-v2-omni",
+    "gitlawb-opengateway/mimo-v2-flash",
+    "groq/openai/gpt-oss-120b",
+    "cerebras/gpt-oss-120b",
     "stub/default",
 ]
 
@@ -2437,7 +2445,7 @@ class MimoCodingCompanyRuntime:
             evidence_text = ", ".join("`" + str(item) + "`" for item in evidence if str(item or "").strip()) or "`provider billing/auth failure`"
             return "\n".join(
                 [
-                    "**MiMo provider-health blocker: OpenCode Zen externally blocked**",
+                    f"**MiMo provider-health blocker: {MIMO_PROVIDER_DISPLAY} externally blocked**",
                     f"- Loop: `{loop_key}`",
                     f"- Schedule: `{entry.get('schedule_id') or (schedule or {}).get('id') or ''}`",
                     f"- Execution: `{entry.get('execution_id') or ''}`",
@@ -2447,7 +2455,7 @@ class MimoCodingCompanyRuntime:
                     f"- Evidence: {evidence_text}",
                     f"- External issue policy: `{provider_health.get('external_issue_policy')}`",
                     "",
-                    "Treat this as an external provider billing/auth blocker. Do not create GitHub issues for it, do not count it as evidence-backed QA, and keep Gemma/vision QA monitoring active.",
+                    "Treat this as an external provider billing/auth blocker. Do not create GitHub issues for it, do not count it as evidence-backed QA, and keep MiMo vision QA monitoring active.",
                 ]
             )
         body = str(entry.get("error") or entry.get("result") or "").strip()
@@ -4021,7 +4029,7 @@ class MimoCodingCompanyRuntime:
             "Do not call todo or subagent tools, do not enumerate routes, and do not make fixes or create issues. "
             "Check pending tasks, recent failures, QA bugs, and blocked work only from status evidence. "
             + (monitoring_summary + " " if monitoring_summary else "")
-            + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo/Gemma loops keep moving. "
+            + "Do not take over QA or fixes; only surface harness blockers and ensure MiMo vision loops keep moving. "
             "If nothing important changed, stay silent. If action is needed, mention @client_manager and @project_manager with evidence. "
             + self._scheduler_noise_prompt()
         )
@@ -4077,6 +4085,6 @@ class MimoCodingCompanyRuntime:
             "Do not create GitHub issues for scheduler bookkeeping noise such as CONVERSATION_RUNNING, "
             "already_running, or a single scheduled task timeout; only externalize repeated, evidence-backed blockers "
             "after an in-loop fix is blocked. Treat provider billing/credits/auth failures such as CreditsError, "
-            "insufficient balance, or HTTP 401 from the configured MiMo/OpenCode Zen model as provider-health blockers, "
-            "not QA bugs; report status without secrets and keep Gemma/vision QA monitoring active."
+            "insufficient balance, or HTTP 401 from the configured MiMo model as provider-health blockers, "
+            "not QA bugs; report status without secrets and keep MiMo vision QA monitoring active."
         )

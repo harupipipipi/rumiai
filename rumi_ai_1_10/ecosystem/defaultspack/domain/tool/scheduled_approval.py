@@ -18,10 +18,6 @@ _SCHEDULE_AUTO_APPROVAL_EXPIRES_IN_SECONDS = 24 * 60 * 60
 _SCHEDULE_AUTO_APPROVAL_MAX_EXPIRES_IN_SECONDS = 30 * 24 * 60 * 60
 _AUTHORITY_PERMISSION_IDS = {"model.invoke", "api_key.use", "network.egress"}
 _AUTHORITY_PROVIDER_DOMAINS = {
-    "google": {"generativelanguage.googleapis.com"},
-    "opencode-go": {"opencode.ai"},
-    "opencode-zen": {"opencode.ai"},
-    "vercel-ai-gateway": {"ai-gateway.vercel.sh"},
     "xiaomi-token-plan-sgp": {"token-plan-sgp.xiaomimimo.com"},
 }
 _DISPLAY_TOOL_ALIASES = {
