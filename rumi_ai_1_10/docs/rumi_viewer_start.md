@@ -19,9 +19,8 @@ Windows PowerShell:
 ```powershell
 cd rumi_viewer\frontend
 npm install
-cd ..
-cargo install tauri-cli --locked
-cargo tauri dev
+npm run tauri -- info
+npm run tauri -- dev
 ```
 
 macOS / Linux:
@@ -29,19 +28,18 @@ macOS / Linux:
 ```bash
 cd rumi_viewer/frontend
 npm install
-cd ..
-cargo install tauri-cli --locked
-cargo tauri dev
+npm run tauri -- info
+npm run tauri -- dev
 ```
 
 2 回目以降、`rumi_viewer/frontend/node_modules` が残っている場合は次だけで起動できます。
 
 ```bash
-cd rumi_viewer
-cargo tauri dev
+cd rumi_viewer/frontend
+npm run tauri -- dev
 ```
 
-`cargo tauri dev` が `error: no such command: tauri` で失敗する場合は、Tauri CLI が未インストールです。`cargo install tauri-cli --locked` を実行してから再試行してください。
+Tauri CLI は `rumi_viewer/frontend` の dev dependency として入ります。`npm run tauri -- info` や `npm run tauri -- dev` が `tauri` 不在で失敗する場合は、`rumi_viewer/frontend` で `npm install` を再実行してください。
 
 開発起動では viewer が次を自動で行います。
 
@@ -60,8 +58,8 @@ cargo tauri dev
 例:
 
 ```bash
-cd rumi_viewer
-RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
+cd rumi_viewer/frontend
+RUMI_AUTO_APPROVE_LOCAL=true npm run tauri -- dev
 ```
 
 この opt-in を付けない通常の開発起動では、modified pack は再承認待ちのままです。
@@ -79,7 +77,7 @@ RUMI_AUTO_APPROVE_LOCAL=true cargo tauri dev
 - frontend source は viewer 側にありますが、配信経路は kernel の `/panel/` のままです
 - `defaultspack` 自体は kernel から component として読み込まれます
 - `defaultspack` の独立 HTTP frontend は `DEFAULTS_HTTP_PORT` 既定値 `8766` ですが、viewer の初期導線とは別です
-- 開発起動 (`cargo tauri dev`) では repo 同梱の `rumi_ai_1_10/ecosystem/defaultspack/` を優先して開きます
+- 開発起動 (`npm run tauri -- dev`) では repo 同梱の `rumi_ai_1_10/ecosystem/defaultspack/` を優先して開きます
 - 配布版 / bundle 起動では `rumi_home/user_data/packs/defaultspack/current.json` を見て、移行互換として `app_data_dir/user_data/packs/defaultspack/current.json` も参照します
 - そのため setup/更新済みの `Defaultspack v2` が managed pack として切り替わっていれば、配布版 viewer からその実体を開けます
 
@@ -131,7 +129,7 @@ bootstrap secret がずれているか、古い kernel がポート `8765` を�
 lsof -nP -iTCP:8765 -sTCP:LISTEN
 ```
 
-viewer で検証する場合、`8765` を掴んでいる古い `python -m rumi_ai`、`python -m app`、または `pack-shell run defaultspack` は終了してから `cd rumi_viewer && cargo tauri dev` を実行してください。
+viewer で検証する場合、`8765` を掴んでいる古い `python -m rumi_ai`、`python -m app`、または `pack-shell run defaultspack` は終了してから `cd rumi_viewer/frontend && npm run tauri -- dev` を実行してください。
 
 ```bash
 pgrep -fl 'rumi-viewer|python.*-m app|python.*rumi_ai|pack-shell run defaultspack|defaultspack.desktop_app'
@@ -146,8 +144,8 @@ lsof -nP -iTCP:8766 -sTCP:LISTEN
 ブラウザから Authority approval を QA するときは、通常の local Bearer token ではなく、明示的なブラウザQAトークンを使います。viewer から defaultspack を開く前に同じ環境で token を渡してください。
 
 ```bash
-cd rumi_viewer
-RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa cargo tauri dev
+cd rumi_viewer/frontend
+RUMI_AUTHORITY_BROWSER_TEST_TOKEN=ambient-browser-qa npm run tauri -- dev
 ```
 
 `pack-shell run defaultspack` を直接起動してブラウザQAする場合は、viewer が生成した署名secretも同じプロセスへ渡してください。tokenだけだと承認ページは開けても、承認操作に必要な `ui_operator` を署名できません。
