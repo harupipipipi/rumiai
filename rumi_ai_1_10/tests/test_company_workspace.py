@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -14,10 +15,14 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 @pytest.fixture(autouse=True)
-def _isolate_company_dispatch_model_capabilities(monkeypatch) -> None:
+def _isolate_provider_capability_catalog(monkeypatch):
     monkeypatch.setattr(
         "domain.company.run_dispatcher.get_model_capabilities",
         lambda _model: {"supports_tool_calling": True},
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company.get_all_known_models",
+        lambda provider_id=None: [],
     )
 
 

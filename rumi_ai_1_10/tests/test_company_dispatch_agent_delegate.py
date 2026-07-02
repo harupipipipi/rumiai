@@ -3,11 +3,21 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_capability_catalog(monkeypatch):
+    monkeypatch.setattr(
+        "domain.company.run_dispatcher.get_model_capabilities",
+        lambda _model: {"supports_tool_calling": True},
+    )
 
 
 def test_dispatch_task_uses_agent_delegate_and_records_run_link(monkeypatch, tmp_path):
@@ -152,6 +162,19 @@ def test_dispatch_persists_unconfigured_agent_model_error(monkeypatch, tmp_path)
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_RUNTIME_DIR", str(tmp_path / "agent_runtime"))
+    monkeypatch.setattr("domain.agent.engine.get_model_capabilities", lambda _model: {})
+
+    def fake_complete(_self, _request):
+        raise RuntimeError(
+            "stub: provider is not configured. "
+            "Configure a real or local AI provider before sending a message."
+        )
+
+    monkeypatch.setattr("blocks.ai.complete.LLMGateway.complete", fake_complete)
+    monkeypatch.setattr(
+        "blocks.ai.complete.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda *_args, **_kwargs: {"level": "none"},
+    )
     AgentRunStore._instance = None
     CompanyStore._instance = None
     CompanyRuntimeStore._instance = None

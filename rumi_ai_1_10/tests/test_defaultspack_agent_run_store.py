@@ -18,20 +18,39 @@ from domain.agent_runtime.transcript import TranscriptStore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def _isolate_agent_engine_routing(monkeypatch) -> None:
+def _isolate_agent_model_routing(monkeypatch):
+    from domain.ai_client.model_router import ModelRoutingDecision
+
     monkeypatch.setattr(
-        "domain.agent.engine._route_agent_model",
-        lambda *, model, **_kwargs: model if model else "default",
+        "domain.agent.engine.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/model",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+        },
     )
     monkeypatch.setattr(
         "domain.agent.engine.get_model_capabilities",
-        lambda _model: {
+        lambda model: {
+            "profile_id": model,
             "supports_tool_calling": True,
             "supports_vision": True,
             "supports_image_input": True,
             "supports_thinking": True,
+            "supports_fast": True,
         },
     )
+
+    def fake_route(request):
+        return ModelRoutingDecision(
+            selected_model=request.preferred_model or "stub/model",
+            original_model=request.preferred_model,
+            selected_group=request.preferred_group or "default",
+            reason_codes=["test_model_routing"],
+            warnings=[],
+        )
+
+    monkeypatch.setattr("domain.agent.engine.route_model_request", fake_route)
 
 
 def _tool(name: str) -> dict:
