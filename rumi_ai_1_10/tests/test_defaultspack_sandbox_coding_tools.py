@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import os
 import sys
 import tarfile
 import uuid
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,6 +35,17 @@ def _sandbox_context(manager, workspace: Path, *, conversation_id: str = "conv-t
         "conversation_id": conversation_id,
         "profile_id": "work",
     }
+
+
+def _write_text_size(text: str) -> int:
+    return len(text.replace("\n", os.linesep).encode("utf-8"))
+
+
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except OSError as exc:
+        pytest.skip(f"symlink creation is unavailable in this environment: {exc}")
 
 
 def test_sandbox_tools_are_policy_allowed_without_host_write_approval(tmp_path, monkeypatch):
@@ -195,7 +209,7 @@ def test_sandbox_file_write_changes_only_staged_workspace(tmp_path):
     )
     assert preview["status"] == "ok"
     assert "sandbox" in preview["data"]["diff"]
-    assert preview["data"]["changed_files"] == [{"path": "hello.txt", "status": "modified", "size": 8}]
+    assert preview["data"]["changed_files"] == [{"path": "hello.txt", "status": "modified", "size": _write_text_size("sandbox\n")}]
 
 
 def test_sandbox_workspace_is_ephemeral_unless_context_session_is_reused(tmp_path):
@@ -242,7 +256,7 @@ def test_sandbox_outputs_do_not_expose_host_or_local_sandbox_paths(tmp_path):
     assert "sandbox_artifact_root" not in serialized
     assert str(tmp_path) not in serialized
     assert export_result["data"]["artifact_paths"] == ["hello.txt"]
-    assert export_result["data"]["files"] == [{"path": "hello.txt", "artifact_ref": "hello.txt", "size": 8}]
+    assert export_result["data"]["files"] == [{"path": "hello.txt", "artifact_ref": "hello.txt", "size": _write_text_size("sandbox\n")}]
 
 
 def test_sandbox_terminal_exec_fails_closed_when_provider_unavailable(tmp_path):
@@ -312,7 +326,7 @@ def test_sandbox_terminal_exec_reports_sandbox_changes_without_touching_host(tmp
 
     assert result["status"] == "ok"
     assert not (workspace / "generated.txt").exists()
-    assert result["data"]["changed_files"] == [{"path": "generated.txt", "status": "added", "size": 8}]
+    assert result["data"]["changed_files"] == [{"path": "generated.txt", "status": "added", "size": _write_text_size("sandbox\n")}]
     assert "--- a/generated.txt" in result["data"]["diff"]
     assert result["data"]["host_modified"] is False
 
@@ -346,7 +360,7 @@ def test_sandbox_terminal_error_includes_changed_files_and_diff(tmp_path):
 
     assert result["status"] == "error"
     details = result["error"]["details"]
-    assert details["changed_files"] == [{"path": "generated.txt", "status": "added", "size": 8}]
+    assert details["changed_files"] == [{"path": "generated.txt", "status": "added", "size": _write_text_size("sandbox\n")}]
     assert "--- a/generated.txt" in details["diff"]
     assert not (workspace / "generated.txt").exists()
 
@@ -450,10 +464,10 @@ def test_sandbox_diff_and_artifact_export_do_not_follow_symlinks(tmp_path):
     manager = SandboxWorkspaceManager(tmp_path / "sandbox-state")
     context = _sandbox_context(manager, workspace)
     staged = manager.prepare({}, context)
-    (staged.work_root / "leak.txt").symlink_to(secret)
+    _symlink_or_skip(staged.work_root / "leak.txt", secret)
     nested = staged.work_root / "nested"
     nested.mkdir()
-    (nested / "leak.txt").symlink_to(secret)
+    _symlink_or_skip(nested / "leak.txt", secret)
 
     preview = sandbox_diff_preview.run({}, context)
     export = sandbox_artifact_export.run({"paths": ["leak.txt", "nested"]}, context)

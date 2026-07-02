@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from pathlib import PurePath, PureWindowsPath
+from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
 from .models import RumiTemplate, TemplateDiagnostic, TemplatePiece, TemplateTrustLevel
 
@@ -94,7 +94,11 @@ def _diagnose_shell_like_handlers(
 
 
 def _is_absolute_path(value: str) -> bool:
-    return PurePath(value).is_absolute() or PureWindowsPath(value).is_absolute()
+    return (
+        PurePath(value).is_absolute()
+        or PurePosixPath(value).is_absolute()
+        or PureWindowsPath(value).is_absolute()
+    )
 
 
 def _contains_parent_traversal(value: str) -> bool:

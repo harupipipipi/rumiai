@@ -300,7 +300,17 @@ def test_remote_task_events_include_completed_task_state_after_run_completion(re
     created = gateway.create_task({"input": "Finish with events"}, {})
 
     _wait_until(lambda: gateway.get_task(created["task_id"], {}, {})["state"] == "completed")
-    events = gateway.list_events(created["task_id"], {"limit": 50}, {})["events"]
+    events = []
+
+    def events_include_completed_dispatch():
+        events[:] = gateway.list_events(created["task_id"], {"limit": 50}, {})["events"]
+        return (
+            any(event["type"] == "task.dispatched" for event in events)
+            and any(event["type"] == "run.status" and event.get("status") == "completed" for event in events)
+            and any(event["type"] == "task.state" and event.get("status") == "completed" for event in events)
+        )
+
+    _wait_until(events_include_completed_dispatch)
 
     assert any(event["type"] == "task.dispatched" for event in events)
     assert any(event["type"] == "run.status" and event.get("status") == "completed" for event in events)

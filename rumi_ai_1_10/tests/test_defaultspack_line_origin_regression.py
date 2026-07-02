@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -31,6 +33,51 @@ from domain.webhook.endpoint_store import WebhookEndpointStore  # noqa: E402
 
 
 SECRET = "line-secret"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_chat_model_routing(monkeypatch):
+    class FakeRoutingDecision:
+        def __init__(self, model: str) -> None:
+            self.selected_model = model
+            self.original_model = model
+            self.selected_group = "default"
+            self.reason_codes = ["test_model_routing"]
+            self.warnings = []
+            self.bridge_required = False
+            self.bridge_plan = {}
+
+        def to_dict(self) -> dict:
+            return {"selected_model": self.selected_model}
+
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "deepthink_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda self, **kwargs: {"level": "none"},
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.get_model_capabilities",
+        lambda model: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_audio_input": True,
+            "supports_thinking": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.route_model_request",
+        lambda request: FakeRoutingDecision(request.preferred_model or "stub/default"),
+    )
 
 
 def _signed_line_payload(payload: dict[str, Any], *, raw_body: bytes | None = None) -> dict[str, Any]:

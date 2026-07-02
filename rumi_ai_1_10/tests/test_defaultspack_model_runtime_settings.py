@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
@@ -11,6 +13,11 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 from domain.ai_client.rumi_process import RUMI_BASE_MODEL, RUMI_MODEL_PACK_REF  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runtime_rumi_base_model(monkeypatch):
+    monkeypatch.setattr(ModelRuntimeSettingsService, "_runtime_rumi_base_model", lambda self, settings=None: "")
 
 
 def _profile(

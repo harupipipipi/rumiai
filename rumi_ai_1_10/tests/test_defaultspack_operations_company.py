@@ -4,11 +4,89 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_operations_model_catalog(monkeypatch):
+    class FakeRoutingDecision:
+        def __init__(self, model: str) -> None:
+            self.selected_model = model
+            self.original_model = model
+            self.selected_group = "default"
+            self.reason_codes = ["test_model_routing"]
+            self.warnings = []
+            self.bridge_required = False
+            self.bridge_plan = {}
+
+        def to_dict(self) -> dict:
+            return {"selected_model": self.selected_model}
+
+    catalog = {
+        "groq": [
+            {
+                "id": "groq/openai/gpt-oss-20b",
+                "qualified_model_id": "groq/openai/gpt-oss-20b",
+                "type": "chat",
+            }
+        ],
+        "cerebras": [
+            {
+                "id": "cerebras/zai-glm-4.7",
+                "qualified_model_id": "cerebras/zai-glm-4.7",
+                "type": "reasoning",
+            }
+        ],
+    }
+
+    def get_all_known_models(provider_id=None, **kwargs):
+        if provider_id:
+            return list(catalog.get(str(provider_id), []))
+        return [model for models in catalog.values() for model in models]
+
+    monkeypatch.setattr("domain.ai_client.providers.get_all_known_models", get_all_known_models)
+    monkeypatch.setattr(
+        "ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company.get_all_known_models",
+        get_all_known_models,
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company.ModelRuntimeSettingsService.update_settings",
+        lambda self, patch: dict(patch or {}),
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "deepthink_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda self, **kwargs: {"level": "none"},
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.get_model_capabilities",
+        lambda model: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_audio_input": True,
+            "supports_thinking": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.route_model_request",
+        lambda request: FakeRoutingDecision(request.preferred_model or "stub/default"),
+    )
 
 
 def _reset_defaultspack_singletons():

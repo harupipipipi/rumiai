@@ -145,7 +145,7 @@ def test_template_catalog_projects_composer_surface_pieces():
     assert all(item["projected_id"].startswith("rumi.composer.default:") for item in projected)
     assert all(item["origin"]["template_id"] == "rumi.composer.default" for item in projected)
     assert all(
-        item["_source"].endswith("templates/composer/default/template.json") for item in projected
+        item["_source"].replace("\\", "/").endswith("templates/composer/default/template.json") for item in projected
     )
 
 
@@ -548,7 +548,24 @@ def test_patched_noncanonical_template_id_does_not_project_runtime_buckets(tmp_p
 
 
 def test_frontend_catalog_merges_template_metadata_without_dropping_existing_keys():
-    with patch("domain.frontend.registry.AIClient") as mock_client:
+    stub_profile = {
+        "profile_id": "stub/default",
+        "display_name": "Stub Default",
+        "provider_id": "stub",
+        "model_id": "default",
+        "type": "chat",
+        "availability": {"local": True},
+    }
+    with (
+        patch("domain.frontend.registry.AIClient") as mock_client,
+        patch.object(FrontendRegistry, "_selectable_model_profiles", return_value=[stub_profile]),
+        patch("domain.frontend.registry.provider_key_status", return_value={}),
+        patch("domain.frontend.registry.provider_oauth_statuses", return_value={}),
+        patch(
+            "domain.frontend.registry.ModelRuntimeSettingsService.refresh_models_settings",
+            lambda _service, values: values if isinstance(values, dict) else {},
+        ),
+    ):
         mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
         registry = FrontendRegistry(pack_root=DEFAULTSPACK_ROOT)
         catalog = registry.build_catalog()

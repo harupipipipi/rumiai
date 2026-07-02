@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import sys
 from pathlib import Path
 
@@ -12,6 +13,65 @@ pytestmark = pytest.mark.contract
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_runtime_profile_catalog(monkeypatch):
+    settings_by_path: dict[str, dict] = {}
+
+    def default_settings() -> dict:
+        return {
+            "preferred_model": "stub/default",
+            "model_groups": [],
+            "api_routes": [],
+            "api_bound_profiles": [],
+        }
+
+    def settings_key(service) -> str:
+        return str(getattr(service, "_settings_path", "default"))
+
+    def get_settings(service) -> dict:
+        return deepcopy(settings_by_path.setdefault(settings_key(service), default_settings()))
+
+    def update_settings(service, patch: dict) -> dict:
+        current = get_settings(service)
+        current.update(deepcopy(patch or {}))
+        settings_by_path[settings_key(service)] = deepcopy(current)
+        return deepcopy(current)
+
+    def runtime_defined_profiles(self, settings=None):
+        source = settings if isinstance(settings, dict) else self.get_settings()
+        profiles = []
+        for item in source.get("api_bound_profiles", []):
+            if not isinstance(item, dict):
+                continue
+            profile = dict(item)
+            metadata = dict(profile.get("metadata") or {})
+            if profile.get("provider_id"):
+                metadata.setdefault("provider_id", profile["provider_id"])
+            if profile.get("api_id"):
+                metadata.setdefault("api_id", profile["api_id"])
+            profile["metadata"] = metadata
+            profile.setdefault("availability", {"configured": True, "active": True})
+            profiles.append(profile)
+        return profiles
+
+    monkeypatch.setattr(
+        "domain.ai_client.model_availability.ModelRuntimeSettingsService.get_settings",
+        get_settings,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_availability.ModelRuntimeSettingsService.update_settings",
+        update_settings,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_availability.ModelRuntimeSettingsService.runtime_defined_profiles",
+        runtime_defined_profiles,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_availability.ModelAvailabilityService._candidate_models",
+        lambda self, provider_id: [],
+    )
 
 
 def test_provider_key_save_with_default_model_creates_available_api_bound_profile(tmp_path):
