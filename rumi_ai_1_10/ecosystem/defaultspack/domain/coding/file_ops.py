@@ -650,10 +650,10 @@ class FileOps:
         if parent and not os.path.isdir(parent):
             os.makedirs(parent, exist_ok=True)
         encoded = content.encode("utf-8")
-        fd, tmp_path = tempfile.mkstemp(prefix=".rumi-write-", dir=parent or self._root, text=True)
+        fd, tmp_path = tempfile.mkstemp(prefix=".rumi-write-", dir=parent or self._root)
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(content)
+            with os.fdopen(fd, "wb") as f:
+                f.write(encoded)
             os.replace(tmp_path, resolved)
         finally:
             if os.path.exists(tmp_path):

@@ -5,6 +5,8 @@ import tarfile
 import uuid
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -283,10 +285,14 @@ def test_sandbox_terminal_exec_reports_sandbox_changes_without_touching_host(tmp
     from blocks.coding import sandbox_terminal_exec
     from domain.coding.sandbox_workspace import SandboxWorkspaceManager
 
+    generated_sizes: list[int] = []
+
     class WritingSupervisor(ManagedSandboxSupervisor):
         def execute_coding_terminal(self, request):
             work_root = Path(request["workspace_root"])
-            (work_root / "generated.txt").write_text("sandbox\n", encoding="utf-8")
+            generated = work_root / "generated.txt"
+            generated.write_text("sandbox\n", encoding="utf-8")
+            generated_sizes.append(generated.stat().st_size)
             return {
                 "success": True,
                 "ok": True,
@@ -312,7 +318,9 @@ def test_sandbox_terminal_exec_reports_sandbox_changes_without_touching_host(tmp
 
     assert result["status"] == "ok"
     assert not (workspace / "generated.txt").exists()
-    assert result["data"]["changed_files"] == [{"path": "generated.txt", "status": "added", "size": 8}]
+    assert result["data"]["changed_files"] == [
+        {"path": "generated.txt", "status": "added", "size": generated_sizes[-1]}
+    ]
     assert "--- a/generated.txt" in result["data"]["diff"]
     assert result["data"]["host_modified"] is False
 
@@ -322,10 +330,14 @@ def test_sandbox_terminal_error_includes_changed_files_and_diff(tmp_path):
     from blocks.coding import sandbox_terminal_exec
     from domain.coding.sandbox_workspace import SandboxWorkspaceManager
 
+    generated_sizes: list[int] = []
+
     class FailingSupervisor(ManagedSandboxSupervisor):
         def execute_coding_terminal(self, request):
             work_root = Path(request["workspace_root"])
-            (work_root / "generated.txt").write_text("sandbox\n", encoding="utf-8")
+            generated = work_root / "generated.txt"
+            generated.write_text("sandbox\n", encoding="utf-8")
+            generated_sizes.append(generated.stat().st_size)
             return {
                 "success": False,
                 "ok": False,
@@ -346,7 +358,9 @@ def test_sandbox_terminal_error_includes_changed_files_and_diff(tmp_path):
 
     assert result["status"] == "error"
     details = result["error"]["details"]
-    assert details["changed_files"] == [{"path": "generated.txt", "status": "added", "size": 8}]
+    assert details["changed_files"] == [
+        {"path": "generated.txt", "status": "added", "size": generated_sizes[-1]}
+    ]
     assert "--- a/generated.txt" in details["diff"]
     assert not (workspace / "generated.txt").exists()
 
@@ -450,10 +464,13 @@ def test_sandbox_diff_and_artifact_export_do_not_follow_symlinks(tmp_path):
     manager = SandboxWorkspaceManager(tmp_path / "sandbox-state")
     context = _sandbox_context(manager, workspace)
     staged = manager.prepare({}, context)
-    (staged.work_root / "leak.txt").symlink_to(secret)
     nested = staged.work_root / "nested"
-    nested.mkdir()
-    (nested / "leak.txt").symlink_to(secret)
+    try:
+        (staged.work_root / "leak.txt").symlink_to(secret)
+        nested.mkdir()
+        (nested / "leak.txt").symlink_to(secret)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation is unavailable: {exc}")
 
     preview = sandbox_diff_preview.run({}, context)
     export = sandbox_artifact_export.run({"paths": ["leak.txt", "nested"]}, context)
