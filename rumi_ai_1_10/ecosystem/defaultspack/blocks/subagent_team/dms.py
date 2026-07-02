@@ -43,9 +43,15 @@ def run(input_data, context):
             channel_id = input_data.get("dm_id") or input_data.get("channel_id")
             if not channel_id:
                 return invalid("dm_id is required")
-            result = service.list_messages(company_id, {**input_data, "channel_id": str(channel_id)})
+            result = service.list_messages(
+                company_id,
+                {**input_data, "channel_id": str(channel_id)},
+                context=context if isinstance(context, dict) else {},
+            )
             if result is None:
                 return missing_team(company_id)
+            if is_denied(result):
+                return denied(result)
             messages, total = result
             return ok({"messages": messages, "total": total})
         return invalid("unsupported dms action: " + action)

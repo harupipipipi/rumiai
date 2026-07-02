@@ -641,7 +641,7 @@ class SubagentTeamService:
         channels = self.list_channels(company_id)
         if channels is None:
             return None
-        return [channel for channel in channels if _is_dm(channel)]
+        return [channel for channel in channels if _is_dm(channel) and not _is_archived_channel(channel)]
 
     def _dm_channel_candidate(self, company_id: str, data: dict[str, Any]) -> dict[str, Any]:
         participants = _dedupe([str(data.get("sender_id") or "user"), *list(data.get("participants") or data.get("target_agent_ids") or [])])
@@ -665,7 +665,11 @@ class SubagentTeamService:
         }
 
     def ensure_dm(self, company_id: str, data: dict[str, Any], *, actor_id: str = "creator") -> dict[str, Any] | None:
-        return self.upsert_channel(company_id, self._dm_channel_candidate(company_id, data), actor_id=actor_id)
+        candidate = self._dm_channel_candidate(company_id, data)
+        existing = self.company_store.get_channel(company_id, str(candidate.get("id") or ""))
+        if existing is not None and _is_archived_channel(existing):
+            return _deny("direct message is archived: " + str(candidate.get("id") or ""), "DM_ARCHIVED")
+        return self.upsert_channel(company_id, candidate, actor_id=actor_id)
 
     def send_dm(self, company_id: str, data: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         sender_id = self._effective_actor_id(company_id, data, context=context, fallback="user")
@@ -705,6 +709,8 @@ class SubagentTeamService:
         if not check["allowed"]:
             return _deny(str(check["deny_reason"]), str(check["deny_code"]), channel_check=check)
         dm = self.ensure_dm(company_id, data, actor_id=str(data.get("sender_id") or data.get("actor_id") or "creator"))
+        if is_denial(dm):
+            return dm
         if dm is None:
             return None
         return self.send_message(
@@ -795,6 +801,9 @@ class SubagentTeamService:
         channel = self.company_store.get_channel(company_id, channel_id)
         if channel is None:
             return _deny("channel not found: " + channel_id, "CHANNEL_NOT_FOUND")
+        if _is_archived_channel(channel):
+            code = "DM_ARCHIVED" if _is_dm(channel) else "CHANNEL_ARCHIVED"
+            return _deny("channel is archived: " + channel_id, code, channel_id=channel_id)
         auth = self.authorize_pm_actor(company_id, actor_id, channel_id=channel_id)
         if auth["allowed"]:
             return {**auth, "allowed": True, "read_scope": "pm"}
@@ -828,10 +837,24 @@ class SubagentTeamService:
                 deny_reason="channel not found: " + channel_id,
                 channel_id=channel_id,
             )
+        if _is_archived_channel(channel):
+            return _channel_decision(
+                allowed=False,
+                deny_code="DM_ARCHIVED" if _is_dm(channel) else "CHANNEL_ARCHIVED",
+                deny_reason="channel is archived: " + channel_id,
+                channel_id=channel_id,
+            )
         return self._channel_turn_policy_for_channel(company_id, data, channel)
 
     def _channel_turn_policy_for_channel(self, company_id: str, data: dict[str, Any], channel: dict[str, Any]) -> dict[str, Any]:
         channel_id = str(data.get("channel_id") or channel.get("id") or DEFAULT_CHANNEL_ID)
+        if _is_archived_channel(channel):
+            return _channel_decision(
+                allowed=False,
+                deny_code="DM_ARCHIVED" if _is_dm(channel) else "CHANNEL_ARCHIVED",
+                deny_reason="channel is archived: " + channel_id,
+                channel_id=channel_id,
+            )
         members = self._resolved_channel_members(company_id, channel)
         channel_policy = self._channel_pm_policy(company_id, channel)
         actor_raw = str(data.get("agent_id") or data.get("sender_id") or data.get("actor_id") or "").strip()
@@ -1185,6 +1208,12 @@ def _is_goal(task: dict[str, Any]) -> bool:
 def _is_dm(channel: dict[str, Any]) -> bool:
     metadata = channel.get("metadata") if isinstance(channel.get("metadata"), dict) else {}
     return str(channel.get("visibility") or "") == "dm" or bool(metadata.get("dm"))
+
+
+def _is_archived_channel(channel: dict[str, Any]) -> bool:
+    metadata = channel.get("metadata") if isinstance(channel.get("metadata"), dict) else {}
+    lifecycle = metadata.get("lifecycle") if isinstance(metadata.get("lifecycle"), dict) else {}
+    return str(channel.get("visibility") or "").lower() == "archived" or str(lifecycle.get("state") or "").lower() == "archived"
 
 
 def _dm_channel_id(company_id: str, participants: list[str]) -> str:

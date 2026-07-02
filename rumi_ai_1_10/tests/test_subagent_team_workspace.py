@@ -361,6 +361,7 @@ def test_channel_and_dm_history_reads_require_trusted_member_or_pm_actor(tmp_pat
     store, runtime_store, company = _create_workspace()
 
     from domain.subagent_team.service import SubagentTeamService
+    from blocks.subagent_team import dms as dms_block
 
     service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
     service.upsert_channel(
@@ -402,6 +403,75 @@ def test_channel_and_dm_history_reads_require_trusted_member_or_pm_actor(tmp_pat
     assert dm_outsider["denied"] is True
     assert dm_outsider["code"] == "DM_PARTICIPANT_REQUIRED"
     assert dm_member[0][0]["content"] == "dm history"
+
+    block_member = dms_block.run(
+        {"company_id": company["id"], "action": "messages", "dm_id": dm["id"]},
+        {"actor_id": "coding_engineer"},
+    )
+    block_outsider = dms_block.run(
+        {"company_id": company["id"], "action": "messages", "dm_id": dm["id"]},
+        {"actor_id": "reviewer"},
+    )
+    assert block_member["status"] == "ok"
+    assert block_member["data"]["messages"][0]["content"] == "dm history"
+    assert block_outsider["status"] == "error"
+    assert block_outsider["error"]["code"] == "DM_PARTICIPANT_REQUIRED"
+
+
+def test_archived_dm_cannot_be_read_or_reactivated_by_send(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+
+    from blocks.subagent_team import channels as channels_block
+    from blocks.subagent_team import dms as dms_block
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    dm = service.ensure_dm(
+        company["id"],
+        {"sender_id": "project_manager", "agent_id": "coding_engineer"},
+    )
+    runtime_store.add_message(
+        company["id"],
+        channel_id=dm["id"],
+        sender_id="project_manager",
+        content="archived dm history",
+    )
+
+    archived = channels_block.run(
+        {"company_id": company["id"], "action": "archive", "channel_id": dm["id"]},
+        {"actor_id": "project_manager"},
+    )
+    assert archived["status"] == "ok"
+    assert archived["data"]["channel"]["metadata"]["lifecycle"]["state"] == "archived"
+
+    read_archived = dms_block.run(
+        {"company_id": company["id"], "action": "messages", "dm_id": dm["id"]},
+        {"actor_id": "coding_engineer"},
+    )
+    send_archived = dms_block.run(
+        {
+            "company_id": company["id"],
+            "action": "send",
+            "dm_id": dm["id"],
+            "sender_id": "project_manager",
+            "agent_id": "coding_engineer",
+            "content": "should not revive",
+        },
+        {"actor_id": "project_manager"},
+    )
+    stored = store.get_channel(company["id"], dm["id"])
+
+    assert read_archived["status"] == "error"
+    assert read_archived["error"]["code"] == "DM_ARCHIVED"
+    assert send_archived["status"] == "error"
+    assert send_archived["error"]["code"] == "DM_ARCHIVED"
+    assert stored["visibility"] == "archived"
+    assert stored["metadata"]["lifecycle"]["state"] == "archived"
+    assert "should not revive" not in json.dumps(
+        runtime_store.list_messages(company["id"], channel_id=dm["id"])[0],
+        sort_keys=True,
+    )
 
 
 def test_pm_decision_requires_stored_manager_actor_and_ignores_client_approval_flags(tmp_path, monkeypatch):

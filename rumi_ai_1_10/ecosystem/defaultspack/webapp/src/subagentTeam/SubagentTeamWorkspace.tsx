@@ -758,6 +758,12 @@ export function SubagentTeamWorkspace({
   const [openPreview, setOpenPreview] = useState<SubagentOpenPreview | null>(null);
 
   const loadSubagentTree = useCallback(async (companyId?: string | null) => {
+    if (!companyId && !activeConversationId) {
+      setTreeState(fallbackSubagentTreeState());
+      setTreeError(null);
+      setOpenPreview(null);
+      return;
+    }
     try {
       const result = await api.getSubagentTeamFileTree({
         companyId,
@@ -810,7 +816,6 @@ export function SubagentTeamWorkspace({
         statusCompany ?? (selectedId ? listedCompanies.find((item) => item.id === selectedId) ?? null : null),
       );
       setCompany(selectedCompany);
-      void loadSubagentTree(selectedId);
 
       if (!selectedId) {
         setAgents([]);
@@ -869,11 +874,13 @@ export function SubagentTeamWorkspace({
       setTasks([]);
       setRuns([]);
       setInboxItems([]);
-      void loadSubagentTree(null);
+      setTreeState(fallbackSubagentTreeState());
+      setTreeError(null);
+      setOpenPreview(null);
     } finally {
       setBusy(false);
     }
-  }, [activeConversationId, ensureSubagentCompanyMarker, loadSubagentTree]);
+  }, [activeConversationId, ensureSubagentCompanyMarker]);
 
   useEffect(() => {
     setActiveCompanyId(null);
@@ -916,6 +923,15 @@ export function SubagentTeamWorkspace({
   const effectiveDecisionTask = decisionPreviewTask ?? latestDecisionTask;
 
   const loadSubagentTeamControls = useCallback(async () => {
+    if (!activeCompanyId && !activeConversationId) {
+      setCreatorSettings(fallbackCreatorSettings);
+      setCreatorSettingsSource("preview");
+      setCreatorSettingsError(null);
+      setDecisionPreviewTask(null);
+      setDecisionPreviewSource("preview");
+      setDecisionPreviewError(null);
+      return;
+    }
     const context = {
       companyId: activeCompanyId,
       conversationId: activeConversationId,
@@ -953,6 +969,11 @@ export function SubagentTeamWorkspace({
   useEffect(() => {
     void loadSubagentTeamControls();
   }, [loadSubagentTeamControls]);
+
+  useEffect(() => {
+    if (!treeMode) return;
+    void loadSubagentTree(activeCompanyId);
+  }, [activeCompanyId, loadSubagentTree, treeMode]);
 
   const threadMessages = useMemo(() => {
     if (activeThread.type === "channel") {
