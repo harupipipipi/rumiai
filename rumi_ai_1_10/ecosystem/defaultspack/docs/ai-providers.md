@@ -15,7 +15,7 @@ runtime 内の curated table は互換 fallback であり、新規 provider を�
 | `openai` | OpenAI API（GPT-4o, GPT-4o-mini, o3, o4-mini 等） |
 | `anthropic` | Anthropic API（Claude Opus 4, Sonnet 4, Haiku 3 等） |
 | `google` | Google Gemini API（Gemini 2.5 Pro, Gemini 2.5 Flash 等） |
-| `openrouter` | OpenRouter API（defaultspack では `tencent/hy3-preview:free` のみ） |
+| `openrouter` | OpenRouter API（defaultspack bundled catalog allowlist） |
 | `gitlawb-opengateway` | Gitlawb OpenGateway（MiMo の固定allowlist。全モデルで API key 必須） |
 | `groq` | Groq OpenAI-compatible API |
 | `cerebras` | Cerebras OpenAI-compatible API |
@@ -57,7 +57,7 @@ GOOGLE_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
 
 ### OpenRouter
 
-defaultspack の OpenRouter 統合は、現時点では `tencent/hy3-preview:free` だけを実行対象にする。
+defaultspack の OpenRouter 統合は、bundled catalog allowlist に載っているモデルを実行対象にする。
 API キーはデスクトップ UI の Settings から保存できる。値は `user_data/secrets/OPENROUTER_API_KEY.json`
 に暗号化保存され、フロントエンドには保存済みかどうかだけが返る。
 

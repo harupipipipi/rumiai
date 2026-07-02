@@ -24,7 +24,7 @@ DEFAULT_MODEL = "stub/default"
 
 
 MODEL_ALLOWLIST = [
-    "openrouter/tencent/hy3-preview:free",
+    "openrouter/cohere/north-mini-code:free",
     "google/gemini-2.5-flash",
     "google/gemini-2.5-pro",
     "openai/gpt-5.4",

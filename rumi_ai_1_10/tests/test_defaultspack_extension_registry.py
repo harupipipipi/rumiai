@@ -67,6 +67,34 @@ def _write_json(path: Path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
+OPENROUTER_CURATED_ALLOWLIST = [
+    {
+        "id": "openrouter/tencent/hy3-preview:free",
+        "model_id": "tencent/hy3-preview:free",
+        "name": "Tencent Hy3 preview (free)",
+        "display_name": "Tencent Hy3 preview (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "fast": True},
+    },
+    {
+        "id": "openrouter/cohere/north-mini-code:free",
+        "model_id": "cohere/north-mini-code:free",
+        "name": "Cohere North Mini Code (free)",
+        "display_name": "Cohere North Mini Code (free)",
+        "provider": "openrouter",
+        "provider_id": "openrouter",
+        "type": "chat",
+        "defaults": {"chat": True, "coding": True, "fast": True},
+    },
+]
+
+
+def _openrouter_catalog_models():
+    return [dict(model) for model in OPENROUTER_CURATED_ALLOWLIST]
+
+
 def _make_extension_pack(ecosystem_root: Path, pack_id: str) -> Path:
     pack_root = ecosystem_root / pack_id
     _write_json(pack_root / "ecosystem.json", {"pack_id": pack_id})
@@ -153,13 +181,13 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
         },
     )
     _write_json(
-        root / "llm/providers/openai/models/gpt-5.4.json",
+        root / "llm/providers/openai/models/gpt-5.5.json",
         {
-            "id": "openai/gpt-5.4",
+            "id": "openai/gpt-5.5",
             "category": "llm_model",
             "version": "1",
             "provider_id": "openai",
-            "model_id": "gpt-5.4",
+            "model_id": "gpt-5.5",
             "priority": 10,
             "defaults": {"chat": True},
         },
@@ -187,7 +215,7 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
     assert len(result.issues) == 0
     assert {(item.category, item.extension_id) for item in result.extensions} >= {
         ("llm_provider", "openai"),
-        ("llm_model", "openai/gpt-5.4"),
+        ("llm_model", "openai/gpt-5.5"),
         ("prompt", "base_assistant"),
         ("skill", "hatch-pet"),
     }
@@ -238,13 +266,13 @@ def test_extension_registry_llm_best_model(tmp_path: Path):
         },
     )
     _write_json(
-        root / "llm/providers/openai/models/gpt-5.4.json",
+        root / "llm/providers/openai/models/gpt-5.5.json",
         {
-            "id": "openai/gpt-5.4",
+            "id": "openai/gpt-5.5",
             "category": "llm_model",
             "version": "1",
             "provider_id": "openai",
-            "model_id": "gpt-5.4",
+            "model_id": "gpt-5.5",
             "priority": 10,
             "defaults": {"chat": True},
         },
@@ -253,7 +281,7 @@ def test_extension_registry_llm_best_model(tmp_path: Path):
     registry = ExtensionRegistry(root)
     best = registry.llm().best_model("openai", use_case="chat")
     assert best is not None
-    assert best["model_id"] == "gpt-5.4"
+    assert best["model_id"] == "gpt-5.5"
 
 
 def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
@@ -266,7 +294,7 @@ def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
             "version": "1",
             "entrypoint": f"{__name__}:_DummyProvider",
             "default_model": "auto",
-            "default_model_for": {"chat": "auto", "fast": "openai/gpt-5.4-mini"},
+            "default_model_for": {"chat": "auto", "fast": "openai/gpt-5.5-mini"},
             "enabled": True,
         },
     )
@@ -277,7 +305,7 @@ def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
     assert chat_default is not None
     assert chat_default["model_id"] == "auto"
     assert fast_default is not None
-    assert fast_default["model_id"] == "openai/gpt-5.4-mini"
+    assert fast_default["model_id"] == "openai/gpt-5.5-mini"
 
 
 def test_extension_registry_preserves_google_api_key_env_list():
@@ -411,20 +439,46 @@ def test_get_extension_registry_force_reload_preserves_registry_identity(monkeyp
     assert reloaded.root == second_root
 
 
-def test_openrouter_provider_lists_only_hy3_preview_free(monkeypatch):
+def test_openrouter_provider_lists_curated_allowlist_from_catalog(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_catalog_models",
+        classmethod(lambda cls: _openrouter_catalog_models()),
+    )
 
     provider = OpenRouterProvider()
     models = provider.list_models()
-    assert [model["id"] for model in models] == ["openrouter/tencent/hy3-preview:free"]
-    assert models[0]["model_id"] == "tencent/hy3-preview:free"
+    assert {model["id"] for model in models} == {model["id"] for model in OPENROUTER_CURATED_ALLOWLIST}
+    assert all(model["provider_id"] == "openrouter" for model in models)
+
+
+def test_openrouter_provider_loads_bundled_curated_catalog():
+    provider = OpenRouterProvider()
+    model_ids = {model["model_id"] for model in provider.list_models()}
+
+    assert {
+        "cohere/north-mini-code:free",
+        "anthropic/claude-sonnet-5",
+        "openai/o3-pro",
+        "google/gemini-2.5-pro",
+        "z-ai/glm-5.2",
+        "moonshotai/kimi-k2.7-code",
+        "deepseek/deepseek-r1-0528",
+        "qwen/qwen3-coder-next",
+    }.issubset(model_ids)
 
 
 def test_openrouter_provider_rejects_non_allowlisted_model(monkeypatch):
     monkeypatch.setenv("OPENROUTER_API_KEY", "dummy-token")
+    monkeypatch.setattr(
+        OpenRouterProvider,
+        "_catalog_models",
+        classmethod(lambda cls: _openrouter_catalog_models()),
+    )
 
     provider = OpenRouterProvider()
-    with pytest.raises(RuntimeError, match="tencent/hy3-preview:free"):
+    with pytest.raises(RuntimeError, match="unsupported model"):
         provider.complete("openai/gpt-4o-mini", [{"role": "user", "content": "hi"}], [], {})
 
 

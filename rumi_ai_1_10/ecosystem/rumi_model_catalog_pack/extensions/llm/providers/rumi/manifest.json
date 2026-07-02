@@ -9,4 +9,3 @@
   "entrypoint": "domain.ai_client.providers.rumi_provider:RumiProvider",
   "credential_required": false
 }
-

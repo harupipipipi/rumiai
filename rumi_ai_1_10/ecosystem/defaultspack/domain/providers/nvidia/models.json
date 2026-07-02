@@ -7,20 +7,42 @@
       "provider_id": "nvidia",
       "model_id": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
       "display_name": "Llama 3.3 Nemotron Super 49B v1.5 via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 2,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/nvidia/llama-3.3-nemotron-super-49b-v1",
@@ -29,24 +51,48 @@
       "provider_id": "nvidia",
       "model_id": "nvidia/llama-3.3-nemotron-super-49b-v1",
       "display_name": "Llama 3.3 Nemotron Super 49B via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 1,
-      "defaults": {
-        "chat": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "reasoning"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/meta/llama-3.3-70b-instruct",
@@ -58,16 +104,22 @@
       "type": "chat",
       "enabled": true,
       "priority": 3,
-      "defaults": {
-        "general": true
+      "routing": {
+        "default_for": [
+          "general"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -77,20 +129,46 @@
       "provider_id": "nvidia",
       "model_id": "openai/gpt-oss-120b",
       "display_name": "GPT OSS 120B via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 4,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/openai/gpt-oss-20b",
@@ -99,23 +177,45 @@
       "provider_id": "nvidia",
       "model_id": "openai/gpt-oss-20b",
       "display_name": "GPT OSS 20B via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 5,
-      "defaults": {
-        "fast": true
+      "routing": {
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/qwen/qwen3-coder-480b-a35b-instruct",
@@ -127,20 +227,24 @@
       "type": "chat",
       "enabled": true,
       "priority": 6,
-      "defaults": {
-        "coding": true
+      "routing": {
+        "default_for": [
+          "coding"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "context_window": 262144,
-      "max_context": 262144,
-      "max_context_tokens": 262144
+      "context_window": 262144
     },
     {
       "id": "nvidia/qwen/qwen3-next-80b-a3b-instruct",
@@ -153,12 +257,16 @@
       "enabled": true,
       "priority": 7,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -168,20 +276,42 @@
       "provider_id": "nvidia",
       "model_id": "qwen/qwen3-next-80b-a3b-thinking",
       "display_name": "Qwen3 Next 80B A3B Thinking via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 8,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/deepseek-ai/deepseek-v4-flash",
@@ -193,16 +323,20 @@
       "type": "chat",
       "enabled": true,
       "priority": 9,
-      "defaults": {
-        "fast": true
+      "routing": {
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -216,12 +350,16 @@
       "enabled": true,
       "priority": 10,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -235,12 +373,16 @@
       "enabled": true,
       "priority": 11,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -254,12 +396,16 @@
       "enabled": true,
       "priority": 12,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -269,20 +415,42 @@
       "provider_id": "nvidia",
       "model_id": "nvidia/llama-3.1-nemotron-ultra-253b-v1",
       "display_name": "Llama 3.1 Nemotron Ultra 253B via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 13,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/nvidia/llama-3.1-nemotron-nano-8b-v1",
@@ -294,16 +462,20 @@
       "type": "chat",
       "enabled": true,
       "priority": 14,
-      "defaults": {
-        "fast": true
+      "routing": {
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -316,16 +488,20 @@
       "type": "chat",
       "enabled": true,
       "priority": 15,
-      "defaults": {
-        "fast": true
+      "routing": {
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -335,20 +511,42 @@
       "provider_id": "nvidia",
       "model_id": "nvidia/nemotron-3-super-120b-a12b",
       "display_name": "Nemotron 3 Super 120B A12B via NVIDIA NIM",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 16,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
+        "thinking": true,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "nvidia/nvidia/nemotron-3-nano-30b-a3b",
@@ -360,16 +558,20 @@
       "type": "chat",
       "enabled": true,
       "priority": 17,
-      "defaults": {
-        "fast": true
+      "routing": {
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -383,12 +585,16 @@
       "enabled": true,
       "priority": 18,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -402,12 +608,16 @@
       "enabled": true,
       "priority": 19,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": false,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -421,12 +631,16 @@
       "enabled": true,
       "priority": 20,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -440,12 +654,16 @@
       "enabled": true,
       "priority": 21,
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
+        "thinking": false,
+        "tool_calling": true,
         "parallel_tool_calls": true,
-        "vision": false
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     }
   ]

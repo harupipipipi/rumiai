@@ -1,0 +1,96 @@
+{
+  "id": "openrouter/openai/o3-pro",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "openai/o3-pro",
+  "display_name": "OpenAI o3 Pro via OpenRouter",
+  "type": "chat",
+  "enabled": true,
+  "priority": 3,
+  "routing": {
+    "default_for": [
+      "reasoning"
+    ]
+  },
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": true,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": true,
+    "structured_output": true,
+    "image_input": true,
+    "audio_input": false
+  },
+  "request_features": {
+    "json_mode": true,
+    "response_format": true,
+    "tool_choice": true
+  },
+  "context_window": 200000,
+  "thinking": {
+    "supported": true,
+    "levels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "default_level": "high",
+    "provider_mapping": {
+      "low": {
+        "reasoning": {
+          "effort": "low"
+        }
+      },
+      "medium": {
+        "reasoning": {
+          "effort": "medium"
+        }
+      },
+      "high": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "xhigh": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "none": {}
+    }
+  },
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text",
+      "file",
+      "image"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 100000,
+    "unsupported_input_modalities": [
+      "file"
+    ],
+    "supported_parameters": [
+      "include_reasoning",
+      "max_tokens",
+      "reasoning",
+      "response_format",
+      "seed",
+      "structured_outputs",
+      "tool_choice",
+      "tools"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.00002",
+    "completion": "0.00008"
+  }
+}

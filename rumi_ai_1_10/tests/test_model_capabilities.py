@@ -31,6 +31,41 @@ def test_model_capability_inference_for_frontier_vision_tool_model():
     assert "vision_ocr" in fields["recommended_roles"]
 
 
+def test_model_type_chat_can_have_vision_and_thinking_capabilities():
+    from domain.ai_client.model_capabilities import flatten_capability_fields
+
+    fields = flatten_capability_fields(
+        {
+            "qualified_model_id": "example/chat-omni",
+            "provider_id": "example",
+            "model_id": "chat-omni",
+            "type": "chat",
+            "capabilities": {
+                "text_input": True,
+                "text_output": True,
+                "image_input": True,
+                "thinking": True,
+                "tool_calling": True,
+            },
+            "thinking": {
+                "supported": True,
+                "levels": ["low", "medium", "high"],
+                "default_level": "medium",
+                "provider_mapping": {
+                    "low": {"reasoning_effort": "low"},
+                    "medium": {"reasoning_effort": "medium"},
+                    "high": {"reasoning_effort": "high"},
+                },
+            },
+        }
+    )
+
+    assert fields["supports_vision"] is True
+    assert fields["supports_thinking"] is True
+    assert fields["supports_tool_calling"] is True
+    assert "vision_ocr" in fields["allowed_roles"]
+
+
 def test_provider_catalog_enriches_models_and_profiles():
     from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog, list_profile_catalog
 

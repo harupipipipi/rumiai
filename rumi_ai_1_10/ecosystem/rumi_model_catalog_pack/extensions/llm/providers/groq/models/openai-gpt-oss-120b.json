@@ -5,21 +5,50 @@
   "provider_id": "groq",
   "model_id": "openai/gpt-oss-120b",
   "display_name": "GPT OSS 120B via Groq",
-  "type": "reasoning",
+  "type": "chat",
   "enabled": true,
   "priority": 1,
-  "defaults": {
-    "chat": true,
-    "reasoning": true
+  "routing": {
+    "default_for": [
+      "chat",
+      "reasoning"
+    ]
   },
   "capabilities": {
-    "chat": true,
+    "text_input": true,
+    "text_output": true,
     "streaming": true,
-    "reasoning": true,
-    "tool_calls": true,
-    "vision": false
+    "thinking": true,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": false,
+    "audio_input": false
   },
-  "supports_thinking": true,
-  "thinking_levels": ["low", "medium", "high", "xhigh"],
-  "default_thinking_level": "medium"
+  "thinking": {
+    "supported": true,
+    "levels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "default_level": "medium",
+    "provider_mapping": {
+      "low": {
+        "reasoning_effort": "low"
+      },
+      "medium": {
+        "reasoning_effort": "medium"
+      },
+      "high": {
+        "reasoning_effort": "high"
+      },
+      "xhigh": {
+        "reasoning_effort": "high"
+      },
+      "none": {}
+    }
+  }
 }

@@ -8,13 +8,23 @@
   "type": "chat",
   "enabled": true,
   "priority": 3,
-  "defaults": {
-    "chat": true,
-    "vision": true
+  "routing": {
+    "default_for": [
+      "chat",
+      "vision"
+    ]
   },
   "capabilities": {
+    "text_input": true,
+    "text_output": true,
     "streaming": true,
-    "vision": true
+    "thinking": false,
+    "tool_calling": false,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": true,
+    "audio_input": false
   },
   "metadata": {
     "source": "gitlawb-opengateway",

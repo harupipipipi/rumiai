@@ -1,19 +1,41 @@
 {
   "provider_id": "google",
-  "api_family": "google_openai",
-  "supports_stream": true,
-  "supports_tool_calling": true,
-  "supports_parallel_tool_calls": false,
-  "supports_vision": true,
-  "supports_audio": true,
-  "supports_pdf": true,
-  "supports_file_upload": false,
-  "supports_reasoning": true,
-  "supported_roles": ["system", "user", "assistant", "tool"],
-  "supported_content_blocks": ["text", "image", "image_url", "audio", "input_audio", "tool_call", "tool_result", "reasoning"],
-  "tool_choice_modes": ["auto", "none"],
-  "schema_support": {"json_schema": true, "strict_json_schema": false},
-  "params": {"temperature": true, "max_tokens": true, "top_p": true, "reasoning_effort": true},
+  "api_surface": {
+    "api_family": "google_openai",
+    "supports_stream": true,
+    "accepts_content_blocks": [
+      "text",
+      "image",
+      "image_url",
+      "audio",
+      "input_audio",
+      "tool_call",
+      "tool_result",
+      "reasoning"
+    ],
+    "supports_tool_call_shape": true,
+    "supports_parallel_tool_call_shape": false,
+    "tool_choice_modes": [
+      "auto",
+      "none"
+    ],
+    "schema_support": {
+      "json_schema": true,
+      "strict_json_schema": false
+    },
+    "params": {
+      "temperature": true,
+      "max_tokens": true,
+      "top_p": true,
+      "reasoning_effort": true
+    }
+  },
+  "supported_roles": [
+    "system",
+    "user",
+    "assistant",
+    "tool"
+  ],
   "quirks": {
     "tool_name_regex": "^[A-Za-z_][A-Za-z0-9_.:-]{0,127}$",
     "tool_name_max_length": 128,

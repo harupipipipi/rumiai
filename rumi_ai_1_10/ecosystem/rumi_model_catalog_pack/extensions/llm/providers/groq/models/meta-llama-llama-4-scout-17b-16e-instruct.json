@@ -5,18 +5,25 @@
   "provider_id": "groq",
   "model_id": "meta-llama/llama-4-scout-17b-16e-instruct",
   "display_name": "Llama 4 Scout 17B 16E Instruct via Groq",
-  "type": "vision",
+  "type": "chat",
   "enabled": true,
   "priority": 5,
-  "defaults": {
-    "vision": true
+  "routing": {
+    "default_for": [
+      "vision"
+    ]
   },
   "capabilities": {
-    "chat": true,
+    "text_input": true,
+    "text_output": true,
     "streaming": true,
-    "reasoning": false,
-    "tool_calls": true,
-    "vision": true
+    "thinking": false,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": true,
+    "audio_input": false
   },
   "metadata": {
     "preview": true,

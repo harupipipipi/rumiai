@@ -21,17 +21,17 @@
     "cheap": "llama-3.1-8b-instant",
     "vision": "meta-llama/llama-4-scout-17b-16e-instruct"
   },
-  "capabilities": {
-    "native_tool_calling": true,
-    "structured_outputs": true,
-    "vision": true,
-    "embeddings": false,
-    "streaming": true,
-    "reasoning": true
-  },
   "config": {
     "api_compatibility": "openai",
     "model_sync": "fixed_allowlist",
     "hidden_provider_tool_models_excluded": true
-  }
+  },
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "vision",
+    "openai_compatible"
+  ]
 }

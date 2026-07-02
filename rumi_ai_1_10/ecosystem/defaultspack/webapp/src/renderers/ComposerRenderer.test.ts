@@ -465,10 +465,10 @@ test("new conversation composer input is not locked to one visual line", () => {
       isGenerating: false,
       isNewConversation: true,
       selectedProfile: {
-        profile_id: "openai/gpt-5.4",
-        display_name: "GPT 5.4",
+        profile_id: "openai/gpt-5.5",
+        display_name: "GPT-5.5",
         provider_id: "openai",
-        model_id: "gpt-5.4",
+        model_id: "gpt-5.5",
         supports_vision: true,
         supports_tool_calling: true,
         supports_thinking: true,
@@ -697,10 +697,10 @@ test("composer asks for an API key when an unconfigured Gemini model is selected
   }), false);
 
   assert.equal(profileNeedsApiKey({
-    profile_id: "openai/gpt-5.4",
-    display_name: "GPT-5.4",
+    profile_id: "openai/gpt-5.5",
+    display_name: "GPT-5.5",
     provider_id: "openai",
-    model_id: "gpt-5.4",
+    model_id: "gpt-5.5",
     availability: { configured: false, status: "catalog" },
   }), true);
 

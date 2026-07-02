@@ -11,8 +11,10 @@
   "default_base_url": "https://api.deepseek.com/v1",
   "credential_required": true,
   "default_model": "deepseek-chat",
-  "capabilities": {
-    "native_tool_calling": true,
-    "streaming": true
-  }
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "openai_compatible"
+  ]
 }
