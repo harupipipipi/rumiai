@@ -597,6 +597,7 @@ class FrontendRegistry:
                         "kind": "tool_settings",
                         "title": label,
                         "fields": self._tool_settings_fields(ui),
+                        "actions": self._tool_panel_actions(ui),
                         "notes": [
                             "Tool call arguments stay in ToolRegistry schema and are not shown as settings.",
                             self._tool_schema_summary(schema),
@@ -2906,6 +2907,30 @@ class FrontendRegistry:
         if not isinstance(fields, list):
             return []
         return [field for field in fields if isinstance(field, dict)]
+
+    def _tool_panel_actions(self, ui: dict[str, Any]) -> list[dict[str, Any]]:
+        actions = ui.get("panel_actions", [])
+        if not isinstance(actions, list):
+            return []
+        normalized: list[dict[str, Any]] = []
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            action_id = str(action.get("id") or "").strip()
+            label = str(action.get("label") or "").strip()
+            if not action_id or not label:
+                continue
+            item = {
+                "id": action_id,
+                "label": label,
+            }
+            for key in ("icon", "method", "endpoint", "preview_type", "requires_approval"):
+                if key in action:
+                    item[key] = action[key]
+            if isinstance(action.get("payload"), dict):
+                item["payload"] = dict(action["payload"])
+            normalized.append(item)
+        return normalized
 
     def _tool_capability_summary(self, tool: dict[str, Any]) -> str:
         parts: list[str] = []
