@@ -74,15 +74,50 @@ def test_change_request_api_routes_are_registered_when_backend_exists():
             assert forbidden_term not in target_text
 
 
-def test_change_request_run_check_routes_are_sensitive_local_routes():
-    from domain.safety.local_guard import is_sensitive_coding_path
+def test_change_request_routes_are_sensitive_local_routes_with_origin_and_csrf_checks():
+    from domain.safety.local_guard import is_sensitive_coding_path, require_local_guard
 
+    assert is_sensitive_coding_path("/api/change-requests", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test", "PATCH") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/refresh", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/export-patch", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/comments", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/comments", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/comments/comment_1", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/comments/comment_1", "PATCH") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/decision", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/viewed-files", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/viewed-files", "PATCH") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/viewed-files", "POST") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/checks", "POST") is True
-    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks", "GET") is False
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/check_1", "GET") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run", "POST") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run-check", "POST") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/run-check", "POST") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run", "GET") is False
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/seal", "GET") is True
+
+    assert require_local_guard(
+        "/api/change-requests/cr_test/seal",
+        "GET",
+        {"Origin": "https://example.test"},
+        ("127.0.0.1", 54321),
+    ) == (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
+    assert require_local_guard(
+        "/api/change-requests/cr_test/export-patch",
+        "POST",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) == (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
+    assert require_local_guard(
+        "/api/change-requests/cr_test/export-patch",
+        "POST",
+        {"Origin": "http://localhost:8766", "X-Rumi-CSRF": "1"},
+        ("127.0.0.1", 54321),
+    ) is None
 
 
 def test_change_request_commit_route_is_default_off_and_flagged(monkeypatch):

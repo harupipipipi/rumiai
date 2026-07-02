@@ -314,6 +314,8 @@ class SubagentTeamService:
         if self.company_store.get_company(company_id) is None:
             return None
         message = normalize_message_request(data)
+        sender_id = self._effective_actor_id(company_id, data, context=context, fallback="user")
+        message["sender_id"] = sender_id
         rich = evaluate_rich_payload({**data, "content": message["content"]})
         target_agent_ids = self._resolve_target_agent_ids(
             company_id,
@@ -440,11 +442,11 @@ class SubagentTeamService:
             return None
         return enrich_short_ids([task], prefix="goal", id_key="task_id")[0]
 
-    def create_goal(self, company_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    def create_goal(self, company_id: str, data: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         if self.company_store.get_company(company_id) is None:
             return None
         goal = normalize_goal_request(data)
-        sender_id = str(data.get("sender_id") or data.get("actor_id") or "user")
+        sender_id = self._effective_actor_id(company_id, data, context=context, fallback="user")
         targets = self._resolve_target_agent_ids(
             company_id,
             explicit=goal["target_agent_ids"],
@@ -664,6 +666,8 @@ class SubagentTeamService:
         return self.upsert_channel(company_id, channel, actor_id=actor_id)
 
     def send_dm(self, company_id: str, data: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        sender_id = self._effective_actor_id(company_id, data, context=context, fallback="user")
+        data = {**data, "sender_id": sender_id, "actor_id": sender_id}
         explicit_targets = data.get("target_agent_ids") if isinstance(data.get("target_agent_ids"), list) else []
         if data.get("agent_id"):
             explicit_targets = [*explicit_targets, str(data.get("agent_id"))]
@@ -691,7 +695,8 @@ class SubagentTeamService:
             {
                 **data,
                 "channel_id": dm["id"],
-                "agent_id": str(data.get("sender_id") or data.get("actor_id") or "user"),
+                "agent_id": sender_id,
+                "sender_id": sender_id,
                 "target_agent_ids": targets,
                 "action": "dm_send",
             },
@@ -711,6 +716,27 @@ class SubagentTeamService:
             },
             context=context or {},
         )
+
+    def _effective_actor_id(
+        self,
+        company_id: str,
+        data: dict[str, Any],
+        *,
+        context: dict[str, Any] | None = None,
+        fallback: str = "user",
+    ) -> str:
+        trusted = trusted_actor_from_context(context)
+        if trusted:
+            return self.resolve_agent_id(company_id, trusted) or str(trusted).strip().lstrip("@")
+        supplied = str(data.get("sender_id") or data.get("actor_id") or fallback).strip().lstrip("@")
+        supplied_resolved = self.resolve_agent_id(company_id, supplied)
+        if supplied_resolved and self.authorize_pm_actor(
+            company_id,
+            supplied_resolved,
+            channel_id=data.get("channel_id") or DEFAULT_CHANNEL_ID,
+        ).get("allowed"):
+            return fallback
+        return supplied_resolved or supplied or fallback
 
     def resolve_agent_id(self, company_id: str, value: str | None) -> str:
         needle = str(value or "").strip().lstrip("@").lower()

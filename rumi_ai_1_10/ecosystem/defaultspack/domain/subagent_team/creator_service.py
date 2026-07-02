@@ -145,7 +145,11 @@ class CreatorService:
             task = SubagentTeamService(
                 company_store=self.company_store,
                 runtime_store=self.runtime_store,
-            ).create_goal(company_id, {**data, "metadata": {**(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}), "creator_preview": preview}})
+            ).create_goal(
+                company_id,
+                {**data, "metadata": {**(data.get("metadata") if isinstance(data.get("metadata"), dict) else {}), "creator_preview": preview}},
+                context=context or {},
+            )
             if is_denial(task):
                 return {"preview": preview, **task}
             return {"preview": preview, "goal": task}

@@ -75,10 +75,32 @@ def direct_lifecycle_denied(input_data: dict[str, Any], context: dict[str, Any] 
         or context.get("current_actor_id")
         or ""
     ).strip().lower()
+    if not actor:
+        return error(
+            "trusted server context is required for direct subagent lifecycle mutation; use Subagent Creator",
+            "ACTOR_REQUIRED",
+        )
     if actor in {"main", "main_agent", "user", "human", "client_manager", "president"}:
         return error(
             "main/user context cannot directly manage subagent lifecycle; use Subagent Creator",
             "CREATOR_REQUIRED",
+        )
+    if actor == "subagent_creator":
+        return None
+    company_id = company_id_from(input_data, default=None)
+    if not company_id:
+        return error("company_id is required", "INVALID_INPUT")
+    from domain.subagent_team.service import SubagentTeamService
+
+    auth = SubagentTeamService().authorize_pm_actor(
+        company_id,
+        actor,
+        channel_id=input_data.get("channel_id") or input_data.get("id"),
+    )
+    if not auth.get("allowed"):
+        return error(
+            "only channel PM, project_manager, operations_manager, or Subagent Creator can directly manage subagent lifecycle",
+            "FORBIDDEN",
         )
     return None
 

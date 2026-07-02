@@ -28,7 +28,7 @@ def run(input_data, context):
                 return error("goal not found: " + str(goal_id), "NOT_FOUND")
             return ok(goal)
         if action in {"create", "add", "propose"}:
-            goal = service.create_goal(company_id, input_data)
+            goal = service.create_goal(company_id, input_data, context=context if isinstance(context, dict) else {})
             if is_denied(goal):
                 return denied(goal)
             if goal is None:

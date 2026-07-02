@@ -621,7 +621,7 @@ def test_agents_post_uses_creator_and_keeps_legacy_slug_as_alias(tmp_path, monke
                 "role": "coder",
             },
         },
-        {},
+        {"actor_id": "subagent_creator"},
     )
 
     assert created["status"] == "ok"
@@ -697,6 +697,89 @@ def test_channel_check_enforced_before_message_goal_and_dm_routing(tmp_path, mon
     assert dm["code"] == "TARGET_NOT_FOUND"
 
 
+def test_sender_id_project_manager_spoof_cannot_bypass_pm_gate_for_message_dm_or_goal(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+
+    message = service.send_message(
+        company["id"],
+        {
+            "channel_id": "ops-company",
+            "sender_id": "project_manager",
+            "content": "@coding_engineer please implement",
+            "target_agent_ids": ["coding_engineer"],
+        },
+    )
+    assert message["message"]["sender_id"] == "user"
+    assert message["message"]["metadata"]["subagent_team"]["pm_gate"]["requires_pm"] is True
+    assert message["tasks"][0]["target_agent_ids"] in (["project_manager"], ["operations_manager"])
+
+    dm = service.send_dm(
+        company["id"],
+        {
+            "sender_id": "project_manager",
+            "agent_id": "coding_engineer",
+            "content": "please implement directly",
+        },
+    )
+    assert dm["denied"] is True
+    assert dm["code"] == "PM_REQUIRED"
+
+    goal = service.create_goal(
+        company["id"],
+        {
+            "channel_id": "ops-company",
+            "sender_id": "project_manager",
+            "title": "Implement safely",
+            "description": "Please implement",
+            "target_agent_ids": ["coding_engineer"],
+        },
+    )
+    assert goal["status"] == "waiting_approval"
+    assert goal["target_agent_ids"] in (["project_manager"], ["operations_manager"])
+    assert goal["metadata"]["pm_gate"]["requires_pm"] is True
+
+
+def test_trusted_context_actor_not_client_sender_controls_message_and_goal_authority(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    store, runtime_store, company = _create_workspace()
+
+    from domain.subagent_team.service import SubagentTeamService
+
+    service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    message = service.send_message(
+        company["id"],
+        {
+            "channel_id": "ops-company",
+            "sender_id": "project_manager",
+            "content": "@coding_engineer please implement",
+            "target_agent_ids": ["coding_engineer"],
+        },
+        context={"actor_id": "coding_engineer"},
+    )
+    assert message["message"]["sender_id"] == "coding_engineer"
+    assert message["message"]["metadata"]["subagent_team"]["pm_gate"]["requires_pm"] is True
+    assert message["tasks"][0]["target_agent_ids"] in (["project_manager"], ["operations_manager"])
+
+    goal = service.create_goal(
+        company["id"],
+        {
+            "channel_id": "ops-company",
+            "sender_id": "project_manager",
+            "title": "Implement safely",
+            "description": "Please implement",
+            "target_agent_ids": ["coding_engineer"],
+        },
+        context={"actor_id": "coding_engineer"},
+    )
+    assert goal["status"] == "waiting_approval"
+    assert goal["target_agent_ids"] in (["project_manager"], ["operations_manager"])
+
+
 def test_dm_send_resolves_human_short_id_to_internal_uuid(tmp_path, monkeypatch):
     _configure_temp_runtime(tmp_path, monkeypatch)
     store, runtime_store, company = _create_workspace(settings={"subagent_team": {"rich_enabled": True}})
@@ -734,6 +817,7 @@ def test_dm_send_resolves_human_short_id_to_internal_uuid(tmp_path, monkeypatch)
             "agent_id": "@" + worker_short,
             "content": "Please inspect the latest change.",
         },
+        context={"actor_id": pm["agent_id"]},
     )
 
     assert routed["channel_check"]["kind"] == "channel.check"
@@ -777,6 +861,7 @@ def test_creator_safe_actions_record_channel_check_and_guard_main_lifecycle(tmp_
             "sender_id": pm["agent_id"],
             "content": "@" + worker_short + " please inspect",
         },
+        context={"actor_id": pm["agent_id"]},
     )
     assert routed["channel_check"]["kind"] == "channel.check"
     assert routed["message"]["metadata"]["subagent_team"]["channel_check"]["kind"] == "channel.check"
@@ -788,6 +873,73 @@ def test_creator_safe_actions_record_channel_check_and_guard_main_lifecycle(tmp_
     )
     assert blocked["status"] == "error"
     assert blocked["error"]["code"] == "CREATOR_REQUIRED"
+
+
+def test_direct_agent_channel_and_settings_mutations_require_trusted_pm_or_creator_context(tmp_path, monkeypatch):
+    _configure_temp_runtime(tmp_path, monkeypatch)
+    _, _, company = _create_workspace()
+
+    from blocks.subagent_team import agents as agents_block
+    from blocks.subagent_team import channels as channels_block
+    from blocks.subagent_team import rich as rich_block
+
+    no_context_agent = agents_block.run(
+        {"company_id": company["id"], "action": "create", "agent": {"display_name": "No Context"}},
+        {},
+    )
+    assert no_context_agent["status"] == "error"
+    assert no_context_agent["error"]["code"] == "ACTOR_REQUIRED"
+
+    spoofed_agent = agents_block.run(
+        {
+            "company_id": company["id"],
+            "action": "patch",
+            "agent_id": "coding_engineer",
+            "actor_id": "project_manager",
+            "updates": {"display_name": "Spoofed"},
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    assert spoofed_agent["status"] == "error"
+    assert spoofed_agent["error"]["code"] == "FORBIDDEN"
+
+    no_context_channel = channels_block.run(
+        {
+            "company_id": company["id"],
+            "action": "create",
+            "channel": {"id": "no-context", "members": ["coding_engineer"]},
+        },
+        {},
+    )
+    assert no_context_channel["status"] == "error"
+    assert no_context_channel["error"]["code"] == "ACTOR_REQUIRED"
+
+    spoofed_channel = channels_block.run(
+        {
+            "company_id": company["id"],
+            "action": "patch",
+            "channel_id": "ops-company",
+            "actor_id": "project_manager",
+            "updates": {"description": "spoofed"},
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    assert spoofed_channel["status"] == "error"
+    assert spoofed_channel["error"]["code"] == "FORBIDDEN"
+
+    no_context_settings = rich_block.run(
+        {"company_id": company["id"], "action": "set", "enabled": True, "actor_id": "project_manager"},
+        {},
+    )
+    assert no_context_settings["status"] == "error"
+    assert no_context_settings["error"]["code"] == "ACTOR_REQUIRED"
+
+    spoofed_settings = rich_block.run(
+        {"company_id": company["id"], "action": "set", "enabled": True, "actor_id": "project_manager"},
+        {"actor_id": "coding_engineer"},
+    )
+    assert spoofed_settings["status"] == "error"
+    assert spoofed_settings["error"]["code"] == "FORBIDDEN"
 
 
 def test_channels_with_five_members_require_pm_unless_creator_supplies_one(tmp_path, monkeypatch):
