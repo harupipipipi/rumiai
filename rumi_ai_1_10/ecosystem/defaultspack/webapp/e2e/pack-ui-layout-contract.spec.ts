@@ -1,9 +1,22 @@
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 type Kind = "write" | "image" | "slide" | "movie";
+type CommandExecutePayload = { command?: string; args?: Record<string, unknown>; conversation_id?: string | null; mode?: string };
+type ApiTrace = { commandExecutions: Array<{ request: CommandExecutePayload; response: Record<string, unknown> }> };
 
 const now = 1_785_000_000_000;
 const longPrompt = "Run a short workspace heartbeat. Check pending tasks, recent failures, QA bugs, blocked work, and the UI layout. This long text catches narrow vertical message bubble regressions when a pack sidecar opens.";
+const MOVIE_OPERATIONS = [
+  "movie_import_media",
+  "movie_edit_timeline",
+  "movie_trim_clip",
+  "movie_split_clip",
+  "movie_update_captions",
+  "movie_save_project",
+  "movie_export_project",
+  "movie_render_project",
+];
+const MOVIE_TRACKS = ["video", "audio", "captions"];
 const surfaces: Record<Kind, { title: string; field: string; text: string; buttons: string[] }> = {
   write: { title: "ビジネスメールテンプレート集", field: "Document body", text: "# ビジネスメールテンプレート集\n\n本文", buttons: ["Sync status", "Undo", "Redo", "Bold", "Italic", "Bulleted list"] },
   image: { title: "画像素材の編集", field: "Image prompt", text: "商品紹介用の明るい画像素材", buttons: ["Sync status", "Undo", "Redo", "Generate", "Crop", "Variants", "Mask"] },
@@ -33,13 +46,56 @@ function conversation() {
   };
 }
 function command(kind: Kind) {
-  return { id: kind, name: kind, label: surfaces[kind].title, description: `Open ${kind} surface`, category: kind, visibility: "default", risk: "low", modes: ["chat", "coding", "agent"], args: [{ name: "text", type: "string", required: false, capture: "rest" }], source_pack_id: "rumi_workspace_surfaces", trust_level: "activated_pack", execution: { type: "rumi_function", pack_id: "rumi_workspace_surfaces", function_id: `open_${kind}_surface` }, ui: { surface: { kind, layoutMode: "split", chatPlacement: "left" } } };
+  const ui: Record<string, unknown> = { surface: { kind, layoutMode: "split", chatPlacement: "left" } };
+  if (kind === "movie") ui.operations = MOVIE_OPERATIONS;
+  return { id: kind, name: kind, label: surfaces[kind].title, description: `Open ${kind} surface`, category: kind, visibility: "default", risk: "low", modes: ["chat", "coding", "agent"], args: [{ name: "text", type: "string", required: false, capture: "rest" }], source_pack_id: "rumi_workspace_surfaces", trust_level: "activated_pack", execution: { type: "rumi_function", pack_id: "rumi_workspace_surfaces", function_id: `open_${kind}_surface` }, ui };
+}
+function movieProject(text: string, resourceId: string) {
+  const clips = [
+    { id: "clip-1", name: "Pack storyboard intro", asset_id: "asset-1", track: "video", start: 0, duration: 3.5, in: 0, out: 3.5, color: "sky" },
+    { id: "clip-2", name: "Product demo take", asset_id: "asset-2", track: "video", start: 3.5, duration: 5, in: 0, out: 5, color: "violet" },
+    { id: "clip-3", name: "Feature closeup", asset_id: "asset-3", track: "video", start: 8.5, duration: 4, in: 0, out: 4, color: "emerald" },
+    { id: "clip-4", name: "CTA end slate", asset_id: "asset-4", track: "video", start: 12.5, duration: 2, in: 0, out: 2, color: "amber" },
+  ];
+  const timeline = { duration: 14.5, fps: 30, tracks: MOVIE_TRACKS };
+  return {
+    project_id: resourceId,
+    title: surfaces.movie.title,
+    brief: text,
+    format: "16:9 / H.264",
+    resolution: "1920x1080",
+    fps: 30,
+    assets: [
+      { id: "asset-1", name: "Opening card", kind: "video", mime_type: "video/mp4", source: "generated:opening-card", duration: 3.5 },
+      { id: "asset-2", name: "Product demo", kind: "video", mime_type: "video/mp4", source: "generated:product-demo", duration: 5 },
+      { id: "asset-3", name: "Feature closeup", kind: "video", mime_type: "video/mp4", source: "generated:feature-closeup", duration: 4 },
+      { id: "asset-4", name: "End slate", kind: "video", mime_type: "video/mp4", source: "generated:end-slate", duration: 2 },
+    ],
+    clips,
+    captions: [
+      { id: "caption-1", text: "商品の魅力を15秒で伝える", start: 0.4, duration: 2.4 },
+      { id: "caption-2", text: "導入後のベネフィットを明確に示す", start: 6, duration: 3 },
+    ],
+    audio: { music: "local-placeholder", voice_gain: 0.82, ducking: true },
+    render: { engine: "unavailable", enabled: false, status: "disabled" },
+    operations: MOVIE_OPERATIONS,
+    timeline,
+  };
 }
 function descriptor(kind: Kind, text: string) {
-  return { id: `${kind}:c-pack-ui`, kind, title: surfaces[kind].title, sourcePackId: "rumi_workspace_surfaces", renderer: `rumi_workspace_surfaces.${kind}`, conversationId: "c-pack-ui", resourceId: `${kind}:c-pack-ui`, payload: { initial_text: text || surfaces[kind].text, attached_files: [], selection: null }, layoutMode: "split", chatPlacement: "left" };
+  const resourceId = `${kind}:c-pack-ui`;
+  const initialText = text || surfaces[kind].text;
+  const payload: Record<string, unknown> = { initial_text: initialText, attached_files: [], selection: null };
+  if (kind === "movie") {
+    const project = movieProject(initialText, resourceId);
+    payload.movie_project = project;
+    payload.operations = MOVIE_OPERATIONS;
+    payload.tool_timeline = project.timeline;
+  }
+  return { id: resourceId, kind, title: surfaces[kind].title, sourcePackId: "rumi_workspace_surfaces", renderer: `rumi_workspace_surfaces.${kind}`, conversationId: "c-pack-ui", resourceId, payload, layoutMode: "split", chatPlacement: "left" };
 }
 
-async function installMocks(page: Page) {
+async function installMocks(page: Page, trace?: ApiTrace) {
   const commands = (Object.keys(surfaces) as Kind[]).map(command);
   await page.route("**/api/**", async (route) => {
     const req = route.request();
@@ -51,11 +107,13 @@ async function installMocks(page: Page) {
     if (path === "/api/ui/settings") return json(route, { sections: [], values: settings });
     if (path === "/api/ui/commands") return json(route, { commands });
     if (path === "/api/ui/commands/execute" && method === "POST") {
-      const payload = req.postDataJSON() as { command?: string; args?: Record<string, unknown> };
+      const payload = req.postDataJSON() as CommandExecutePayload;
       const kind = String(payload.command ?? "") as Kind;
       if (kind in surfaces) {
         const surface = descriptor(kind, String(payload.args?.text ?? surfaces[kind].text));
-        return json(route, { command: command(kind), executed: true, result: { surface }, effects: [{ type: "surface.open", surface }], message: `${surfaces[kind].title} surface opened.` });
+        const response = { command: command(kind), executed: true, result: { surface }, effects: [{ type: "surface.open", surface }], message: `${surfaces[kind].title} surface opened.` };
+        trace?.commandExecutions.push({ request: payload, response });
+        return json(route, response);
       }
     }
     if (path === "/api/ai/profiles") return json(route, { profiles: [profile], count: 1 });
@@ -71,8 +129,8 @@ async function installMocks(page: Page) {
     return json(route, {});
   });
 }
-async function openApp(page: Page) {
-  await installMocks(page);
+async function openApp(page: Page, trace?: ApiTrace) {
+  await installMocks(page, trace);
   await page.goto("/static/chat");
   await expect(page.getByText("Workspace Surface Guard Chat").first()).toBeVisible();
 }
@@ -143,34 +201,66 @@ for (const kind of Object.keys(surfaces) as Kind[]) {
   });
 }
 
-test("/movie exercises core edit operations and status transitions", async ({ page }) => {
+test("/movie opens from pack command effect and reports operation statuses", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   const errors = captureErrors(page);
-  await openApp(page);
+  const trace: ApiTrace = { commandExecutions: [] };
+  await openApp(page, trace);
   const surface = await openSurface(page, "movie");
 
-  await expect(surface.getByText("3 clips / 2 captions")).toBeVisible();
-  await surface.getByRole("button", { name: "Import media" }).click();
+  expect(trace.commandExecutions).toHaveLength(1);
+  const execution = trace.commandExecutions[0];
+  expect(execution.request).toMatchObject({ command: "movie", args: { text: surfaces.movie.text }, conversation_id: "c-pack-ui", mode: "agent" });
+  const result = execution.response.result as { surface?: Record<string, unknown> };
+  const openedSurface = result.surface;
+  expect(openedSurface).toBeTruthy();
+  expect(execution.response.effects).toEqual([{ type: "surface.open", surface: openedSurface }]);
+  expect(openedSurface).toMatchObject({
+    id: "movie:c-pack-ui",
+    kind: "movie",
+    sourcePackId: "rumi_workspace_surfaces",
+    renderer: "rumi_workspace_surfaces.movie",
+    conversationId: "c-pack-ui",
+    resourceId: "movie:c-pack-ui",
+    payload: {
+      initial_text: surfaces.movie.text,
+      operations: MOVIE_OPERATIONS,
+      movie_project: {
+        project_id: "movie:c-pack-ui",
+        operations: MOVIE_OPERATIONS,
+        timeline: { duration: 14.5, fps: 30, tracks: MOVIE_TRACKS },
+        render: { enabled: false, status: "disabled" },
+      },
+      tool_timeline: { duration: 14.5, fps: 30, tracks: MOVIE_TRACKS },
+    },
+    layoutMode: "split",
+    chatPlacement: "left",
+  });
+
   await expect(surface.getByText("4 clips / 2 captions")).toBeVisible();
+  await expect(surface.getByLabel("Selected clip name")).toHaveValue("Pack storyboard intro");
+  await surface.getByRole("button", { name: "Import media" }).click();
+  await expect(surface.getByText("5 clips / 2 captions")).toBeVisible();
   await expect(surface.getByText("Imported media and appended it to the timeline")).toBeVisible();
 
   await surface.getByRole("button", { name: "Split" }).click();
-  await expect(surface.getByText("5 clips / 2 captions")).toBeVisible();
-  await expect(surface.getByLabel("Selected clip name")).toHaveValue("商品紹介動画の編集 B");
+  await expect(surface.getByText("6 clips / 2 captions")).toBeVisible();
+  await expect(surface.getByLabel("Selected clip name")).toHaveValue("Pack storyboard intro B");
 
   await surface.getByLabel("Selected clip duration").fill("1.25");
   await expect(surface.getByText("Trim metadata updated")).toBeVisible();
   await expect(surface.getByText("1.25s")).toBeVisible();
 
   await surface.getByRole("button", { name: "Captions" }).click();
-  await expect(surface.getByText("5 clips / 3 captions")).toBeVisible();
+  await expect(surface.getByText("6 clips / 3 captions")).toBeVisible();
 
   await surface.getByRole("button", { name: "Save project" }).click();
-  await expect(surface.getByText("Saved local project JSON with 5 clips")).toBeVisible();
+  await expect(surface.getByText("Saved local project JSON with 6 clips")).toBeVisible();
 
   await surface.getByRole("button", { name: "Export project" }).click();
   await expect(surface.getByText("Exported project JSON and timeline EDL")).toBeVisible();
 
+  expect(MOVIE_OPERATIONS).toContain("movie_render_project");
   await surface.getByRole("button", { name: "Render movie" }).click();
   await expect(surface.getByText("ffmpeg render disabled; export is still available")).toBeVisible();
 
