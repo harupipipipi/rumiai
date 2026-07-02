@@ -382,15 +382,33 @@ def movie_split_clip(args: dict[str, Any] | None, context: dict[str, Any] | None
     for index, clip in enumerate(project.get("clips", [])):
         if str(clip.get("id")) != clip_id:
             continue
-        split_at = _number(payload.get("split_at"), float(clip["duration"]) / 2.0, 0.25)
-        split_at = min(max(0.25, split_at), max(0.25, float(clip["duration"]) - 0.25))
+        original_duration = _number(clip.get("duration"), 0.0, 0.0)
+        if original_duration <= 0.5:
+            return {
+                "status": "error",
+                "error": {
+                    "code": "CLIP_TOO_SHORT",
+                    "message": f"clip is too short to split: {clip_id}",
+                },
+            }
+        split_at = _number(payload.get("split_at"), original_duration / 2.0)
+        if split_at <= 0 or split_at >= original_duration or split_at < 0.25 or original_duration - split_at < 0.25:
+            return {
+                "status": "error",
+                "error": {
+                    "code": "INVALID_SPLIT_AT",
+                    "message": "split_at must leave at least 0.25 seconds on both sides.",
+                },
+            }
+        split_at = round(split_at, 3)
+        second_duration = round(original_duration - split_at, 3)
         second = deepcopy(clip)
         clip["duration"] = split_at
         clip["out"] = _number(float(clip["in"]) + split_at, float(clip["in"]) + split_at, float(clip["in"]) + 0.25)
         second["id"] = _clean_text(payload.get("new_clip_id"), f"{clip_id}-split")
         second["name"] = f"{clip.get('name', 'Clip')} B"
         second["in"] = clip["out"]
-        second["duration"] = _number(float(second["duration"]) - split_at, 0.25, 0.25)
+        second["duration"] = second_duration
         second["out"] = _number(float(second["in"]) + float(second["duration"]), float(second["in"]) + float(second["duration"]), float(second["in"]) + 0.25)
         project["clips"].insert(index + 1, second)
         return _ok_operation("movie_split_clip", _resequence_project(project), clip=clip, new_clip=second)
@@ -405,9 +423,35 @@ def movie_update_captions(args: dict[str, Any] | None, context: dict[str, Any] |
     if isinstance(captions, list):
         project["captions"] = [_normalize_caption(item, index) for index, item in enumerate(captions, start=1)]
     else:
+        caption_id = _clean_text(payload.get("caption_id"), "")
+        existing_index = next(
+            (
+                index
+                for index, item in enumerate(project.get("captions", []))
+                if caption_id and str(item.get("id")) == caption_id
+            ),
+            -1,
+        )
+        if existing_index >= 0:
+            existing = project["captions"][existing_index]
+            project["captions"][existing_index] = _normalize_caption(
+                {
+                    **existing,
+                    "id": existing.get("id"),
+                    "text": payload.get("text") or payload.get("caption_text") or existing.get("text"),
+                    "start": payload.get("start") if "start" in payload else existing.get("start"),
+                    "duration": payload.get("duration") if "duration" in payload else existing.get("duration"),
+                },
+                existing_index + 1,
+            )
+            return _ok_operation(
+                "movie_update_captions",
+                _resequence_project(project),
+                captions=project.get("captions", []),
+            )
         caption = _normalize_caption(
             {
-                "id": payload.get("caption_id") or f"caption-{len(project.get('captions', [])) + 1}",
+                "id": caption_id or f"caption-{len(project.get('captions', [])) + 1}",
                 "text": payload.get("text") or payload.get("caption_text") or project.get("title"),
                 "start": payload.get("start"),
                 "duration": payload.get("duration"),

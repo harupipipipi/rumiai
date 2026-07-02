@@ -175,3 +175,55 @@ def test_movie_surface_payload_and_operations_are_editable():
     assert "timeline_edl" in exported["data"]["export"]
     rendered = movie_render_project({"project": saved["data"]["project"]}, {})
     assert rendered["data"]["render"]["status"] in {"ready", "disabled"}
+
+
+def test_movie_caption_update_replaces_existing_caption_by_id():
+    from surface_helpers import movie_update_captions, open_surface
+
+    opened = open_surface("movie", {"text": "Product intro", "conversation_id": "conv-1"}, {})
+    project = opened["data"]["surface"]["payload"]["movie_project"]
+    caption_count = len(project["captions"])
+
+    updated = movie_update_captions(
+        {
+            "project": project,
+            "caption_id": "caption-1",
+            "text": "Updated opening caption",
+            "start": 0.75,
+            "duration": 2.25,
+        },
+        {},
+    )
+
+    captions = updated["data"]["project"]["captions"]
+    assert len(captions) == caption_count
+    assert captions[0]["id"] == "caption-1"
+    assert captions[0]["text"] == "Updated opening caption"
+    assert captions[0]["start"] == 0.75
+    assert captions[0]["duration"] == 2.25
+
+
+def test_movie_split_rejects_short_clips_and_preserves_duration_sum():
+    from surface_helpers import movie_split_clip, open_surface
+
+    opened = open_surface("movie", {"text": "Product intro", "conversation_id": "conv-1"}, {})
+    project = opened["data"]["surface"]["payload"]["movie_project"]
+    project["clips"][0]["duration"] = 0.5
+    project["clips"][0]["out"] = 0.5
+
+    rejected = movie_split_clip({"project": project, "clip_id": "clip-1", "split_at": 0.25}, {})
+
+    assert rejected["status"] == "error"
+    assert rejected["error"]["code"] == "CLIP_TOO_SHORT"
+
+    project["clips"][0]["duration"] = 2.0
+    project["clips"][0]["out"] = 2.0
+    before_duration = sum(clip["duration"] for clip in project["clips"])
+
+    split = movie_split_clip({"project": project, "clip_id": "clip-1", "split_at": 0.75}, {})
+
+    assert split["status"] == "ok"
+    clips = split["data"]["project"]["clips"]
+    assert clips[0]["duration"] == 0.75
+    assert clips[1]["duration"] == 1.25
+    assert sum(clip["duration"] for clip in clips) == before_duration

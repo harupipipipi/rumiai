@@ -142,3 +142,37 @@ for (const kind of Object.keys(surfaces) as Kind[]) {
     expect(errors).toEqual([]);
   });
 }
+
+test("/movie exercises core edit operations and status transitions", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const errors = captureErrors(page);
+  await openApp(page);
+  const surface = await openSurface(page, "movie");
+
+  await expect(surface.getByText("3 clips / 2 captions")).toBeVisible();
+  await surface.getByRole("button", { name: "Import media" }).click();
+  await expect(surface.getByText("4 clips / 2 captions")).toBeVisible();
+  await expect(surface.getByText("Imported media and appended it to the timeline")).toBeVisible();
+
+  await surface.getByRole("button", { name: "Split" }).click();
+  await expect(surface.getByText("5 clips / 2 captions")).toBeVisible();
+  await expect(surface.getByLabel("Selected clip name")).toHaveValue("商品紹介動画の編集 B");
+
+  await surface.getByLabel("Selected clip duration").fill("1.25");
+  await expect(surface.getByText("Trim metadata updated")).toBeVisible();
+  await expect(surface.getByText("1.25s")).toBeVisible();
+
+  await surface.getByRole("button", { name: "Captions" }).click();
+  await expect(surface.getByText("5 clips / 3 captions")).toBeVisible();
+
+  await surface.getByRole("button", { name: "Save project" }).click();
+  await expect(surface.getByText("Saved local project JSON with 5 clips")).toBeVisible();
+
+  await surface.getByRole("button", { name: "Export project" }).click();
+  await expect(surface.getByText("Exported project JSON and timeline EDL")).toBeVisible();
+
+  await surface.getByRole("button", { name: "Render movie" }).click();
+  await expect(surface.getByText("ffmpeg render disabled; export is still available")).toBeVisible();
+
+  expect(errors).toEqual([]);
+});
