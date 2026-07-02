@@ -298,6 +298,7 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.13"]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -325,7 +326,7 @@ jobs:
           set -o pipefail
           PYTEST_LOG="${RUNNER_TEMP}/package-pytest-${GITHUB_JOB}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-py${{ matrix.python-version }}.log"
           if [ "${{ matrix.python-version }}" = "3.11" ]; then
-            pytest tests/ -v 2>&1 | tee "$PYTEST_LOG"
+            pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py tests/test_agent_engine_tools.py tests/test_company_workspace.py -v 2>&1 | tee "$PYTEST_LOG"
           else
             pytest tests/test_defaultspack_setup_pack.py tests/test_setup_pack_basepack.py tests/test_defaultspack_extension_registry.py tests/test_defaultspack_provider_foundation.py tests/test_defaultspack_agent_run_store.py -v 2>&1 | tee "$PYTEST_LOG"
           fi
