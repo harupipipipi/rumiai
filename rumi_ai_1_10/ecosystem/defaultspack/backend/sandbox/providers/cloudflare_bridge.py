@@ -4,6 +4,7 @@ import base64
 import binascii
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Callable, Mapping
@@ -40,6 +41,8 @@ CLOUDFLARE_BRIDGE_CAPABILITIES = frozenset(
 )
 MAX_BRIDGE_FILE_BYTES = 32 * 1024 * 1024
 WORKSPACE_ROOT = "/workspace"
+REDACTED_SECRET = "[REDACTED]"
+BEARER_TOKEN_RE = re.compile(r"(?i)(\bbearer\s+)[^\s\"'<>]+")
 
 
 @dataclass(frozen=True)
@@ -669,14 +672,15 @@ def _request_bridge(
             "CLOUDFLARE_SANDBOX_BRIDGE_UNREACHABLE",
             "Cloudflare Sandbox Bridge request failed.",
             status_code=503,
-            details={"error": str(exc)[:1000]},
+            details={"error": _redact_bridge_secret_text(str(exc), api_key)[:1000]},
         ) from exc
     if response.status < 200 or response.status >= 300:
+        body = response.body.decode("utf-8", errors="replace")
         raise SandboxContractError(
             "CLOUDFLARE_SANDBOX_BRIDGE_HTTP_ERROR",
             "Cloudflare Sandbox Bridge returned an error status.",
             status_code=502 if response.status >= 500 else 400,
-            details={"bridge_status": response.status, "body": response.body.decode("utf-8", errors="replace")[:1000]},
+            details={"bridge_status": response.status, "body": _redact_bridge_secret_text(body, api_key)[:1000]},
         )
     return response
 
@@ -971,6 +975,14 @@ def _redact_url(base_url: str) -> str:
     if not parsed.netloc:
         return base_url
     return parse.urlunparse((parsed.scheme, parsed.hostname or "", parsed.path, "", "", ""))
+
+
+def _redact_bridge_secret_text(text: str, api_key: str | None) -> str:
+    redacted = BEARER_TOKEN_RE.sub(r"\1" + REDACTED_SECRET, text)
+    key = str(api_key or "")
+    if key:
+        redacted = redacted.replace(key, REDACTED_SECRET)
+    return redacted
 
 
 def _output_bytes_from_instance(instance: ProviderInstance) -> int | None:

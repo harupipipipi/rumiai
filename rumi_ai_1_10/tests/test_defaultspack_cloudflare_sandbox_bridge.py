@@ -81,6 +81,24 @@ class StaticBridgeTransport:
         return self.response
 
 
+class FailingBridgeTransport:
+    def __init__(self, error: OSError) -> None:
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def __call__(self, method, url, body, headers, timeout):
+        self.calls.append(
+            {
+                "method": method,
+                "url": url,
+                "body": body,
+                "headers": dict(headers),
+                "timeout": timeout,
+            }
+        )
+        raise self.error
+
+
 def test_cloudflare_sandbox_bridge_doctor_requires_bridge_url(monkeypatch):
     monkeypatch.delenv("RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL", raising=False)
     monkeypatch.delenv("RUMI_CLOUDFLARE_SANDBOX_API_KEY", raising=False)
@@ -214,6 +232,80 @@ def test_cloudflare_sandbox_bridge_exec_rejects_non_loopback_http_before_auth():
     assert result["ok"] is False
     assert result["code"] == "CLOUDFLARE_SANDBOX_BRIDGE_INSECURE_URL"
     assert not transport.calls
+
+
+def test_cloudflare_sandbox_bridge_http_error_redacts_bridge_api_key():
+    api_key = "bridge-secret-token"
+    transport = StaticBridgeTransport(
+        BridgeResponse(
+            502,
+            {"content-type": "text/plain"},
+            (
+                "upstream rejected Authorization: Bearer unrelated-token "
+                "and echoed bridge-secret-token"
+            ).encode(),
+        )
+    )
+    agent = CloudflareSandboxBridgeProvider(
+        base_url="https://bridge.example.com",
+        api_key=api_key,
+        transport=transport,
+    ).connect_agent(_provider_instance("cf-1"))
+
+    result = agent.exec(
+        "cf-1",
+        GuestExecRequest(
+            argv=("true",),
+            cwd=".",
+            env={},
+            timeout_ms=1000,
+            stdin=None,
+            client_request_id="http-redact-1",
+        ).to_agent_payload(),
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "CLOUDFLARE_SANDBOX_BRIDGE_HTTP_ERROR"
+    body = result["details"]["body"]
+    assert api_key not in body
+    assert "unrelated-token" not in body
+    assert "Bearer [REDACTED]" in body
+    assert body.count("[REDACTED]") == 2
+
+
+def test_cloudflare_sandbox_bridge_os_error_redacts_bridge_api_key():
+    api_key = "bridge-secret-token"
+    transport = FailingBridgeTransport(
+        OSError(
+            "connect failed with Authorization: Bearer unrelated-token "
+            "and raw bridge-secret-token"
+        )
+    )
+    agent = CloudflareSandboxBridgeProvider(
+        base_url="https://bridge.example.com",
+        api_key=api_key,
+        transport=transport,
+    ).connect_agent(_provider_instance("cf-1"))
+
+    result = agent.exec(
+        "cf-1",
+        GuestExecRequest(
+            argv=("true",),
+            cwd=".",
+            env={},
+            timeout_ms=1000,
+            stdin=None,
+            client_request_id="os-redact-1",
+        ).to_agent_payload(),
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "CLOUDFLARE_SANDBOX_BRIDGE_UNREACHABLE"
+    error = result["details"]["error"]
+    assert api_key not in error
+    assert "unrelated-token" not in error
+    assert "Bearer [REDACTED]" in error
+    assert error.count("[REDACTED]") == 2
 
 
 def test_cloudflare_sandbox_bridge_exec_fails_closed_for_malformed_sse():
