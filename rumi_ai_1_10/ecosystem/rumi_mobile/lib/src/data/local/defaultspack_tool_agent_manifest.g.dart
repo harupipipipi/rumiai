@@ -2339,6 +2339,25 @@ const defaultspackToolAgentManifestCatalog =
     },
   ),
   DefaultspackToolAgentManifestEntry(
+    id: "sandbox_files_read",
+    description: "Read a file from an existing managed sandbox.",
+    tags: <String>["agent_os", "files", "sandbox", "tool_registry"],
+    aliases: <String>[],
+    inputSchema: <String, dynamic>{
+      "type": "object",
+      "additionalProperties": false,
+      "properties": <String, dynamic>{
+        "sandbox_id": <String, dynamic>{"type": "string"},
+        "path": <String, dynamic>{"type": "string"},
+        "start_line": <String, dynamic>{"type": "integer", "minimum": 1},
+        "end_line": <String, dynamic>{"type": "integer", "minimum": 1},
+        "max_chars": <String, dynamic>{"type": "integer", "minimum": 1},
+        "max_output_chars": <String, dynamic>{"type": "integer", "minimum": 1}
+      },
+      "required": <dynamic>["sandbox_id", "path"]
+    },
+  ),
+  DefaultspackToolAgentManifestEntry(
     id: "sandbox_port_expose",
     description: "Expose or resolve a managed sandbox port.",
     tags: <String>[
