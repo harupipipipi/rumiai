@@ -81,6 +81,9 @@ domains:
   coding_backends:
     may_import: []
     path: domain/coding_backends
+  cloudflare:
+    may_import: []
+    path: domain/cloudflare
   company:
     may_import:
     - domain/agent_runtime

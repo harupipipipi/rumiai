@@ -4,9 +4,13 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 TOOL_ROOT = ROOT / "ecosystem" / "defaultspack" / "tools"
+
+pytestmark = pytest.mark.contract
 
 
 def _parameters(tool_id: str) -> dict:
