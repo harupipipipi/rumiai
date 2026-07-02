@@ -86,6 +86,19 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
     monkeypatch.setattr("domain.chat.run_request.enrich_messages", _fake_enrich_messages)
     monkeypatch.setattr("core_runtime.ai_input_segments.ToolRegistry", _FakeToolRegistry)
     monkeypatch.setattr("core_runtime.ai_input_segments.resolve_effective_prompt", _fake_prompt)
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "deepthink_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda self, **kwargs: {"level": "none"},
+    )
     monkeypatch.setattr("domain.chat.run_request.route_model_request", lambda request: _Decision("stub/default"))
     monkeypatch.setattr(
         "domain.chat.run_request.get_model_capabilities",
@@ -100,15 +113,21 @@ def test_ai_input_trace_is_applied_to_chat_runtime_context(monkeypatch, tmp_path
         "domain.chat.run_request.RuntimeSkillTriggerService",
         lambda: type("SkillTrigger", (), {"evaluate": lambda self, **kwargs: {"matched": [], "instructions": ""}})(),
     )
+    raw_tools = [
+        {"tool_id": "web_search", "name": "web_search", "schema": {"parameters": {"type": "object"}}},
+        {"tool_id": "computer_use", "name": "computer_use", "schema": {"parameters": {"type": "object"}}},
+    ]
+    monkeypatch.setattr(
+        "domain.chat.run_request._available_tools",
+        lambda request_context, input_data, **kwargs: (
+            raw_tools,
+            raw_tools,
+            {**request_context, "tool_selection": {"selected_tool_ids": ["web_search", "computer_use"]}},
+        ),
+    )
     monkeypatch.setattr(
         "domain.chat.run_request._resolve_selected_tools",
-        lambda raw_tools, **kwargs: (
-            [
-                {"tool_id": "web_search", "name": "web_search", "schema": {"parameters": {"type": "object"}}},
-                {"tool_id": "computer_use", "name": "computer_use", "schema": {"parameters": {"type": "object"}}},
-            ],
-            [],
-        ),
+        lambda raw_tools, **kwargs: (raw_tools, []),
     )
 
     prepared = prepare_chat_run(
