@@ -527,7 +527,24 @@ class TestDefaultspackAiOauth(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
             secrets_dir = pack_root / "user_data" / "secrets"
             env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
-            with patch.dict(os.environ, env, clear=True), patch("domain.frontend.registry.AIClient") as mock_client:
+            stub_profile = {
+                "profile_id": "stub/default",
+                "display_name": "Stub Default",
+                "provider_id": "stub",
+                "model_id": "default",
+                "type": "chat",
+                "availability": {"local": True},
+            }
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch("domain.frontend.registry.AIClient") as mock_client,
+                patch.object(FrontendRegistry, "_selectable_model_profiles", return_value=[stub_profile]),
+                patch("domain.frontend.registry.provider_key_status", return_value={}),
+                patch(
+                    "domain.frontend.registry.ModelRuntimeSettingsService.refresh_models_settings",
+                    lambda _service, values: values if isinstance(values, dict) else {},
+                ),
+            ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 statuses = provider_oauth_statuses(pack_root=pack_root)
                 settings = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
@@ -664,7 +681,24 @@ class TestDefaultspackAiOauth(unittest.TestCase):
             pack_root = Path(tmpdir)
             secrets_dir = pack_root / "user_data" / "secrets"
             env = {"RUMI_DEFAULTSPACK_SECRETS_DIR": str(secrets_dir)}
-            with patch.dict(os.environ, env, clear=True), patch("domain.frontend.registry.AIClient") as mock_client:
+            stub_profile = {
+                "profile_id": "stub/default",
+                "display_name": "Stub Default",
+                "provider_id": "stub",
+                "model_id": "default",
+                "type": "chat",
+                "availability": {"local": True},
+            }
+            with (
+                patch.dict(os.environ, env, clear=True),
+                patch("domain.frontend.registry.AIClient") as mock_client,
+                patch.object(FrontendRegistry, "_selectable_model_profiles", return_value=[stub_profile]),
+                patch("domain.frontend.registry.provider_key_status", return_value={}),
+                patch(
+                    "domain.frontend.registry.ModelRuntimeSettingsService.refresh_models_settings",
+                    lambda _service, values: values if isinstance(values, dict) else {},
+                ),
+            ):
                 mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
                 imported = import_connection_bundle(
                     f"CLOUDFLARE_API_TOKEN={raw_token}\nCLOUDFLARE_ACCOUNT_ID=account-id",
