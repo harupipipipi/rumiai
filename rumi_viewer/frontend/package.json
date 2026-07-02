@@ -11,7 +11,7 @@
     "lint": "tsc --noEmit",
     "audit": "npm audit --audit-level=high",
     "test": "node --import tsx --test src/lib/*.test.ts src/pages/*.test.tsx scripts/*.test.mjs",
-    "tauri": "tauri"
+    "tauri": "cd .. && npm exec --prefix frontend -- tauri"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
