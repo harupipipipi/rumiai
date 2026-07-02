@@ -23,6 +23,7 @@ def _isolate_provider_capability_catalog(monkeypatch):
     monkeypatch.setattr(
         "ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company.get_all_known_models",
         lambda provider_id=None: [],
+        raising=False,
     )
 
 
