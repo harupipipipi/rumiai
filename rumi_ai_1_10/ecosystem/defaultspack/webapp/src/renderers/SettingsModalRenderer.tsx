@@ -1032,6 +1032,44 @@ function capabilityToneClass(tone: "enabled" | "approval" | "rejected" | "scope"
   }
 }
 
+function plainRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function plainRecordList(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value) ? value.map(plainRecord).filter((item) => Object.keys(item).length > 0) : [];
+}
+
+function cloudflareProvisioningRows(provisioning: Record<string, unknown>): Array<{ label: string; ready: boolean; value: string }> {
+  const environment = plainRecord(provisioning.environment);
+  const status = String(provisioning.environment_status || environment.status || "").trim();
+  if (!status && Object.keys(environment).length === 0) return [];
+  return [
+    { label: "Sandbox", ready: Boolean(provisioning.sandbox_ready || environment.sandbox_ready), value: provisioning.sandbox_ready || environment.sandbox_ready ? "Ready" : "Blocked" },
+    { label: "Pages", ready: Boolean(provisioning.pages_ready || environment.pages_ready), value: provisioning.pages_ready || environment.pages_ready ? "Ready" : "Check" },
+    { label: "Named tunnel", ready: Boolean(provisioning.stable_pc_tunnel_ready || environment.stable_pc_tunnel_ready), value: provisioning.stable_pc_tunnel_ready || environment.stable_pc_tunnel_ready ? "Ready" : "Missing" },
+    { label: "PC bridge", ready: Boolean(provisioning.pc_tool_bridge_ready || environment.pc_tool_bridge_ready), value: provisioning.pc_tool_bridge_ready || environment.pc_tool_bridge_ready ? "Ready" : "Missing" },
+  ];
+}
+
+function cloudflareProvisioningFacts(provisioning: Record<string, unknown>): string[] {
+  const constraints = plainRecord(provisioning.constraints);
+  const facts: string[] = [];
+  if (constraints.cloudflare_sandbox_requires_workers_paid) facts.push("Sandbox: Workers Paid plan");
+  if (constraints.pages_dev_is_not_a_pc_tunnel_hostname) facts.push("pages.dev is not a PC tunnel");
+  if (constraints.all_tools_cloudflare_native_supported === false) facts.push("Cloudflare-native tools: partial");
+  if (constraints.pc_local_tools_require_pc_bridge) facts.push("PC-local tools: PC bridge");
+  return facts;
+}
+
+function cloudflareProvisioningBlockers(provisioning: Record<string, unknown>): string[] {
+  const blockers = plainRecordList(provisioning.blockers);
+  return blockers
+    .map((item) => String(item.message || item.code || "").trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
 function compactCredentialRef(value: string): string {
   const text = value.trim();
   if (text.length <= 32) return text;
@@ -3201,10 +3239,10 @@ export function SettingsModalRenderer({
     setActiveSectionId(mapSettingsSectionId(sectionId) ?? "packs_extensions");
     onOpenSection?.(sectionId);
   };
-  const refreshConnectionStatus = (providerId: string) => {
+  const refreshConnectionStatus = (providerId: string, activeDiagnostics = false) => {
     onSettingChange("apis", "api_keys", providerId === "codex"
       ? { action: "oauth_refresh" }
-      : { action: "oauth_refresh", provider_id: providerId });
+      : { action: "oauth_refresh", provider_id: providerId, active_diagnostics: activeDiagnostics });
   };
   const selectedConnectionScopeMode = (card: AccountConnectionPreludeCard): AccountConnectionScopeModeOption | undefined => {
     const selectedId = connectionScopeModes[card.providerId] || card.scopeMode || card.scopeModes[0]?.id || "";
@@ -3572,6 +3610,9 @@ export function SettingsModalRenderer({
               const selectedScopeModeId = selectedScopeOption?.id ?? card.scopeMode ?? "";
               const selectedScopes = selectedScopeOption?.scopes.length ? selectedScopeOption.scopes : card.scopes;
               const hasPermissionSummary = selectedScopes.length > 0 || card.credentialRef || card.capabilities.length > 0 || card.approvalRequiredCapabilities.length > 0 || card.rejectedCapabilities.length > 0 || card.expiresAt;
+              const cloudflareRows = card.providerId === "cloudflare" ? cloudflareProvisioningRows(card.provisioning) : [];
+              const cloudflareFacts = card.providerId === "cloudflare" ? cloudflareProvisioningFacts(card.provisioning) : [];
+              const cloudflareBlockers = card.providerId === "cloudflare" ? cloudflareProvisioningBlockers(card.provisioning) : [];
               return (
                 <article key={card.providerId} className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-950/70 shadow-2xl shadow-black/20">
                   <div className={cn("absolute inset-x-0 top-0 h-1 bg-gradient-to-r", providerAccentClass(card.providerId))} />
@@ -3607,6 +3648,54 @@ export function SettingsModalRenderer({
                         <div className="mt-1 text-xs text-zinc-200">{card.approvalRequiredCapabilities.length ? "Approval needed" : card.capabilities.length ? "Granted" : "Limited"}</div>
                       </div>
                     </div>
+
+                    {card.providerId === "cloudflare" && (cloudflareRows.length > 0 || cloudflareFacts.length > 0 || cloudflareBlockers.length > 0) && (
+                      <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="text-xs font-medium text-zinc-200">Cloudflare runtime</div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded-full border border-zinc-800 px-2 py-0.5 text-[10px] text-zinc-500">Sandbox + PC bridge</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConnectionMessages((current) => ({
+                                  ...current,
+                                  [card.providerId]: { tone: "success", text: "Cloudflare diagnostics requested." },
+                                }));
+                                refreshConnectionStatus(card.providerId, true);
+                              }}
+                              className="rounded-lg border border-zinc-700 px-2 py-1 text-[10px] text-zinc-300 transition-colors hover:border-zinc-500 hover:text-zinc-100"
+                            >
+                              Run diagnostics
+                            </button>
+                          </div>
+                        </div>
+                        {cloudflareRows.length > 0 && (
+                          <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                            {cloudflareRows.map((row) => (
+                              <div key={row.label} className="rounded-lg border border-zinc-800 bg-zinc-950 px-2.5 py-2">
+                                <div className="text-[10px] uppercase tracking-[0.14em] text-zinc-600">{row.label}</div>
+                                <div className={cn("mt-1 text-xs", row.ready ? "text-emerald-200" : "text-amber-100")}>{row.value}</div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {cloudflareFacts.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-1.5">
+                            {cloudflareFacts.map((fact) => (
+                              <span key={fact} className={cn("rounded-full border px-2 py-0.5 text-[10px]", capabilityToneClass("neutral"))}>{fact}</span>
+                            ))}
+                          </div>
+                        )}
+                        {cloudflareBlockers.length > 0 && (
+                          <div className="mt-3 space-y-1.5">
+                            {cloudflareBlockers.map((blocker) => (
+                              <div key={blocker} className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-5 text-amber-100/85">{blocker}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {card.scopeModes.length > 0 && (
                       <div className="mt-4 rounded-xl border border-zinc-800 bg-black/20 p-3" role="radiogroup" aria-label={`${card.label} OAuth scope mode`}>

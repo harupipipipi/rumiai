@@ -6,8 +6,8 @@
     "ja": "Cloudflare"
   },
   "description": {
-    "en": "Continue Rumi tasks in your Cloudflare account when this computer is offline.",
-    "ja": "PCがオフラインでもCloudflareアカウントでRumiの作業を継続します。"
+    "en": "Run cloud-capable sandbox work in your Cloudflare account and bridge PC-bound tools through a named Tunnel.",
+    "ja": "Cloudflareアカウントで実行できるsandbox作業を動かし、PC依存toolはnamed Tunnel経由でPCに委譲します。"
   },
   "icon": "cloudflare",
   "service_kind": "cloud",
@@ -223,8 +223,8 @@
         "ja": "Rumi runnerを配置"
       },
       "description": {
-        "en": "Create/update runner resources for cloud continuation.",
-        "ja": "クラウド継続用runnerリソースを作成/更新します。"
+        "en": "Create/update Cloudflare Sandbox Bridge and PC Tool Bridge runner resources.",
+        "ja": "Cloudflare Sandbox BridgeとPC Tool Bridgeのrunnerリソースを作成/更新します。"
       },
       "risk": "high"
     }
@@ -316,11 +316,32 @@
   },
   "metadata": {
     "scope_note": "Configure least-privilege Cloudflare OAuth scopes for the exact runner resources used by the implementation. Do not request broad account permissions by default.",
+    "sandbox_bridge_scaffold_path": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge",
+    "sandbox_bridge_runtime": "Cloudflare Sandbox Bridge HTTP API via @cloudflare/sandbox/bridge",
+    "tool_coverage_surface": "/api/tools/catalog",
+    "all_tools_cloudflare_native_supported": false,
+    "pc_bridge_required_for_host_tools": true,
+    "pc_tunnel_scaffold_path": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tunnel",
+    "pc_tool_bridge_scaffold_path": "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge",
+    "pc_tool_bridge_runtime": "Cloudflare Worker narrow proxy to a named Tunnel PC runtime",
+    "stable_pc_tunnel_note": "Cloudflare Pages/pages.dev is not a permanent tunnel to a Mac. Use a named Cloudflare Tunnel plus a DNS hostname on a Cloudflare-managed zone.",
+    "pc_tool_bridge_note": "PC-bound tools are not uploaded to Cloudflare. They are invoked through the PC Tool Bridge, preserving PC runtime approval, policy, and audit.",
+    "free_plan_note": "Cloudflare Sandbox uses Cloudflare Containers. Accounts without Containers access require the Workers Paid plan.",
     "self_host_env": [
       "RUMI_CLOUDFLARE_OAUTH_CLIENT_ID",
       "RUMI_CLOUDFLARE_OAUTH_CLIENT_SECRET",
       "RUMI_CLOUDFLARE_OAUTH_SCOPES",
-      "RUMI_CLOUDFLARE_OAUTH_REDIRECT_URI"
+      "RUMI_CLOUDFLARE_OAUTH_REDIRECT_URI",
+      "RUMI_CLOUDFLARE_SANDBOX_BRIDGE_URL",
+      "RUMI_CLOUDFLARE_SANDBOX_API_KEY",
+      "RUMI_CLOUDFLARE_PC_TUNNEL_HOSTNAME",
+      "RUMI_CLOUDFLARE_PC_TUNNEL_ORIGIN_URL",
+      "RUMI_CLOUDFLARE_PC_TUNNEL_CONFIG",
+      "RUMI_CLOUDFLARE_PC_TOOL_BRIDGE_URL",
+      "RUMI_PC_TOOL_BRIDGE_TOKEN",
+      "RUMI_PC_RUNTIME_BEARER",
+      "RUMI_PC_ORIGIN",
+      "RUMI_PC_TOOL_BRIDGE_ALLOWED_ORIGIN"
     ],
     "direct_token_env": [
       "RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN",

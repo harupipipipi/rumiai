@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "rumi-cloudflare-sandbox-bridge",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "Sandbox",
+        "name": "Sandbox"
+      },
+      {
+        "class_name": "WarmPool",
+        "name": "WarmPool"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["Sandbox", "WarmPool"]
+    }
+  ],
+  "vars": {
+    "WARM_POOL_TARGET": "0",
+    "WARM_POOL_REFRESH_INTERVAL": "60000"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

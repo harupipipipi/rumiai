@@ -1,0 +1,9 @@
+# Copy to ~/.cloudflared/rumi-pc.yml after creating a named tunnel.
+# Replace the tunnel id, credentials path, and hostname with your values.
+tunnel: <TUNNEL_ID_OR_NAME>
+credentials-file: /Users/<you>/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  - hostname: rumi-pc.example.com
+    service: http://127.0.0.1:8765
+  - service: http_status:404

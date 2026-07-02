@@ -80,7 +80,7 @@ def build_default_registry() -> SettingsRegistry:
                 id="core.connections.cloudflare",
                 owner="core",
                 title="Cloudflare",
-                description="Continue Rumi tasks in your Cloudflare account when this computer is offline.",
+                description="Run cloud-capable sandbox work in your Cloudflare account and bridge PC-bound tools through a named Tunnel.",
                 section=SettingSectionId.ACCOUNTS_CONNECTIONS,
                 priority=30,
                 frequency="weekly",

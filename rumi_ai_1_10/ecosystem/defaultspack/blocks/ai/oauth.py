@@ -20,6 +20,10 @@ from domain.ai_client.oauth_store import (
 from domain.connections.store import import_connection_bundle
 
 
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _callback_page(provider_id: str, *, success: bool, title: str, message: str, payload: dict[str, object]) -> dict[str, object]:
     safe_title = html.escape(title, quote=True)
     safe_message = html.escape(message, quote=True)
@@ -153,9 +157,10 @@ def run(input_data, context):
         )
 
     if method == "GET":
+        active_diagnostics = _truthy((input_data or {}).get("active_diagnostics") or (input_data or {}).get("diagnostics"))
         if provider_id:
-            return ok({"provider": provider_oauth_status(provider_id)})
-        return ok({"providers": provider_oauth_statuses()})
+            return ok({"provider": provider_oauth_status(provider_id, active_diagnostics=active_diagnostics)})
+        return ok({"providers": provider_oauth_statuses(active_diagnostics=active_diagnostics)})
 
     if method == "POST":
         action = str((input_data or {}).get("action", "status")).strip().lower()
@@ -182,6 +187,12 @@ def run(input_data, context):
                 scope_mode=str((input_data or {}).get("scope_mode") or "").strip() or None,
                 services=requested_services if isinstance(requested_services, list) else None,
             )
+        elif action in {"diagnostics", "active_diagnostics", "cloudflare_diagnostics"}:
+            result = {
+                "success": True,
+                "provider_id": provider_id or "cloudflare",
+                "provider": provider_oauth_status(provider_id or "cloudflare", active_diagnostics=True),
+            }
         else:
             result = {
                 "success": True,
