@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.subagent_team.service import SubagentTeamService
 
-from ._helpers import company_id_from, denied, invalid, is_denied, lifecycle_actor, missing_team, normalize_action, require_dict
+from ._helpers import company_id_from, denied, direct_lifecycle_denied, invalid, is_denied, lifecycle_actor, missing_team, normalize_action, require_dict
 
 
 def run(input_data, context):
@@ -19,6 +19,9 @@ def run(input_data, context):
                 return missing_team(company_id)
             return ok({"dms": dms, "total": len(dms)})
         if action in {"create", "ensure"}:
+            blocked = direct_lifecycle_denied(input_data, context if isinstance(context, dict) else {})
+            if blocked is not None:
+                return blocked
             dm = service.ensure_dm(
                 company_id,
                 input_data,

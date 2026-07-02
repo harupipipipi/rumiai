@@ -643,7 +643,7 @@ class SubagentTeamService:
             return None
         return [channel for channel in channels if _is_dm(channel)]
 
-    def ensure_dm(self, company_id: str, data: dict[str, Any], *, actor_id: str = "creator") -> dict[str, Any] | None:
+    def _dm_channel_candidate(self, company_id: str, data: dict[str, Any]) -> dict[str, Any]:
         participants = _dedupe([str(data.get("sender_id") or "user"), *list(data.get("participants") or data.get("target_agent_ids") or [])])
         if len(participants) < 2 and data.get("agent_id"):
             participants.append(str(data["agent_id"]))
@@ -655,7 +655,7 @@ class SubagentTeamService:
                 participants = existing_members
             else:
                 participants = _dedupe([*existing_members, *participants])
-        channel = {
+        return {
             "id": channel_id,
             "name": str(data.get("name") or "dm-" + "-".join(participants[:3])),
             "description": str(data.get("description") or "Direct message channel"),
@@ -663,7 +663,9 @@ class SubagentTeamService:
             "members": participants,
             "metadata": {"dm": True, "participants": participants},
         }
-        return self.upsert_channel(company_id, channel, actor_id=actor_id)
+
+    def ensure_dm(self, company_id: str, data: dict[str, Any], *, actor_id: str = "creator") -> dict[str, Any] | None:
+        return self.upsert_channel(company_id, self._dm_channel_candidate(company_id, data), actor_id=actor_id)
 
     def send_dm(self, company_id: str, data: dict[str, Any], *, context: dict[str, Any] | None = None) -> dict[str, Any] | None:
         sender_id = self._effective_actor_id(company_id, data, context=context, fallback="user")
@@ -678,31 +680,33 @@ class SubagentTeamService:
                 "TARGET_NOT_FOUND",
                 unresolved_target_agent_ids=unresolved_targets,
             )
-        dm = self.ensure_dm(company_id, data, actor_id=str(data.get("sender_id") or data.get("actor_id") or "creator"))
-        if dm is None:
-            return None
+        dm_candidate = self._dm_channel_candidate(company_id, data)
         if not explicit_targets:
             sender = self.resolve_agent_id(company_id, str(data.get("sender_id") or data.get("actor_id") or "user"))
-            explicit_targets = [member for member in self._resolved_channel_members(company_id, dm) if member != sender]
+            explicit_targets = [member for member in self._resolved_channel_members(company_id, dm_candidate) if member != sender]
         targets = self._resolve_target_agent_ids(
             company_id,
             explicit=explicit_targets,
             content=str(data.get("content") or data.get("message") or ""),
-            channel_id=str(dm["id"]),
+            channel_id=str(dm_candidate["id"]),
         )
-        check = self._channel_turn_policy(
+        check = self._channel_turn_policy_for_channel(
             company_id,
             {
                 **data,
-                "channel_id": dm["id"],
+                "channel_id": dm_candidate["id"],
                 "agent_id": sender_id,
                 "sender_id": sender_id,
                 "target_agent_ids": targets,
                 "action": "dm_send",
             },
+            dm_candidate,
         )
         if not check["allowed"]:
             return _deny(str(check["deny_reason"]), str(check["deny_code"]), channel_check=check)
+        dm = self.ensure_dm(company_id, data, actor_id=str(data.get("sender_id") or data.get("actor_id") or "creator"))
+        if dm is None:
+            return None
         return self.send_message(
             company_id,
             {
@@ -824,6 +828,10 @@ class SubagentTeamService:
                 deny_reason="channel not found: " + channel_id,
                 channel_id=channel_id,
             )
+        return self._channel_turn_policy_for_channel(company_id, data, channel)
+
+    def _channel_turn_policy_for_channel(self, company_id: str, data: dict[str, Any], channel: dict[str, Any]) -> dict[str, Any]:
+        channel_id = str(data.get("channel_id") or channel.get("id") or DEFAULT_CHANNEL_ID)
         members = self._resolved_channel_members(company_id, channel)
         channel_policy = self._channel_pm_policy(company_id, channel)
         actor_raw = str(data.get("agent_id") or data.get("sender_id") or data.get("actor_id") or "").strip()

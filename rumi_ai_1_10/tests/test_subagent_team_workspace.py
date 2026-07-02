@@ -704,6 +704,7 @@ def test_sender_id_project_manager_spoof_cannot_bypass_pm_gate_for_message_dm_or
     from domain.subagent_team.service import SubagentTeamService
 
     service = SubagentTeamService(company_store=store, runtime_store=runtime_store)
+    before_dms = service.list_dms(company["id"]) or []
 
     message = service.send_message(
         company["id"],
@@ -728,6 +729,7 @@ def test_sender_id_project_manager_spoof_cannot_bypass_pm_gate_for_message_dm_or
     )
     assert dm["denied"] is True
     assert dm["code"] == "PM_REQUIRED"
+    assert (service.list_dms(company["id"]) or []) == before_dms
 
     goal = service.create_goal(
         company["id"],
@@ -881,6 +883,7 @@ def test_direct_agent_channel_and_settings_mutations_require_trusted_pm_or_creat
 
     from blocks.subagent_team import agents as agents_block
     from blocks.subagent_team import channels as channels_block
+    from blocks.subagent_team import dms as dms_block
     from blocks.subagent_team import rich as rich_block
 
     no_context_agent = agents_block.run(
@@ -926,6 +929,57 @@ def test_direct_agent_channel_and_settings_mutations_require_trusted_pm_or_creat
     )
     assert spoofed_channel["status"] == "error"
     assert spoofed_channel["error"]["code"] == "FORBIDDEN"
+
+    no_context_dm_create = dms_block.run(
+        {
+            "company_id": company["id"],
+            "action": "create",
+            "sender_id": "project_manager",
+            "agent_id": "coding_engineer",
+        },
+        {},
+    )
+    assert no_context_dm_create["status"] == "error"
+    assert no_context_dm_create["error"]["code"] == "ACTOR_REQUIRED"
+
+    no_context_dm_ensure = dms_block.run(
+        {
+            "company_id": company["id"],
+            "action": "ensure",
+            "sender_id": "project_manager",
+            "agent_id": "coding_engineer",
+        },
+        {},
+    )
+    assert no_context_dm_ensure["status"] == "error"
+    assert no_context_dm_ensure["error"]["code"] == "ACTOR_REQUIRED"
+
+    spoofed_dm_create = dms_block.run(
+        {
+            "company_id": company["id"],
+            "action": "create",
+            "sender_id": "project_manager",
+            "actor_id": "project_manager",
+            "agent_id": "coding_engineer",
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    assert spoofed_dm_create["status"] == "error"
+    assert spoofed_dm_create["error"]["code"] == "FORBIDDEN"
+
+    spoofed_dm_ensure = dms_block.run(
+        {
+            "company_id": company["id"],
+            "action": "ensure",
+            "sender_id": "project_manager",
+            "actor_id": "project_manager",
+            "agent_id": "coding_engineer",
+        },
+        {"actor_id": "coding_engineer"},
+    )
+    assert spoofed_dm_ensure["status"] == "error"
+    assert spoofed_dm_ensure["error"]["code"] == "FORBIDDEN"
+    assert dms_block.run({"company_id": company["id"], "action": "list"}, {})["data"]["total"] == 0
 
     no_context_settings = rich_block.run(
         {"company_id": company["id"], "action": "set", "enabled": True, "actor_id": "project_manager"},
