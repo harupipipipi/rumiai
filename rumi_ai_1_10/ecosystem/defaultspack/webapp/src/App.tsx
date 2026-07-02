@@ -36,6 +36,7 @@ import {
   workspaceUrlForKind,
 } from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
+import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -3030,8 +3031,8 @@ function ChatApp() {
     });
   }
 
-  async function refreshProviderOAuthStatus(providerId: string) {
-    const result = await api.providerOAuthStatus(providerId);
+  async function refreshProviderOAuthStatus(providerId: string, options: { activeDiagnostics?: boolean } = {}) {
+    const result = await api.providerOAuthStatus(providerId, options);
     if (result.provider && typeof result.provider === "object" && !Array.isArray(result.provider)) {
       mergeProviderOAuthStatus(providerId, result.provider as Record<string, unknown>);
     }
@@ -3549,8 +3550,9 @@ function ChatApp() {
         const action = String(payload.action ?? "upsert").trim();
         const kind = String(payload.kind ?? "").trim() || undefined;
         if (action === "oauth_refresh") {
+          const activeDiagnostics = Boolean(payload.active_diagnostics);
           if (providerId) {
-            void refreshProviderOAuthStatus(providerId).catch(console.error);
+            void refreshProviderOAuthStatus(providerId, { activeDiagnostics }).catch(console.error);
           } else {
             void refreshCatalog().catch(console.error);
           }
@@ -6081,6 +6083,9 @@ export default function App() {
   }
   if (pathname === "/prompts") {
     return <PromptStudio />;
+  }
+  if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
+    return <UiPrecisionComparator />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;

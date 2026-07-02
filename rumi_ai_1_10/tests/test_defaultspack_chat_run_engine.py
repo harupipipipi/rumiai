@@ -167,6 +167,73 @@ def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, mo
     ChatStore._instance = None
 
 
+def test_send_wrapper_returns_cancelled_final_when_nonstream_run_is_cancelled(tmp_path, monkeypatch):
+    from blocks.chat.send import run as send_run
+    from domain.chat.store import ChatStore
+    import domain.chat.stream_engine as engine_module
+    import domain.chat.run_request as run_request_module
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+
+    class RuntimeSettingsStub:
+        def get_settings(self):
+            return {"deepthink_enabled": False}
+
+        def get_effective_thinking_level(self, **kwargs):
+            return {"level": "medium"}
+
+    class RoutingDecisionStub:
+        selected_model = "stub/default"
+        bridge_required = False
+        bridge_plan = {}
+
+        def to_dict(self):
+            return {
+                "selected_model": self.selected_model,
+                "selected_group": "default",
+                "reason_codes": ["test_stub"],
+                "warnings": [],
+                "bridge_required": False,
+                "bridge_plan": {},
+                "utility_models": {},
+                "explanation": "test stub",
+            }
+
+    def fake_execute(self, prepared, draft):
+        if False:
+            yield {}
+        raise engine_module._ChatCancelled()
+
+    monkeypatch.setattr(run_request_module, "ModelRuntimeSettingsService", RuntimeSettingsStub)
+    monkeypatch.setattr(run_request_module, "route_model_request", lambda request: RoutingDecisionStub())
+    monkeypatch.setattr(run_request_module, "get_model_capabilities", lambda model: {"supports_thinking": True})
+    monkeypatch.setattr(engine_module.ChatRunEngine, "_execute", fake_execute)
+
+    result = send_run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "stop this run"},
+            "tools": [],
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["finish_reason"] == "cancelled"
+    assert result["data"]["metadata"]["cancelled"] is True
+    assert result["data"]["metadata"]["thinking"]["state"] == "cancelled"
+
+    saved = ChatStore().get_conversation(conversation["id"])
+    assert [message["role"] for message in saved["messages"]] == ["user", "assistant"]
+    assert saved["messages"][-1]["id"] == result["data"]["id"]
+    ChatStore._instance = None
+
+
 def test_chat_send_and_stream_wrappers_write_inspector_logs(tmp_path, monkeypatch):
     from blocks.chat.send import run as send_run
     import blocks.chat.stream as stream_module

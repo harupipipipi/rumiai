@@ -1,0 +1,33 @@
+{
+  "sidebar_items": [
+    {
+      "id": "marketplace-preview",
+      "label": "探す",
+      "category": "system",
+      "description": "Marketplace — Coming soon",
+      "badge": "Coming soon",
+      "tags": [
+        "marketplace",
+        "skill",
+        "tool",
+        "mcp",
+        "pack",
+        "coming-soon"
+      ],
+      "origin": {
+        "kind": "pack",
+        "path": "rumi_knowledge_marketplace_pack/frontend_extensions/marketplace_preview.ui.json"
+      },
+      "panel": {
+        "kind": "info",
+        "title": "Marketplace",
+        "notes": [
+          "Coming soon",
+          "Skill・Tool・MCP・Packを、自由なタグとany/all条件で探せる予定です。",
+          "候補はprovenance・権限・trust reviewを確認してから通常の導入承認へhandoffします。",
+          "現在はプレビューのみで、リモート検索・自動導入・MCP接続は行いません。"
+        ]
+      }
+    }
+  ]
+}

@@ -2147,8 +2147,15 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     windows_isolation = api._provider_isolation("windows_wsl", True)
     linux_isolation = api._provider_isolation("linux_native", True)
     docker_isolation = api._provider_isolation("docker", True)
+    cloudflare_isolation = api._provider_isolation("cloudflare_sandbox_bridge", True)
 
-    assert provider_ids == {"docker", "linux_native", "mac_lima", "windows_wsl"}
+    assert provider_ids == {
+        "cloudflare_sandbox_bridge",
+        "docker",
+        "linux_native",
+        "mac_lima",
+        "windows_wsl",
+    }
     assert mac_isolation["mode"] == "lima_vm"
     assert mac_isolation["vm"] is True
     assert mac_isolation["security_boundary"] is False
@@ -2177,6 +2184,13 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     assert docker_isolation["container"] is True
     assert docker_isolation["sandbox_process_namespace_shared"] is False
     assert docker_isolation["sandbox_cgroup_scope"] == "docker_container"
+    assert cloudflare_isolation["container"] is True
+    assert cloudflare_isolation["sandbox_workspace_shared"] is False
+    assert cloudflare_isolation["sandbox_process_namespace_shared"] is False
+    assert cloudflare_isolation["sandbox_network_namespace_shared"] is False
+    assert cloudflare_isolation["sandbox_cgroup_scope"] == "cloudflare_container"
+    assert cloudflare_isolation["sandbox_operation_binding"] == "bridge_sandbox_id"
+    assert "PC-local" in cloudflare_isolation["summary"]
 
 
 def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch) -> None:

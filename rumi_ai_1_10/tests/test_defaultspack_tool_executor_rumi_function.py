@@ -1023,7 +1023,7 @@ def test_sandbox_exec_command_string_preserves_quoted_whitespace(tmp_path, monke
     assert exec_calls[-1]["argv"] == ["python", r"scripts\hello.py"]
 
 
-def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
+def test_sandbox_file_read_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
     from domain.tool import sandbox_tools
     from domain.tool_policy.internal_context import seal_tool_context
 
@@ -1033,6 +1033,8 @@ def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monk
 
         def run(self, payload, context):
             self.calls.append(payload)
+            if payload["_handler"] == "sandbox_files_read":
+                return {"status": "ok", "data": {"path": payload["path"], "content": "ok\n"}}
             if payload["_handler"] == "sandbox_files_apply_patch":
                 return {"status": "ok", "data": {"files_written": 1}}
             if payload["_handler"] == "sandbox_port_expose":
@@ -1046,6 +1048,10 @@ def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monk
         {"action": "allow", "allowed": True},
     )
 
+    read = sandbox_tools.sandbox_files_read(
+        {"sandbox_id": "sandbox-1", "path": "app.py", "max_chars": 100},
+        context,
+    )
     patched = sandbox_tools.sandbox_files_apply_patch(
         {"sandbox_id": "sandbox-1", "path": "app.py", "content": "print('ok')\n"},
         context,
@@ -1055,13 +1061,16 @@ def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monk
         context,
     )
 
+    assert read["status"] == "ok"
     assert patched["status"] == "ok"
     assert exposed["status"] == "ok"
-    assert [call["_handler"] for call in fake_api.calls] == ["sandbox_files_apply_patch", "sandbox_port_expose"]
+    assert [call["_handler"] for call in fake_api.calls] == ["sandbox_files_read", "sandbox_files_apply_patch", "sandbox_port_expose"]
     assert fake_api.calls[0]["sandbox_id"] == "sandbox-1"
     assert fake_api.calls[0]["path"] == "app.py"
-    assert fake_api.calls[1]["port"] == 3000
-    assert fake_api.calls[1]["protocol"] == "http"
+    assert fake_api.calls[0]["max_chars"] == 100
+    assert fake_api.calls[1]["path"] == "app.py"
+    assert fake_api.calls[2]["port"] == 3000
+    assert fake_api.calls[2]["protocol"] == "http"
 
 
 def test_sandbox_file_patch_and_port_tools_require_approval(tmp_path, monkeypatch):

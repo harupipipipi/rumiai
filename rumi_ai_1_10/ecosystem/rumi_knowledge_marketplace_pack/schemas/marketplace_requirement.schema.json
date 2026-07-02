@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/marketplace_requirement.schema.json",
+  "version": "rumi.knowledge_marketplace.requirement.schema.v1",
+  "title": "Rumi Marketplace Tag Requirement",
+  "description": "Tag-based prerequisite contract for packs, skills, tools, MCP tools, models, and extension surfaces. Opaque UUIDs are not valid selectors.",
+  "type": "object",
+  "required": [
+    "requirements"
+  ],
+  "properties": {
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/requirement"
+      }
+    }
+  },
+  "$defs": {
+    "tag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "description": "Free-form, human-meaningful discovery tag. Broad and specific tags may coexist, for example coding and coding.python.refactor.",
+      "not": {
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+      }
+    },
+    "tag_selector": {
+      "type": "object",
+      "required": [
+        "tags"
+      ],
+      "properties": {
+        "match": {
+          "type": "string",
+          "enum": [
+            "any",
+            "all"
+          ],
+          "default": "any",
+          "description": "any means one matching tag is sufficient; all means every tag must be provided."
+        },
+        "tags": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
+        },
+        "exclude_tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "requirement": {
+      "type": "object",
+      "required": [
+        "kind",
+        "selector"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[a-z][a-z0-9._-]*$",
+          "description": "Open requirement namespace. Well-known kinds are pack, skill, tool, mcp_tool, mcp_server, model, and extension."
+        },
+        "selector": {
+          "$ref": "#/$defs/tag_selector"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "install",
+            "activation",
+            "runtime"
+          ],
+          "default": "activation"
+        },
+        "required": {
+          "type": "boolean",
+          "default": true
+        },
+        "prefer_pack": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resolve a matching pack before considering a loose skill, tool, or MCP descriptor."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional semver range for pack-backed requirements."
+        },
+        "model_tier": {
+          "type": "string",
+          "enum": [
+            "rough",
+            "standard",
+            "strong",
+            "frontier"
+          ],
+          "description": "Provider-independent model usage tier from catalog/model_tiers.yaml."
+        },
+        "marketplace_fallback": {
+          "type": "string",
+          "enum": [
+            "search",
+            "prompt_install",
+            "disabled"
+          ],
+          "default": "search"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        },
+        "extensions": {
+          "type": "object",
+          "description": "Namespaced third-party requirement metadata.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

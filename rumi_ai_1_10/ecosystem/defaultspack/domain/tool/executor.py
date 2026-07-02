@@ -928,9 +928,9 @@ class ToolExecutor:
             return result
 
         if _truthy(policy.get("yolo_mode")):
-            next_context["_tool_server_approved"] = True
+            mark_tool_server_approval_context(next_context)
         elif _is_policy_allow_context(context):
-            next_context["_tool_server_approved"] = True
+            mark_tool_server_approval_context(next_context)
         elif _context_has_tool_server_approval(next_context):
             pass
         elif _requires_approval(tool_def):
