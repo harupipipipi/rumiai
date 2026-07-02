@@ -255,7 +255,10 @@ def test_docker_provider_seeds_trusted_workspace_overlay(tmp_path, monkeypatch) 
     docker_run = fake.command_with("run")
     docker_cp = fake.command_with("cp")
     assert "--mount" not in docker_run
-    assert docker_cp[-2:] == [f"{workspace_root}/.", docker_run[docker_run.index("--name") + 1] + ":/workspace"]
+    source, destination = docker_cp[-2:]
+    assert source.endswith(("/.", "\\."))
+    assert source[:-2] == workspace_root
+    assert destination == docker_run[docker_run.index("--name") + 1] + ":/workspace"
 
 
 def test_docker_provider_rejects_untrusted_workspace_binding(tmp_path, monkeypatch) -> None:
