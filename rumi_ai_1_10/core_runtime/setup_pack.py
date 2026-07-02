@@ -252,6 +252,102 @@ class SetupPackManager:
                 selected.add(normalized)
         return selected
 
+    def get_completed_selection_status(self) -> Dict[str, Any]:
+        selection = self.get_selection()
+        if not selection:
+            return {
+                "completed": False,
+                "reason": "setup_pack_selection_not_found",
+            }
+
+        definitions = self._load_definitions()
+
+        selected_ids: List[str] = []
+        seen: set[str] = set()
+        raw_selected = selection.get("setup_pack_ids")
+        if isinstance(raw_selected, list):
+            raw_items = raw_selected
+        else:
+            raw_items = []
+        for item in raw_items:
+            setup_pack_id = str(item or "").strip()
+            if setup_pack_id and setup_pack_id not in seen:
+                selected_ids.append(setup_pack_id)
+                seen.add(setup_pack_id)
+
+        legacy_setup_pack_id = str(selection.get("setup_pack_id") or "").strip()
+        if legacy_setup_pack_id and legacy_setup_pack_id not in seen:
+            selected_ids.append(legacy_setup_pack_id)
+            seen.add(legacy_setup_pack_id)
+
+        active_setup_pack_id = str(selection.get("active_setup_pack_id") or "").strip()
+        if not active_setup_pack_id:
+            active_setup_pack_id = legacy_setup_pack_id
+        active_target_pack_id = str(selection.get("active_target_pack_id") or "").strip()
+        if not active_target_pack_id:
+            active_target_pack_id = str(selection.get("target_pack_id") or "").strip()
+
+        if not active_setup_pack_id:
+            return {
+                "completed": False,
+                "reason": "missing_active_setup_pack_id",
+            }
+        if active_setup_pack_id not in selected_ids:
+            return {
+                "completed": False,
+                "reason": "active_setup_pack_not_selected",
+                "active_setup_pack_id": active_setup_pack_id,
+            }
+
+        unknown_selected = [
+            setup_pack_id
+            for setup_pack_id in selected_ids
+            if setup_pack_id not in definitions
+        ]
+        if unknown_selected:
+            return {
+                "completed": False,
+                "reason": "unknown_selected_setup_pack",
+                "unknown_selected_setup_pack_ids": unknown_selected,
+            }
+
+        active_definition = definitions.get(active_setup_pack_id)
+        if active_definition is None:
+            return {
+                "completed": False,
+                "reason": "unknown_active_setup_pack",
+                "active_setup_pack_id": active_setup_pack_id,
+            }
+
+        expected_target_pack_id = active_definition.target_pack_id
+        if active_target_pack_id != expected_target_pack_id:
+            return {
+                "completed": False,
+                "reason": "active_target_pack_mismatch",
+                "active_setup_pack_id": active_setup_pack_id,
+                "active_target_pack_id": active_target_pack_id,
+                "expected_target_pack_id": expected_target_pack_id,
+            }
+
+        locations = {
+            loc.pack_id: loc for loc in discover_pack_locations(str(self.ecosystem_dir))
+        }
+        if active_target_pack_id not in locations:
+            return {
+                "completed": False,
+                "reason": "active_target_pack_not_found",
+                "active_setup_pack_id": active_setup_pack_id,
+                "active_target_pack_id": active_target_pack_id,
+            }
+
+        return {
+            "completed": True,
+            "reason": "setup_pack_selection_valid",
+            "active_setup_pack_id": active_setup_pack_id,
+            "active_target_pack_id": active_target_pack_id,
+            "selected_setup_pack_ids": selected_ids,
+        }
+
     def _log_system_event(
         self,
         action: str,
