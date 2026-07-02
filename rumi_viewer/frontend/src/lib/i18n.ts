@@ -78,6 +78,7 @@ const en: Dict = {
   'setup.connect_rumi': 'Connect with Rumi Account',
   'setup.connect_started': 'Browser opened. Finish signing in there, then return.',
   'setup.skip': 'Skip',
+  'setup.choose_packs': 'Choose setup packs',
   'packs.title': 'Packs',
   'packs.search': 'Search packs...',
   'packs.not_found': 'No packs found',

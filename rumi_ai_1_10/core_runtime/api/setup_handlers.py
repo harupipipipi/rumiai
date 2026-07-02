@@ -72,7 +72,66 @@ class SetupHandlersMixin:
         return payload
 
     def _setup_list_packs(self) -> Dict[str, Any]:
-        return get_setup_pack_manager().list_packs()
+        return self._normalize_setup_pack_selection_payload(
+            get_setup_pack_manager().list_packs()
+        )
+
+    @staticmethod
+    def _normalize_setup_pack_selection_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+        result = dict(payload or {})
+        packs = result.get("packs")
+        if not isinstance(packs, list):
+            return result
+        if not any(
+            key in result
+            for key in (
+                "selected_setup_pack_id",
+                "selected_setup_pack_ids",
+                "active_setup_pack_id",
+                "active_target_pack_id",
+            )
+        ):
+            return result
+
+        pack_by_id = {
+            str(item.get("pack_id") or "").strip(): item
+            for item in packs
+            if isinstance(item, dict) and str(item.get("pack_id") or "").strip()
+        }
+        selected_ids: list[str] = []
+        seen_selected: set[str] = set()
+        for item in result.get("selected_setup_pack_ids") or []:
+            pack_id = str(item or "").strip()
+            if pack_id and pack_id in pack_by_id and pack_id not in seen_selected:
+                selected_ids.append(pack_id)
+                seen_selected.add(pack_id)
+
+        legacy_selected = str(result.get("selected_setup_pack_id") or "").strip()
+        if legacy_selected and legacy_selected in pack_by_id and legacy_selected not in seen_selected:
+            selected_ids.append(legacy_selected)
+            seen_selected.add(legacy_selected)
+
+        active_setup_pack_id = str(result.get("active_setup_pack_id") or "").strip()
+        if active_setup_pack_id not in seen_selected:
+            active_setup_pack_id = ""
+        active_pack = pack_by_id.get(active_setup_pack_id) if active_setup_pack_id else None
+        active_target_pack_id = (
+            str(active_pack.get("target_pack_id") or "").strip()
+            if isinstance(active_pack, dict)
+            else ""
+        )
+
+        for item in packs:
+            if isinstance(item, dict):
+                item["selected"] = str(item.get("pack_id") or "").strip() in seen_selected
+
+        result["selected_setup_pack_ids"] = selected_ids
+        result["selected_setup_pack_id"] = active_setup_pack_id or (
+            selected_ids[0] if selected_ids else None
+        )
+        result["active_setup_pack_id"] = active_setup_pack_id or None
+        result["active_target_pack_id"] = active_target_pack_id or None
+        return result
 
     def _setup_install_pack(self, body: Dict[str, Any]) -> Dict[str, Any]:
         payload = dict(body or {})

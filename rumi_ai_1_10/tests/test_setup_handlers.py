@@ -39,6 +39,62 @@ class TestSetupHandlers(unittest.TestCase):
             result = handler._setup_list_packs()
         self.assertEqual(result, {"packs": []})
 
+    def test_setup_handler_filters_stale_selected_setup_packs(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked:
+            mocked.return_value.list_packs.return_value = {
+                "packs": [
+                    {"pack_id": "defaultspack", "target_pack_id": "defaultspack"},
+                ],
+                "selected_setup_pack_id": "ghost_pack",
+                "selected_setup_pack_ids": ["ghost_pack", "defaultspack"],
+                "active_setup_pack_id": "ghost_pack",
+                "active_target_pack_id": "ghost_target",
+            }
+            result = handler._setup_list_packs()
+
+        self.assertEqual(result["selected_setup_pack_ids"], ["defaultspack"])
+        self.assertEqual(result["selected_setup_pack_id"], "defaultspack")
+        self.assertIsNone(result["active_setup_pack_id"])
+        self.assertIsNone(result["active_target_pack_id"])
+        self.assertTrue(result["packs"][0]["selected"])
+
+    def test_setup_handler_derives_active_target_from_selected_pack_definition(self):
+        from core_runtime.api.setup_handlers import SetupHandlersMixin
+
+        class _Handler(SetupHandlersMixin):
+            pass
+
+        handler = _Handler()
+        with patch(
+            "core_runtime.api.setup_handlers.get_setup_pack_manager"
+        ) as mocked:
+            mocked.return_value.list_packs.return_value = {
+                "packs": [
+                    {"pack_id": "alpha", "target_pack_id": "alpha_target"},
+                    {"pack_id": "beta", "target_pack_id": "beta_target"},
+                ],
+                "selected_setup_pack_id": "alpha",
+                "selected_setup_pack_ids": ["alpha"],
+                "active_setup_pack_id": "alpha",
+                "active_target_pack_id": "stale_target",
+            }
+            result = handler._setup_list_packs()
+
+        self.assertEqual(result["selected_setup_pack_ids"], ["alpha"])
+        self.assertEqual(result["selected_setup_pack_id"], "alpha")
+        self.assertEqual(result["active_setup_pack_id"], "alpha")
+        self.assertEqual(result["active_target_pack_id"], "alpha_target")
+        self.assertTrue(result["packs"][0]["selected"])
+        self.assertFalse(result["packs"][1]["selected"])
+
     def test_setup_handler_accepts_multiple_setup_pack_ids(self):
         from core_runtime.api.setup_handlers import SetupHandlersMixin
 
@@ -385,6 +441,39 @@ class TestSetupHandlers(unittest.TestCase):
             source,
         )
         self.assertIn("Installs without all OK grants", source)
+        self.assertIn("return_to", source)
+        self.assertIn("active_target_not_selected", source)
+        self.assertIn("no active setup pack selected", source)
+        self.assertIn("payloadError", source)
+        self.assertIn("payloadErrorItem", source)
+        self.assertIn("PANEL_CSRF_STORAGE_KEY", source)
+        self.assertIn('"X-Rumi-CSRF"', source)
+        self.assertIn('credentials: "same-origin"', source)
+        self.assertIn("name.textContent = pack.display_name", source)
+        self.assertIn("description.textContent = pack.description", source)
+        self.assertIn("input.dataset.selectPack = pack.pack_id", source)
+        self.assertIn("document.createTextNode", source)
+        self.assertIn('url.pathname === "/panel"', source)
+        self.assertIn('url.pathname.startsWith("/panel/")', source)
+        self.assertIn("!packs.active_target_pack_id", source)
+        self.assertIn("payload.success === false", source)
+        self.assertNotIn("card.innerHTML", source)
+        self.assertNotIn("${pack.display_name}", source)
+        self.assertNotIn("${pack.description", source)
+        self.assertNotIn('data-select-pack="${pack.pack_id}"', source)
+        self.assertNotIn('url.pathname.startsWith("/panel"))', source)
+        self.assertNotIn("payload.errors.map(String)", source)
+        self.assertNotIn(
+            'migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready"',
+            source,
+        )
+        install_error_pattern = (
+            r'async function installSelectedPacks\(\)[\s\S]*'
+            r'getJson\("/api/setup/packs/install"[\s\S]*'
+            r'catch \(error\) \{[\s\S]*'
+            r'setStatus\("Setup pack install failed"'
+        )
+        self.assertRegex(source, install_error_pattern)
 
 
 if __name__ == "__main__":

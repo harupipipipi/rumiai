@@ -80,6 +80,14 @@ function isPanelApiPath(path: string): boolean {
   return path === '/api/panel' || path.startsWith('/api/panel/');
 }
 
+function isSetupApiPath(path: string): boolean {
+  return path === '/api/setup' || path.startsWith('/api/setup/');
+}
+
+function isPanelSessionApiPath(path: string): boolean {
+  return isPanelApiPath(path) || isSetupApiPath(path);
+}
+
 export function hasPendingPanelBootstrapCode(href = window.location.href): boolean {
   return new URL(href).searchParams.has('code');
 }
@@ -278,7 +286,7 @@ export async function bootstrapPanelSession(): Promise<void> {
 }
 
 async function ensurePanelSessionForRequest(path: string, method: string): Promise<void> {
-  if (!isPanelApiPath(path)) {
+  if (!isPanelSessionApiPath(path)) {
     return;
   }
 
@@ -344,7 +352,7 @@ export async function apiFetch<T>(
 
       if (
         allowPanelRecovery &&
-        isPanelApiPath(path) &&
+        isPanelSessionApiPath(path) &&
         isRecoverablePanelAuthError(response.status, errorMessage) &&
         await recoverExpiredPanelSession()
       ) {
@@ -360,7 +368,7 @@ export async function apiFetch<T>(
       const errorMessage = envelope.error || 'Unknown API error';
       if (
         allowPanelRecovery &&
-        isPanelApiPath(path) &&
+        isPanelSessionApiPath(path) &&
         isRecoverablePanelAuthError(response.status, errorMessage) &&
         await recoverExpiredPanelSession()
       ) {

@@ -174,22 +174,99 @@
     </section>
   </main>
   <script>
+    const PANEL_CSRF_STORAGE_KEY = "rumi-panel-csrf";
     const statusEl = document.getElementById("status");
     const selectionEl = document.getElementById("selection");
     const migrationEl = document.getElementById("migration");
     const listEl = document.getElementById("pack-list");
+    const returnTo = safeReturnTo(new URLSearchParams(window.location.search).get("return_to"));
 
     function setStatus(label, payload) {
       statusEl.textContent = label + "\n\n" + JSON.stringify(payload, null, 2);
     }
 
-    async function getJson(url, options) {
-      const res = await fetch(url, options);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data.success === false) {
-        throw new Error(data.error || res.statusText || "request failed");
+    function errorMessage(error) {
+      return error instanceof Error ? error.message : String(error || "request failed");
+    }
+
+    function payloadError(payload) {
+      if (!payload || typeof payload !== "object") return "";
+      if (payload.error) return String(payload.error);
+      if (Array.isArray(payload.errors) && payload.errors.length) {
+        return payload.errors.map(payloadErrorItem).filter(Boolean).join("; ");
       }
-      return data.data || data;
+      return "";
+    }
+
+    function payloadErrorItem(item) {
+      if (!item || typeof item !== "object") return String(item || "");
+      const reason = item.reason ? String(item.reason) : "";
+      const message = item.error ? String(item.error) : "";
+      return [reason, message].filter(Boolean).join(": ") || JSON.stringify(item);
+    }
+
+    function safeReturnTo(value) {
+      if (!value) return "";
+      try {
+        const url = new URL(value, window.location.origin);
+        const isPanelReturnPath = url.pathname === "/panel" || url.pathname.startsWith("/panel/");
+        if (url.origin !== window.location.origin || !isPanelReturnPath) {
+          return "";
+        }
+        return url.pathname + url.search + url.hash;
+      } catch {
+        return "";
+      }
+    }
+
+    function setupMigrationLabel(migration) {
+      if (migration && migration.available === false) {
+        if (migration.reason === "active_target_not_selected") {
+          return "no active setup pack selected";
+        }
+        return migration.reason ? "migration unavailable: " + migration.reason : "migration unavailable";
+      }
+      return migration && migration.needs_user_migration ? "user.csv migration pending" : "ready";
+    }
+
+    function redirectToReturnTarget(packs) {
+      if (!returnTo || !(packs.selected_setup_pack_ids || []).length || !packs.active_target_pack_id) {
+        return;
+      }
+      window.location.assign(returnTo);
+    }
+
+    function panelCsrfToken() {
+      try {
+        return window.sessionStorage.getItem(PANEL_CSRF_STORAGE_KEY) || "";
+      } catch {
+        return "";
+      }
+    }
+
+    function requestHeaders(options) {
+      const headers = { ...((options && options.headers) || {}) };
+      const method = String((options && options.method) || "GET").toUpperCase();
+      if (method === "POST" || method === "PUT" || method === "DELETE" || method === "PATCH") {
+        const csrf = panelCsrfToken();
+        if (csrf) headers["X-Rumi-CSRF"] = csrf;
+      }
+      return headers;
+    }
+
+    async function getJson(url, options) {
+      const requestOptions = {
+        ...(options || {}),
+        credentials: "same-origin",
+        headers: requestHeaders(options),
+      };
+      const res = await fetch(url, requestOptions);
+      const data = await res.json().catch(() => ({}));
+      const payload = data.data || data;
+      if (!res.ok || data.success === false || (payload && payload.success === false)) {
+        throw new Error(payloadError(payload) || data.error || res.statusText || "request failed");
+      }
+      return payload;
     }
 
     async function installSelectedPacks() {
@@ -199,11 +276,17 @@
         setStatus("No setup packs checked", {});
         return;
       }
-      const data = await getJson("/api/setup/packs/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ setup_pack_ids: selected })
-      });
+      let data;
+      try {
+        data = await getJson("/api/setup/packs/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ setup_pack_ids: selected })
+        });
+      } catch (error) {
+        setStatus("Setup pack install failed", { error: errorMessage(error) });
+        return;
+      }
       setStatus("Setup packs installed", data);
       await load();
     }
@@ -219,24 +302,39 @@
         const allOkText = pack.supports_all_ok
           ? "Supports selective all OK grants"
           : "Installs without all OK grants";
-        card.innerHTML = `
-          <header>
-            <div>
-              <strong>${pack.display_name}</strong>
-              <div>${pack.description || ""}</div>
-              <div>${allOkText}</div>
-            </div>
-            <div class="pill ${pack.recommended ? "recommended" : riskClass}">
-              ${pack.recommended ? "Recommended" : "Risk: " + pack.risk_level}
-            </div>
-          </header>
-          <div class="mini-actions">
-            <label>
-              <input type="checkbox" data-select-pack="${pack.pack_id}" ${checked ? "checked" : ""}>
-              Include in setup
-            </label>
-          </div>
-        `;
+        const header = document.createElement("header");
+        const details = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = pack.display_name || "";
+        const description = document.createElement("div");
+        description.textContent = pack.description || "";
+        const allOk = document.createElement("div");
+        allOk.textContent = allOkText;
+        details.appendChild(name);
+        details.appendChild(description);
+        details.appendChild(allOk);
+
+        const pill = document.createElement("div");
+        pill.className = "pill" + (
+          pack.recommended ? " recommended" : (riskClass ? " " + riskClass : "")
+        );
+        pill.textContent = pack.recommended ? "Recommended" : "Risk: " + pack.risk_level;
+        header.appendChild(details);
+        header.appendChild(pill);
+
+        const miniActions = document.createElement("div");
+        miniActions.className = "mini-actions";
+        const label = document.createElement("label");
+        const input = document.createElement("input");
+        input.type = "checkbox";
+        input.dataset.selectPack = pack.pack_id || "";
+        input.checked = Boolean(checked);
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(" Include in setup"));
+        miniActions.appendChild(label);
+
+        card.appendChild(header);
+        card.appendChild(miniActions);
         listEl.appendChild(card);
       }
     }
@@ -247,10 +345,11 @@
         const migration = await getJson("/api/setup/migration/status");
         renderPacks(packs);
         selectionEl.textContent = (packs.selected_setup_pack_ids || []).join(", ") || "none";
-        migrationEl.textContent = migration.needs_user_migration ? "user.csv migration pending" : "ready";
+        migrationEl.textContent = setupMigrationLabel(migration);
         setStatus("Setup loaded", { packs, migration });
+        redirectToReturnTarget(packs);
       } catch (error) {
-        setStatus("Setup failed", { error: error.message });
+        setStatus("Setup failed", { error: errorMessage(error) });
       }
     }
 

@@ -20,7 +20,6 @@ import {
   authorityApprovalRiskTone,
   authorityApprovalRuntimeContent,
   authorityApprovalTitle,
-  resolvePendingAuthorityApproval,
   type AuthorityApproval,
   type AuthorityApprovalSettledStatus,
   type AuthorityApprovalScope,
@@ -51,6 +50,8 @@ type TauriAuthorityWindow = Window & {
   __TAURI__?: unknown;
 };
 
+const APPROVAL_RETURN_TO_PATHS = ["/finger-recording", "/ambient-debug"] as const;
+
 const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
   once: "今回のみ",
   conversation: "会話",
@@ -61,6 +62,27 @@ const SCOPE_LABELS: Record<AuthorityApprovalScope, string> = {
 function requestIdFromLocation(): string {
   try {
     return new URLSearchParams(window.location.search).get("request_id")?.trim() ?? "";
+  } catch {
+    return "";
+  }
+}
+
+function isApprovalReturnToPathAllowed(pathname: string): boolean {
+  return APPROVAL_RETURN_TO_PATHS.some(
+    (allowedPath) => pathname === allowedPath || pathname.startsWith(`${allowedPath}/`),
+  );
+}
+
+function approvalReturnToFromLocation(): string {
+  try {
+    const value = new URLSearchParams(window.location.search).get("return_to")?.trim() ?? "";
+    if (!value) return "";
+    const url = new URL(value, window.location.origin);
+    if (url.origin !== window.location.origin) return "";
+    if (!isApprovalReturnToPathAllowed(url.pathname)) {
+      return "";
+    }
+    return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "";
   }
@@ -106,17 +128,22 @@ async function returnToFingerRecordingAfterApproval() {
   }, 250);
 }
 
-async function closeAuthorityApprovalWindow() {
+async function closeAuthorityApprovalWindow(fallbackReturnTo = "") {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
     // Fall back below when the approval page is not inside Rumi Viewer.
   }
   window.close();
+  if (!fallbackReturnTo) return;
+  window.setTimeout(() => {
+    if (document.hidden) return;
+    window.location.replace(defaultspackUrlWithStoredLocalAuth(browserApprovalTokenizedPath(fallbackReturnTo)));
+  }, 250);
 }
 
-function scheduleAuthorityApprovalWindowClose() {
-  window.setTimeout(() => void closeAuthorityApprovalWindow(), 650);
+function scheduleAuthorityApprovalWindowClose(fallbackReturnTo = "") {
+  window.setTimeout(() => void closeAuthorityApprovalWindow(fallbackReturnTo), 650);
 }
 
 function hasNativeAuthorityApprovalContext(): boolean {
@@ -176,6 +203,8 @@ export function AuthorityApprovalWindow() {
   const [nativeApprovalAvailable, setNativeApprovalAvailable] = useState(hasNativeAuthorityApprovalContext);
   const [browserApprovalToken, setBrowserApprovalToken] = useState("");
   const nativeApprovalAvailableRef = useRef(nativeApprovalAvailable);
+  const browserApprovalTokenRef = useRef(browserApprovalToken);
+  const requestIdRef = useRef(requestId);
   const locallySettledRequestsRef = useRef(new Map<string, AuthorityApprovalSettledStatus>());
   const settlementBroadcastedRef = useRef(new Set<string>());
 
@@ -217,6 +246,7 @@ export function AuthorityApprovalWindow() {
   const browserApprovalAvailable = Boolean(!nativeApprovalAvailable && browserApprovalToken);
   const approvalContextAvailable = nativeApprovalAvailable || browserApprovalAvailable;
   const showApprovalControls = Boolean(request && request.status === "pending" && approvalContextAvailable && !displayedSettledStatus && decisionState.kind === "idle");
+  const showPendingRequestPicker = pendingRequests.length > 0 && (!requestId || pendingRequests.length > 1);
   const controlsDisabled = !showApprovalControls || action !== null;
   const confirmationPhrase = stringValue(request?.display_metadata?.confirmation_phrase) || stringValue(request?.resource?.confirmation_phrase);
   const typedConfirmationRequired = Boolean(
@@ -266,6 +296,14 @@ export function AuthorityApprovalWindow() {
   }, []);
 
   useEffect(() => {
+    browserApprovalTokenRef.current = browserApprovalToken;
+  }, [browserApprovalToken]);
+
+  useEffect(() => {
+    requestIdRef.current = requestId;
+  }, [requestId]);
+
+  useEffect(() => {
     if (hasNativeAuthorityApprovalContext()) return;
     const tokenFromLocation = readBrowserApprovalTokenFromLocation();
     if (tokenFromLocation) {
@@ -285,11 +323,6 @@ export function AuthorityApprovalWindow() {
   ) => {
     const nextRequest: AuthorityRequest = { ...settledRequest, status };
     locallySettledRequestsRef.current.set(settledRequest.request_id, status);
-    setRequest(nextRequest);
-    setError(null);
-    setDecisionState(status === "approved"
-      ? { kind: "approved", decision: options?.decision, resumed: Boolean(options?.resumed) }
-      : { kind: "rejected" });
     setPendingRequests((current) => current.filter((item) => item.request_id !== settledRequest.request_id));
 
     const settlementKey = `${settledRequest.request_id}:${status}`;
@@ -302,9 +335,20 @@ export function AuthorityApprovalWindow() {
       });
     }
 
-    const shouldScheduleClose = options?.scheduleClose ?? nativeApprovalAvailableRef.current;
+    if (requestIdRef.current !== settledRequest.request_id) {
+      return;
+    }
+
+    setRequest(nextRequest);
+    setError(null);
+    setDecisionState(status === "approved"
+      ? { kind: "approved", decision: options?.decision, resumed: Boolean(options?.resumed) }
+      : { kind: "rejected" });
+
+    const shouldScheduleClose = options?.scheduleClose
+      ?? (nativeApprovalAvailableRef.current || Boolean(browserApprovalTokenRef.current));
     if (shouldScheduleClose) {
-      scheduleAuthorityApprovalWindowClose();
+      scheduleAuthorityApprovalWindowClose(nativeApprovalAvailableRef.current ? "" : approvalReturnToFromLocation());
     }
   }, []);
 
@@ -404,17 +448,6 @@ export function AuthorityApprovalWindow() {
           ?? locallySettledRequestsRef.current.get(single.request_id)
           ?? null;
         if (singleSettledStatus) {
-          const activePendingApproval = resolvePendingAuthorityApproval(requestToApproval(single), list.pending ?? []);
-          if (activePendingApproval && activePendingApproval.requestId !== single.request_id) {
-            const nextUrl = new URL(window.location.href);
-            nextUrl.searchParams.set("request_id", activePendingApproval.requestId);
-            window.history.replaceState(null, "", nextUrl.toString());
-            setAction(null);
-            setError(null);
-            setDecisionState({ kind: "idle" });
-            setRequestId(activePendingApproval.requestId);
-            return;
-          }
           settleAuthorityRequest(single, singleSettledStatus);
           return;
         }
@@ -450,16 +483,6 @@ export function AuthorityApprovalWindow() {
   const refresh = async () => {
     setRefreshNonce((value) => value + 1);
   };
-
-  const settleApprovedDecision = useCallback((
-    settledRequest: AuthorityRequest,
-    decision: AuthorityApprovalDecision,
-  ) => {
-    settleAuthorityRequest({ ...settledRequest, status: "approved" }, "approved", {
-      decision,
-      resumed: false,
-    });
-  }, [settleAuthorityRequest]);
 
   const finalizeApprovedDecision = useCallback(async (
     settledRequest: AuthorityRequest,
@@ -519,14 +542,12 @@ export function AuthorityApprovalWindow() {
     try {
       try {
         const decision = await submitApproveOnce();
-        settleApprovedDecision(request, decision);
         await finalizeApprovedDecision(request, decision);
       } catch (postError) {
         if (await settleFromServer(request.request_id)) return;
         if (!authorityApprovalShouldRetryWithFreshContext(postError)) throw postError;
         try {
           const retriedDecision = await submitApproveOnce();
-          settleApprovedDecision(request, retriedDecision);
           await finalizeApprovedDecision(request, retriedDecision);
         } catch (retryError) {
           if (await settleFromServer(request.request_id)) return;
@@ -763,7 +784,7 @@ export function AuthorityApprovalWindow() {
           )}
         </section>
 
-        {pendingRequests.length > 1 && (
+        {showPendingRequestPicker && (
           <section className="mt-5 border-t border-zinc-800 pt-4">
             <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-zinc-600">Pending</p>
             <div className="mt-2 grid gap-2">
