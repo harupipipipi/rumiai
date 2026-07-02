@@ -17,7 +17,6 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core_runtime.approval_manager import (
     ApprovalManager,
-    ApprovalResult,
     PackApproval,
     PackStatus,
 )
@@ -236,6 +235,7 @@ class TestVerifyHash:
 
     def test_root_component_change_is_critical(self, tmp_path, monkeypatch):
         mgr, pack_dir = _make_manager(tmp_path, monkeypatch=monkeypatch)
+        assert mgr._is_critical_path("components\\demo\\startup.py") is True
         component_dir = pack_dir / "components" / "demo"
         component_dir.mkdir(parents=True)
         (component_dir / "startup.py").write_text(

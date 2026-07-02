@@ -4,12 +4,26 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_provider_capability_catalog(monkeypatch):
+    monkeypatch.setattr(
+        "domain.company.run_dispatcher.get_model_capabilities",
+        lambda _model: {"supports_tool_calling": True},
+    )
+    monkeypatch.setattr(
+        "ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company.get_all_known_models",
+        lambda provider_id=None: [],
+    )
 
 
 def _reset_company_store():
@@ -280,6 +294,15 @@ def test_inbound_routes_ingest_message_and_queue_task(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
     monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
     _reset_company_store()
+
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "queued",
+            "delegate": {"execution_id": "run_" + envelope.target["agent_id"], "status": "queued"},
+            "result": {"status": "queued"},
+        }
+
+    monkeypatch.setattr("domain.company.run_dispatcher.dispatch_input", fake_dispatch)
 
     company_id = bootstrap.run({}, {})["data"]["company"]["id"]
     route = inbound_routes.run(
