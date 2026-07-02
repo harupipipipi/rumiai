@@ -19,6 +19,132 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 class TestDefaultspackUiRegistry(unittest.TestCase):
     @staticmethod
+    def _fast_provider_has_api_key(provider_id, *, pack_root=None):
+        from domain.ai_client.api_key_store import provider_secret_keys
+
+        override = os.environ.get("RUMI_DEFAULTSPACK_SECRETS_DIR", "").strip()
+        secrets_dir = (
+            Path(override)
+            if override
+            else Path(pack_root or DEFAULTSPACK_ROOT) / "user_data" / "secrets"
+        )
+        for key in provider_secret_keys(provider_id):
+            if os.environ.get(key, "").strip():
+                return True
+            if (secrets_dir / f"{key}.json").exists():
+                return True
+        return False
+
+    @staticmethod
+    def _fast_provider_key_status(*, pack_root=None):
+        from domain.ai_client.api_key_store import (
+            provider_named_api_keys,
+            provider_secret_key,
+            provider_secret_keys,
+        )
+        from domain.ai_client.oauth_store import provider_oauth_status
+
+        rows = []
+        for provider_id in ("google", "openrouter"):
+            oauth = provider_oauth_status(provider_id, pack_root=pack_root)
+            rows.append(
+                {
+                    "provider_id": provider_id,
+                    "key": provider_secret_key(provider_id),
+                    "keys": provider_secret_keys(provider_id),
+                    "kind": "llm",
+                    "builtin": True,
+                    "label": provider_id,
+                    "configured": (
+                        TestDefaultspackUiRegistry._fast_provider_has_api_key(
+                            provider_id,
+                            pack_root=pack_root,
+                        )
+                        or bool(oauth.get("connected"))
+                    ),
+                    "apis": provider_named_api_keys(provider_id, pack_root=pack_root),
+                    "oauth": oauth,
+                }
+            )
+        return rows
+
+    @staticmethod
+    def _fast_provider_oauth_statuses(*, pack_root=None):
+        from domain.ai_client.oauth_store import provider_oauth_status
+
+        return {"google": provider_oauth_status("google", pack_root=pack_root)}
+
+    def setUp(self):
+        self._runtime_rumi_base_model = patch(
+            "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService._runtime_rumi_base_model",
+            return_value="",
+        )
+        self._runtime_rumi_base_model.start()
+        self.addCleanup(self._runtime_rumi_base_model.stop)
+        self._selectable_model_profiles = patch(
+            "domain.frontend.registry.FrontendRegistry._selectable_model_profiles",
+            return_value=[
+                {
+                    "profile_id": "stub/default",
+                    "display_name": "Stub Default",
+                    "provider_id": "stub",
+                    "provider_display_name": "Stub",
+                    "model_id": "default",
+                    "type": "chat",
+                    "availability": {"configured": True, "local": True},
+                },
+                {
+                    "profile_id": "google/gemini-2.5-flash",
+                    "display_name": "Gemini 2.5 Flash",
+                    "provider_id": "google",
+                    "provider_display_name": "Google",
+                    "model_id": "gemini-2.5-flash",
+                    "type": "chat",
+                    "availability": {"configured": False, "supports_invoke": True},
+                },
+                {
+                    "profile_id": "google/gemma-4-26b-a4b-it",
+                    "display_name": "Gemma 4 26B A4B IT",
+                    "provider_id": "google",
+                    "provider_display_name": "Google",
+                    "model_id": "gemma-4-26b-a4b-it",
+                    "type": "chat",
+                    "availability": {"configured": False, "supports_invoke": True},
+                },
+                {
+                    "profile_id": "ollama/llama3.1:8b",
+                    "display_name": "llama3.1:8b",
+                    "provider_id": "ollama",
+                    "provider_display_name": "Ollama",
+                    "model_id": "llama3.1:8b",
+                    "type": "chat",
+                    "local": True,
+                    "availability": {"configured": True, "local": True},
+                },
+            ],
+        )
+        self._selectable_model_profiles.start()
+        self.addCleanup(self._selectable_model_profiles.stop)
+        self._provider_key_status = patch(
+            "domain.frontend.registry.provider_key_status",
+            side_effect=self._fast_provider_key_status,
+        )
+        self._provider_key_status.start()
+        self.addCleanup(self._provider_key_status.stop)
+        self._provider_oauth_statuses = patch(
+            "domain.frontend.registry.provider_oauth_statuses",
+            side_effect=self._fast_provider_oauth_statuses,
+        )
+        self._provider_oauth_statuses.start()
+        self.addCleanup(self._provider_oauth_statuses.stop)
+        self._model_runtime_provider_has_api_key = patch(
+            "domain.ai_client.model_runtime_settings.provider_has_api_key",
+            side_effect=self._fast_provider_has_api_key,
+        )
+        self._model_runtime_provider_has_api_key.start()
+        self.addCleanup(self._model_runtime_provider_has_api_key.stop)
+
+    @staticmethod
     def _jwt(payload):
         def encode(obj):
             raw = json.dumps(obj, separators=(",", ":")).encode("utf-8")
@@ -2165,7 +2291,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertEqual(public_pack_command["piece_id"], "user_pack_action")
         self.assertEqual(public_pack_command["trust_level"], "user")
         self.assertTrue(
-            public_pack_command["source_path"].endswith(
+            public_pack_command["source_path"].replace("\\", "/").endswith(
                 "user_data/shared/templates/user_commands/template.json"
             )
         )

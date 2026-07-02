@@ -1047,7 +1047,7 @@ def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monke
     deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
     assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
     assert patches[0]["files"][0]["path"] == "scripts/hello.py"
-    assert base64.b64decode(patches[0]["files"][0]["content_base64"]).decode("utf-8") == "print('ok')\n"
+    assert base64.b64decode(patches[0]["files"][0]["content_base64"]).decode("utf-8") == python_script.read_bytes().decode("utf-8")
     assert patches[1]["files"][0]["path"] == "scripts/hello.js"
     assert execs[0]["argv"] == ["python", "scripts/hello.py"]
     assert execs[0]["timeout_ms"] == 5000

@@ -8,11 +8,28 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
 
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_model_pack_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "domain.ai_client.model_pack_router.get_model_capabilities",
+        lambda model, **kwargs: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_audio_input": True,
+            "supports_thinking": False,
+        },
+    )
 
 
 class TestDefaultspackProviderExpansion(unittest.TestCase):
