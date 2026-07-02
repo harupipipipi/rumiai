@@ -50,6 +50,47 @@ def test_frontend_request_detector_matches_app_without_path_style_false_positive
     assert not detect_frontend_request("fix parser", files=["src/freestyle_parser.py"]).enabled
 
 
+def test_frontend_request_detector_ignores_ordinary_chat_with_ui_words() -> None:
+    from domain.coding.frontend_precision import detect_frontend_request
+
+    for prompt in [
+        "what app should I use?",
+        "explain this page",
+    ]:
+        detected = detect_frontend_request(prompt)
+        assert not detected.enabled, detected.to_dict()
+        assert any(reason.startswith("prompt keyword:") for reason in detected.reasons)
+
+
+def test_prepare_chat_run_does_not_attach_frontend_precision_for_ordinary_chat(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+
+    from domain.chat.run_request import prepare_chat_run
+    from domain.chat.store import ChatStore
+
+    for prompt in [
+        "what app should I use?",
+        "explain this page",
+    ]:
+        ChatStore._instance = None
+        store = ChatStore()
+        conversation = store.create_conversation(model="stub/default")
+        prepared = prepare_chat_run(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": prompt},
+                "params": {"tool_selection": {"mode": "none"}},
+            },
+            {"workspace_root": str(tmp_path)},
+        )
+
+        assert "frontend_precision" not in prepared.tool_context
+        assert "frontend_precision" not in prepared.request_context
+        assert "tool_ui_build_recursive" not in prepared.tools_called
+        assert "tool_ui_build_recursive" not in prepared.connected_tool_names
+    ChatStore._instance = None
+
+
 def test_frontend_default_ui_trees_are_planner_executable() -> None:
     from domain.coding.frontend_precision import build_default_ui_tree
     from domain.ui_compiler.planner import RecursiveUIPlanner
@@ -201,6 +242,49 @@ def test_stream_engine_executes_frontend_precision_before_model_turn(tmp_path, m
     metadata = completed[-1]["data"]["message"]["metadata"]
     assert metadata["frontend_precision"]["executed"]["report"].endswith("/reports/final.json")
     assert "tool_ui_build_recursive" in metadata["executed_tools"]
+    ChatStore._instance = None
+
+
+def test_stream_engine_does_not_preexecute_frontend_precision_for_ordinary_chat(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+
+    from domain.chat.store import ChatStore
+    from domain.chat.stream_engine import ChatRunEngine
+
+    ChatStore._instance = None
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    captured: dict[str, object] = {}
+
+    def fake_execute_tool(self, prepared, tool_name, tool_call_id, arguments):
+        raise AssertionError("ordinary chat must not pre-execute frontend precision")
+
+    def fake_model_turn(self, prepared, messages, draft):
+        captured["model_turn"] = True
+        captured["frontend_precision"] = prepared.tool_context.get("frontend_precision")
+        captured["provider_tools"] = list(prepared.provider_tools or [])
+        return {"content": [{"type": "text", "text": "ordinary response"}], "finish_reason": "stop", "usage": {}}, []
+
+    monkeypatch.setattr(ChatRunEngine, "_execute_tool", fake_execute_tool)
+    monkeypatch.setattr(ChatRunEngine, "_model_turn", fake_model_turn)
+
+    events = list(
+        ChatRunEngine(store=store).stream(
+            {
+                "conversation_id": conversation["id"],
+                "message": {"role": "user", "content": "explain this page"},
+                "params": {"tool_selection": {"mode": "none"}},
+            },
+            {"workspace_root": str(tmp_path), "profile_policy": {"yolo_mode": True}},
+        )
+    )
+
+    assert captured["model_turn"] is True
+    assert captured["frontend_precision"] is None
+    assert all(tool.get("name") != "tool_ui_build_recursive" for tool in captured["provider_tools"])
+    flat_events = [item for event in events for item in (event if isinstance(event, list) else [event])]
+    assert not any(event.get("frontend_precision") for event in flat_events)
+    assert not any(event.get("tool_name") == "tool_ui_build_recursive" for event in flat_events)
     ChatStore._instance = None
 
 

@@ -82,6 +82,32 @@ FRONTEND_EXTENSIONS = {
     ".module.css",
     ".module.scss",
 }
+FRONTEND_ACTION_KEYWORDS = {
+    "add",
+    "adjust",
+    "build",
+    "change",
+    "create",
+    "design",
+    "develop",
+    "edit",
+    "fix",
+    "implement",
+    "make",
+    "modify",
+    "refactor",
+    "redesign",
+    "render",
+    "restyle",
+    "update",
+    "作って",
+    "作る",
+    "作成",
+    "実装",
+    "修正",
+    "変更",
+    "改善",
+}
 
 SPECIALIST_AGENTS = [
     {
@@ -201,10 +227,13 @@ def detect_frontend_request(
     *,
     files: list[str] | None = None,
     command: str | None = None,
+    coding_session_mode: bool = False,
 ) -> FrontendDetection:
     text = str(task or "")
     slash = _slash_command(text) or _slash_command(command)
     reasons: list[str] = []
+    keyword_reasons: list[str] = []
+    path_reasons: list[str] = []
     explicit = False
     mode = "strict"
     command_name = ""
@@ -217,17 +246,25 @@ def detect_frontend_request(
     lowered = text.lower()
     for keyword in sorted(FRONTEND_KEYWORDS, key=len, reverse=True):
         if _keyword_matches(lowered, keyword):
-            reasons.append(f"prompt keyword: {keyword}")
+            keyword_reasons.append(f"prompt keyword: {keyword}")
             break
 
     for path in files or []:
         path_reason = _frontend_path_reason(path)
         if path_reason:
-            reasons.append(path_reason)
+            path_reasons.append(path_reason)
             break
 
+    reasons.extend(keyword_reasons)
+    reasons.extend(path_reasons)
+    action = _frontend_action_keyword(lowered)
+    if action and keyword_reasons:
+        reasons.append(f"frontend action: {action}")
+
+    enabled = bool(explicit or path_reasons or (coding_session_mode and keyword_reasons) or (action and keyword_reasons))
+
     return FrontendDetection(
-        enabled=bool(reasons),
+        enabled=enabled,
         mode=mode,
         explicit=explicit,
         reasons=reasons,
@@ -241,7 +278,12 @@ def promote_coding_session_input(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     data = deepcopy(input_data if isinstance(input_data, dict) else {})
     files = _request_files(data)
-    detection = detect_frontend_request(data.get("task"), files=files, command=_request_command(data))
+    detection = detect_frontend_request(
+        data.get("task"),
+        files=files,
+        command=_request_command(data),
+        coding_session_mode=True,
+    )
     if not detection.enabled:
         return data, {
             "enabled": False,
@@ -524,6 +566,13 @@ def _keyword_matches(text: str, keyword: str) -> bool:
     if all(char.isalnum() or char in {"-", "_", "."} for char in keyword):
         return re.search(rf"(?<![a-z0-9]){re.escape(keyword)}(?![a-z0-9])", text) is not None
     return keyword in text
+
+
+def _frontend_action_keyword(text: str) -> str:
+    for keyword in sorted(FRONTEND_ACTION_KEYWORDS, key=len, reverse=True):
+        if _keyword_matches(text, keyword):
+            return keyword
+    return ""
 
 
 def _slash_command(value: str | None) -> list[str]:
