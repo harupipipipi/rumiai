@@ -3,7 +3,7 @@ name: Desktop Installers
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, soon]
     paths:
       - ".github/scripts/prepare_tauri_resources.py"
       - ".github/workflows/desktop-installers.yml"
@@ -11,7 +11,7 @@ on:
       - "rumi_ai_1_10/**"
       - "rumi_viewer/**"
   pull_request:
-    branches: [master]
+    branches: [master, soon]
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     paths:
       - ".github/scripts/prepare_tauri_resources.py"

@@ -2,12 +2,12 @@ name: Flutter Mobile
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, soon]
     paths:
       - "rumi_mobile/**"
       - ".github/workflows/flutter-mobile.yml"
   push:
-    branches: [master]
+    branches: [master, soon]
     paths:
       - "rumi_mobile/**"
       - ".github/workflows/flutter-mobile.yml"
