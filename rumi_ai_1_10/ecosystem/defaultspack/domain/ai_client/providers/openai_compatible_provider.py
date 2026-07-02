@@ -361,6 +361,24 @@ class OpenAICompatibleProvider(OpenAIProvider):
     def _translate_model_params(self, model, params):
         if self.provider_id == "cerebras":
             return self._translate_cerebras_model_params(model, params)
+        if self.provider_id == "vercel-ai-gateway":
+            translated = dict(params or {})
+            extra_body = dict(translated.get("extra_body", {})) if isinstance(translated.get("extra_body"), dict) else {}
+            reasoning_effort = str(translated.pop("reasoning_effort", "") or "").strip().lower()
+            if reasoning_effort:
+                extra_body.setdefault("reasoning", {"effort": reasoning_effort})
+            for key in (
+                "models",
+                "providerOptions",
+                "reasoning",
+                "service_tier",
+                "web_search_options",
+            ):
+                if key in translated:
+                    extra_body[key] = translated.pop(key)
+            if extra_body:
+                translated["extra_body"] = extra_body
+            return translated
         return super()._translate_model_params(model, params)
 
     def build_request(self, messages):
