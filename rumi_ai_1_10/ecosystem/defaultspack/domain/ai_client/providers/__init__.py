@@ -84,7 +84,7 @@ _CURATED_PROVIDER_METADATA: Dict[str, Dict[str, Any]] = {
         "base_url_envs": ["OPENAI_BASE_URL"],
         "catalog_only": False,
         "supports_invoke": True,
-        "default_model": "gpt-5.4",
+        "default_model": "gpt-5.5",
         "capabilities": [
             "chat",
             "tool_calls",
@@ -518,7 +518,7 @@ _CURATED_PROVIDER_MODELS: Dict[str, List[Dict[str, Any]]] = {
 
 _BEST_MODEL_BY_PROVIDER = {
     "stub": "default",
-    "openai": "gpt-5.4",
+    "openai": "gpt-5.5",
     "anthropic": "claude-sonnet-4-0",
     "google": "gemini-2.5-pro",
     "genspark": "gpt-5-mini",

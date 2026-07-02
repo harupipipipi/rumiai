@@ -375,7 +375,7 @@ def test_chat_run_executes_prefixless_mcp_tool_with_tool_log_evidence(monkeypatc
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     events = list(
         ChatRunEngine(client=EvidenceCheckingClient()).stream(
             {

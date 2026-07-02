@@ -23,7 +23,7 @@
     ],
     "catalog_only": false,
     "supports_invoke": true,
-    "default_model": "gpt-5.4",
+    "default_model": "gpt-5.5",
     "catalog_features": [
       "chat",
       "tool_calls",

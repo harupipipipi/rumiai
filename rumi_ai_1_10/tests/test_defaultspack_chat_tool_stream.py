@@ -56,7 +56,7 @@ def test_chat_run_engine_streams_tool_call_events_and_final_message(tmp_path, mo
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     events = list(
         ChatRunEngine(client=FakeClient()).stream(
             {
@@ -221,7 +221,7 @@ def test_stream_with_selected_tools_uses_chat_run_engine_not_legacy_fallback(tmp
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     result = stream_module.run(
         {
             "conversation_id": conversation["id"],
@@ -312,7 +312,7 @@ def test_chat_run_engine_streams_browser_state_events_with_timestamped_tool_resu
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     events = list(
         ChatRunEngine(client=FakeClient()).stream(
             {
@@ -397,7 +397,7 @@ def test_chat_run_engine_stops_for_permission_required_tool_result(tmp_path, mon
     monkeypatch.setattr(ChatRunEngine, "_provider_supports_stream_tool_calls", staticmethod(lambda _model: True))
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     events = list(
         ChatRunEngine(client=FakeClient()).stream(
             {
@@ -543,7 +543,7 @@ def test_chat_run_engine_browser_approval_followup_resumes_one_computer_tool_cal
             raise AssertionError("complete should not be called")
 
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     tool_schema = {
         "type": "function",
         "function": {

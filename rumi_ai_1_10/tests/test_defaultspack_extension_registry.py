@@ -181,13 +181,13 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
         },
     )
     _write_json(
-        root / "llm/providers/openai/models/gpt-5.4.json",
+        root / "llm/providers/openai/models/gpt-5.5.json",
         {
-            "id": "openai/gpt-5.4",
+            "id": "openai/gpt-5.5",
             "category": "llm_model",
             "version": "1",
             "provider_id": "openai",
-            "model_id": "gpt-5.4",
+            "model_id": "gpt-5.5",
             "priority": 10,
             "defaults": {"chat": True},
         },
@@ -215,7 +215,7 @@ def test_discovery_scans_manifest_categories(tmp_path: Path):
     assert len(result.issues) == 0
     assert {(item.category, item.extension_id) for item in result.extensions} >= {
         ("llm_provider", "openai"),
-        ("llm_model", "openai/gpt-5.4"),
+        ("llm_model", "openai/gpt-5.5"),
         ("prompt", "base_assistant"),
         ("skill", "hatch-pet"),
     }
@@ -266,13 +266,13 @@ def test_extension_registry_llm_best_model(tmp_path: Path):
         },
     )
     _write_json(
-        root / "llm/providers/openai/models/gpt-5.4.json",
+        root / "llm/providers/openai/models/gpt-5.5.json",
         {
-            "id": "openai/gpt-5.4",
+            "id": "openai/gpt-5.5",
             "category": "llm_model",
             "version": "1",
             "provider_id": "openai",
-            "model_id": "gpt-5.4",
+            "model_id": "gpt-5.5",
             "priority": 10,
             "defaults": {"chat": True},
         },
@@ -281,7 +281,7 @@ def test_extension_registry_llm_best_model(tmp_path: Path):
     registry = ExtensionRegistry(root)
     best = registry.llm().best_model("openai", use_case="chat")
     assert best is not None
-    assert best["model_id"] == "gpt-5.4"
+    assert best["model_id"] == "gpt-5.5"
 
 
 def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
@@ -294,7 +294,7 @@ def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
             "version": "1",
             "entrypoint": f"{__name__}:_DummyProvider",
             "default_model": "auto",
-            "default_model_for": {"chat": "auto", "fast": "openai/gpt-5.4-mini"},
+            "default_model_for": {"chat": "auto", "fast": "openai/gpt-5.5-mini"},
             "enabled": True,
         },
     )
@@ -305,7 +305,7 @@ def test_extension_registry_synthesizes_provider_default_models(tmp_path: Path):
     assert chat_default is not None
     assert chat_default["model_id"] == "auto"
     assert fast_default is not None
-    assert fast_default["model_id"] == "openai/gpt-5.4-mini"
+    assert fast_default["model_id"] == "openai/gpt-5.5-mini"
 
 
 def test_extension_registry_preserves_google_api_key_env_list():

@@ -12,9 +12,9 @@
   "base_url_env": "OPENAI_BASE_URL",
   "credential_required": true,
   "default_model_for": {
-    "chat": "gpt-5.4",
-    "fast": "gpt-5.4-mini",
-    "large": "gpt-5.4",
+    "chat": "gpt-5.5",
+    "fast": "gpt-5.5-mini",
+    "large": "gpt-5.5",
     "embedding": "text-embedding-3-large"
   },
   "catalog_features": [
