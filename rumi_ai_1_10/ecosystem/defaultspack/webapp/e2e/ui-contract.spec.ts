@@ -823,36 +823,14 @@ test("composer approval menu opens action permissions while selection modes live
   await expect(approvalMenu).not.toContainText("自動で選ぶ");
 
   await approvalMenu.getByRole("button", { name: "詳細はこちら" }).click();
-  await expect(page.getByRole("heading", { name: "機能と接続" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "基本", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "権限", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "接続", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "高度な設定", exact: true })).toBeVisible();
-  await expect(page.getByText("既定の使い方")).toBeVisible();
-  await expect(page.getByText("自動で選ぶ")).toBeVisible();
-
-  await page.getByRole("button", { name: "権限", exact: true }).click();
-  for (const label of ["読む", "検索する", "作る", "更新する", "送信する", "実行する", "コンピュータ操作", "削除・push・reset"]) {
-    await expect(page.getByRole("heading", { name: label, exact: true })).toBeVisible();
-  }
-  await expect(page.getByText("自動で許可").first()).toBeVisible();
-  await expect(page.getByText("確認する").first()).toBeVisible();
-  await expect(page.getByText("使わない").first()).toBeVisible();
-
-  await page.getByRole("button", { name: "接続", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "GitHub" })).toBeVisible();
-  await expect(page.getByText("権限を調整").first()).toBeVisible();
-
-  await page.getByRole("button", { name: "高度な設定", exact: true }).click();
-  await expect(page.getByText("自動：ベクトルで絞って別のAIが決める")).toBeVisible();
-  await expect(page.getByText("ベクトルで選ぶ", { exact: true })).toBeVisible();
-  await expect(page.getByText("別のAIがすべての機能から選ぶ")).toBeVisible();
-  await expect(page.getByText("すべて読み込む＋おすすめを付ける")).toBeVisible();
-  await expect(page.getByText("全ツールスキーマをそのまま渡します")).toBeVisible();
-  await expect(page.getByText("軽量キーワードで選ぶ")).toBeVisible();
-  await expect(page.getByText("Tool補助モデル")).toBeVisible();
-  await expect(page.getByText("ベクトルモデル")).toBeVisible();
-  await expect(page.getByText("Text Embedding 004")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tools & MCP" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Tools & MCP" }).first()).toBeVisible();
+  await expect(page.getByText("Installed tools, MCP servers, discovered tools, visibility, and approval policy.")).toBeVisible();
+  await expect(page.getByText("Tools are not logins")).toBeVisible();
+  await expect(page.getByText("Safety rules")).toBeVisible();
+  await expect(page.getByText("Tool source → Tools & MCP")).toBeVisible();
+  await expect(page.getByText("MCP servers can require a connection")).toBeVisible();
 });
 
 test("tool hub service selections can be scoped to the conversation and survive reload", async ({ page }) => {

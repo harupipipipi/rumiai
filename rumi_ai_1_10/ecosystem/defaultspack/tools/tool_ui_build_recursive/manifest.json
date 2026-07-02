@@ -1,0 +1,47 @@
+{
+  "id": "tool_ui_build_recursive",
+  "description": "Build a recursive Rumi UI by generating foundation candidates, isolated leaf candidates, render evidence, compression inspection, candidate selection, page composition, and verification.",
+  "config": {
+    "tool_id": "tool_ui_build_recursive",
+    "name": "tool_ui_build_recursive",
+    "summary": "Generate, inspect, select, compose, and verify a recursive UI build.",
+    "tool_category": "frontend",
+    "action_type": "local",
+    "write_action": true,
+    "requires_approval": true,
+    "risk": "high",
+    "tags": ["frontend", "ui", "recursive-ui-compiler", "subagent", "artifact"],
+    "metadata": {
+      "keywords": ["ui compiler", "recursive ui", "subagent", "candidate generation", "compression inspector"]
+    },
+    "ui": {
+      "group_id": "frontend",
+      "group_label": "Frontend",
+      "group_icon": "layout",
+      "item_icon": "layout",
+      "widget_kind": "tool_toggle",
+      "composer_label": "UI Build Recursive",
+      "composer_description": "Build UI candidates with isolated subagents and render proof.",
+      "composer_icon": "layout"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["ui_tree"],
+        "properties": {
+          "ui_tree": {"type": "object"},
+          "config": {"type": "object"},
+          "target": {"type": "object"},
+          "run_id": {"type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", "maxLength": 80},
+          "idempotency_key": {"type": "string"},
+          "options": {"type": "object"}
+        }
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.ui_compiler_tools:ui_build_recursive"
+    }
+  }
+}

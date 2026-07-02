@@ -1,0 +1,51 @@
+{
+  "id": "inbox-page-frame",
+  "purpose": "Process unresolved conversations quickly.",
+  "density": "compact",
+  "implementationMode": "component-with-slots",
+  "importance": "pageFrame",
+  "responsibilities": {"responsiveTopologies": ["inbox-two-region-frame"]},
+  "slots": [
+    {"id": "toolbar", "acceptsNodeId": "inbox-toolbar", "purpose": "Filter controls", "minWidth": 280},
+    {"id": "reply-composer", "acceptsNodeId": "reply-composer", "purpose": "Reply region", "minWidth": 280}
+  ],
+  "children": [
+    {
+      "id": "inbox-toolbar",
+      "purpose": "Filter the conversation set.",
+      "density": "compact",
+      "importance": "secondaryRegion",
+      "responsibilities": {
+        "visualRoles": ["toolbar"],
+        "controls": ["query", "onQueryChange", "status-filter"],
+        "states": ["default", "filtered"],
+        "responsiveTopologies": ["inbox-toolbar-stack"]
+      },
+      "inputs": ["query"],
+      "events": ["onQueryChange"],
+      "requiredStates": ["default", "filtered"],
+      "allowedPrimitives": ["Button", "SegmentedControl", "SearchField"],
+      "visibleActionBudget": 3
+    },
+    {
+      "id": "reply-composer",
+      "purpose": "Send a safe reply to the selected conversation.",
+      "primaryPerceptualTask": "Understand draft state and send readiness.",
+      "density": "comfortable",
+      "importance": "primaryRegion",
+      "layoutEnvelope": {"minWidth": 280, "preferredWidth": 560, "maxWidth": 760, "mobileBehavior": "sticky-bottom"},
+      "responsibilities": {
+        "visualRoles": ["reply-composer"],
+        "controls": ["draft", "onDraftChange", "onSend"],
+        "mutations": ["send-reply"],
+        "states": ["empty", "editing", "sending"],
+        "responsiveTopologies": ["composer-mobile-stack"]
+      },
+      "inputs": ["draft"],
+      "events": ["onDraftChange", "onSend"],
+      "requiredStates": ["empty", "editing", "sending"],
+      "allowedPrimitives": ["Button", "TextArea", "InlineAlert"],
+      "visibleActionBudget": 2
+    }
+  ]
+}

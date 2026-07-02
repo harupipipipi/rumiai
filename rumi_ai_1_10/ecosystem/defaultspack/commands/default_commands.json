@@ -120,6 +120,19 @@
     "execution": { "type": "frontend", "action": "set_mode_coding" }
   },
   {
+    "id": "frontend",
+    "name": "frontend",
+    "aliases": ["ui"],
+    "label": "Frontend Precision",
+    "description": "Force recursive frontend precision mode.",
+    "category": "coding",
+    "visibility": "default",
+    "risk": "medium",
+    "modes": ["coding"],
+    "args": [{ "name": "mode", "type": "enum", "required": false, "values": ["strict", "audit", "refine"] }],
+    "execution": { "type": "pack_block", "qualified_name": "defaultspack:ui.frontend_precision" }
+  },
+  {
     "id": "chat",
     "name": "chat",
     "label": "Chat Mode",
