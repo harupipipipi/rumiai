@@ -1,0 +1,74 @@
+example_id: rumi_knowledge_marketplace.tagged_requirement
+scenario: Describe a coding skill with pack, MCP tool, extension, and model prerequisites.
+marketplace_card:
+  card_id: skill.repo_change_summarizer.v1
+  display_name: Repo Change Summarizer
+  capability_type: skill
+  tags: [coding, coding.review, git.diff.summary]
+  provides:
+    tags: [skill.repo.review, output.change_summary]
+    extension_points: [review.output_formatter]
+  requirements:
+    - kind: pack
+      stage: activation
+      prefer_pack: true
+      selector:
+        match: any
+        tags: [coding.workspace, coding.ide]
+      marketplace_fallback: search
+      reason: Prefer one reviewed pack that supplies the workspace and coding tools.
+    - kind: mcp_tool
+      stage: runtime
+      prefer_pack: true
+      selector:
+        match: any
+        tags: [mcp.github.repository, mcp.git.repository]
+      marketplace_fallback: search
+      reason: One approved repository tool is sufficient.
+    - kind: extension
+      stage: runtime
+      required: false
+      selector:
+        match: all
+        tags: [extension.review, extension.markdown]
+      marketplace_fallback: disabled
+      reason: A compatible review renderer is optional.
+      extensions:
+        rumi.review:
+          output_slot: change_summary
+  model_policy:
+    tier: rough
+    rough_use_allowed: true
+    required_model_tags:
+      match: any
+      tags: [tool_calling, structured_output]
+    reason: Candidate ranking and first-pass summaries are low-risk and replaceable.
+  listing:
+    status: preview
+    searchable: true
+    search_label: 探す
+  source:
+    source_ref: local_repo:skills/repo-change-summarizer
+    content_digest: sha256:tagged-requirement-fixture
+  publisher: rumi-internal
+  trust_status: repository_reviewed
+  permission_summary:
+    required_permissions: [read_repository_diff, write_review_note]
+    network_requirement: approved_mcp_only
+    secret_requirement: gateway_managed
+    host_execution_requirement: false
+  provenance:
+    source_ref: local_repo:skills/repo-change-summarizer
+    content_digest: sha256:tagged-requirement-fixture
+    publisher: rumi-internal
+    reviewer: local-marketplace-curator
+    reviewed_at: "2026-06-25T00:00:00Z"
+  install_review:
+    decision: allow_with_warning
+    explicit_user_approval_required: true
+    reviewer: local-marketplace-curator
+    reason: Dependencies require normal review and approval before activation.
+expected_resolution:
+  top_level_mode: all
+  pack_first: true
+  auto_install_allowed: false
