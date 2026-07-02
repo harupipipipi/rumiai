@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -81,6 +82,16 @@ def test_lifecycle_fresh_install_writes_state_atomically(tmp_path):
     assert entry["installed_version"] == "1.2.0"
     assert entry["schema_version"] == 1
     assert entry["source_generation"] == "gen-a"
+
+
+def test_lifecycle_state_save_skips_directory_fsync_when_unavailable(tmp_path, monkeypatch):
+    monkeypatch.delattr(os, "O_DIRECTORY", raising=False)
+    store = TemplateLifecycleStore(tmp_path)
+    state = {"templates": {"template.lifecycle": {"installed_version": "1.2.0"}}}
+
+    store.save(state)
+
+    assert json.loads(store.path.read_text(encoding="utf-8")) == state
 
 
 def test_lifecycle_reapply_is_idempotent_and_preserves_existing_value(tmp_path):

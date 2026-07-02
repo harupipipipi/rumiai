@@ -27,6 +27,7 @@ def test_non_builtin_templates_reject_absolute_paths_parent_segments_and_shell_h
             "trust_level": "user",
             "pieces": [
                 {"id": "abs", "kind": "function", "path": "/tmp/handler.py"},
+                {"id": "win-abs", "kind": "function", "path": "C:\\tmp\\handler.py"},
                 {"id": "parent", "kind": "function", "entrypoint": "../handler.py"},
                 {"id": "shell", "kind": "function", "handler": "bash -lc run"},
             ],
