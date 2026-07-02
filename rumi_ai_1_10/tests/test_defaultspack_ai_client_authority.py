@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -119,6 +121,97 @@ class _CaptureDenyAuthority:
             risk_level="medium",
             resource=kwargs["resource"],
         )
+
+
+def _provider_catalog_stub(*, active_provider_ids=None):
+    catalog = {
+        "openai": {
+            "display_name": "OpenAI",
+            "kind": "cloud",
+            "metadata": {
+                "default_base_url": "https://api.openai.com/v1",
+                "provider_kind": "cloud",
+            },
+        },
+        "google": {
+            "display_name": "Google",
+            "kind": "cloud",
+            "metadata": {"provider_kind": "cloud"},
+        },
+        "opencode-go": {
+            "display_name": "OpenCode Go",
+            "kind": "cloud",
+            "metadata": {
+                "default_base_url": "https://opencode.ai/zen/go/v1",
+                "provider_kind": "cloud",
+            },
+        },
+        "oauth-provider": {
+            "display_name": "OAuth Provider",
+            "kind": "cloud",
+            "availability": {},
+            "metadata": {"provider_kind": "cloud"},
+        },
+        "rumi": {
+            "display_name": "Rumi",
+            "kind": "local",
+            "metadata": {"provider_kind": "local"},
+        },
+    }
+    if active_provider_ids is None:
+        return catalog
+    active = {str(provider_id) for provider_id in active_provider_ids}
+    return {provider_id: entry for provider_id, entry in catalog.items() if provider_id in active}
+
+
+def _known_models_stub(*, provider_id=None, active_provider_ids=None):
+    models_by_provider = {
+        "openai": [
+            {
+                "id": "openai/gpt-5.4",
+                "model_id": "gpt-5.4",
+                "display_name": "GPT-5.4",
+                "metadata": {"endpoint_path": "/chat/completions"},
+            }
+        ],
+        "google": [
+            {
+                "id": "google/gemini-3",
+                "model_id": "gemini-3",
+                "display_name": "Gemini 3",
+                "metadata": {"endpoint_path": "/chat/completions"},
+            }
+        ],
+        "rumi": [
+            {
+                "id": "rumi/default",
+                "model_id": "default",
+                "display_name": "Rumi Default",
+                "metadata": {},
+            }
+        ],
+    }
+    if provider_id:
+        return list(models_by_provider.get(str(provider_id), []))
+    active = {str(item) for item in active_provider_ids or models_by_provider}
+    return [
+        model
+        for candidate_provider_id, models in models_by_provider.items()
+        if candidate_provider_id in active
+        for model in models
+    ]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_authority_resource_catalog(monkeypatch):
+    monkeypatch.setattr(
+        "domain.ai_client.authority_resource.get_provider_catalog_map",
+        _provider_catalog_stub,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.authority_resource.get_all_known_models",
+        _known_models_stub,
+    )
 
 
 def _client(monkeypatch):
