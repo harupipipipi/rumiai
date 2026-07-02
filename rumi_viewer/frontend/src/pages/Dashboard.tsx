@@ -72,7 +72,6 @@ function shouldRetryInitialProfileLoad(errorMessage: string): boolean {
 export function Dashboard() {
   const addToast = useAppStore((state) => state.addToast);
   const showDialog = useAppStore((state) => state.showDialog);
-  const closeDialog = useAppStore((state) => state.closeDialog);
   const runtimeReady = useAppStore((state) => state.runtimeReady);
   const runtimeStatus = useAppStore((state) => state.runtimeStatus);
   const runtimeError = useAppStore((state) => state.runtimeError);
@@ -349,7 +348,8 @@ export function Dashboard() {
           setSuccessFeedback('Profile deleted.');
         } catch (error) {
           setErrorFeedback(translateActionError(error, 'delete this profile'));
-        } finally { setActionState(null); closeDialog(); }
+          throw error;
+        } finally { setActionState(null); }
       },
     });
   };
@@ -494,23 +494,23 @@ export function Dashboard() {
                       {!isActive && lastLaunched && <span className="text-[11px] text-text-muted">Last used</span>}
                     </div>
                     <Popover>
-                      <PopoverTrigger className="rounded-md p-1.5 text-text-muted opacity-0 transition hover:bg-bg-hover group-hover:opacity-100 focus-visible:opacity-100">
+                      <PopoverTrigger className="rounded-md p-1.5 text-text-muted transition hover:bg-bg-hover">
                         <MoreHorizontal className="h-4 w-4" />
                         <span className="sr-only">Actions</span>
                       </PopoverTrigger>
                       <PopoverContent className="w-40">
                         <div className="flex flex-col py-1">
-                          <button onClick={() => patchSearchParams({ edit: profile.profile_id })} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover">
+                          <button role="menuitem" onClick={() => patchSearchParams({ edit: profile.profile_id })} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover">
                             <Save className="h-3.5 w-3.5" /> Edit
                           </button>
-                          <button onClick={() => void handleActivate(profile.profile_id)} disabled={isActive || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
+                          <button role="menuitem" onClick={() => void handleActivate(profile.profile_id)} disabled={isActive || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
                             <Star className={`h-3.5 w-3.5 ${isActive ? 'fill-accent text-accent' : ''}`} /> {isActive ? 'Active' : 'Set Active'}
                           </button>
-                          <button onClick={() => void handleDuplicate(profile.profile_id)} disabled={busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
+                          <button role="menuitem" onClick={() => void handleDuplicate(profile.profile_id)} disabled={busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-text-main transition hover:bg-bg-hover disabled:opacity-50">
                             <Copy className="h-3.5 w-3.5" /> Duplicate
                           </button>
                           <div className="my-1 border-t border-border" />
-                          <button onClick={() => handleDelete(profile.profile_id, profile.name)} disabled={profileCount <= 1 || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-950/20 disabled:opacity-50">
+                          <button role="menuitem" onClick={() => handleDelete(profile.profile_id, profile.name)} disabled={profileCount <= 1 || busy} className="flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-50 dark:hover:bg-red-950/20 disabled:opacity-50">
                             <Trash2 className="h-3.5 w-3.5" /> Delete
                           </button>
                         </div>

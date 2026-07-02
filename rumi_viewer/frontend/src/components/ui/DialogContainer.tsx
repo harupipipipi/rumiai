@@ -1,6 +1,8 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState } from 'react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
+import { viewerLayers } from '@/src/lib/layers';
+import { cn } from '@/src/lib/utils';
 import { Button } from './Button';
 
 export function DialogContainer() {
@@ -9,9 +11,15 @@ export function DialogContainer() {
   const closeDialog = useAppStore(state => state.closeDialog);
   const dialogRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const isConfirmingRef = useRef(false);
+  const [isConfirming, setIsConfirming] = useState(false);
+  isConfirmingRef.current = isConfirming;
 
   useEffect(() => {
-    if (!dialog) return;
+    if (!dialog) {
+      setIsConfirming(false);
+      return;
+    }
 
     previousFocusRef.current = document.activeElement as HTMLElement | null;
 
@@ -22,7 +30,9 @@ export function DialogContainer() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        closeDialog();
+        if (!isConfirmingRef.current) {
+          closeDialog();
+        }
         return;
       }
 
@@ -58,18 +68,31 @@ export function DialogContainer() {
     };
   }, [dialog, closeDialog]);
 
-  const handleConfirm = useCallback(() => {
-    if (!dialog) return;
-    dialog.onConfirm();
-    closeDialog();
-  }, [dialog, closeDialog]);
+  const handleClose = useCallback(() => {
+    if (!isConfirming) {
+      closeDialog();
+    }
+  }, [closeDialog, isConfirming]);
+
+  const handleConfirm = useCallback(async () => {
+    if (!dialog || isConfirming) return;
+    setIsConfirming(true);
+    try {
+      await dialog.onConfirm();
+      closeDialog();
+    } catch (error) {
+      console.error('Dialog confirmation failed:', error);
+    } finally {
+      setIsConfirming(false);
+    }
+  }, [dialog, closeDialog, isConfirming]);
 
   if (!dialog) return null;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in"
-      onClick={closeDialog}
+      className={cn("fixed inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-in fade-in", viewerLayers.dialog)}
+      onClick={handleClose}
       role="presentation"
     >
       <div
@@ -85,11 +108,13 @@ export function DialogContainer() {
         <h2 id="dialog-title" className="text-lg font-semibold text-text-main">{dialog.title}</h2>
         <p id="dialog-description" className="mt-2 text-sm text-text-muted">{dialog.message}</p>
         <div className="mt-6 flex justify-end gap-3">
-          <Button variant="outline" onClick={closeDialog}>
+          <Button variant="outline" onClick={handleClose} disabled={isConfirming}>
             {dialog.cancelText || t('dialog.cancel')}
           </Button>
-          <Button onClick={handleConfirm}>
-            {dialog.confirmText || t('dialog.confirm')}
+          <Button onClick={handleConfirm} loading={isConfirming}>
+            {isConfirming
+              ? (dialog.confirmPendingText || t('dialog.pending'))
+              : (dialog.confirmText || t('dialog.confirm'))}
           </Button>
         </div>
       </div>
