@@ -32,7 +32,7 @@ def test_cloudflare_sandbox_bridge_wrangler_config_matches_bridge_requirements()
 
     assert config["name"] == "rumi-cloudflare-sandbox-bridge"
     assert config["main"] == "src/index.ts"
-    assert config["compatibility_date"] == "2026-07-01"
+    assert config["compatibility_date"] == "2026-07-02"
     assert config["compatibility_flags"] == ["nodejs_compat"]
     assert config["containers"] == [
         {

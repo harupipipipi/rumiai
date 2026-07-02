@@ -31,7 +31,7 @@ def test_cloudflare_pc_tool_bridge_wrangler_config_is_worker_only() -> None:
 
     assert config["name"] == "rumi-cloudflare-pc-tool-bridge"
     assert config["main"] == "src/index.ts"
-    assert config["compatibility_date"] == "2026-07-01"
+    assert config["compatibility_date"] == "2026-07-02"
     assert config["compatibility_flags"] == ["nodejs_compat"]
     assert config["observability"]["enabled"] is True
     assert "containers" not in config
