@@ -4,7 +4,7 @@ event_bus.py - publish/subscribe(疎結合通信)
 スレッドセーフ版
 ワイルドカード対応:
   - `*` は1セグメントに一致 (例: `agent.*` → `agent.created`)
-  - `#` は1以上のセグメントに一致 (例: `agent.#` → `agent.created`, `agent.x.y`)
+  - `#` は0以上のセグメントに一致 (例: `agent.#` → `agent.created`, `agent.x.y`)
 """
 
 from __future__ import annotations

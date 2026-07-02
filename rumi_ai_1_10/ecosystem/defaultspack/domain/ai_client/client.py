@@ -1620,36 +1620,88 @@ class AIClient:
                 )
         return profiles
 
+    def _check_authority_for_direct_provider_call(self, *, provider, provider_id, model_id, model_ref, params=None):
+        if not self._provider_requires_authority(provider_id, provider, "legacy"):
+            return
+        self._check_authority_for_model_and_api_key_use(
+            provider_id=provider_id,
+            api_id="legacy",
+            model_id=model_id,
+            model_ref=model_ref,
+            params=params,
+            provider=provider,
+            stream=False,
+        )
+
     def embed(self, model, input_text):
         provider, model_name = self.resolve_provider(model)
+        provider_id = self._provider_id_for_provider(provider, model)
+        self._check_authority_for_direct_provider_call(
+            provider=provider,
+            provider_id=provider_id,
+            model_id=model_name,
+            model_ref=model,
+        )
         try:
             return provider.embed(model_name, input_text)
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
     def image_gen(self, model, prompt, params=None):
+        params = dict(params or {})
         provider, model_name = self.resolve_provider(model)
+        provider_id = self._provider_id_for_provider(provider, model)
+        self._check_authority_for_direct_provider_call(
+            provider=provider,
+            provider_id=provider_id,
+            model_id=model_name,
+            model_ref=model,
+            params=params,
+        )
         try:
-            return provider.image_gen(model_name, prompt, params or {})
+            return provider.image_gen(model_name, prompt, self._strip_authority_params(params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
     def image_analyze(self, model, image, prompt):
         provider, model_name = self.resolve_provider(model)
+        provider_id = self._provider_id_for_provider(provider, model)
+        self._check_authority_for_direct_provider_call(
+            provider=provider,
+            provider_id=provider_id,
+            model_id=model_name,
+            model_ref=model,
+        )
         try:
             return provider.image_analyze(model_name, image, prompt)
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
     def transcribe(self, model, audio, params=None):
+        params = dict(params or {})
         provider, model_name = self.resolve_provider(model)
+        provider_id = self._provider_id_for_provider(provider, model)
+        self._check_authority_for_direct_provider_call(
+            provider=provider,
+            provider_id=provider_id,
+            model_id=model_name,
+            model_ref=model,
+            params=params,
+        )
         try:
-            return provider.transcribe(model_name, audio, params or {})
+            return provider.transcribe(model_name, audio, self._strip_authority_params(params))
         except NotImplementedError as e:
             raise RuntimeError(str(e)) from None
 
     def tts(self, model, text, voice=None):
         provider, model_name = self.resolve_provider(model)
+        provider_id = self._provider_id_for_provider(provider, model)
+        self._check_authority_for_direct_provider_call(
+            provider=provider,
+            provider_id=provider_id,
+            model_id=model_name,
+            model_ref=model,
+        )
         try:
             return provider.tts(model_name, text, voice)
         except NotImplementedError as e:

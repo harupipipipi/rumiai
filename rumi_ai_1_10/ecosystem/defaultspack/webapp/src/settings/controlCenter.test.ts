@@ -132,6 +132,19 @@ test("account connection prelude enables Cloudflare when self-host OAuth is read
           connection_status: "not_connected",
           status_label: "Ready to connect",
           scopes: ["account:read", "user:read"],
+          provisioning: {
+            environment_status: "blocked",
+            sandbox_ready: false,
+            stable_pc_tunnel_ready: false,
+            pc_tool_bridge_ready: false,
+            constraints: {
+              cloudflare_sandbox_requires_workers_paid: true,
+              pages_dev_is_not_a_pc_tunnel_hostname: true,
+            },
+            blockers: [
+              { code: "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED", message: "Cloudflare Containers require the Workers Paid plan." },
+            ],
+          },
         },
       },
     },
@@ -147,6 +160,11 @@ test("account connection prelude enables Cloudflare when self-host OAuth is read
   assert.equal(cloudflare?.primaryLabel, "Connect Cloudflare");
   assert.equal(cloudflare?.disabledReason, "");
   assert.deepEqual(cloudflare?.scopes, ["account:read", "user:read"]);
+  assert.equal(cloudflare?.provisioning.environment_status, "blocked");
+  assert.deepEqual(
+    (cloudflare?.provisioning.blockers as Array<Record<string, unknown>> | undefined)?.map((item) => item.code),
+    ["CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED"],
+  );
 });
 
 test("account connection prelude gives Google explicit OAuth scope mode actions", () => {

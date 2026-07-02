@@ -48,6 +48,7 @@ SENSITIVE_LOCAL_PATHS = {
     "/api/authority/browser-ui-operator",
     "/api/browser/artifacts",
     "/api/tools/browser-computer",
+    "/api/tools/browser-companion/session",
     "/api/tools/create",
     "/api/tools/mcp/connect",
     "/api/runtime/ensure",

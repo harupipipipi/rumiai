@@ -72,6 +72,7 @@ domains:
     - domain/stream
     - domain/temporal_context
     - domain/tool
+    - domain/tool_policy
     - domain/vision
     path: domain/chat
   change_request:
@@ -288,6 +289,7 @@ domains:
     - domain/runtime_config
     - domain/safety
     - domain/tool_policy
+    - domain/ui_compiler
     path: domain/tool
   tool_policy:
     may_import:
@@ -304,6 +306,9 @@ domains:
   ui_surfaces:
     may_import: []
     path: domain/ui_surfaces
+  ui_compiler:
+    may_import: []
+    path: domain/ui_compiler
   vision:
     may_import:
     - domain/chat

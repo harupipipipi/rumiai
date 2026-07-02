@@ -3017,8 +3017,8 @@ function ChatApp() {
     });
   }
 
-  async function refreshProviderOAuthStatus(providerId: string) {
-    const result = await api.providerOAuthStatus(providerId);
+  async function refreshProviderOAuthStatus(providerId: string, options: { activeDiagnostics?: boolean } = {}) {
+    const result = await api.providerOAuthStatus(providerId, options);
     if (result.provider && typeof result.provider === "object" && !Array.isArray(result.provider)) {
       mergeProviderOAuthStatus(providerId, result.provider as Record<string, unknown>);
     }
@@ -3520,8 +3520,9 @@ function ChatApp() {
         const action = String(payload.action ?? "upsert").trim();
         const kind = String(payload.kind ?? "").trim() || undefined;
         if (action === "oauth_refresh") {
+          const activeDiagnostics = Boolean(payload.active_diagnostics);
           if (providerId) {
-            void refreshProviderOAuthStatus(providerId).catch(console.error);
+            void refreshProviderOAuthStatus(providerId, { activeDiagnostics }).catch(console.error);
           } else {
             void refreshCatalog().catch(console.error);
           }

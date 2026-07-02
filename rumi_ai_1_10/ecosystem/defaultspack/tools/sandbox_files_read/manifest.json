@@ -1,0 +1,44 @@
+{
+  "id": "sandbox_files_read",
+  "description": "Read a file from an existing managed sandbox.",
+  "config": {
+    "tool_id": "sandbox_files_read",
+    "name": "Sandbox Files Read",
+    "summary": "Read a file from an existing managed sandbox.",
+    "tool_category": "sandbox",
+    "action_type": "read",
+    "write_action": false,
+    "requires_approval": false,
+    "risk": "low",
+    "tags": ["sandbox", "files", "agent_os"],
+    "ui": {
+      "group_id": "sandbox",
+      "group_label": "Sandbox",
+      "group_icon": "terminal",
+      "item_icon": "file-text",
+      "widget_kind": "tool_toggle",
+      "composer_label": "Sandbox File Read",
+      "composer_description": "Read files inside an existing managed sandbox.",
+      "composer_icon": "file-text"
+    },
+    "schema": {
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sandbox_id": { "type": "string" },
+          "path": { "type": "string" },
+          "start_line": { "type": "integer", "minimum": 1 },
+          "end_line": { "type": "integer", "minimum": 1 },
+          "max_chars": { "type": "integer", "minimum": 1 },
+          "max_output_chars": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["sandbox_id", "path"]
+      }
+    },
+    "execution": {
+      "type": "local",
+      "handler": "domain.tool.sandbox_tools:sandbox_files_read"
+    }
+  }
+}

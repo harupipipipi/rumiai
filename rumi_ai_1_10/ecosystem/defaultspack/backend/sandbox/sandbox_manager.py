@@ -735,6 +735,56 @@ class SandboxManager:
             self._touch_ready_instance(inst.sandbox_id)
         return result
 
+    def read_file(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._enforce_lifecycle_for_instance(sandbox_id)
+        with self._lock:
+            inst, error = self._ready_instance(sandbox_id)
+            if error is not None:
+                return error
+            assert inst is not None
+            operation_error = self._require_operation(inst, "sandbox.files.read", "sandbox.files")
+            if operation_error is not None:
+                return operation_error
+        try:
+            agent = self._provider_agent(inst)
+            read_file = getattr(agent, "read_file", None)
+            if callable(read_file):
+                result = read_file(inst.sandbox_id, payload)
+            else:
+                result = {
+                    "ok": False,
+                    "error": "Sandbox file read is not available until a guest file service is implemented.",
+                    "code": "SANDBOX_FILES_NOT_READY",
+                    "status_code": 501,
+                }
+        except SandboxContractError as exc:
+            result = exc.to_dict()
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": f"Sandbox file read failed: {exc}",
+                "code": "SANDBOX_FILES_FAILED",
+                "status_code": 502,
+                "sandbox_id": inst.sandbox_id,
+                "status": inst.state,
+                "state": inst.state,
+                "provider_id": inst.provider_id,
+            }
+        if not isinstance(result, dict):
+            result = {
+                "ok": False,
+                "error": "Sandbox file read returned an invalid payload",
+                "code": "SANDBOX_FILES_FAILED",
+                "status_code": 502,
+            }
+        result.setdefault("sandbox_id", inst.sandbox_id)
+        result.setdefault("status", inst.state)
+        result.setdefault("state", inst.state)
+        result.setdefault("provider_id", inst.provider_id)
+        if result.get("ok") is True:
+            self._touch_ready_instance(inst.sandbox_id)
+        return result
+
     def expose_port(self, sandbox_id: str, payload: Dict[str, Any], *, approved: bool = False) -> Dict[str, Any]:
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:

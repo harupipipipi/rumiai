@@ -1394,6 +1394,12 @@
     },
     {
       "method": "POST",
+      "path": "/api/sandboxes/{sandbox_id}/files/read",
+      "function_id": "managed_runtime_sandbox_files_read",
+      "description": "Read a file inside a managed sandbox"
+    },
+    {
+      "method": "POST",
       "path": "/api/sandboxes/{sandbox_id}/files/apply-patch",
       "function_id": "managed_runtime_sandbox_files_apply_patch",
       "description": "Apply file changes inside a managed sandbox"

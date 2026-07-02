@@ -500,6 +500,7 @@ def test_window_relative_coordinates_are_sent_to_background_as_screen(controller
     )
     svc.doctor.return_value = {"platform": "win32", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     controller._computer_seat = svc
+    monkeypatch.setattr(controller, "_running_apps", lambda: [])
     monkeypatch.setattr(
         controller,
         "_list_windows",

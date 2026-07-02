@@ -59,6 +59,11 @@ from domain.chat.tool_recommender import (
     recommend_tool_ids,
     tool_assist_limit,
 )
+from domain.coding.frontend_precision import (
+    PRECISION_TOOL_NAMES,
+    detect_frontend_request,
+    precision_metadata,
+)
 from domain.prompt.manager import get_manager
 from domain.skill_trigger import RuntimeSkillTriggerService
 from domain.temporal_context import add_temporal_context_message, current_datetime_context
@@ -397,6 +402,17 @@ def prepare_chat_run(
                     set(ignored_tool_policy_keys)
                 )
                 store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
+    frontend_precision = _frontend_precision_metadata(
+        user_text=user_text,
+        metadata=metadata,
+        input_data=prepared_input,
+        conversation_metadata=conversation_metadata,
+        request_context=request_context,
+    )
+    if frontend_precision:
+        metadata["frontend_precision"] = frontend_precision
+        user_message["metadata"] = metadata
+        request_context["frontend_precision"] = frontend_precision
     template_tool_policy_resolution = _resolve_template_tool_policy(
         params.get("tool_policy") if isinstance(params.get("tool_policy"), dict) else {},
         metadata=metadata,
@@ -448,6 +464,11 @@ def prepare_chat_run(
             },
         },
     }
+    if frontend_precision:
+        tool_resolution_input = _with_frontend_precision_tool_selection(tool_resolution_input)
+        request_context["tool_selection"] = _tool_selection_metadata(
+            _normalize_tool_selection(tool_resolution_input)
+        )
 
     request_context, effective_system_prompt = _apply_effective_ai_input_to_request_context(
         request_context,
@@ -482,6 +503,9 @@ def prepare_chat_run(
     raw_tools, provider_tools, tool_context = _available_tools(
         request_context, tool_resolution_input, user_text=user_text
     )
+    if frontend_precision:
+        tool_context["frontend_precision"] = frontend_precision
+        request_context["frontend_precision"] = frontend_precision
     tool_hint_prompt = _tool_selection_hints_prompt(tool_context)
     if tool_hint_prompt:
         _append_system_context_message(standard_messages, tool_hint_prompt)
@@ -2656,6 +2680,80 @@ def _with_inferred_tools(
     updated = dict(input_data)
     updated["tools"] = merged
     return updated
+
+
+def _with_frontend_precision_tool_selection(input_data: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(input_data or {})
+    params = dict(updated.get("params") if isinstance(updated.get("params"), dict) else {})
+    selection = dict(params.get("tool_selection") if isinstance(params.get("tool_selection"), dict) else {})
+    include = _merge_tool_items(_coerce_tool_items(selection.get("include")), list(PRECISION_TOOL_NAMES))
+    exclude = [item for item in _coerce_tool_id_list(selection.get("exclude")) if item not in PRECISION_TOOL_NAMES]
+    selection.update(
+        {
+            "mode": "auto",
+            "include": include,
+            "exclude": exclude,
+            "scope": "turn",
+            "must_use": True,
+        }
+    )
+    params["tool_selection"] = selection
+    updated["params"] = params
+    return updated
+
+
+def _frontend_precision_metadata(
+    *,
+    user_text: str,
+    metadata: dict[str, Any],
+    input_data: dict[str, Any],
+    conversation_metadata: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any] | None:
+    files = _frontend_precision_file_hints(input_data, metadata, conversation_metadata)
+    explicit = metadata.get("frontend_precision") if isinstance(metadata.get("frontend_precision"), dict) else {}
+    command_hint = ""
+    if explicit:
+        mode = str(explicit.get("mode") or explicit.get("command") or "strict").strip()
+        command_hint = f"/frontend {mode}" if mode else "/frontend strict"
+    detection = detect_frontend_request(user_text, files=files, command=command_hint)
+    if not detection.enabled:
+        return None
+    return precision_metadata(
+        detection=detection,
+        task=user_text,
+        files=files,
+        context=request_context,
+    )
+
+
+def _frontend_precision_file_hints(
+    input_data: dict[str, Any],
+    metadata: dict[str, Any],
+    conversation_metadata: dict[str, Any],
+) -> list[str]:
+    values: list[Any] = []
+    for source in (input_data, metadata, conversation_metadata):
+        if not isinstance(source, dict):
+            continue
+        for key in ("files", "paths", "target_paths", "targetPaths", "changed_files", "changedFiles"):
+            raw = source.get(key)
+            if isinstance(raw, list):
+                values.extend(raw)
+            elif isinstance(raw, str):
+                values.append(raw)
+        workspace_root = source.get("workspace_root") or source.get("workspaceRoot")
+        if workspace_root:
+            values.append(workspace_root)
+    message = input_data.get("message") if isinstance(input_data.get("message"), dict) else {}
+    attachments = message.get("attachments")
+    if isinstance(attachments, list):
+        for item in attachments:
+            if isinstance(item, dict):
+                for key in ("path", "name", "filename"):
+                    if item.get(key):
+                        values.append(item[key])
+    return [str(item) for item in values if str(item or "").strip()]
 
 
 def _has_explicit_selected_tools(input_data: dict[str, Any]) -> bool:

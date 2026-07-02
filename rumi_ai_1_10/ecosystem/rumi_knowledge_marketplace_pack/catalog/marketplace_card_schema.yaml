@@ -1,5 +1,5 @@
 schema_id: rumi_knowledge_marketplace.card
-version: 1
+version: 2
 required_fields:
   - card_id
   - capability_type
@@ -9,7 +9,18 @@ required_fields:
   - permission_summary
   - provenance
   - install_review
-capability_types: [skill, template, playbook, connector_card, pack_bundle]
+optional_fields:
+  - display_name
+  - summary
+  - tags
+  - provides
+  - requirements
+  - model_policy
+  - extension_contract
+  - listing
+capability_types: [skill, tool, mcp_tool, mcp_server, template, playbook, connector_card, extension, pack_bundle]
+requirement_schema: schemas/marketplace_requirement.schema.json
+model_tier_catalog: catalog/model_tiers.yaml
 trust_statuses: [unreviewed, repository_reviewed, trusted, blocked]
 permission_summary_fields:
   - required_permissions

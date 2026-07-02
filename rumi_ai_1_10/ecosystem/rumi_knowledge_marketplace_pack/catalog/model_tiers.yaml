@@ -1,0 +1,72 @@
+catalog_id: rumi_knowledge_marketplace.model_tiers
+version: 1
+pack_id: rumi_knowledge_marketplace_pack
+provider_independent: true
+default_tier: standard
+selection_notes:
+  - Resolve current provider models through defaultspack model capabilities; do not pin marketplace cards to one provider model ID.
+  - A card may combine a tier with required model tags such as tool_calling, vision, or coding.
+  - The rough tier is for low-risk, replaceable work and must not silently handle high-impact decisions.
+tiers:
+  - id: rough
+    label: 雑に使ってよい
+    rough_use_allowed: true
+    suitable_for:
+      - tag normalization
+      - search query drafting
+      - low-risk classification
+      - disposable summaries and first drafts
+    avoid_for:
+      - security or trust decisions
+      - destructive actions
+      - final legal, medical, or financial output
+    routing:
+      min_quality_tier: local
+      max_cost_tier: low
+      preferred_speed_tiers: [fast, balanced]
+      preferred_model_groups: [cheap, fast, local]
+  - id: standard
+    label: 標準
+    rough_use_allowed: false
+    suitable_for:
+      - normal chat
+      - routine tool use
+      - document editing
+      - reversible workflows
+    avoid_for:
+      - security-critical review without a stronger reviewer
+    routing:
+      min_quality_tier: mid
+      max_cost_tier: medium
+      preferred_speed_tiers: [balanced, fast]
+      preferred_model_groups: [default]
+  - id: strong
+    label: 高品質
+    rough_use_allowed: false
+    suitable_for:
+      - coding
+      - multi-step planning
+      - complex tool orchestration
+      - marketplace review assistance
+    avoid_for:
+      - final high-impact approval without policy evidence
+    routing:
+      min_quality_tier: high
+      max_cost_tier: high
+      preferred_speed_tiers: [balanced, slow]
+      preferred_model_groups: [deep, default]
+  - id: frontier
+    label: 最上位
+    rough_use_allowed: false
+    suitable_for:
+      - difficult reasoning
+      - high-complexity architecture
+      - adversarial review
+      - final review of high-impact proposals
+    avoid_for:
+      - repetitive low-value bulk work
+    routing:
+      min_quality_tier: frontier
+      max_cost_tier: high
+      preferred_speed_tiers: [slow, balanced]
+      preferred_model_groups: [deep]

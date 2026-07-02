@@ -1924,6 +1924,13 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/tools/browser-computer", block_module="blocks.tool.browser_computer"
     ),
     HttpRouteSpec(
+        "GET",
+        "/api/tools/browser-companion/session",
+        block_module="blocks.tool.browser_companion_session",
+        sensitive=True,
+        local_only=True,
+    ),
+    HttpRouteSpec(
         "POST",
         "/api/tools/browser-companion/bridge/poll",
         block_module="blocks.tool.browser_companion_bridge_poll",
@@ -2106,6 +2113,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/ui/commands/execute", block_module="blocks.ui.commands"),
     HttpRouteSpec("POST", "/api/ui/clipboard", block_module="blocks.ui.clipboard"),
     HttpRouteSpec("POST", "/api/ui/client-events", block_module="blocks.ui.client_events"),
+    HttpRouteSpec("POST", "/api/ui/build-recursive", block_module="blocks.ui.build_recursive", sensitive=True),
+    HttpRouteSpec("GET", "/api/ui/generation-status", block_module="blocks.ui.generation_status"),
     HttpRouteSpec(
         "GET",
         "/api/ui/conversations/{id}/preview",

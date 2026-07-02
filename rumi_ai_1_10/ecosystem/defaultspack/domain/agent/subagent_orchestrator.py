@@ -169,6 +169,7 @@ def _delegate_via_input(
     task = str(payload.get("task") or payload.get("prompt") or "").strip()
     if not task:
         raise ValueError("task is required for delegated compatibility alias")
+    delegate_params = _delegate_params(payload)
     result = dispatch_input(
         RumiInputEnvelope(
             role="user",
@@ -187,7 +188,7 @@ def _delegate_via_input(
                 "runtime_profile_key": payload.get("runtime_profile_key"),
                 "capability_profile": payload.get("capability_profile"),
                 "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
-                "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+                "params": delegate_params,
             },
             tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
         ),
@@ -210,3 +211,26 @@ def _delegate_target(payload: dict[str, Any], context: dict[str, Any]) -> dict[s
     if conversation_id:
         target["conversation_id"] = conversation_id
     return target
+
+
+def _delegate_params(payload: dict[str, Any]) -> dict[str, Any]:
+    params = dict(payload.get("params") if isinstance(payload.get("params"), dict) else {})
+    for source_key, target_key in (
+        ("output_dir", "output_dir"),
+        ("outputDir", "output_dir"),
+        ("allowed_paths", "allowed_paths"),
+        ("allowedPaths", "allowed_paths"),
+        ("metadata", "metadata"),
+    ):
+        if source_key in payload and target_key not in params:
+            params[target_key] = payload[source_key]
+    if "output_dir" in params or "allowed_paths" in params:
+        params.setdefault(
+            "workspace_write_contract",
+            {
+                "output_dir": params.get("output_dir"),
+                "allowed_paths": list(params.get("allowed_paths") if isinstance(params.get("allowed_paths"), list) else []),
+                "mode": "create-from-empty-directory",
+            },
+        )
+    return params
