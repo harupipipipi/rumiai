@@ -2,8 +2,8 @@
   "pack_id": "rumi_knowledge_marketplace_pack",
   "pack_identity": "rumi:ecosystem/rumi_knowledge_marketplace_pack",
   "display_name": "Rumi Knowledge Marketplace Pack",
-  "description": "Declarative local-first marketplace pack for capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
-  "version": "0.1.0",
+  "description": "Declarative local-first marketplace pack for tag-based capability requirements, provider-independent model tiers, capability cards, provenance ledgers, install review, trust rubrics, promotion gates, and blacklist policy.",
+  "version": "0.2.0",
   "license": "MIT",
   "vocabulary": {
     "types": [
@@ -29,7 +29,7 @@
         "singleton": false
       },
       "schema": {
-        "description": "JSON Schema assets for marketplace cards and review records.",
+        "description": "JSON Schema assets for marketplace cards and tag-based requirement records.",
         "singleton": false
       }
     }
@@ -42,12 +42,16 @@
   "connectivity": {
     "provides": [
       "marketplace.card_schema",
+      "marketplace.tag_requirements",
+      "marketplace.model_tiers",
+      "marketplace.listing_preview",
       "marketplace.trust_rubric",
       "marketplace.install_review_workflow",
       "marketplace.provenance_ledger"
     ],
     "requires": [
-      "defaultspack.grants"
+      "defaultspack.grants",
+      "defaultspack.model_routing"
     ]
   },
   "required_secrets": [],
@@ -60,7 +64,11 @@
     "runtime_type": "declarative_pack",
     "owner_surfaces": [
       "skill_cards",
+      "tool_mcp_cards",
       "template_catalogs",
+      "tag_requirements",
+      "model_tier_metadata",
+      "marketplace_listing_preview",
       "install_candidate_reviews",
       "trust_metadata",
       "provenance_ledgers",
@@ -82,13 +90,18 @@
       {
         "pack_id": "rumi_connector_gateway_pack",
         "reason": "Connector execution, secrets, and live grants stay with connector gateway; marketplace captures card metadata only."
+      },
+      {
+        "pack_id": "rumi_mcp_gateway_pack",
+        "reason": "MCP server review, namespace routing, and connection approval stay with the MCP gateway and defaultspack."
       }
     ],
     "overlap_notes": {
-      "defaultspack": "Owns active grants, pack selection, and runtime enforcement.",
+      "defaultspack": "Owns active grants, pack selection, model routing, and runtime enforcement.",
       "rumi_pack_suite_pack": "Owns bundle installation and suite composition; marketplace owns candidate card trust metadata.",
       "rumi_security_review_pack": "Owns security analysis; marketplace owns triage, provenance, and blacklist policy.",
-      "rumi_connector_gateway_pack": "Owns connector execution; marketplace owns connector-card review records."
+      "rumi_connector_gateway_pack": "Owns connector execution; marketplace owns connector-card review records.",
+      "rumi_mcp_gateway_pack": "Owns unsupported MCP server review and namespace routing; marketplace owns searchable tags and requirement metadata."
     },
     "asset_index": {
       "manifest": [
@@ -97,18 +110,24 @@
       "readme": [
         "README.md"
       ],
+      "frontend_extensions": [
+        "frontend_extensions/marketplace_preview.ui.json"
+      ],
       "docs": [
         "docs/README.md",
         "docs/architecture.md",
         "docs/interfaces.md",
-        "docs/operations.md"
+        "docs/operations.md",
+        "docs/tag-requirements.md"
       ],
       "catalog": [
         "catalog/marketplace_card_schema.yaml",
+        "catalog/model_tiers.yaml",
         "catalog/trust_rubric.yaml"
       ],
       "schemas": [
-        "schemas/marketplace_card.schema.json"
+        "schemas/marketplace_card.schema.json",
+        "schemas/marketplace_requirement.schema.json"
       ],
       "policies": [
         "policies/marketplace_trust.policy.yaml",
@@ -134,6 +153,7 @@
       "examples": [
         "examples/connector_card_review.example.yaml",
         "examples/skill_review_card.example.yaml",
+        "examples/tagged_requirement.example.yaml",
         "examples/template_catalog_entry.example.yaml"
       ]
     }

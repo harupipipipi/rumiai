@@ -1,8 +1,10 @@
 {
-  "version": "rumi.knowledge_marketplace.card.schema.v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rumi.local/schemas/marketplace_card.schema.json",
+  "version": "rumi.knowledge_marketplace.card.schema.v2",
   "pack_id": "rumi_knowledge_marketplace_pack",
   "type": "object",
-  "description": "Schema-like contract for reviewed skills, templates, playbooks, connector cards, and bundle entries.",
+  "description": "Contract for reviewed skills, tools, MCP surfaces, templates, playbooks, extensions, and pack bundles. Runtime prerequisites are selected by human-readable tags rather than opaque IDs.",
   "required": [
     "card_id",
     "capability_type",
@@ -14,57 +16,264 @@
     "install_review"
   ],
   "properties": {
-    "card_id": {"type": "string"},
+    "card_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable provenance and ledger key. It is not used as a requirement selector."
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
     "capability_type": {
       "type": "string",
-      "enum": ["skill", "template", "playbook", "connector_card", "pack_bundle"]
+      "enum": [
+        "skill",
+        "tool",
+        "mcp_tool",
+        "mcp_server",
+        "template",
+        "playbook",
+        "connector_card",
+        "extension",
+        "pack_bundle"
+      ]
+    },
+    "tags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/tag"
+      },
+      "description": "Free-form discovery and compatibility tags, from broad terms such as coding to specific terms such as coding.python.refactor."
+    },
+    "provides": {
+      "type": "object",
+      "properties": {
+        "tags": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/tag"
+          }
+        },
+        "extension_points": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "requirements": {
+      "type": "array",
+      "items": {
+        "$ref": "marketplace_requirement.schema.json#/$defs/requirement"
+      },
+      "description": "Top-level entries are combined with AND. Each selector chooses any or all tag matching."
+    },
+    "model_policy": {
+      "type": "object",
+      "properties": {
+        "tier": {
+          "type": "string",
+          "enum": [
+            "rough",
+            "standard",
+            "strong",
+            "frontier"
+          ]
+        },
+        "rough_use_allowed": {
+          "type": "boolean"
+        },
+        "required_model_tags": {
+          "$ref": "marketplace_requirement.schema.json#/$defs/tag_selector"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "extension_contract": {
+      "type": "object",
+      "properties": {
+        "required_extension_points": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "listing": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "private",
+            "preview",
+            "coming_soon",
+            "listed",
+            "delisted"
+          ]
+        },
+        "searchable": {
+          "type": "boolean"
+        },
+        "search_label": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": true
     },
     "source": {
       "type": "object",
-      "required": ["source_ref", "content_digest"],
+      "required": [
+        "source_ref",
+        "content_digest"
+      ],
       "properties": {
-        "source_ref": {"type": "string"},
-        "content_digest": {"type": "string"},
-        "repository_ref": {"type": "string"}
-      }
+        "source_ref": {
+          "type": "string"
+        },
+        "content_digest": {
+          "type": "string"
+        },
+        "repository_ref": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     },
-    "publisher": {"type": "string"},
+    "publisher": {
+      "type": "string"
+    },
     "trust_status": {
       "type": "string",
-      "enum": ["unreviewed", "repository_reviewed", "trusted", "blocked"]
+      "enum": [
+        "unreviewed",
+        "repository_reviewed",
+        "trusted",
+        "blocked"
+      ]
     },
     "permission_summary": {
       "type": "object",
-      "required": ["required_permissions", "network_requirement", "secret_requirement", "host_execution_requirement"],
+      "required": [
+        "required_permissions",
+        "network_requirement",
+        "secret_requirement",
+        "host_execution_requirement"
+      ],
       "properties": {
         "required_permissions": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         },
-        "network_requirement": {"type": "string"},
-        "secret_requirement": {"type": "string"},
-        "host_execution_requirement": {"type": "boolean"}
-      }
+        "network_requirement": {
+          "type": "string"
+        },
+        "secret_requirement": {
+          "type": "string"
+        },
+        "host_execution_requirement": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
     },
     "provenance": {
       "type": "object",
-      "required": ["source_ref", "content_digest", "publisher", "reviewer", "reviewed_at"]
+      "required": [
+        "source_ref",
+        "content_digest",
+        "publisher",
+        "reviewer",
+        "reviewed_at"
+      ],
+      "properties": {
+        "source_ref": {
+          "type": "string"
+        },
+        "content_digest": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "reviewed_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
     },
     "install_review": {
       "type": "object",
-      "required": ["decision", "explicit_user_approval_required", "reviewer", "reason"],
+      "required": [
+        "decision",
+        "explicit_user_approval_required",
+        "reviewer",
+        "reason"
+      ],
       "properties": {
         "decision": {
           "type": "string",
-          "enum": ["allow_install", "allow_with_warning", "needs_security_review", "block_install"]
+          "enum": [
+            "allow_install",
+            "allow_with_warning",
+            "needs_security_review",
+            "block_install"
+          ]
         },
-        "explicit_user_approval_required": {"type": "boolean"},
-        "reviewer": {"type": "string"},
-        "reason": {"type": "string"},
+        "explicit_user_approval_required": {
+          "type": "boolean"
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
         "required_followups": {
           "type": "array",
-          "items": {"type": "string"}
+          "items": {
+            "type": "string"
+          }
         }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "tag": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "not": {
+        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
       }
     }
   },
