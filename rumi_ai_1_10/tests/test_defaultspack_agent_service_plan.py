@@ -55,6 +55,17 @@ def _collect_defaultspack_routes():
     return registry
 
 
+def _context_with_connected_tools(*tool_ids, **extra):
+    return {
+        **extra,
+        "runtime_profile": {
+            "defaultspack": {
+                "agents": {"test-agent": {"tools": list(tool_ids)}},
+            },
+        },
+    }
+
+
 def test_capability_catalog_loads_plan_manifest():
     from domain.capability.catalog import CapabilityCatalog
 
@@ -240,11 +251,13 @@ def test_model_profiles_expose_required_context_and_thinking_metadata():
 
 def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
+    from domain.tool.registry import ToolRegistry
     from blocks.chat.send import run
 
     storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
+    ToolRegistry._instance = None
 
     store = ChatStore()
     conversation = store.create_conversation(model="stub/default")
@@ -252,22 +265,26 @@ def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeyp
         {
             "conversation_id": conversation["id"],
             "message": {"role": "user", "content": "hello with tools"},
+            "tools": ["coding_file_read"],
             "params": {"thinking_level": "medium"},
         },
-        {},
+        _context_with_connected_tools("coding_file_read"),
     )
 
     assert result["status"] == "ok"
     assistant = result["data"]
     assert assistant["metadata"]["model"] == "stub/default"
     assert assistant["metadata"]["attached_tool_count"] >= 1
+    assert assistant["metadata"]["attached_tools"] == ["coding_file_read"]
     assert assistant["metadata"]["thinking_level"] == "medium"
     assert any(event["phase"] == "tools_attached" for event in assistant["events"])
 
     persisted = json.loads(storage_path.read_text(encoding="utf-8"))
     stored_assistant = persisted["conversations"][conversation["id"]]["messages"][-1]
     assert stored_assistant["metadata"]["attached_tool_count"] == assistant["metadata"]["attached_tool_count"]
+    assert stored_assistant["metadata"]["attached_tools"] == assistant["metadata"]["attached_tools"]
     ChatStore._instance = None
+    ToolRegistry._instance = None
 
     store = ChatStore()
     conversation = store.create_conversation(tags=["persisted"])
@@ -1981,7 +1998,7 @@ def test_chat_send_resolves_selected_tool_ids_before_provider_adaptation(tmp_pat
             "message": {"role": "user", "content": "read"},
             "tools": ["coding_file_read"],
         },
-        {"call_handler": call_handler},
+        _context_with_connected_tools("coding_file_read", call_handler=call_handler),
     )
 
     assert result["status"] == "ok"
@@ -2018,7 +2035,7 @@ def test_chat_send_drops_unknown_selected_tool_ids(tmp_path, monkeypatch):
             "message": {"role": "user", "content": "read"},
             "tools": ["coding_file_read", "missing_tool"],
         },
-        {"call_handler": call_handler},
+        _context_with_connected_tools("coding_file_read", call_handler=call_handler),
     )
 
     assert result["status"] == "ok"

@@ -15,6 +15,8 @@ from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.permissions 
 from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool.browser_computer import (
     BrowserComputerController,
 )
+from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import browser_computer
+from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.computer.mac import swift_host
 
 
 @pytest.fixture
@@ -30,10 +32,64 @@ def controller(tmp_path):
     svc.type_text.return_value = asdict(ActionResult(action="type_text", driver="mock", executed=True))
     svc.semantic_action.return_value = asdict(ActionResult(action="semantic_action", driver="mock", executed=True))
     svc.pid_event.return_value = asdict(ActionResult(action="pid_event", driver="mock", executed=True))
-    svc.observe.return_value = {"platform": "darwin", "screenshot": {"data_url": "data:image/png;base64,AAAA"}}
+    svc.observe.return_value = {
+        "platform": "darwin",
+        "screenshot": {"data_url": "data:image/png;base64,AAAA"},
+        "ax_tree": {"root": {"role": "AXWindow", "children": []}},
+    }
     svc.doctor.return_value = {"platform": "darwin", "driver_chain_order": [], "available_drivers": [], "unavailable_drivers": []}
     ctrl._computer_seat = svc
+    ctrl._list_windows = lambda: [_notes_window()]
     return ctrl
+
+
+@pytest.fixture
+def swift_host_calls(monkeypatch):
+    calls = []
+
+    class FakeMacSwiftComputerHost:
+        def available(self):
+            return True
+
+        def run(self, action, args):
+            calls.append({"action": action, "args": dict(args)})
+            if action == "computer.ocr":
+                return {"action": action, "driver": "mac_swift_host", "supported": True, "text": "selected text"}
+            if action == "computer.ax_tree":
+                return {
+                    "action": action,
+                    "driver": "mac_swift_host",
+                    "supported": True,
+                    "ax_tree": {"root": {"role": "AXWindow"}},
+                }
+            if action == "computer.click_text":
+                return {"action": action, "driver": "mac_swift_host", "executed": True, "supported": True}
+            return {"action": action, "driver": "mac_swift_host"}
+
+    monkeypatch.setattr(browser_computer.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(swift_host, "MacSwiftComputerHost", FakeMacSwiftComputerHost)
+    return calls
+
+
+def _notes_window():
+    return {
+        "app": "Notes",
+        "title": "Project Notes",
+        "x": 32,
+        "y": 48,
+        "width": 900,
+        "height": 640,
+        "pid": 4321,
+        "window_id": 8765,
+    }
+
+
+def _select_notes_window(controller):
+    window = _notes_window()
+    controller._list_windows = lambda: [window]
+    selected = controller.run("computer.select_window", {"app": "Notes", "focus": False}, yolo_mode=True)
+    assert selected["selected"] is True
+    return window
 
 
 def test_click_requires_approval_without_yolo(controller):
@@ -57,11 +113,53 @@ def test_observe_requires_approval_without_yolo(controller):
     controller._computer_seat.observe.assert_not_called()
 
 
+def test_ocr_requires_approval_without_yolo(controller):
+    """ocr can disclose screen text, so it requires approval before fallback observation."""
+    result = controller.run("computer.ocr", {"app": "Notes"})
+    assert result.get("requires_approval") is True
+    assert "approval_token" not in result
+    controller._computer_seat.observe.assert_not_called()
+
+
+def test_ax_tree_requires_approval_without_yolo(controller):
+    """ax_tree can disclose visible UI content, so it requires approval."""
+    result = controller.run("computer.ax_tree", {"app": "Notes"})
+    assert result.get("requires_approval") is True
+    assert "approval_token" not in result
+    controller._computer_seat.observe.assert_not_called()
+
+
+def test_click_text_requires_approval_without_yolo(controller):
+    """click_text is a text-targeted click and must be gated like click/semantic_action."""
+    result = controller.run("computer.click_text", {"text": "Save", "approved": True})
+    assert result.get("requires_approval") is True
+    assert "approval_token" not in result
+    controller._computer_seat.semantic_action.assert_not_called()
+
+
 def test_observe_yolo_bypasses(controller):
     """observe with yolo_mode executes after bypassing approval."""
     result = controller.run("computer.observe", {"app": "Notes"}, yolo_mode=True)
     assert result["action"] == "computer.observe"
     assert result["screenshot"]["data_url"].startswith("data:image/png;base64,")
+
+
+def test_ax_tree_yolo_bypasses_and_filters_observe_result(controller):
+    """ax_tree returns AX data from observe without leaking screenshot unless requested."""
+    result = controller.run("computer.ax_tree", {"app": "Notes"}, yolo_mode=True)
+    assert result["action"] == "computer.ax_tree"
+    assert result["supported"] is True
+    assert result["ax_tree"]["root"]["role"] == "AXWindow"
+    assert "screenshot" not in result
+
+
+def test_ocr_yolo_returns_explicit_unsupported_without_ocr_driver(controller):
+    """ocr should clearly report unsupported when neither host nor fallback exposes OCR."""
+    result = controller.run("computer.ocr", {"app": "Notes", "include_ax_tree": True}, yolo_mode=True)
+    assert result["action"] == "computer.ocr"
+    assert result["supported"] is False
+    assert "No OCR-capable" in result["reason"]
+    assert result["ax_tree"]["root"]["role"] == "AXWindow"
 
 
 def test_semantic_action_requires_approval(controller):
@@ -75,6 +173,80 @@ def test_semantic_action_yolo_bypasses(controller):
     result = controller.run("computer.semantic_action", {"intent": "press Save"}, yolo_mode=True)
     assert result["action"] == "computer.semantic_action"
     assert result.get("requires_approval") is not True
+
+
+def test_click_text_yolo_uses_semantic_action_fallback(controller):
+    """click_text passes text target aliases through to semantic fallback."""
+    result = controller.run(
+        "computer.click_text",
+        {
+            "query": "Save",
+            "text_query": "Save",
+            "match_text": "Save",
+            "role": "button",
+            "element_id": "AX-1",
+            "confidence_threshold": 0.8,
+        },
+        yolo_mode=True,
+    )
+
+    assert result["action"] == "computer.click_text"
+    assert result["underlying_action"] == "computer.semantic_action"
+    call = controller._computer_seat.semantic_action.call_args
+    assert call.kwargs["intent"] == "click the button matching text: Save"
+    assert call.kwargs["element_or_point"] == {
+        "id": "AX-1",
+        "role": "button",
+        "confidence_threshold": 0.8,
+        "text": "Save",
+        "query": "Save",
+        "text_query": "Save",
+        "match_text": "Save",
+    }
+
+
+@pytest.mark.parametrize(
+    ("action", "payload"),
+    [
+        ("computer.ocr", {}),
+        ("computer.ax_tree", {}),
+        ("computer.click_text", {"text": "Save"}),
+    ],
+)
+def test_swift_fast_path_uses_selected_window_target(controller, swift_host_calls, action, payload):
+    window = _select_notes_window(controller)
+
+    result = controller.run(action, payload, yolo_mode=True)
+
+    assert result["action"] == action
+    assert swift_host_calls[-1]["action"] == action
+    args = swift_host_calls[-1]["args"]
+    assert args["window_id"] == window["window_id"]
+    assert args["pid"] == window["pid"]
+    assert args["app"] == window["app"]
+    assert args["title"] == window["title"]
+    assert args["window_title"] == window["title"]
+    assert args["x"] == window["x"]
+    assert args["y"] == window["y"]
+    assert args["width"] == window["width"]
+    assert args["height"] == window["height"]
+
+
+def test_swift_fast_path_refuses_unmatched_explicit_target(controller, swift_host_calls):
+    _select_notes_window(controller)
+
+    result = controller.run(
+        "computer.ocr",
+        {"app": "Safari", "title": "Missing"},
+        yolo_mode=True,
+    )
+
+    assert result["action"] == "computer.ocr"
+    assert result["supported"] is False
+    assert "No visible window matched" in result["reason"]
+    assert result["target_filter"] == {"app": "Safari", "title": "Missing"}
+    assert swift_host_calls == []
+    controller._computer_seat.observe.assert_not_called()
 
 
 def test_pid_event_requires_approval(controller):
