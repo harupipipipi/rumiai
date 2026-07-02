@@ -515,6 +515,37 @@ def test_cloud_model_capability_false_values_are_preserved():
     assert nvidia_nemotron["model_capabilities"]["capabilities"]["parallel_tool_calls"] is True
 
 
+def test_openai_primary_chat_models_remain_tool_capable_in_public_catalog():
+    from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_model_catalog
+
+    models = {item["id"]: item for item in list_model_catalog("openai")}
+    expectations = {
+        "openai/gpt-5.4": True,
+        "openai/gpt-5.4-mini": True,
+        "openai/gpt-4o": False,
+    }
+
+    for model_id, supports_thinking in expectations.items():
+        model = models[model_id]
+        capabilities = model["model_capabilities"]["capabilities"]
+
+        assert model["supports_tool_calling"] is True
+        assert model["supports_image_input"] is True
+        assert model["supports_vision"] is True
+        assert model["supports_thinking"] is supports_thinking
+        assert capabilities["tool_calling"] is True
+        assert capabilities["parallel_tool_calls"] is True
+        assert capabilities["json_schema"] is True
+        assert capabilities["structured_output"] is True
+        assert capabilities["image_input"] is True
+        assert capabilities["thinking"] is supports_thinking
+        assert model["request_features"] == {
+            "json_mode": True,
+            "response_format": True,
+            "tool_choice": True,
+        }
+
+
 def test_moonshot_manifest_first_runtime_provider(monkeypatch):
     from domain.ai_client.providers import detect_available_providers
 
