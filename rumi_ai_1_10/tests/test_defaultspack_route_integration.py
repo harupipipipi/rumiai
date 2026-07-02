@@ -388,6 +388,22 @@ def test_static_mediapipe_wasm_uses_browser_wasm_mime():
     assert isinstance(result["body"], bytes)
 
 
+def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
+    canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
+    mirror_dir = DEFAULTSPACK_ROOT / "ui" / "mediapipe" / "wasm"
+
+    canonical_files = sorted(path.name for path in canonical_dir.iterdir() if path.is_file())
+    mirror_files = sorted(path.name for path in mirror_dir.iterdir() if path.is_file())
+
+    assert mirror_files == canonical_files
+    for name in canonical_files:
+        assert (mirror_dir / name).read_bytes() == (canonical_dir / name).read_bytes(), name
+
+    canonical_model = DEFAULTSPACK_ROOT / "webapp" / "public" / "models" / "hand_landmarker.task"
+    mirror_model = DEFAULTSPACK_ROOT / "ui" / "models" / "hand_landmarker.task"
+    assert mirror_model.read_bytes() == canonical_model.read_bytes()
+
+
 def test_pack_api_dispatches_defaultspack_interface_routes(monkeypatch):
     from core_runtime.pack_api_server import PackAPIHandler
 

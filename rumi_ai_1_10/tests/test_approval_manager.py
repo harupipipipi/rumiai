@@ -243,6 +243,12 @@ class TestVerifyHash:
         )
 
         mgr.approve("testpack")
+        approval = mgr.get_approval("testpack")
+        assert approval is not None
+        approval.file_hashes = {
+            (path.replace("/", "\\") if path == "components/demo/startup.py" else path): value
+            for path, value in approval.file_hashes.items()
+        }
         (component_dir / "startup.py").write_text(
             "def run(): return 'tampered'\n", encoding="utf-8"
         )

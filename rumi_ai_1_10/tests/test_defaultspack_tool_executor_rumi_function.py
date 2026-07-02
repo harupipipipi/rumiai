@@ -1004,6 +1004,7 @@ def test_sandbox_exec_command_string_preserves_quoted_whitespace(tmp_path, monke
 
     fake_api = FakeSandboxApi()
     monkeypatch.setattr(sandbox_tools, "_sandbox_api", lambda: fake_api)
+    monkeypatch.setattr(sandbox_tools.sys, "platform", "win32")
     context = seal_tool_context(
         {"workspace_root": str(tmp_path)},
         {"action": "allow", "allowed": True},
@@ -1014,6 +1015,12 @@ def test_sandbox_exec_command_string_preserves_quoted_whitespace(tmp_path, monke
     assert result["status"] == "ok"
     exec_call = next(call for call in fake_api.calls if call["_handler"] == "sandbox_exec")
     assert exec_call["argv"] == ["python", "-c", "print('a  b')"]
+
+    path_result = sandbox_tools.sandbox_exec({"command": r"python scripts\hello.py"}, context)
+
+    assert path_result["status"] == "ok"
+    exec_calls = [call for call in fake_api.calls if call["_handler"] == "sandbox_exec"]
+    assert exec_calls[-1]["argv"] == ["python", r"scripts\hello.py"]
 
 
 def test_sandbox_file_patch_and_port_tools_forward_to_runtime_api(tmp_path, monkeypatch):
@@ -1182,8 +1189,9 @@ def test_python_and_node_exec_script_path_stages_file_in_sandbox(tmp_path, monke
     deletes = [call for call in fake_api.calls if call["_handler"] == "sandbox_delete"]
     assert [call["template_id"] for call in creates] == ["coding.python", "coding.node"]
     assert patches[0]["files"][0]["path"] == "scripts/hello.py"
-    assert base64.b64decode(patches[0]["files"][0]["content_base64"]).decode("utf-8") == "print('ok')\n"
+    assert base64.b64decode(patches[0]["files"][0]["content_base64"]) == python_script.read_bytes()
     assert patches[1]["files"][0]["path"] == "scripts/hello.js"
+    assert base64.b64decode(patches[1]["files"][0]["content_base64"]) == node_script.read_bytes()
     assert execs[0]["argv"] == ["python", "scripts/hello.py"]
     assert execs[0]["timeout_ms"] == 5000
     assert execs[1]["argv"] == ["node", "scripts/hello.js"]

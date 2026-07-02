@@ -302,7 +302,17 @@ def _command_plan(arguments: dict[str, Any]) -> dict[str, Any]:
                 "code": "SANDBOX_SHELL_STRING_REJECTED",
             }
         try:
-            return {"argv": shlex.split(stripped, posix=sys.platform != "win32")}
+            posix = sys.platform != "win32"
+            parts = shlex.split(stripped, posix=posix)
+            if not posix:
+                parts = [_strip_matching_quotes(part) for part in parts]
+            return {"argv": parts}
         except ValueError as exc:
             return {"error": f"invalid command string: {exc}", "code": "INVALID_INPUT"}
     return {"error": "'command' must be a string or argv array", "code": "INVALID_INPUT"}
+
+
+def _strip_matching_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value

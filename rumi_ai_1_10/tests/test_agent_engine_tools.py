@@ -3,12 +3,78 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 DEFAULTSPACK_ROOT = Path(__file__).resolve().parents[1] / "ecosystem" / "defaultspack"
 if str(DEFAULTSPACK_ROOT) not in sys.path:
     sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.agent.engine import AgentEngine  # noqa: E402
 from domain.tool.schema_adapter import adapt_tool_definition, runtime_profile_enforced_tool_names  # noqa: E402
+
+
+def _stub_model_profile(model: str) -> dict:
+    provider, _, model_id = model.partition("/")
+    return {
+        "profile_id": model,
+        "qualified_model_id": model,
+        "provider_id": provider or "stub",
+        "model_id": model_id or model,
+        "type": "chat",
+        "configured": True,
+        "supports_tool_calling": True,
+        "supports_vision": True,
+        "supports_image_input": True,
+        "supports_thinking": True,
+        "supports_fast": True,
+        "speed_tier": "fast",
+        "knowledge_level": 0,
+    }
+
+
+_STUB_MODEL_PROFILES = [
+    _stub_model_profile("stub/default"),
+    _stub_model_profile("stub/model"),
+    _stub_model_profile("demo/tools"),
+    _stub_model_profile("demo/vision"),
+]
+
+
+def _stub_capabilities(model: str, *, profiles: list[dict] | None = None) -> dict:
+    for profile in profiles or _STUB_MODEL_PROFILES:
+        if model in {profile.get("profile_id"), profile.get("qualified_model_id")}:
+            return dict(profile)
+    return _stub_model_profile(str(model or "stub/default"))
+
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_model_catalog(monkeypatch) -> None:
+    class FakeModelRuntimeSettingsService:
+        def get_settings(self) -> dict:
+            return {
+                "preferred_model": "stub/default",
+                "preferred_model_group": "default",
+                "auto_route_within_group": True,
+                "model_groups": {
+                    "default": {
+                        "label": "Default",
+                        "allowed_models": [
+                            profile["profile_id"] for profile in _STUB_MODEL_PROFILES
+                        ],
+                    }
+                },
+            }
+
+    monkeypatch.setattr(
+        "domain.agent.engine.ModelRuntimeSettingsService",
+        FakeModelRuntimeSettingsService,
+    )
+    monkeypatch.setattr("domain.agent.engine.get_model_capabilities", _stub_capabilities)
+    monkeypatch.setattr(
+        "domain.ai_client.model_router.models_for_group",
+        lambda _group_id, _settings, profiles=None: list(profiles or _STUB_MODEL_PROFILES),
+    )
+    monkeypatch.setattr("domain.ai_client.model_router.get_model_capabilities", _stub_capabilities)
 
 
 def _tool(name: str) -> dict:

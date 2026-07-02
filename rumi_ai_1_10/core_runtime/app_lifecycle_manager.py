@@ -91,6 +91,28 @@ class AppLifecycleManager:
 
     base_dir: Path = field(default_factory=lambda: Path(__file__).resolve().parent.parent)
 
+    def _check_setup_pack_selection_status(self) -> Dict[str, Any]:
+        try:
+            from .setup_pack import SetupPackManager
+
+            manager = SetupPackManager(
+                root=self.base_dir / "ecosystem" / "setup_pack",
+                selection_file=(
+                    self.base_dir
+                    / "user_data"
+                    / "settings"
+                    / "setup_pack_selection.json"
+                ),
+                ecosystem_dir=self.base_dir / "ecosystem",
+            )
+            return manager.get_completed_selection_status()
+        except Exception as e:
+            logger.warning("setup_pack selection status check failed: %s", e)
+            return {
+                "completed": False,
+                "reason": "setup_pack_selection_check_error: {}".format(e),
+            }
+
     def check_setup_status(self) -> Dict[str, Any]:
         """
         セットアップ状態を確認する。
@@ -107,6 +129,19 @@ class AppLifecycleManager:
         except Exception as e:
             logger.error("check_setup_status failed: %s", e)
             result = {"needs_setup": True, "reason": "check_error: {}".format(e)}
+
+        if result.get("needs_setup"):
+            setup_pack_status = self._check_setup_pack_selection_status()
+            if setup_pack_status.get("completed"):
+                result = {
+                    **result,
+                    "needs_setup": False,
+                    "reason": setup_pack_status.get("reason", "setup_pack_selection_valid"),
+                    "profile_reason": result.get("reason"),
+                    "setup_pack_selection": setup_pack_status,
+                }
+            else:
+                result["setup_pack_selection"] = setup_pack_status
 
         result.update(get_runtime_readiness())
         return result

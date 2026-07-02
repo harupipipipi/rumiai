@@ -1007,7 +1007,8 @@ def test_managed_ubuntu_seeds_trusted_workspace_read_only(monkeypatch, tmp_path)
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     workspace_root = tmp_path / "workspace"
     (workspace_root / "src").mkdir(parents=True)
-    (workspace_root / "src" / "app.py").write_text("print('seeded')\n", encoding="utf-8")
+    app_path = workspace_root / "src" / "app.py"
+    app_path.write_text("print('seeded')\n", encoding="utf-8")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
     provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
     requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
@@ -1026,14 +1027,15 @@ def test_managed_ubuntu_seeds_trusted_workspace_read_only(monkeypatch, tmp_path)
     assert started.state == "ready"
     assert f"find {started.opaque_state['guest_workspace']} -mindepth 1 -maxdepth 1 ! -name .rumi" in seed_script
     assert "& ~0o222" in seed_script
-    assert _workspace_seed_member(payload, "src/app.py") == b"print('seeded')\n"
+    assert _workspace_seed_member(payload, "src/app.py") == app_path.read_bytes()
 
 
 def test_managed_ubuntu_seeds_trusted_workspace_overlay(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     workspace_root = tmp_path / "workspace"
     workspace_root.mkdir()
-    (workspace_root / "package.json").write_text('{"scripts":{"test":"true"}}\n', encoding="utf-8")
+    package_path = workspace_root / "package.json"
+    package_path.write_text('{"scripts":{"test":"true"}}\n', encoding="utf-8")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
     provider = MacLimaProvider(command_path="/usr/bin/limactl", runner=fake)
     requirements = RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec", "sandbox.files"}))
@@ -1051,7 +1053,7 @@ def test_managed_ubuntu_seeds_trusted_workspace_overlay(monkeypatch, tmp_path) -
     assert ensured.ok is True
     assert started.state == "ready"
     assert "RUMI_WORKSPACE_SEED_MODE=overlay" in seed_script
-    assert _workspace_seed_member(payload, "package.json") == b'{"scripts":{"test":"true"}}\n'
+    assert _workspace_seed_member(payload, "package.json") == package_path.read_bytes()
 
 
 def test_default_sandbox_api_registers_cross_platform_runtime_providers() -> None:
