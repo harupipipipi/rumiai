@@ -335,6 +335,45 @@ def test_cloudflare_sandbox_bridge_exec_fails_closed_for_malformed_sse():
     assert result["code"] == "CLOUDFLARE_SANDBOX_BRIDGE_INVALID_SSE"
 
 
+def test_cloudflare_sandbox_bridge_exec_error_event_redacts_bridge_api_key():
+    api_key = "bridge-secret-token"
+    stream = (
+        "event: error\n"
+        "data: {"
+        '"code":"BRIDGE_EXEC_FAILED",'
+        '"error":"runner failed with Authorization: Bearer unrelated-token and bridge-secret-token"'
+        "}\n\n"
+    )
+    transport = StaticBridgeTransport(
+        BridgeResponse(200, {"content-type": "text/event-stream"}, stream.encode())
+    )
+    agent = CloudflareSandboxBridgeProvider(
+        base_url="https://bridge.example.com",
+        api_key=api_key,
+        transport=transport,
+    ).connect_agent(_provider_instance("cf-1"))
+
+    result = agent.exec(
+        "cf-1",
+        GuestExecRequest(
+            argv=("true",),
+            cwd=".",
+            env={},
+            timeout_ms=1000,
+            stdin=None,
+            client_request_id="sse-error-redact-1",
+        ).to_agent_payload(),
+    )
+
+    assert result["ok"] is False
+    assert result["code"] == "BRIDGE_EXEC_FAILED"
+    error = result["error"]
+    assert api_key not in error
+    assert "unrelated-token" not in error
+    assert "Bearer [REDACTED]" in error
+    assert error.count("[REDACTED]") == 2
+
+
 def test_cloudflare_sandbox_bridge_exec_applies_provider_output_limit():
     stream = (
         "event: stdout\n"

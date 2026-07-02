@@ -512,7 +512,10 @@ class CloudflareSandboxBridgeGuestAgent:
                 "ok": False,
                 "sandbox_id": sandbox_id,
                 "code": str(error_payload.get("code") or "CLOUDFLARE_SANDBOX_BRIDGE_EXEC_ERROR"),
-                "error": str(error_payload.get("error") or "Cloudflare Sandbox Bridge exec failed."),
+                "error": _redact_bridge_secret_text(
+                    str(error_payload.get("error") or "Cloudflare Sandbox Bridge exec failed."),
+                    self._api_key,
+                )[:1000],
                 "status_code": 502,
                 "stdout": stdout,
                 "stderr": stderr,
