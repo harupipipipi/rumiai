@@ -1,0 +1,224 @@
+{
+  "models": [
+    {
+      "id": "vercel-ai-gateway/xiaomi/mimo-v2.5-pro",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "xiaomi/mimo-v2.5-pro",
+      "display_name": "MiMo V2.5 Pro via Vercel AI Gateway",
+      "type": "reasoning",
+      "enabled": true,
+      "priority": 1,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": false,
+        "file_input": true
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high"],
+      "default_thinking_level": "medium"
+    },
+    {
+      "id": "vercel-ai-gateway/xiaomi/mimo-v2.5",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "xiaomi/mimo-v2.5",
+      "display_name": "MiMo V2.5 via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 2,
+      "defaults": {
+        "chat": true,
+        "coding": true,
+        "agent": true,
+        "reasoning": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true,
+        "file_input": true
+      },
+      "supports_thinking": true,
+      "thinking_levels": ["low", "medium", "high"],
+      "default_thinking_level": "medium"
+    },
+    {
+      "id": "vercel-ai-gateway/xiaomi/mimo-v2-flash",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "xiaomi/mimo-v2-flash",
+      "display_name": "MiMo V2 Flash via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 3,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": false
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/google/gemma-4-31b-it",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "google/gemma-4-31b-it",
+      "display_name": "Gemma 4 31B IT via Vercel AI Gateway",
+      "type": "vision",
+      "enabled": true,
+      "priority": 4,
+      "defaults": {
+        "vision": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true,
+        "file_input": true
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/google/gemma-4-26b-a4b-it",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "google/gemma-4-26b-a4b-it",
+      "display_name": "Gemma 4 26B A4B IT via Vercel AI Gateway",
+      "type": "vision",
+      "enabled": true,
+      "priority": 5,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true,
+        "file_input": true
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/deepseek/deepseek-v4-flash",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "deepseek/deepseek-v4-flash",
+      "display_name": "DeepSeek V4 Flash via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 6,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "parallel_tool_calls": false,
+        "vision": false
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/alibaba/qwen3-coder-30b-a3b",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "alibaba/qwen3-coder-30b-a3b",
+      "display_name": "Qwen3 Coder 30B A3B via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 7,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": false
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/alibaba/qwen-3-14b",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "alibaba/qwen-3-14b",
+      "display_name": "Qwen 3 14B via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 8,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": true,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": false
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/zai/glm-4.7-flashx",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "zai/glm-4.7-flashx",
+      "display_name": "GLM 4.7 FlashX via Vercel AI Gateway",
+      "type": "chat",
+      "enabled": true,
+      "priority": 9,
+      "defaults": {
+        "fast": true,
+        "cheap": true
+      },
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": false
+      }
+    },
+    {
+      "id": "vercel-ai-gateway/zai/glm-4.6v",
+      "category": "llm_model",
+      "version": "1",
+      "provider_id": "vercel-ai-gateway",
+      "model_id": "zai/glm-4.6v",
+      "display_name": "GLM 4.6V via Vercel AI Gateway",
+      "type": "vision",
+      "enabled": true,
+      "priority": 10,
+      "defaults": {},
+      "capabilities": {
+        "chat": true,
+        "streaming": true,
+        "reasoning": false,
+        "tool_calls": true,
+        "parallel_tool_calls": true,
+        "vision": true
+      }
+    }
+  ]
+}

@@ -33,14 +33,18 @@
           "seat_id": { "type": "string" },
           "desktop_id": { "type": "string" },
           "access_key": { "type": "string" },
-          "action": { "type": "string", "enum": ["move", "click", "double_click", "drag", "scroll", "type_text", "key"] },
+          "action": {
+            "type": "string",
+            "description": "Required. Use type_text with text to type; use key with key=Enter to press Enter. Do not send text without action.",
+            "enum": ["move", "click", "double_click", "drag", "scroll", "type_text", "key"]
+          },
           "x": { "type": "integer" },
           "y": { "type": "integer" },
           "to_x": { "type": "integer" },
           "to_y": { "type": "integer" },
           "button": { "type": "string", "enum": ["left", "middle", "right"] },
-          "text": { "type": "string" },
-          "key": { "type": "string" },
+          "text": { "type": "string", "description": "Text to type when action is type_text." },
+          "key": { "type": "string", "description": "Key to press when action is key, for example Enter." },
           "delta_x": { "type": "integer" },
           "delta_y": { "type": "integer" }
         },

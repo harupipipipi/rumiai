@@ -10,6 +10,10 @@ import base64
 import ssl
 
 from ..base_provider import BaseProvider
+from ..request_timeout import (
+    PROVIDER_REQUEST_TIMEOUT_MAX_SECONDS,
+    PROVIDER_REQUEST_TIMEOUT_MIN_SECONDS,
+)
 
 
 class OpenAIProvider(BaseProvider):
@@ -256,7 +260,10 @@ class OpenAIProvider(BaseProvider):
             timeout = float(value)
         except (TypeError, ValueError):
             timeout = 120.0
-        return max(2.0, min(timeout, 120.0))
+        return max(
+            PROVIDER_REQUEST_TIMEOUT_MIN_SECONDS,
+            min(timeout, PROVIDER_REQUEST_TIMEOUT_MAX_SECONDS),
+        )
 
     def _request_timeout_kwargs(self, params):
         raw = dict(params or {})

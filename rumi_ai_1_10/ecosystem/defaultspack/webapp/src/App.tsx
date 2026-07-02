@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { Hand, Loader2 } from "lucide-react";
 
-import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
+import {
+  CompanyWorkspacePanel,
+  resolveCompanyWorkspaceHint,
+  resolveCompanyWorkspaceHintFromGroup,
+} from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
 import { DefaultsConsoleWindow } from "./ambient/DefaultsConsoleWindow";
 import { AdaptiveRuntimePage } from "./adaptive";
@@ -25,6 +29,12 @@ import {
   type WorkspaceTab,
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
+import {
+  initialActiveWorkspaceTabIdForPathname,
+  initialWorkspaceTabsForPathname,
+  workspaceKindForPathname,
+  workspaceUrlForKind,
+} from "./lib/workspaceRouting";
 import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
@@ -44,6 +54,7 @@ import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToke
 import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
+import { loadConversationForRefresh, resolveSupersededConversationRedirect } from "./lib/chatRouteLoading";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
@@ -2048,6 +2059,8 @@ function isPendingInLocation(): boolean {
 }
 
 function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
+  const routeKind = workspaceKindForPathname(window.location.pathname);
+  if (routeKind && routeKind !== "chat" && routeKind !== "coding") return;
   const url = new URL(window.location.href);
   url.pathname = window.location.pathname === "/coding" ? "/coding" : "/chat";
   if (conversationId) {
@@ -2064,6 +2077,14 @@ function replaceChatIdInUrl(conversationId: string | null, pending?: boolean) {
   const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
   if (next !== current) {
     window.history.pushState({ conversationId }, "", next);
+  }
+}
+
+function pushWorkspaceRoute(kind: WorkspaceTabKind, conversationId: string | null = null) {
+  const next = workspaceUrlForKind(kind, window.location.href, conversationId);
+  const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (next !== current) {
+    window.history.pushState({ workspaceKind: kind, conversationId }, "", next);
   }
 }
 
@@ -2252,6 +2273,7 @@ function ChatApp() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  const [activeHistoryCompanyId, setActiveHistoryCompanyId] = useState<string | null>(null);
   const [input, setInput] = useLocalStorage("rumi-input", "");
   const [composerCandidateMenu, setComposerCandidateMenu] = useState<ComposerCandidateMenuState>(null);
   const [isSpotlightOpen, setIsSpotlightOpen] = useState(false);
@@ -2268,10 +2290,8 @@ function ChatApp() {
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
-    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
-  ]);
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialActiveWorkspaceTabIdForPathname(window.location.pathname));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -3106,6 +3126,11 @@ function ChatApp() {
       return;
     }
     const conversation = await api.getConversation(conversationId);
+    const supersededTargetId = resolveSupersededConversationRedirect(conversation, conversationId);
+    if (supersededTargetId) {
+      await loadConversation(supersededTargetId, updateUrl);
+      return;
+    }
     setActiveConversationId(conversationId);
     setActiveConversation(conversation);
     if (updateUrl) replaceChatIdInUrl(conversationId);
@@ -3115,21 +3140,13 @@ function ChatApp() {
   async function refreshConversations(preferredId?: string | null) {
     const result = await api.listConversations();
     setConversations(result.conversations);
-
-    const targetId = preferredId ?? activeConversationId ?? chatIdFromLocation() ?? result.conversations[0]?.id ?? null;
-    if (!targetId) {
-      setActiveConversationId(null);
-      setActiveConversation(null);
-      void refreshPreview(null);
-      return;
-    }
-
-    if (!result.conversations.some((conversation) => conversation.id === targetId)) {
-      await loadConversation(result.conversations[0]?.id ?? null);
-      return;
-    }
-
-    await loadConversation(targetId);
+    await loadConversationForRefresh({
+      preferredId,
+      activeConversationId,
+      locationChatId: chatIdFromLocation(),
+      listedConversations: result.conversations,
+      loadConversation,
+    });
   }
 
   useEffect(() => subscribeAuthorityApprovalSettlements((event) => {
@@ -3213,6 +3230,20 @@ function ChatApp() {
   useEffect(() => {
     const handlePopState = () => {
       setError(null);
+      const routeKind = workspaceKindForPathname(window.location.pathname) ?? "chat";
+      if (routeKind !== "chat") {
+        const routeTabId = `workspace-tab-route-${routeKind}`;
+        setWorkspaceTabs((current) => (
+          current.some((tab) => tab.id === routeTabId)
+            ? current
+            : [...current, createWorkspaceTab(routeKind, { id: routeTabId })]
+        ));
+        setActiveWorkspaceTabId(routeTabId);
+        setMode(routeKind === "coding" ? "coding" : "agent");
+      } else {
+        setActiveWorkspaceTabId(DEFAULT_WORKSPACE_TAB_ID);
+        setMode("agent");
+      }
       void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
       });
@@ -3362,6 +3393,7 @@ function ChatApp() {
   const handleHistoryClick = (conversationId: string) => {
     setError(null);
     setPendingNewTaskContext(null);
+    setActiveHistoryCompanyId(null);
     const activeTab = workspaceTabs.find((tab) => tab.id === activeWorkspaceTabId);
     if (activeTab?.kind === "chat") {
       setWorkspaceTabs((current) => current.map((tab) => tab.id === activeWorkspaceTabId ? { ...tab, conversationId } : tab));
@@ -3381,6 +3413,10 @@ function ChatApp() {
         if (activeConversationId === conversation.id) setActiveConversation(conversation);
       })
       .catch((updateError) => setError(updateError instanceof Error ? updateError.message : "会話メタデータの更新に失敗しました。"));
+  };
+
+  const handleHistoryGroupSelect = (group: ChatGroup) => {
+    setActiveHistoryCompanyId(resolveCompanyWorkspaceHintFromGroup(group));
   };
 
   const closeSpotlight = () => {
@@ -4037,8 +4073,9 @@ function ChatApp() {
     }
   };
 
-  const handleModeChange = (newMode: AppMode) => {
+  const handleModeChange = (newMode: AppMode, updateRoute = true) => {
     setMode(newMode);
+    if (!updateRoute) return;
     if (newMode === "coding" && window.location.pathname !== "/coding") {
       const url = new URL(window.location.href);
       url.pathname = "/coding";
@@ -4057,15 +4094,18 @@ function ChatApp() {
     setActiveWorkspaceTabId(tab.id);
     setError(null);
     if (tab.kind === "chat") {
-      handleModeChange("agent");
-      void loadConversation(tab.conversationId ?? null);
+      handleModeChange("agent", false);
+      pushWorkspaceRoute("chat", tab.conversationId ?? null);
+      void loadConversation(tab.conversationId ?? null, false);
       return;
     }
     if (tab.kind === "coding") {
-      handleModeChange("coding");
+      handleModeChange("coding", false);
+      pushWorkspaceRoute("coding", activeConversationId);
       return;
     }
-    handleModeChange("agent");
+    handleModeChange("agent", false);
+    pushWorkspaceRoute(tab.kind, activeConversationId);
     if (tab.kind === "calendar" || tab.kind === "kanban") {
       return;
     }
@@ -4515,23 +4555,23 @@ function ChatApp() {
     const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
     const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
     if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
-    if (effectiveAllowlist.includes("xiaomi-token-plan-sgp/mimo-v2.5-pro")) return "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    if (effectiveAllowlist.includes("opencode-go/mimo-v2.5")) return "opencode-go/mimo-v2.5";
     if (effectiveAllowlist.includes("stub/default")) return "stub/default";
-    return effectiveAllowlist[0] ?? "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+    return effectiveAllowlist[0] ?? "opencode-go/mimo-v2.5";
   };
 
   const preferredMimoVisionModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
+    const visionPreferred = allowlist.find((item) => /gemma|omni|vision|vl/i.test(item));
     if (visionPreferred) return visionPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+    return "google/gemma-4-31b-it";
   };
 
   const preferredMimoFastModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
     const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
     if (fastPreferred) return fastPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-flash";
+    return "opencode-go/mimo-v2.5";
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
@@ -4539,7 +4579,9 @@ function ChatApp() {
   const mimoCodingMaxToolCalls = () => {
     const raw = settingsValues.mimo_coding_company?.max_tool_calls;
     if (raw === null || raw === undefined || raw === "" || raw === false) return null;
-    return Math.max(1, Math.min(200, settingNumber(raw, 80)));
+    const numeric = settingNumber(raw, 0);
+    if (numeric <= 0) return null;
+    return Math.max(1, Math.min(200, numeric));
   };
   const mimoCodingMaxToolCallsPayload = () => {
     const value = mimoCodingMaxToolCalls();
@@ -5350,11 +5392,16 @@ function ChatApp() {
   const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
     ? activeConversation.metadata
     : {};
-  const activeConversationCompanyId = typeof activeConversationMetadata.company_id === "string"
-    ? activeConversationMetadata.company_id
-    : typeof activeConversationMetadata.companyId === "string"
-      ? activeConversationMetadata.companyId
-      : null;
+  const activeConversationGroupId = cleanOptionalString(activeConversation?.group_id)
+    ?? cleanOptionalString(activeConversationMetadata.group_id ?? activeConversationMetadata.groupId);
+  const activeConversationCompanyId = resolveCompanyWorkspaceHint({
+    companyId: activeConversationMetadata.company_id ?? activeConversationMetadata.companyId,
+    groupId: activeConversationGroupId,
+    conversationKind: activeConversation?.conversation_kind,
+    profileId: activeConversationMetadata.profile_id,
+    tags: activeConversation?.tags,
+  });
+  const activeCompanyWorkspaceHint = activeConversationCompanyId ?? activeHistoryCompanyId;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -5526,6 +5573,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5556,6 +5604,7 @@ function ChatApp() {
               isCalendarActive={isCalendarMode}
               onKanbanOpen={handleKanbanModeToggle}
               onGroupKanbanOpen={handleHistoryGroupKanbanOpen}
+              onGroupSelect={handleHistoryGroupSelect}
               isKanbanActive={isKanbanMode}
               onDesktopsOpen={handleDesktopsModeOpen}
               isDesktopsActive={isDesktopsWorkspace}
@@ -5884,7 +5933,13 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} />}
+            companyPanel={(
+              <CompanyWorkspacePanel
+                activeConversationId={activeConversationId}
+                activeConversationTitle={activeChatTitle}
+                activeCompanyIdHint={activeCompanyWorkspaceHint}
+              />
+            )}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

@@ -68,6 +68,32 @@ class TestDefaultspackTransportAdapters(unittest.TestCase):
                         sys.modules.pop(loaded_name, None)
                 sys.modules.update(original_modules)
 
+    def test_block_adapter_preserves_repo_ecosystem_namespace(self):
+        repo_root = Path(__file__).resolve().parent.parent
+        pack_root = repo_root / "ecosystem" / "defaultspack"
+        original_path = list(sys.path)
+        original_modules = dict(sys.modules)
+
+        try:
+            sys.path.insert(0, str(pack_root))
+            sys.path.insert(0, str(repo_root))
+            ecosystem_module = importlib.import_module("ecosystem")
+            importlib.import_module("ecosystem.defaultspack.backend.sandbox.template_catalog")
+
+            from bridge.block_adapter import invoke_block
+
+            result = invoke_block("ecosystem.defaultspack.blocks.sandbox.api", {"action": "list"}, {})
+
+            self.assertEqual(result.get("status"), "ok")
+            self.assertIs(sys.modules.get("ecosystem"), ecosystem_module)
+            self.assertIn("ecosystem.defaultspack.backend.sandbox.template_catalog", sys.modules)
+        finally:
+            sys.path[:] = original_path
+            for loaded_name in list(sys.modules):
+                if loaded_name not in original_modules:
+                    sys.modules.pop(loaded_name, None)
+            sys.modules.update(original_modules)
+
     def test_chat_send_infers_computer_tools_from_compute_use_typo(self):
         repo_root = Path(__file__).resolve().parent.parent
         pack_root = repo_root / "ecosystem" / "defaultspack"

@@ -9,6 +9,7 @@ from domain.ai_client.capability_tokens import (
     model_requirements_from_tokens,
     normalize_capability_tokens,
 )
+from domain.ai_client.client import AuthorityApprovalRequired
 from domain.ai_client.gateway import LLMGateway
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
@@ -97,26 +98,30 @@ def call_model(
     add_temporal_context_message(messages, runtime_context, temporal_context=temporal_context)
     sanitized_messages = _sanitize_value(messages)
     try:
+        authority_context = _authority_context_from_runtime(runtime_context)
         if call_handler is not None:
-            response = call_handler(
-                "defaults.ai.complete",
-                {
-                    "model": model,
-                    "messages": sanitized_messages,
-                    "tools": [],
-                    "params": params,
-                },
-            )
+            request = {
+                "model": model,
+                "messages": sanitized_messages,
+                "tools": [],
+                "params": params,
+            }
+            if authority_context:
+                request["authority_context"] = authority_context
+            response = call_handler("defaults.ai.complete", request)
             response = response.get("data") if isinstance(response, dict) and response.get("status") == "ok" else response
         else:
-            response = LLMGateway().complete(
-                {
-                    "model": model,
-                    "messages": sanitized_messages,
-                    "tools": [],
-                    "params": params,
-                }
-            )
+            request = {
+                "model": model,
+                "messages": sanitized_messages,
+                "tools": [],
+                "params": params,
+            }
+            if authority_context:
+                request["authority_context"] = authority_context
+            response = LLMGateway().complete(request)
+    except AuthorityApprovalRequired as exc:
+        return _authority_approval_response(exc, model)
     except RuntimeError as exc:
         return {"status": "error", "code": "PROVIDER_ERROR", "error": str(exc), "model": model}
     output = _extract_output(response, expect_json=bool(payload.get("output_schema")))
@@ -127,6 +132,52 @@ def call_model(
         "response": response,
         "required_capabilities": required_capabilities,
         "routing": decision.to_dict(),
+    }
+
+
+def _authority_context_from_runtime(context: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(context, dict):
+        return {}
+    authority = context.get("authority") if isinstance(context.get("authority"), dict) else {}
+    result = dict(authority)
+    for key in ("profile_id", "conversation_id", "node_id", "graph_id"):
+        value = str(result.get(key) or context.get(key) or "").strip()
+        if value:
+            result[key] = value
+    principal_id = str(
+        result.get("principal_id")
+        or context.get("principal_id")
+        or context.get("authority_principal_id")
+        or ""
+    ).strip()
+    profile_id = str(result.get("profile_id") or "").strip()
+    if not principal_id and profile_id:
+        principal_id = "profile:" + profile_id
+    if principal_id:
+        result["principal_id"] = principal_id
+    return {key: value for key, value in result.items() if value not in ("", None)}
+
+
+def _authority_approval_response(exc: AuthorityApprovalRequired, model: str) -> dict[str, Any]:
+    decision = getattr(exc, "decision", None)
+    details: dict[str, Any]
+    if decision is not None and callable(getattr(decision, "to_approval_event", None)):
+        details = dict(decision.to_approval_event())
+    elif decision is not None and callable(getattr(decision, "to_dict", None)):
+        details = dict(decision.to_dict())
+    else:
+        details = {}
+    message = str(details.get("message") or details.get("reason") or exc or "authority approval required")
+    return {
+        "status": "authority_approval_required",
+        "code": "authority_approval_required",
+        "error": message,
+        "message": message,
+        "model": model,
+        "approval_required": True,
+        "requires_approval": True,
+        "finish_reason": "authority_approval_required",
+        "authority": details,
     }
 
 

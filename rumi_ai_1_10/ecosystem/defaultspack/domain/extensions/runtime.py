@@ -149,16 +149,16 @@ def get_extension_registry(
     strict: bool = False,
 ) -> ExtensionRegistry:
     global _REGISTRY
+    roots = get_extensions_roots()
     if _REGISTRY is None:
         with _LOCK:
             if _REGISTRY is None:
-                _REGISTRY = ExtensionRegistry(get_extensions_roots(), strict=strict)
-    elif force_reload:
+                _REGISTRY = ExtensionRegistry(roots, strict=strict)
+    elif force_reload or [Path(root) for root in roots] != list(getattr(_REGISTRY, "_roots", [])):
         with _LOCK:
             if _REGISTRY is None:
-                _REGISTRY = ExtensionRegistry(get_extensions_roots(), strict=strict)
+                _REGISTRY = ExtensionRegistry(roots, strict=strict)
             else:
-                roots = get_extensions_roots()
                 _REGISTRY._roots = [Path(root) for root in roots]
                 _REGISTRY._root = _REGISTRY._roots[0] if _REGISTRY._roots else Path(".")
                 _REGISTRY._strict = strict

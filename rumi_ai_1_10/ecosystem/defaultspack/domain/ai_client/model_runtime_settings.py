@@ -19,6 +19,7 @@ from domain.ai_client.model_roles import (
     normalize_utility_models,
 )
 from domain.ai_client.rumi_process import (
+    RUMI_BASE_MODEL,
     RUMI_MODEL_PACK_ID,
     ensure_default_rumi_model_pack,
     resolve_rumi_base_model,
@@ -37,11 +38,12 @@ class ModelRuntimeSettingsService:
     """Owns model runtime settings persisted in frontend_settings.json."""
 
     def __init__(self, pack_root: Path | None = None) -> None:
-        self._pack_root = pack_root or Path(__file__).resolve().parents[2]
+        self._pack_root = pack_root or Path(__file__).parents[2]
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
     def get_settings(self) -> dict[str, Any]:
-        return self.refresh_models_settings(self._read_all().get("models", {}))
+        models = self._read_all().get("models", {})
+        return models if isinstance(models, dict) else self.refresh_models_settings({})
 
     def update_settings(self, patch: dict[str, Any]) -> dict[str, Any]:
         all_settings = self._read_all()
@@ -371,6 +373,10 @@ class ModelRuntimeSettingsService:
         }
 
     def _runtime_rumi_base_model(self, settings: dict[str, Any] | None = None) -> str:
+        cached_base_model = self._cached_rumi_base_model(settings)
+        if cached_base_model:
+            return cached_base_model
+
         base_profiles = self._base_profile_catalog(settings)
         available_models: list[str] = []
         available_providers: set[str] = set()
@@ -393,23 +399,43 @@ class ModelRuntimeSettingsService:
             if provider_id:
                 available_providers.add(provider_id)
         try:
-            from domain.ai_client.providers import detect_available_providers, get_all_known_models
+            from domain.ai_client.providers import detect_available_providers
 
             provider_map = detect_available_providers()
             available_providers.update(str(name or "").strip() for name in provider_map.keys() if str(name or "").strip())
-            for model in get_all_known_models():
-                if not isinstance(model, dict):
-                    continue
-                provider_id = str(model.get("provider") or model.get("provider_id") or "").strip()
-                model_id = str(model.get("id") or model.get("qualified_model_id") or "").strip()
-                if provider_id and provider_id in available_providers and model_id:
-                    available_models.append(model_id)
         except Exception:
             pass
         return resolve_rumi_base_model(
             available_models,
             available_providers=available_providers,
         )
+
+    @staticmethod
+    def _cached_rumi_base_model(settings: dict[str, Any] | None = None) -> str:
+        if not isinstance(settings, dict):
+            return ""
+        model_packs = settings.get("model_packs")
+        if not isinstance(model_packs, list):
+            return ""
+        for model_pack in model_packs:
+            if not isinstance(model_pack, dict):
+                continue
+            if str(model_pack.get("id") or "").strip() != RUMI_MODEL_PACK_ID:
+                continue
+            metadata = model_pack.get("metadata") if isinstance(model_pack.get("metadata"), dict) else {}
+            for key in ("resolved_base_model", "base_model"):
+                candidate = str(metadata.get(key) or "").strip()
+                if candidate == RUMI_BASE_MODEL:
+                    return candidate
+            members = model_pack.get("members") if isinstance(model_pack.get("members"), list) else []
+            member_models = [
+                str(member.get("model") or "").strip()
+                for member in members
+                if isinstance(member, dict) and str(member.get("model") or "").strip()
+            ]
+            if member_models and all(model == RUMI_BASE_MODEL for model in member_models):
+                return RUMI_BASE_MODEL
+        return ""
 
     def _ensure_rumi_model_packs(self, model_packs: Any, *, settings: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return ensure_default_rumi_model_pack(
@@ -466,7 +492,12 @@ class ModelRuntimeSettingsService:
             sanitized["on_switch_to_non_vision_with_images"] = policy if policy in {"auto_bridge", "ask", "block", "ignore"} else "auto_bridge"
         return sanitized
 
-    def refresh_models_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+    def refresh_models_settings(
+        self,
+        values: dict[str, Any],
+        *,
+        resolve_runtime_model_packs: bool = True,
+    ) -> dict[str, Any]:
         models = self._deep_merge(self.default_model_settings(), values if isinstance(values, dict) else {})
         models["google_api_key"] = ""
         models["google_api_key_configured"] = provider_has_api_key("google", pack_root=self._pack_root)
@@ -515,10 +546,17 @@ class ModelRuntimeSettingsService:
         models["api_routes"] = self._normalize_api_routes(models.get("api_routes"))
         models["api_bound_profiles"] = self._normalize_api_bound_profiles(models.get("api_bound_profiles"))
         models["composite_models"] = self._normalize_composite_models(models.get("composite_models"))
-        models["model_packs"] = self._ensure_rumi_model_packs(normalize_model_packs(
+        normalized_model_packs = normalize_model_packs(
             models.get("model_packs"),
             composite_models=models.get("composite_models"),
-        ), settings=models)
+        )
+        if resolve_runtime_model_packs:
+            models["model_packs"] = self._ensure_rumi_model_packs(
+                normalized_model_packs,
+                settings=models,
+            )
+        else:
+            models["model_packs"] = normalized_model_packs
         models["model_notes"] = self._normalize_model_notes(models.get("model_notes"))
         models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
         models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))

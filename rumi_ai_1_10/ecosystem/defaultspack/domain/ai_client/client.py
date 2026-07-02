@@ -336,8 +336,21 @@ class AIClient:
                 else:
                     provider_name = "stub"
                     model_name = model_str
+        if provider_name and provider_name not in self._providers:
+            self._refresh_provider_registration(provider_name)
         provider = self._providers.get(provider_name, self._providers["stub"])
         return provider, model_name
+
+    def _refresh_provider_registration(self, provider_name):
+        provider_name = str(provider_name or "").strip()
+        if not provider_name or provider_name in self._providers:
+            return
+        try:
+            provider = detect_available_providers().get(provider_name)
+            if provider is not None:
+                self._providers[provider_name] = provider
+        except Exception:
+            pass
 
     def _settings_path(self):
         return Path(__file__).resolve().parents[2] / "user_data" / "shared" / "frontend_settings.json"

@@ -15,7 +15,7 @@ class ProfileLoader:
     @staticmethod
     def _registry_provider_order():
         try:
-            registry = get_extension_registry(force_reload=True)
+            registry = get_extension_registry()
             return [item["id"] for item in registry.llm().providers(enabled_only=True)]
         except Exception:
             return []
@@ -23,7 +23,7 @@ class ProfileLoader:
     @staticmethod
     def _best_model_from_registry(provider_id, use_case):
         try:
-            registry = get_extension_registry(force_reload=True)
+            registry = get_extension_registry()
             model = registry.llm().best_model(provider_id, use_case=use_case)
             if model is not None:
                 return str(model.get("model_id", ""))
@@ -34,7 +34,7 @@ class ProfileLoader:
     @staticmethod
     def _embedding_model_from_registry(provider_id):
         try:
-            registry = get_extension_registry(force_reload=True)
+            registry = get_extension_registry()
             for model in registry.llm().models(provider_id=provider_id, enabled_only=True):
                 if str(model.get("type", "")).strip() == "embedding":
                     return str(model.get("model_id", ""))

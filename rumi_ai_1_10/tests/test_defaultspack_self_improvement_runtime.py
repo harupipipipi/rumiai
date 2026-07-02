@@ -18,17 +18,173 @@ def test_mimo_profile_assigns_main_vision_fast_models(tmp_path):
 
     runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
 
-    assert runtime.role_map["main"] == "xiaomi-token-plan-sgp/mimo-v2.5-pro"
-    assert runtime.role_map["vision"] == "xiaomi-token-plan-sgp/mimo-v2-omni"
-    assert runtime.role_map["fast"] == "xiaomi-token-plan-sgp/mimo-v2-flash"
+    assert runtime.role_map["main"] == "opencode-zen/mimo-v2.5-free"
+    assert runtime.role_map["vision"] == "google/gemma-4-31b-it"
+    assert runtime.role_map["fast"] == "opencode-zen/mimo-v2.5-free"
 
 
-def test_mimo_vision_role_uses_omni(tmp_path):
+def test_mimo_profile_uses_local_company_profile_role_map(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+
+    status_path = tmp_path / "user_data" / "shared" / "mimo_coding_company" / "codex_manager_status.json"
+    status_path.parent.mkdir(parents=True)
+    status_path.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "models": {
+                        "main": "profile/main-current",
+                        "vision": "profile/vision-current",
+                        "fast": "profile/fast-current",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
+
+    assert runtime.role_map["main"] == "profile/main-current"
+    assert runtime.role_map["vision"] == "profile/vision-current"
+    assert runtime.role_map["fast"] == "profile/fast-current"
+
+
+def test_mimo_profile_status_overrides_stale_company_profile(tmp_path):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+
+    company_path = tmp_path / "ecosystem" / "defaultspack" / "user_data" / "shared" / "companies" / "companies.json"
+    company_path.parent.mkdir(parents=True)
+    company_path.write_text(
+        json.dumps(
+            {
+                "companies": {
+                    "mimo-coding-company": {
+                        "metadata": {
+                            "main_model": "company/main-stale",
+                            "vision_model": "company/vision-stale",
+                            "fast_model": "company/fast-stale",
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    status_path = tmp_path / "user_data" / "shared" / "mimo_coding_company" / "codex_manager_status.json"
+    status_path.parent.mkdir(parents=True)
+    status_path.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "models": {
+                        "main": "status/main-current",
+                        "vision": "status/vision-current",
+                        "fast": "status/fast-current",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
+
+    assert runtime.role_map["main"] == "status/main-current"
+    assert runtime.role_map["vision"] == "status/vision-current"
+    assert runtime.role_map["fast"] == "status/fast-current"
+
+
+def test_mimo_profile_uses_company_metadata_role_map(tmp_path, monkeypatch):
+    from domain.agent.self_improvement_runtime import create_mimo_profile
+
+    company_store = tmp_path / "companies.json"
+    company_store.write_text(
+        json.dumps(
+            {
+                "companies": {
+                    "mimo-coding-company": {
+                        "metadata": {
+                            "role_map": {
+                                "main": "company/main-current",
+                                "vision": "company/vision-current",
+                                "fast": "company/fast-current",
+                            }
+                        }
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(company_store))
+
+    runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
+
+    assert runtime.role_map["main"] == "company/main-current"
+    assert runtime.role_map["vision"] == "company/vision-current"
+    assert runtime.role_map["fast"] == "company/fast-current"
+
+
+def test_live_self_improvement_defaults_to_current_mimo_models():
+    from domain.agent.self_improvement_live_loop import run_live_improvement, run_vision_qa
+
+    assert run_live_improvement.__kwdefaults__["model"] == "opencode-zen/mimo-v2.5-free"
+    assert run_vision_qa.__kwdefaults__["model"] == "google/gemma-4-31b-it"
+
+
+def test_self_improvement_run_defaults_to_current_mimo_main_model(tmp_path, monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_run_live_improvement(**kwargs):
+        seen.update(kwargs)
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "domain.agent.self_improvement_live_loop.run_live_improvement",
+        fake_run_live_improvement,
+    )
+
+    from blocks.agent.self_improvement_run import run
+
+    result = run({"action": "single", "model": "", "workspace_root": str(tmp_path)}, {})
+
+    assert result["status"] == "ok"
+    assert seen["model"] == "opencode-zen/mimo-v2.5-free"
+
+
+def test_self_improvement_run_uses_local_profile_default(tmp_path, monkeypatch):
+    seen: dict[str, object] = {}
+    status_path = tmp_path / "user_data" / "shared" / "mimo_coding_company" / "codex_manager_status.json"
+    status_path.parent.mkdir(parents=True)
+    status_path.write_text(
+        json.dumps({"provider": {"models": {"main": "profile/main", "vision": "profile/vision", "fast": "profile/fast"}}}),
+        encoding="utf-8",
+    )
+
+    def fake_run_live_improvement(**kwargs):
+        seen.update(kwargs)
+        return {"success": True}
+
+    monkeypatch.setattr(
+        "domain.agent.self_improvement_live_loop.run_live_improvement",
+        fake_run_live_improvement,
+    )
+
+    from blocks.agent.self_improvement_run import run
+
+    result = run({"action": "single", "model": "", "workspace_root": str(tmp_path)}, {})
+
+    assert result["status"] == "ok"
+    assert seen["model"] == "profile/main"
+
+
+def test_mimo_vision_role_uses_current_vision_model(tmp_path):
     from domain.agent.self_improvement_runtime import create_mimo_profile
 
     runtime = create_mimo_profile(workspace_root=tmp_path, state_path=tmp_path / "state.json")
 
-    assert "omni" in runtime.role_map["vision"]
+    assert runtime.role_map["vision"] == "google/gemma-4-31b-it"
 
 
 def test_coding_role_rejects_non_tool_call_model():

@@ -46,8 +46,17 @@ class FrontendRegistry:
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
+        self._provider_models_cache: list[dict[str, Any]] | None = None
+        self._selectable_model_profiles_cache: list[dict[str, Any]] | None = None
+        self._provider_key_status_cache: list[dict[str, Any]] | None = None
+        self._provider_oauth_statuses_cache: dict[str, dict[str, Any]] | None = None
 
-    def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
+    def build_catalog(
+        self,
+        profile_id: str | None = None,
+        *,
+        lightweight: bool = False,
+    ) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
@@ -65,14 +74,17 @@ class FrontendRegistry:
         ]
         component_bindings = self._filter_frontend_items(component_bindings, selected_frontend_ids)
         sidebar_items = [
-            *self._sidebar_items(ui_surfaces, extensions),
+            *([] if lightweight else self._sidebar_items(ui_surfaces, extensions)),
             *template_catalog.get("sidebar_items", []),
         ]
         sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
-        settings_sections = self._merge_settings_sections(
-            self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
-            template_catalog.get("settings_sections", []),
-        )
+        if lightweight:
+            settings_sections = []
+        else:
+            settings_sections = self._merge_settings_sections(
+                self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
+                template_catalog.get("settings_sections", []),
+            )
         settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
         chat_renderers = [
             *self._chat_renderers(ui_surfaces, extensions),
@@ -91,7 +103,7 @@ class FrontendRegistry:
             },
             "settings": {
                 "sections": settings_sections,
-                "values": self._read_settings(),
+                "values": self._read_settings(lightweight=lightweight),
             },
             "chat_rendering": {
                 "renderers": chat_renderers,
@@ -119,7 +131,7 @@ class FrontendRegistry:
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
-    def get_settings(self) -> dict[str, Any]:
+    def get_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         ui_surfaces = self._load_ui_surfaces()
@@ -128,7 +140,7 @@ class FrontendRegistry:
                 self._settings_sections(ui_surfaces, self._load_extensions(), template_catalog=template_catalog),
                 template_catalog.get("settings_sections", []),
             ),
-            "values": self._read_settings(),
+            "values": self._read_settings(lightweight=lightweight),
         }
 
     def update_settings(self, patch: dict[str, Any] | None) -> dict[str, Any]:
@@ -679,7 +691,7 @@ class FrontendRegistry:
 
     def _skill_items(self) -> list[dict[str, Any]]:
         try:
-            skills = get_extension_registry(force_reload=True).skills().list(enabled_only=True)
+            skills = get_extension_registry().skills().list(enabled_only=True)
         except Exception:
             return []
 
@@ -2408,14 +2420,14 @@ class FrontendRegistry:
                     if model_route_options is None:
                         model_route_options = self._model_route_options()
                     if provider_rows is None:
-                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                        provider_rows = self._provider_key_status()
                     item["options"] = model_route_options
                     item["api_keys"] = provider_rows
                     item.setdefault("type", "model_api_routes")
                     item.setdefault("renderer", "model_routing")
                 if section_id == "apis" and (field_id == "api_keys" or field_type == "api_key_setup"):
                     if provider_rows is None:
-                        provider_rows = provider_key_status(pack_root=self._pack_root)
+                        provider_rows = self._provider_key_status()
                     item["api_keys"] = provider_rows
                     item.setdefault("type", "api_key_setup")
                     item.setdefault("renderer", "api_key_setup")
@@ -2544,6 +2556,16 @@ class FrontendRegistry:
             hydrated.append(item)
         return hydrated
 
+    def _provider_key_status(self) -> list[dict[str, Any]]:
+        if self._provider_key_status_cache is None:
+            self._provider_key_status_cache = provider_key_status(pack_root=self._pack_root)
+        return deepcopy(self._provider_key_status_cache)
+
+    def _provider_oauth_statuses(self) -> dict[str, dict[str, Any]]:
+        if self._provider_oauth_statuses_cache is None:
+            self._provider_oauth_statuses_cache = provider_oauth_statuses(pack_root=self._pack_root)
+        return deepcopy(self._provider_oauth_statuses_cache)
+
     def _dedupe_by_key(self, items: list[dict[str, Any]], key: str) -> list[dict[str, Any]]:
         deduped: dict[str, dict[str, Any]] = {}
         order: list[str] = []
@@ -2556,8 +2578,8 @@ class FrontendRegistry:
             deduped[value] = item
         return [deduped[value] for value in order]
 
-    def _read_settings(self) -> dict[str, Any]:
-        values = self._default_settings()
+    def _read_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
+        values = self._default_settings_lightweight() if lightweight else self._default_settings()
         if self._settings_path.exists():
             try:
                 saved = json.loads(self._settings_path.read_text(encoding="utf-8"))
@@ -2565,7 +2587,9 @@ class FrontendRegistry:
                 saved = {}
             saved = self._settings_with_legacy_tool_version(saved)
             values = self._deep_merge(values, saved)
-        return self._refresh_derived_settings(values)
+        if lightweight:
+            return self._sanitize_lightweight_settings(values)
+        return self._refresh_derived_settings(values, lightweight=lightweight)
 
     def _settings_with_legacy_tool_version(self, saved: Any) -> dict[str, Any]:
         if not isinstance(saved, dict):
@@ -2748,6 +2772,61 @@ class FrontendRegistry:
             },
         }
 
+    def _default_settings_lightweight(self) -> dict[str, Any]:
+        return {
+            "general": {
+                "composer_placeholder": "繝｡繝・そ繝ｼ繧ｸ繧貞・蜉・..",
+                "show_activity_in_messages": True,
+                "keyboard_button_navigation": False,
+                "spotlight_shortcut_enabled": True,
+                "spotlight_shortcut": "Ctrl+K",
+                "spotlight_shortcut_text_input": True,
+                "language": "ja",
+            },
+            "preview": {"auto_open": False, "default_mode": "auto", "max_items": 12},
+            "chat_rendering": {"show_widgets": True, "unknown_block_strategy": "hidden"},
+            "models": {
+                "preferred_model": "stub/default",
+                "preferred_model_group": "default",
+                "auto_route_within_group": True,
+                "thinking_level": "medium",
+                "deepthink_enabled": False,
+                "favorite_profiles": ["stub/default"],
+                "thinking_level_by_profile": {"stub/default": "medium"},
+                "thinking_level_by_conversation": {},
+                "google_api_key": "",
+                "google_api_key_configured": False,
+                "openrouter_api_key": "",
+                "openrouter_api_key_configured": False,
+            },
+        }
+
+    def _sanitize_lightweight_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        sanitized = deepcopy(values if isinstance(values, dict) else {})
+        models = sanitized.setdefault("models", {})
+        if isinstance(models, dict):
+            models["google_api_key"] = ""
+            models["openrouter_api_key"] = ""
+            favorite_profiles = models.get("favorite_profiles")
+            if isinstance(favorite_profiles, str):
+                try:
+                    favorite_profiles = json.loads(favorite_profiles)
+                except json.JSONDecodeError:
+                    favorite_profiles = [line.strip() for line in favorite_profiles.splitlines()]
+            if not isinstance(favorite_profiles, list):
+                preferred = str(models.get("preferred_model") or "stub/default").strip()
+                favorite_profiles = [preferred] if preferred else ["stub/default"]
+            models["favorite_profiles"] = [
+                str(item).strip()
+                for item in favorite_profiles
+                if str(item or "").strip()
+            ] or ["stub/default"]
+            models["preferred_model"] = str(models.get("preferred_model") or "stub/default").strip() or "stub/default"
+            models["preferred_model_group"] = str(models.get("preferred_model_group") or "default").strip() or "default"
+            models["auto_route_within_group"] = bool(models.get("auto_route_within_group", True))
+            models["deepthink_enabled"] = bool(models.get("deepthink_enabled", False))
+        return sanitized
+
     def _model_options(self) -> list[dict[str, str]]:
         profiles = self._selectable_model_profiles()
         return [
@@ -2799,6 +2878,8 @@ class FrontendRegistry:
         return options or [{"value": "stub/default", "label": "Stub Default", "provider_id": "stub", "model_id": "default", "local": True}]
 
     def _selectable_model_profiles(self) -> list[dict[str, Any]]:
+        if self._selectable_model_profiles_cache is not None:
+            return deepcopy(self._selectable_model_profiles_cache)
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -2824,6 +2905,7 @@ class FrontendRegistry:
 
         filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
         filtered.sort(key=self._model_profile_sort_key)
+        self._selectable_model_profiles_cache = deepcopy(filtered)
         return filtered
 
     def _is_user_selectable_profile(self, profile: dict[str, Any]) -> bool:
@@ -2895,11 +2977,15 @@ class FrontendRegistry:
         return f"{provider} / {name}{suffix}" if provider else f"{name}{suffix}"
 
     def _list_provider_models(self) -> list[dict[str, Any]]:
+        if self._provider_models_cache is not None:
+            return deepcopy(self._provider_models_cache)
         try:
             client = AIClient()
-            return client.list_models()
+            models = client.list_models()
         except Exception:
-            return [{"id": "stub/default", "name": "stub/default"}]
+            models = [{"id": "stub/default", "name": "stub/default"}]
+        self._provider_models_cache = deepcopy(models)
+        return models
 
     def _tool_settings_fields(self, ui: dict[str, Any]) -> list[dict[str, Any]]:
         fields = ui.get("settings_fields", [])
@@ -3098,7 +3184,12 @@ class FrontendRegistry:
             ).sanitize_models_patch(models)
         return sanitized
 
-    def _refresh_derived_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+    def _refresh_derived_settings(
+        self,
+        values: dict[str, Any],
+        *,
+        lightweight: bool = False,
+    ) -> dict[str, Any]:
         refreshed = deepcopy(values)
         debug = refreshed.setdefault("debug", {})
         if not isinstance(debug, dict):
@@ -3357,7 +3448,7 @@ class FrontendRegistry:
 
         apis = refreshed.setdefault("apis", {})
         if isinstance(apis, dict):
-            apis["api_keys"] = provider_key_status(pack_root=self._pack_root)
+            apis["api_keys"] = self._provider_key_status()
             legacy_routes = apis.pop("model_api_routes", None)
             if legacy_routes and not models.get("model_api_routes"):
                 models["model_api_routes"] = legacy_routes
@@ -3369,7 +3460,7 @@ class FrontendRegistry:
         if not isinstance(connection_providers, dict):
             connection_providers = {}
             accounts_connections["providers"] = connection_providers
-        connection_providers.update(provider_oauth_statuses(pack_root=self._pack_root))
+        connection_providers.update(self._provider_oauth_statuses())
         connection_providers["codex"] = codex_connection_status(pack_root=self._pack_root)
         tools_mcp = refreshed.setdefault("tools_mcp", {})
         if not isinstance(tools_mcp, dict):
@@ -3499,7 +3590,10 @@ class FrontendRegistry:
         if isinstance(models, dict):
             refreshed["models"] = ModelRuntimeSettingsService(
                 self._pack_root
-            ).refresh_models_settings(models)
+            ).refresh_models_settings(
+                models,
+                resolve_runtime_model_packs=not lightweight,
+            )
         return refreshed
 
     def _input_profile_options(self) -> list[dict[str, str]]:

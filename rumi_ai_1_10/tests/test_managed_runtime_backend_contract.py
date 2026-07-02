@@ -651,6 +651,14 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
             "button": "left",
         },
     )
+    missing_action = manager.desktop_input(
+        "input-seat",
+        {
+            "client_action_id": "missing-action",
+            "lease_token": "lease-token",
+            "text": "http://127.0.0.1:8766/chat",
+        },
+    )
     valid = manager.desktop_input(
         "input-seat",
         {
@@ -666,6 +674,10 @@ def test_manager_validates_and_sanitizes_desktop_input_before_provider(tmp_path)
 
     assert invalid["ok"] is False
     assert invalid["code"] == "INVALID_DESKTOP_INPUT"
+    assert missing_action["ok"] is False
+    assert missing_action["code"] == "INVALID_DESKTOP_INPUT"
+    assert "action=type_text" in missing_action["error"]
+    assert "key=Enter" in missing_action["error"]
     assert valid["ok"] is True
     assert agent.provider_inputs == [
         {
@@ -908,6 +920,117 @@ def test_api_rejects_template_kind_mismatches(tmp_path) -> None:
     assert desktops["data"]["desktops"] == []
 
 
+def test_desktop_list_survives_invalid_desktop_payload(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    service = SimpleNamespace(
+        manager=SimpleNamespace(
+            list_instances=lambda: [
+                None,
+                {
+                    "display": True,
+                    "id": None,
+                    "sandbox_id": "seat-broken",
+                    "name": "Broken desktop",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                },
+            ]
+        ),
+        frame_cache=SimpleNamespace(last_metadata=lambda _seat_id: None),
+        lease_manager=SimpleNamespace(active_lease=lambda _seat_id: None),
+    )
+
+    def broken_payload(_service, _item):
+        raise AttributeError("'NoneType' object has no attribute '__dict__'")
+
+    monkeypatch.setattr(api, "_desktop_payload", broken_payload)
+
+    desktops = api._desktop_list(service)
+
+    assert len(desktops) == 1
+    assert desktops[0]["id"] == "seat-broken"
+    assert desktops[0]["seat_id"] == "seat-broken"
+    assert desktops[0]["sandbox_id"] == "seat-broken"
+    assert desktops[0]["status"] == "failed"
+    assert desktops[0]["last_error"] == "Desktop state could not be serialized."
+
+
+def test_desktop_list_prioritizes_running_desktops() -> None:
+    from types import SimpleNamespace
+
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    service = SimpleNamespace(
+        manager=SimpleNamespace(
+            list_instances=lambda: [
+                {
+                    "display": True,
+                    "sandbox_id": "old-destroyed-seat",
+                    "name": "Old destroyed desktop",
+                    "state": "destroyed",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 20,
+                },
+                {
+                    "display": True,
+                    "id": None,
+                    "sandbox_id": "current-running-seat",
+                    "name": "Current QA worker",
+                    "state": "ready",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 10,
+                },
+                {
+                    "display": True,
+                    "id": None,
+                    "seat_id": "newer-stopped-seat",
+                    "name": "Newer stopped desktop",
+                    "state": "stopped",
+                    "provider_id": "windows_wsl",
+                    "template_id": "desktop.browser",
+                    "updated_at": 30,
+                },
+            ]
+        ),
+        frame_cache=SimpleNamespace(last_metadata=lambda _seat_id: None),
+        lease_manager=SimpleNamespace(active_lease=lambda _seat_id: None),
+    )
+
+    desktops = api._desktop_list(service)
+
+    assert [desktop["seat_id"] for desktop in desktops] == [
+        "current-running-seat",
+        "newer-stopped-seat",
+        "old-destroyed-seat",
+    ]
+    assert desktops[0]["status"] == "running"
+    for desktop in desktops:
+        assert desktop["id"] == desktop["seat_id"]
+        assert desktop["id"] == desktop["sandbox_id"]
+
+
+def test_desktops_list_skips_malformed_manager_instances() -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    api._reset_service_for_tests(None)
+    service = api._SandboxApiService(start_lifecycle_sweeper=False)
+    service.manager._instances.clear()
+    service.manager._instances["bad"] = None
+    api._reset_service_for_tests(service)
+    try:
+        result = api.run({"_handler": "desktops_list"}, {})
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert result["status"] == "ok"
+    assert result["data"]["desktops"] == []
+
+
 def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -946,6 +1069,61 @@ def test_desktop_create_rejects_guest_provisioning_for_desktop_only_provider(tmp
     assert created["status"] == "error"
     assert created["error"]["code"] == "DESKTOP_PROVISIONING_UNSUPPORTED"
     assert service.manager.list_instances() == []
+
+
+def test_desktop_create_browser_url_defaults_to_browser_template_and_context_network_approval(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    provider = FakeRuntimeProvider(
+        provider_id="fake-runtime",
+        capabilities={
+            "sandbox.exec",
+            "sandbox.files",
+            "sandbox.resource_limits",
+            "sandbox.desktop",
+            "sandbox.desktop_input",
+            "sandbox.snapshot",
+            "sandbox.network_policy",
+        },
+        sandbox_id_factory=lambda: "browser-seat",
+    )
+    registry = ProviderRegistry()
+    registry.register(provider)
+    service = SimpleNamespace(
+        provider_registry=registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    api._reset_service_for_tests(service)
+    try:
+        created = api.run(
+            {
+                "_handler": "desktops_create",
+                "provider_id": "fake-runtime",
+                "owner_id": "local-user",
+                "starter": "browser_url",
+                "browser_url": "http://127.0.0.1:8766/chat",
+            },
+            {"user_id": "local-user", "_tool_server_approved": True},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["status"] == "ok"
+    assert created["data"]["template_id"] == "desktop.browser"
+    assert provider.create_specs[0].template.template_id == "desktop.browser"
+    assert provider.create_specs[0].metadata["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "http://127.0.0.1:8766/chat",
+    }
+    assert provider.create_specs[0].metadata["network_approved"] is True
+    assert created["data"]["startup"] == {
+        "starter": "browser_url",
+        "browser_url": "http://127.0.0.1:8766/chat",
+    }
+    assert created["data"]["metadata"]["startup"] == created["data"]["startup"]
+    assert created["data"]["desktop_spec"]["enabled"] is True
 
 
 def test_sandbox_port_api_uses_context_approval_not_payload_flags(tmp_path) -> None:
@@ -1229,6 +1407,82 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert service.frame_cache.last_metadata("seat-1") is None
     assert service.lease_manager.active_lease("seat-1") is None
     assert agent.desktop_inputs[0].action == "click"
+
+
+def test_desktop_api_sees_desktop_created_by_external_tool_manager(tmp_path) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    capabilities = {
+        "sandbox.exec",
+        "sandbox.files",
+        "sandbox.resource_limits",
+        "sandbox.network_policy",
+        "sandbox.desktop",
+        "sandbox.desktop_input",
+        "sandbox.snapshot",
+    }
+    http_registry = ProviderRegistry()
+    http_agent = FakeGuestAgent()
+    http_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            guest_agent=http_agent,
+            sandbox_id_factory=lambda: "http-seat",
+        )
+    )
+    service = SimpleNamespace(
+        provider_registry=http_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=http_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+
+    tool_registry = ProviderRegistry()
+    tool_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            sandbox_id_factory=lambda: "tool-seat",
+        )
+    )
+    tool_manager = SandboxManager(state_dir=tmp_path, provider_registry=tool_registry)
+    created = tool_manager.create(
+        display=True,
+        provider_id="fake-runtime",
+        template_id="desktop.ubuntu",
+        access_owner_id="local-user",
+    )
+
+    api._reset_service_for_tests(service)
+    try:
+        listed = api.run({"_handler": "desktops_list"}, {})
+        fetched = api.run({"_handler": "desktop_get", "seat_id": "tool-seat"}, {"user_id": "local-user"})
+        ai_input = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "tool-seat",
+                "action": "click",
+                "client_action_id": "ai-click-1",
+                "x": 12,
+                "y": 34,
+                "button": "left",
+            },
+            {"user_id": "local-user", "agent_id": "agent-1"},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert created["ok"] is True
+    assert created["sandbox_id"] == "tool-seat"
+    assert listed["status"] == "ok"
+    assert [desktop["seat_id"] for desktop in listed["data"]["desktops"]] == ["tool-seat"]
+    assert fetched["status"] == "ok"
+    assert fetched["data"]["seat_id"] == "tool-seat"
+    assert fetched["data"]["status"] == "running"
+    assert ai_input["status"] == "ok"
+    assert ai_input["data"]["accepted"] is True
+    assert http_agent.desktop_inputs[0].action == "click"
 
 
 def test_sandbox_stop_and_delete_require_destructive_confirmation(tmp_path) -> None:
@@ -1925,6 +2179,150 @@ def test_defaultspack_runtime_service_registers_cross_platform_providers(tmp_pat
     assert docker_isolation["sandbox_cgroup_scope"] == "docker_container"
 
 
+def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch) -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers import managed_ubuntu
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+        GuestCommandResult,
+        WindowsWslProvider,
+    )
+
+    commands: list[tuple[str, ...]] = []
+
+    def runner(command, input_text, timeout):
+        del input_text, timeout
+        argv = tuple(command)
+        commands.append(argv)
+        if argv == ("wsl.exe", "--version"):
+            return GuestCommandResult(returncode=0, stdout="WSL version: 2.5.0\n")
+        if argv == ("wsl.exe", "-l", "-q"):
+            return GuestCommandResult(
+                returncode=0,
+                stdout="d\x00o\x00c\x00k\x00e\x00r\x00-\x00d\x00e\x00s\x00k\x00t\x00o\x00p\x00\n\x00R\x00u\x00m\x00i\x00U\x00b\x00u\x00n\x00t\x00u\x00\n\x00",
+            )
+        if argv[:5] == ("wsl.exe", "-d", "RumiUbuntu", "--", "bash"):
+            return GuestCommandResult(returncode=0, stdout="")
+        return GuestCommandResult(returncode=1, stderr=f"unexpected command: {argv!r}")
+
+    monkeypatch.setattr(managed_ubuntu.platform, "system", lambda: "Windows")
+    provider = WindowsWslProvider(command_path="wsl.exe", runner=runner)
+
+    status = provider.doctor(
+        RuntimeRequirements(provider_id="windows_wsl", required_capabilities=frozenset())
+    )
+
+    dependency_checks = [
+        command for command in commands if command[:5] == ("wsl.exe", "-d", "RumiUbuntu", "--", "bash")
+    ]
+    assert status.ready is True
+    assert "managed_guest" not in status.missing_requirements
+    assert dependency_checks
+    assert "command -v Xvfb" in dependency_checks[0][-1]
+
+
+def test_windows_wsl_guest_shell_escapes_dollar_expansion_and_preserves_stdin() -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
+        GuestCommandResult,
+        WindowsWslProvider,
+    )
+
+    captured = {}
+
+    def runner(command, input_text, timeout):
+        captured["command"] = tuple(command)
+        captured["input_text"] = input_text
+        captured["timeout"] = timeout
+        return GuestCommandResult(returncode=0, stdout="ok")
+
+    provider = WindowsWslProvider(command_path="wsl.exe", runner=runner)
+
+    result = provider._guest_shell(
+        "wsl.exe",
+        'DISPLAY_ID=":98"\nprintf "%s" "$DISPLAY_ID"',
+        input_text="payload",
+        timeout=5,
+        check=False,
+    )
+
+    assert result.stdout == "ok"
+    assert captured["command"] == (
+        "wsl.exe",
+        "-d",
+        "RumiUbuntu",
+        "--",
+        "bash",
+        "-lc",
+        'DISPLAY_ID=":98"\nprintf "%s" "\\$DISPLAY_ID"',
+    )
+    assert captured["input_text"] == "payload"
+    assert captured["timeout"] == 5
+
+
+def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_processes() -> None:
+    from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import _desktop_running_script, _desktop_start_script
+
+    def assert_in_order(text: str, *needles: str) -> None:
+        position = -1
+        for needle in needles:
+            next_position = text.index(needle, position + 1)
+            assert next_position > position
+            position = next_position
+
+    script = _desktop_start_script(
+        "windows_wsl-seat-1",
+        "/workspace/windows_wsl-seat-1",
+        1440,
+        900,
+        ":98",
+        False,
+        {"starter": "empty"},
+    )
+
+    assert "chmod 1777 /tmp/.X11-unix" in script
+    assert "CLIENT_DISPLAY=\"127.0.0.1:${DISPLAY_NUM}.0\"" in script
+    assert "$XVFB_TRANSPORT_ARGS" in script
+    assert "-nolisten local -listen tcp" in script
+    assert "display.env" in script
+    assert "run_display_service setsid" in script
+    assert "run_ui() {" in script
+    assert "rumi_process_matches_instance" in script
+    assert "rumi_find_instance_pid Xvfb" in script
+    assert "rumi_find_instance_pid openbox" in script
+    assert "rumi_pidfile_alive" in script
+    assert "/proc/$pid/environ" in script
+    assert "launched_xvfb" in script
+    assert "launched_openbox" in script
+    assert script.index("launched_xvfb") < script.index("Desktop Xvfb failed to stay running.")
+    assert script.index("launched_openbox") < script.index("Desktop openbox failed to stay running.")
+    assert 'rm -f "/tmp/.X${DISPLAY_NUM}-lock"' in script
+    assert "Desktop Xvfb failed to stay running." in script
+    assert "Desktop openbox failed to stay running." in script
+    assert_in_order(
+        script,
+        "Xvfb :98 -screen 0 1440x900x24",
+        "sleep 0.5",
+        'launched_xvfb="$(rumi_find_instance_pid Xvfb || true)"',
+        'echo "$launched_xvfb" > /tmp/rumi-managed-runtime/windows_wsl-seat-1/xvfb.pid',
+        "Desktop Xvfb failed to stay running.",
+    )
+    assert_in_order(
+        script,
+        'DISPLAY="$CLIENT_DISPLAY" openbox',
+        "sleep 0.2",
+        'launched_openbox="$(rumi_find_instance_pid openbox || true)"',
+        'echo "$launched_openbox" > /tmp/rumi-managed-runtime/windows_wsl-seat-1/openbox.pid',
+        "Desktop openbox failed to stay running.",
+    )
+
+    running_script = _desktop_running_script("windows_wsl-seat-1")
+    assert "rumi_process_matches_instance" in running_script
+    assert "rumi_find_instance_pid Xvfb" in running_script
+    assert "rumi_find_instance_pid openbox" in running_script
+    assert "rumi_pidfile_alive" in running_script
+    assert "/proc/$pid/environ" in running_script
+    assert "xvfb.pid" in running_script
+    assert "openbox.pid" in running_script
+
+
 def test_runtime_update_and_uninstall_use_provider_operation_results(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
@@ -2193,6 +2591,18 @@ def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None
     assert final["data"]["status"] == "cancelled"
     assert not finished_file.exists()
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
+
+
+def test_cancellable_subprocess_replaces_non_utf8_output() -> None:
+    from ecosystem.defaultspack.backend.sandbox.cancellation import run_cancellable_subprocess
+
+    script = "import sys; sys.stderr.buffer.write(b'bad-\\\\xfc-byte')"
+
+    completed = run_cancellable_subprocess((sys.executable, "-c", script), timeout=5)
+
+    assert completed.returncode == 0
+    assert "bad-" in completed.stderr
+    assert "-byte" in completed.stderr
 
 
 def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:

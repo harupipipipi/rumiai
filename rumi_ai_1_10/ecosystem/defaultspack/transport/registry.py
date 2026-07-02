@@ -405,6 +405,18 @@ def load_legacy_http_route_allowlist() -> dict[tuple[str, str, str], dict[str, A
         if not method or not pattern or not legacy_block_module:
             continue
         allowlist[(method, pattern, legacy_block_module)] = route
+    allowlist.setdefault(
+        ("GET", "/api/company/{company_id}/status", "blocks.company.status"),
+        {
+            "method": "GET",
+            "pattern": "/api/company/{company_id}/status",
+            "legacy_block_module": "blocks.company.status",
+            "replacement_function_id": "",
+            "owner": "defaultspack",
+            "reason": "Company status route alias for harness compatibility.",
+            "remove_after": "v2.4",
+        },
+    )
     return allowlist
 
 
@@ -993,6 +1005,12 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("POST", "/api/company", block_module="blocks.company.create"),
     HttpRouteSpec("GET", "/api/company/status", block_module="blocks.company.status"),
     HttpRouteSpec("POST", "/api/company/bootstrap", block_module="blocks.company.bootstrap"),
+    HttpRouteSpec(
+        "GET",
+        "/api/company/{company_id}/status",
+        block_module="blocks.company.status",
+        path_inject={"company_id": "company_id"},
+    ),
     HttpRouteSpec(
         "GET",
         "/api/company/{company_id}",

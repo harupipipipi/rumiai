@@ -994,7 +994,9 @@ export type OperationsCompanyStatus = {
   };
 };
 
-export type MimoCodingCompanyStatus = OperationsCompanyStatus;
+export type MimoCodingCompanyStatus = OperationsCompanyStatus & {
+  company?: CompanyRecord | null;
+};
 
 export type ChatActivityEvent = {
   type: string;
@@ -3366,7 +3368,15 @@ export const api = {
     });
   },
 
-  listCompanyMessages(companyId: string, options?: { channel_id?: string; limit?: number; offset?: number }) {
+  listCompanyMessages(companyId: string, options?: {
+    channel_id?: string;
+    thread_id?: string;
+    limit?: number;
+    offset?: number;
+    tail?: boolean;
+    latest?: boolean;
+    order?: "asc" | "desc" | string;
+  }) {
     return request<{ messages: CompanyMessage[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/messages`, { company_id: companyId, ...options }),
       { cache: "no-store" },
@@ -3421,7 +3431,7 @@ export const api = {
     });
   },
 
-  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number }) {
+  listCompanyRuns(companyId: string, options?: { agent_id?: string; task_id?: string; status?: string; limit?: number; offset?: number }) {
     return request<{ runs: CompanyRunLink[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/runs`, { company_id: companyId, ...options }),
       { cache: "no-store" },

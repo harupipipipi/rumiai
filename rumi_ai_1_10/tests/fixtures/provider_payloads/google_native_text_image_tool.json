@@ -25,6 +25,20 @@
           }
         }
       ]
+    },
+    {
+      "role": "user",
+      "parts": [
+        {
+          "functionResponse": {
+            "name": "lookup",
+            "response": {
+              "ok": true
+            },
+            "id": "tc"
+          }
+        }
+      ]
     }
   ],
   "tools": [

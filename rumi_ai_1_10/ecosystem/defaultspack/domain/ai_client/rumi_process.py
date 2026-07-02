@@ -37,6 +37,7 @@ _ACTION_TOOL_IDS = {
     "coding_file_patch",
     "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
     "browser_use",
     "browser_computer",
     "html_preview",

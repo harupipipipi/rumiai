@@ -269,7 +269,7 @@ class GoogleProvider(OpenAICompatibleProvider):
             return None
 
         if model_id.startswith("gemma-4"):
-            if level in {"minimal", "low"}:
+            if level in {"none", "minimal", "low"}:
                 return "minimal"
             if level in {"medium", "high"}:
                 return "high"
@@ -310,8 +310,9 @@ class GoogleProvider(OpenAICompatibleProvider):
         if not isinstance(value, dict):
             return None
         block_type = str(value.get("type") or "").lower()
-        if block_type == "text":
-            return {"text": str(value.get("text") or "")}
+        if block_type in {"text", "input_text"}:
+            text = str(value.get("text") or value.get("content") or "")
+            return {"text": text} if text else None
         if block_type == "image_url":
             image_url = value.get("image_url")
             url = image_url.get("url") if isinstance(image_url, dict) else value.get("url")
@@ -445,8 +446,14 @@ class GoogleProvider(OpenAICompatibleProvider):
                 continue
             role = str(message.get("role") or "user").lower()
             raw_content = message.get("content", "")
+            if raw_content is None or raw_content == [] or (isinstance(raw_content, str) and not raw_content.strip()):
+                raw_content = cls._native_message_text_fallback(message)
             raw_parts = raw_content if isinstance(raw_content, list) else [raw_content]
             parts = [] if role == "tool" else [part for part in (cls._native_text_part(item) for item in raw_parts) if part]
+            if not parts and role != "tool":
+                fallback = cls._native_message_text_fallback(message)
+                if fallback:
+                    parts = [{"text": fallback}]
             if role == "assistant":
                 parts.extend(
                     part
@@ -467,8 +474,121 @@ class GoogleProvider(OpenAICompatibleProvider):
                 continue
             native_role = "model" if role == "assistant" else "user"
             contents.append({"role": native_role, "parts": parts})
+        contents = cls._native_normalize_tool_history(contents)
         system_instruction = {"parts": system_parts} if system_parts else None
         return contents, system_instruction
+
+    @classmethod
+    def _native_normalize_tool_history(cls, contents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        pending: Dict[str, Any] | None = None
+
+        def has_call(part: Dict[str, Any]) -> bool:
+            return isinstance(part.get("functionCall"), dict)
+
+        def has_response(part: Dict[str, Any]) -> bool:
+            return isinstance(part.get("functionResponse"), dict)
+
+        def finalize_pending() -> None:
+            nonlocal pending
+            if pending is None:
+                return
+            entry = pending["entry"]
+            answered_indexes = pending["answered_indexes"]
+            kept_parts = [
+                part
+                for index, part in enumerate(entry.get("parts") or [])
+                if not has_call(part) or index in answered_indexes
+            ]
+            if kept_parts:
+                entry["parts"] = kept_parts
+            else:
+                if 0 <= pending["entry_index"] < len(normalized):
+                    normalized.pop(pending["entry_index"])
+            pending = None
+
+        for item in contents:
+            if not isinstance(item, dict):
+                continue
+            role = str(item.get("role") or "user")
+            parts = [part for part in item.get("parts") or [] if isinstance(part, dict)]
+            if not parts:
+                continue
+            if role != "model":
+                parts = [part for part in parts if not has_call(part)]
+            if role != "user":
+                parts = [part for part in parts if not has_response(part)]
+            if not parts:
+                continue
+
+            call_indexes = [index for index, part in enumerate(parts) if has_call(part)]
+            response_indexes = [index for index, part in enumerate(parts) if has_response(part)]
+
+            if pending is not None and not (role == "user" and response_indexes):
+                finalize_pending()
+
+            if role == "user" and response_indexes:
+                kept_response_indexes: set[int] = set()
+                if pending is not None:
+                    for response_index in response_indexes:
+                        response = parts[response_index].get("functionResponse") or {}
+                        for call_index in pending["call_indexes"]:
+                            if call_index in pending["answered_indexes"]:
+                                continue
+                            call_part = pending["entry"]["parts"][call_index].get("functionCall") or {}
+                            if cls._native_tool_parts_match(call_part, response):
+                                pending["answered_indexes"].add(call_index)
+                                kept_response_indexes.add(response_index)
+                                break
+                    if len(pending["answered_indexes"]) >= len(pending["call_indexes"]):
+                        pending = None
+                parts = [
+                    part
+                    for index, part in enumerate(parts)
+                    if not has_response(part) or index in kept_response_indexes
+                ]
+                if not parts:
+                    continue
+
+            entry = {"role": role, "parts": parts}
+            normalized.append(entry)
+            if role == "model" and call_indexes:
+                pending = {
+                    "entry": entry,
+                    "entry_index": len(normalized) - 1,
+                    "call_indexes": call_indexes,
+                    "answered_indexes": set(),
+                }
+
+        finalize_pending()
+        return normalized
+
+    @staticmethod
+    def _native_tool_parts_match(function_call: Dict[str, Any], function_response: Dict[str, Any]) -> bool:
+        call_id = str(function_call.get("id") or "").strip()
+        response_id = str(function_response.get("id") or "").strip()
+        call_name = str(function_call.get("name") or "").strip()
+        response_name = str(function_response.get("name") or "").strip()
+        if call_id and response_id:
+            return call_id == response_id
+        if call_id and not response_id:
+            return bool(call_name and call_name == response_name)
+        if response_id and not call_id:
+            return bool(call_name and call_name == response_name)
+        return bool(call_name and call_name == response_name)
+
+    @staticmethod
+    def _native_message_text_fallback(message: Dict[str, Any]) -> str:
+        for key in ("text", "raw_text", "prompt", "message"):
+            value = message.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+        for key in ("scheduled_task_message", "runtime_content", "user_text"):
+            value = metadata.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
 
     @staticmethod
     def _native_schema(value: Any) -> Dict[str, Any]:
@@ -553,6 +673,8 @@ class GoogleProvider(OpenAICompatibleProvider):
         name_map: Dict[str, str] | None = None,
     ) -> Dict[str, Any]:
         contents, system_instruction = self._native_build_contents(messages, name_map)
+        if not contents:
+            raise ValueError("google native request requires at least one non-empty message content")
         body: Dict[str, Any] = {"contents": contents}
         if system_instruction:
             body["systemInstruction"] = system_instruction
@@ -739,8 +861,9 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     def _native_complete(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
-        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        with self._native_request_json(model, body, timeout=self._request_timeout(params)) as resp:
+        native_params = self._translate_params(dict(params or {}), model)
+        body = self._native_body(model, messages, tools, native_params, name_map)
+        with self._native_request_json(model, body, timeout=self._request_timeout(native_params)) as resp:
             raw = json.loads(resp.read().decode("utf-8"))
         text, thought, finish_reason, tool_uses = self._native_extract_parts(raw, reverse_name_map)
         content = [{"type": "text", "text": text}]
@@ -762,8 +885,9 @@ class GoogleProvider(OpenAICompatibleProvider):
 
     def _native_stream(self, model, messages, tools, params):
         name_map, reverse_name_map = self._tool_name_maps(tools)
-        body = self._native_body(model, messages, tools, dict(params or {}), name_map)
-        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(params))
+        native_params = self._translate_params(dict(params or {}), model)
+        body = self._native_body(model, messages, tools, native_params, name_map)
+        resp = self._native_request_json(model, body, stream=True, timeout=self._request_timeout(native_params))
         finish_reason = "stop"
         usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
         try:
