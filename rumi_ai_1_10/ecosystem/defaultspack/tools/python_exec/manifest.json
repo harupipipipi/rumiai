@@ -28,7 +28,11 @@
     "schema": {
       "parameters": {
         "type": "object",
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "anyOf": [
+          {"required": ["code"]},
+          {"required": ["script_path"]}
+        ],
         "properties": {
           "code": {
             "type": "string"
