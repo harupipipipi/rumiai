@@ -973,8 +973,14 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
                     pages_dev_is_not_a_pc_tunnel_hostname: true,
                     all_tools_cloudflare_native_supported: false,
                     pc_local_tools_require_pc_bridge: true,
+                    wrangler_diagnostics_require_explicit_command_or_local_install: true,
                   },
                   blockers: [
+                    {
+                      code: "CLOUDFLARE_WRANGLER_MISSING",
+                      message:
+                        "Set RUMI_WRANGLER_COMMAND or run npm install in a Cloudflare scaffold so its pinned node_modules/.bin/wrangler is available.",
+                    },
                     { code: "CLOUDFLARE_CONTAINERS_PAID_PLAN_REQUIRED", message: "Cloudflare Containers require the Workers Paid plan." },
                     { code: "CLOUDFLARE_PC_TUNNEL_ENV_NOT_CONFIGURED", message: "Set a named Cloudflare Tunnel hostname." },
                   ],
@@ -1010,8 +1016,10 @@ test("settings accounts prelude renders actionable Google and disabled Cloudflar
   assert.match(html, /Run diagnostics/);
   assert.match(html, /Sandbox: Workers Paid plan/);
   assert.match(html, /pages\.dev is not a PC tunnel/);
+  assert.match(html, /Wrangler: explicit command or local install/);
+  assert.match(html, /Set RUMI_WRANGLER_COMMAND/);
+  assert.match(html, /node_modules\/\.bin\/wrangler/);
   assert.match(html, /Cloudflare Containers require the Workers Paid plan/);
-  assert.match(html, /Set a named Cloudflare Tunnel hostname/);
   assert.doesNotMatch(html, />Not connected</);
 });
 

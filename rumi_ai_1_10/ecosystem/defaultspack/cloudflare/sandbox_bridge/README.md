@@ -21,9 +21,9 @@ Prerequisites:
 cd rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge
 npm install
 npm run check
-npx wrangler deploy --dry-run --containers-rollout=none
+./node_modules/.bin/wrangler deploy --dry-run --containers-rollout=none
 SANDBOX_API_KEY="$(openssl rand -hex 32)"
-printf '%s' "$SANDBOX_API_KEY" | npx wrangler secret put SANDBOX_API_KEY
+printf '%s' "$SANDBOX_API_KEY" | ./node_modules/.bin/wrangler secret put SANDBOX_API_KEY
 npm run deploy
 curl https://rumi-cloudflare-sandbox-bridge.<your-subdomain>.workers.dev/health
 ```

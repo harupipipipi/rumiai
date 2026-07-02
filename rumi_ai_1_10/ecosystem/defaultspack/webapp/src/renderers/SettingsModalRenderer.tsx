@@ -1059,6 +1059,7 @@ function cloudflareProvisioningFacts(provisioning: Record<string, unknown>): str
   if (constraints.pages_dev_is_not_a_pc_tunnel_hostname) facts.push("pages.dev is not a PC tunnel");
   if (constraints.all_tools_cloudflare_native_supported === false) facts.push("Cloudflare-native tools: partial");
   if (constraints.pc_local_tools_require_pc_bridge) facts.push("PC-local tools: PC bridge");
+  if (constraints.wrangler_diagnostics_require_explicit_command_or_local_install) facts.push("Wrangler: explicit command or local install");
   return facts;
 }
 

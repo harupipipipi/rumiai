@@ -45,6 +45,7 @@ def test_cloudflare_oauth_status_includes_sdk_missing(monkeypatch):
     assert status["provisioning"]["constraints"]["pc_tool_bridge_requires_named_tunnel"] is True
     assert status["provisioning"]["constraints"]["stable_pc_tunnel_requires_cloudflare_managed_zone"] is True
     assert status["provisioning"]["constraints"]["pages_projects_do_not_create_cloudflare_dns_zones"] is True
+    assert status["provisioning"]["constraints"]["wrangler_diagnostics_require_explicit_command_or_local_install"] is True
     assert (
         status["provisioning"]["environment"]["deployment"]["sandbox_bridge_scaffold"]
         == "rumi_ai_1_10/ecosystem/defaultspack/cloudflare/sandbox_bridge"
@@ -128,7 +129,7 @@ def test_cloudflare_oauth_active_diagnostics_passes_imported_token(monkeypatch):
     assert "cloudflare-secret-token" not in str(status)
 
 
-def test_cloudflare_environment_prefers_local_wrangler_before_npx(monkeypatch):
+def test_cloudflare_environment_prefers_local_wrangler_over_downloadable_npx(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 
     local_bin = "/repo/rumi_ai_1_10/ecosystem/defaultspack/cloudflare/pc_tool_bridge/node_modules/.bin/wrangler"
@@ -145,13 +146,25 @@ def test_cloudflare_environment_prefers_local_wrangler_before_npx(monkeypatch):
     assert diagnostics._wrangler_command({}) == [local_bin]
 
 
-def test_cloudflare_environment_uses_noninteractive_npx_wrangler(monkeypatch):
+def test_cloudflare_environment_does_not_fall_back_to_downloadable_npx_wrangler(monkeypatch):
     from core_runtime.cloudflare import diagnostics
 
     monkeypatch.setattr(diagnostics.shutil, "which", lambda name: "/usr/local/bin/npx" if name == "npx" else None)
     monkeypatch.setattr(diagnostics.os.path, "isfile", lambda _path: False)
 
-    assert diagnostics._wrangler_command({}) == ["/usr/local/bin/npx", "--yes", "wrangler"]
+    assert diagnostics._wrangler_command({}) == []
+
+    status = diagnostics.cloudflare_environment_status(
+        active=True,
+        command_runner=lambda argv, _timeout: (_ for _ in ()).throw(AssertionError(f"unexpected command: {argv}")),
+        env={},
+    )
+
+    assert status["checks"]["wrangler"]["status"] == "missing"
+    assert "RUMI_WRANGLER_COMMAND" in status["checks"]["wrangler"]["detail"]
+    assert "node_modules/.bin/wrangler" in status["checks"]["wrangler"]["detail"]
+    assert "auto-download" in status["checks"]["wrangler"]["detail"]
+    assert "CLOUDFLARE_WRANGLER_MISSING" in {item["code"] for item in status["blockers"]}
 
 
 def test_cloudflare_environment_active_diagnostics_reports_paid_plan_and_tunnel_blockers(monkeypatch):

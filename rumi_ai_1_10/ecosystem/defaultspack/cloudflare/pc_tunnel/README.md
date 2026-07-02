@@ -14,11 +14,11 @@ cloudflared tunnel create rumi-pc
 cloudflared tunnel route dns rumi-pc rumi-pc.example.com
 ```
 
-Wrangler OAuth can also create and list the named Tunnel:
+An explicitly installed Wrangler binary can also create and list the named Tunnel:
 
 ```bash
-npx wrangler tunnel create rumi-pc
-npx wrangler tunnel list
+wrangler tunnel create rumi-pc
+wrangler tunnel list
 ```
 
 That does not remove the DNS requirement. A stable phone-to-PC URL still needs a

@@ -26,9 +26,9 @@ Cloudflare the tool execution authority.
 
    ```sh
    npm install
-   npx wrangler secret put RUMI_PC_TOOL_BRIDGE_TOKEN
-   npx wrangler secret put RUMI_PC_RUNTIME_BEARER
-   npx wrangler deploy
+   ./node_modules/.bin/wrangler secret put RUMI_PC_TOOL_BRIDGE_TOKEN
+   ./node_modules/.bin/wrangler secret put RUMI_PC_RUNTIME_BEARER
+   ./node_modules/.bin/wrangler deploy
    ```
 
 4. Set `RUMI_PC_ORIGIN` as a non-secret Worker variable after the named Tunnel

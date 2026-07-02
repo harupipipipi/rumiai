@@ -89,6 +89,7 @@ def test_cloudflare_sandbox_bridge_readme_states_pages_and_tool_limits() -> None
     assert "named Cloudflare Tunnel plus a DNS hostname" in readme
     assert "does not upload or replace PC-local browser" in readme
     assert "Workers Paid plan" in readme
+    assert "./node_modules/.bin/wrangler" in readme
 
 
 def _load_jsonc(path: Path) -> dict[str, object]:
