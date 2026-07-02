@@ -390,6 +390,10 @@ test("authority approval browser token helper accepts URL aliases and builds tok
     "/approval?request_id=auth+1&browser_approval_token=tok%2Fen",
   );
   assert.equal(
+    browserAuthorityApprovalPath("auth 1", "tok/en", "/ambient-debug?authority_approved=1"),
+    "/approval?request_id=auth+1&browser_approval_token=tok%2Fen&return_to=%2Fambient-debug%3Fauthority_approved%3D1",
+  );
+  assert.equal(
     browserApprovalTokenizedPath("/finger-recording?authority_approved=1", "tok/en"),
     "/finger-recording?authority_approved=1&browser_approval_token=tok%2Fen",
   );
@@ -454,19 +458,55 @@ test("authority approval window settles already-approved or denied requests on l
     source,
     /const singleSettledStatus = authorityRequestSettledStatus\(single\.status\)[\s\S]*settleAuthorityRequest\(single, singleSettledStatus\)/,
   );
+  assert.doesNotMatch(source, /resolvePendingAuthorityApproval\(requestToApproval\(single\), list\.pending \?\? \[\]\)/);
+  assert.doesNotMatch(source, /setRequestId\(activePendingApproval\.requestId\)/);
   assert.match(source, /const displayedSettledStatus = decisionSettledStatus \?\? authorityRequestSettledStatus\(request\?\.status\)/);
   assert.match(source, /const approvalContextAvailable = nativeApprovalAvailable \|\| browserApprovalAvailable/);
   assert.match(source, /const showApprovalControls = Boolean\(request && request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /authorityApprovalSettledLabel\(displayedSettledStatus\)/);
 });
 
-test("authority approval window settles and closes immediately after approve or deny post success", () => {
+test("authority approval window finalizes hidden resume before broadcasting approve settlement", () => {
   const source = authorityApprovalWindowSource();
 
-  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(\)[\s\S]*closeAuthorityApprovalWindow/);
-  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose \?\? nativeApprovalAvailableRef\.current/);
-  assert.match(source, /const decision = await submitApproveOnce\(\);\s*settleApprovedDecision\(request, decision\);\s*await finalizeApprovedDecision\(request, decision\);/);
+  assert.match(source, /function scheduleAuthorityApprovalWindowClose\(fallbackReturnTo = ""\)[\s\S]*closeAuthorityApprovalWindow\(fallbackReturnTo\)/);
+  assert.match(source, /const shouldScheduleClose = options\?\.scheduleClose[\s\S]*nativeApprovalAvailableRef\.current \|\| Boolean\(browserApprovalTokenRef\.current\)/);
+  assert.match(source, /scheduleAuthorityApprovalWindowClose\(nativeApprovalAvailableRef\.current \? "" : approvalReturnToFromLocation\(\)\)/);
+  assert.match(source, /const decision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, decision\);/);
+  assert.match(source, /const retriedDecision = await submitApproveOnce\(\);\s*await finalizeApprovedDecision\(request, retriedDecision\);/);
+  assert.doesNotMatch(source, /settleApprovedDecision\(request,/);
   assert.match(source, /await submitRejectOnce\(\);\s*settleDeniedRequest\(request\);\s*await finalizeDeniedRequest\(request\);/);
+});
+
+test("authority approval browser fallback returns same-tab approvals to a safe ambient route", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /function approvalReturnToFromLocation\(\)/);
+  assert.match(source, /url\.origin !== window\.location\.origin/);
+  assert.match(source, /const APPROVAL_RETURN_TO_PATHS = \["\/finger-recording", "\/ambient-debug"\] as const/);
+  assert.match(source, /function isApprovalReturnToPathAllowed\(pathname: string\)/);
+  assert.match(source, /pathname === allowedPath \|\| pathname\.startsWith\(`\$\{allowedPath\}\/`\)/);
+  assert.match(source, /!isApprovalReturnToPathAllowed\(url\.pathname\)/);
+  assert.doesNotMatch(source, /startsWith\("\/finger-recording"\)/);
+  assert.doesNotMatch(source, /startsWith\("\/ambient-debug"\)/);
+  assert.match(source, /window\.location\.replace\(defaultspackUrlWithStoredLocalAuth\(browserApprovalTokenizedPath\(fallbackReturnTo\)\)\)/);
+});
+
+test("authority approval route shows the pending picker when request_id is missing", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /const showPendingRequestPicker = pendingRequests\.length > 0 && \(!requestId \|\| pendingRequests\.length > 1\)/);
+  assert.match(source, /\{showPendingRequestPicker && \(/);
+  assert.doesNotMatch(source, /\{pendingRequests\.length > 1 && \(/);
+});
+
+test("authority approval window ignores late settlements for a request that is no longer selected", () => {
+  const source = authorityApprovalWindowSource();
+
+  assert.match(source, /const requestIdRef = useRef\(requestId\)/);
+  assert.match(source, /requestIdRef\.current = requestId/);
+  assert.match(source, /if \(requestIdRef\.current !== settledRequest\.request_id\) \{\s*return;\s*\}/);
+  assert.match(source, /setPendingRequests\(\(current\) => current\.filter\(\(item\) => item\.request_id !== settledRequest\.request_id\)\)[\s\S]*if \(requestIdRef\.current !== settledRequest\.request_id\)/);
 });
 
 test("authority approval window treats post failure followed by settled GET as settled", () => {

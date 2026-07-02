@@ -17,6 +17,23 @@ from domain.agent_runtime.run_store import AgentRunStore  # noqa: E402
 from domain.agent_runtime.transcript import TranscriptStore  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_agent_engine_routing(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "domain.agent.engine._route_agent_model",
+        lambda *, model, **_kwargs: model if model else "default",
+    )
+    monkeypatch.setattr(
+        "domain.agent.engine.get_model_capabilities",
+        lambda _model: {
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_thinking": True,
+        },
+    )
+
+
 def _tool(name: str) -> dict:
     return {
         "type": "function",
