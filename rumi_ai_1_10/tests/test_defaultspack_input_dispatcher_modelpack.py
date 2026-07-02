@@ -5,6 +5,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -23,6 +25,71 @@ from domain.ai_client.model_pack_store import ModelPackStore  # noqa: E402
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService  # noqa: E402
 from domain.ai_client.model_router import ModelRoutingDecision, ModelRoutingRequest, route_model_request  # noqa: E402
 from domain.ai_client.client import AIClient  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _isolate_agent_model_routing(monkeypatch):
+    monkeypatch.setattr(
+        "domain.agent.engine.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_settings",
+        lambda self: {
+            "preferred_model": "stub/default",
+            "preferred_model_group": "default",
+            "auto_route_within_group": True,
+            "deepthink_enabled": False,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.chat.run_request.ModelRuntimeSettingsService.get_effective_thinking_level",
+        lambda self, **kwargs: {"level": "none"},
+    )
+    monkeypatch.setattr(
+        "domain.agent.engine.route_model_request",
+        lambda request: _fake_route_decision(request.preferred_model or "stub/default"),
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.route_model_request",
+        lambda request: _fake_route_decision(request.preferred_model or "stub/default"),
+    )
+    monkeypatch.setattr(
+        "domain.agent.engine.get_model_capabilities",
+        lambda model: {
+            "profile_id": model,
+            "supports_tool_calling": True,
+            "supports_vision": True,
+            "supports_image_input": True,
+            "supports_audio_input": True,
+            "supports_thinking": True,
+            "supports_fast": True,
+        },
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.get_model_capabilities",
+        _stub_model_capabilities,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_pack_router.get_model_capabilities",
+        _stub_model_capabilities,
+    )
+    monkeypatch.setattr(
+        "domain.ai_client.model_runtime_settings.ModelRuntimeSettingsService._runtime_rumi_base_model",
+        lambda self, settings=None: "",
+    )
 
 
 def _configure_paths(monkeypatch, tmp_path: Path) -> None:
@@ -52,6 +119,22 @@ def _fake_route_decision(model: str) -> ModelRoutingDecision:
         utility_models={},
         explanation="test",
     )
+
+
+def _stub_model_capabilities(model: str, *, profiles: list[dict] | None = None) -> dict:
+    if profiles:
+        for profile in profiles:
+            if profile.get("profile_id") == model or profile.get("qualified_model_id") == model:
+                return dict(profile)
+    return {
+        "profile_id": model,
+        "supports_tool_calling": True,
+        "supports_vision": True,
+        "supports_image_input": True,
+        "supports_audio_input": True,
+        "supports_thinking": True,
+        "supports_fast": True,
+    }
 
 
 def _tiny_image_attachment() -> dict:
