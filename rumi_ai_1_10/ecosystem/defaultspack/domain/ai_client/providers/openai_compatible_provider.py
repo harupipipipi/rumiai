@@ -8,6 +8,13 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..model_metadata_schema import (
+    context_window_value,
+    normalize_capability_map,
+    normalize_request_features,
+    normalize_routing_defaults,
+)
+
 from .openai_provider import OpenAIProvider
 from .profile_catalog import merge_curated_and_profiles, profile_dir_for
 
@@ -130,15 +137,15 @@ class OpenAICompatibleProvider(OpenAIProvider):
                 "provider": provider_id,
                 "provider_id": provider_id,
                 "type": item.get("type", "chat"),
-                "defaults": dict(item.get("defaults", {})),
+                "defaults": normalize_routing_defaults(item),
+                "routing": dict(item.get("routing", {})) if isinstance(item.get("routing"), dict) else {},
                 "metadata": dict(item.get("metadata", {})),
-                "capabilities": dict(item.get("capabilities", {})),
-                "context_window": item.get("context_window", item.get("max_context", item.get("max_context_tokens", 0))),
-                "max_context": item.get("max_context", item.get("max_context_tokens", item.get("context_window", 0))),
-                "max_context_tokens": item.get("max_context_tokens", item.get("max_context", item.get("context_window", 0))),
-                "supports_thinking": bool(item.get("supports_thinking", False)),
-                "thinking_levels": list(item.get("thinking_levels", [])),
-                "default_thinking_level": item.get("default_thinking_level"),
+                "capabilities": normalize_capability_map(item.get("capabilities", {})),
+                "request_features": normalize_request_features(item.get("request_features", {})),
+                "context_window": context_window_value(item, default=0),
+                "max_context": context_window_value(item, default=0),
+                "max_context_tokens": context_window_value(item, default=0),
+                "thinking": dict(item.get("thinking", {})) if isinstance(item.get("thinking"), dict) else {},
             }
         known_models = list(known_model_map.values())
         if not known_models:
@@ -238,15 +245,21 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "display_name": display_name,
             "type": str(raw.get("type", "chat")),
         }
-        defaults = dict(raw.get("defaults", {}))
+        defaults = normalize_routing_defaults(raw)
         metadata = dict(raw.get("metadata", {}))
-        capabilities = raw.get("capabilities", [])
+        capabilities = self._public_capability_map(raw.get("capabilities", []))
         if defaults:
             normalized["defaults"] = defaults
         if metadata:
             normalized["metadata"] = metadata
         if capabilities:
             normalized["capabilities"] = capabilities
+        if isinstance(raw.get("routing"), dict):
+            normalized["routing"] = dict(raw["routing"])
+        if isinstance(raw.get("request_features"), dict):
+            normalized["request_features"] = normalize_request_features(raw["request_features"])
+        if isinstance(raw.get("thinking"), dict):
+            normalized["thinking"] = dict(raw["thinking"])
         for key in ("context_window", "max_context", "max_context_tokens", "supports_thinking", "thinking_levels", "default_thinking_level"):
             if key in raw:
                 normalized[key] = raw[key]
@@ -269,17 +282,21 @@ class OpenAICompatibleProvider(OpenAIProvider):
         return {}
 
     @staticmethod
+    def _public_capability_map(raw_capabilities: Any) -> Dict[str, Any]:
+        capability_map = normalize_capability_map(raw_capabilities)
+        capability_map.setdefault("chat", bool(capability_map.get("text_input") or capability_map.get("text_output")))
+        capability_map.setdefault("vision", bool(capability_map.get("image_input")))
+        capability_map.setdefault("reasoning", bool(capability_map.get("thinking")))
+        capability_map.setdefault("tool_calls", bool(capability_map.get("tool_calling")))
+        return capability_map
+
+    @staticmethod
     def _capability_map(model_entry: Dict[str, Any]) -> Dict[str, Any]:
         raw = model_entry.get("capabilities") if isinstance(model_entry, dict) else {}
-        if isinstance(raw, dict):
-            capability_map = dict(raw)
-        elif isinstance(raw, list):
-            capability_map = {str(item): True for item in raw if str(item or "").strip()}
-        else:
-            capability_map = {}
+        capability_map = normalize_capability_map(raw)
         metadata = model_entry.get("metadata") if isinstance(model_entry, dict) else {}
         if isinstance(metadata, dict) and isinstance(metadata.get("capabilities"), dict):
-            capability_map.update(metadata["capabilities"])
+            capability_map.update(normalize_capability_map(metadata["capabilities"]))
         return capability_map
 
     def _model_request_defaults(self, model: str, model_entry: Dict[str, Any]) -> Dict[str, Any]:
@@ -297,10 +314,11 @@ class OpenAICompatibleProvider(OpenAIProvider):
 
     def _model_supports_reasoning(self, model: str, model_entry: Dict[str, Any]) -> bool:
         capability_map = self._capability_map(model_entry)
-        if "reasoning" in capability_map:
-            return bool(capability_map.get("reasoning"))
         if "thinking" in capability_map:
             return bool(capability_map.get("thinking"))
+        thinking = model_entry.get("thinking") if isinstance(model_entry, dict) and isinstance(model_entry.get("thinking"), dict) else {}
+        if "supported" in thinking:
+            return bool(thinking.get("supported"))
         if isinstance(model_entry, dict) and "supports_thinking" in model_entry:
             return bool(model_entry.get("supports_thinking"))
         model_id = str(model or "").strip()
@@ -344,6 +362,14 @@ class OpenAICompatibleProvider(OpenAIProvider):
         if self.provider_id == "cerebras":
             return self._translate_cerebras_model_params(model, params)
         return super()._translate_model_params(model, params)
+
+    def build_request(self, messages):
+        converted = super().build_request(messages)
+        if self.provider_id == "groq":
+            for message in converted:
+                if isinstance(message, dict) and message.get("role") == "tool":
+                    message.pop("name", None)
+        return converted
 
     def list_models(self):
         provider_name = str(self.provider_id or getattr(self, "provider_name", "") or "").strip()
@@ -457,6 +483,8 @@ class OpenAICompatibleProvider(OpenAIProvider):
         capability_map = self._remote_model_capabilities(model_id, model_type)
         metadata: Dict[str, Any] = {
             "source": "remote_models_endpoint",
+            "capability_source": "remote_models_endpoint",
+            "capability_confidence": "unknown",
         }
         for key in ("owned_by", "object", "created"):
             value = raw.get(key)
@@ -471,9 +499,7 @@ class OpenAICompatibleProvider(OpenAIProvider):
             "name": str(raw.get("display_name") or raw.get("name") or model_id),
             "type": model_type,
             "capabilities": capability_map,
-            "supports_thinking": bool(capability_map.get("reasoning")),
-            "thinking_levels": ["low", "medium", "high", "xhigh"] if capability_map.get("reasoning") else [],
-            "default_thinking_level": "medium" if capability_map.get("reasoning") else None,
+            "thinking": {"supported": False, "levels": [], "provider_mapping": {}},
             "metadata": metadata,
         }
 
@@ -490,31 +516,23 @@ class OpenAICompatibleProvider(OpenAIProvider):
             return "transcription"
         if any(token in lowered for token in ("guard", "moderation", "safeguard")):
             return "moderation"
-        if any(token in lowered for token in ("omni", "vision", "vl", "scout", "maverick")):
-            return "vision"
-        if any(token in lowered for token in ("reason", "thinking", "r1", "gpt-oss", "glm")):
-            return "reasoning"
         return "chat"
 
     @classmethod
     def _remote_model_capabilities(cls, model_id: str, model_type: str) -> Dict[str, Any]:
-        lowered = str(model_id or "").strip().lower()
         is_chat_like = model_type in {"chat", "reasoning", "vision"}
-        supports_reasoning = model_type == "reasoning" or any(
-            token in lowered for token in ("reason", "thinking", "r1", "gpt-oss", "glm")
-        )
-        supports_vision = model_type == "vision"
-        supports_tool_calls = (
-            is_chat_like
-            and model_type not in {"moderation", "tts", "transcription"}
-            and "compound" not in lowered
-        )
         return {
             "chat": is_chat_like,
+            "text_input": is_chat_like,
+            "text_output": is_chat_like,
             "streaming": is_chat_like,
-            "reasoning": supports_reasoning,
-            "tool_calls": supports_tool_calls,
-            "vision": supports_vision,
+            "thinking": False,
+            "reasoning": False,
+            "tool_calling": False,
+            "tool_calls": False,
+            "parallel_tool_calls": False,
+            "image_input": False,
+            "vision": False,
         }
 
     def _headers(self, content_type="application/json"):

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from ...components import get_domain_component_registry
+from ..metadata_json import load_strict_metadata_json
+from ..model_metadata_schema import validate_model_catalog_source
 
 
 def _provider_id(component_manifest: dict[str, Any]) -> str:
@@ -22,8 +23,8 @@ def _load_json_entrypoint(component_manifest: dict[str, Any], key: str) -> Any:
         return None
     path = (Path(source_path).parent / rel_path).resolve()
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        return load_strict_metadata_json(path)
+    except OSError:
         return None
 
 
@@ -100,6 +101,13 @@ def model_manifests_from_provider_components(provider_id: str) -> list[dict[str,
         if _provider_id(manifest) != provider_id:
             continue
         raw_models = _load_json_entrypoint(manifest, "models")
+        if raw_models is not None and _is_trusted_runtime_provider_component(component):
+            source_path = manifest.get("source_path", "")
+            rel_path = (manifest.get("entrypoints") or {}).get("models") if isinstance(manifest.get("entrypoints"), dict) else ""
+            validate_model_catalog_source(
+                raw_models,
+                path=(Path(source_path).parent / rel_path).resolve() if source_path and rel_path else source_path,
+            )
         if isinstance(raw_models, dict):
             raw_models = raw_models.get("models")
         if not isinstance(raw_models, list):

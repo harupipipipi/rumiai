@@ -2203,7 +2203,8 @@ class ChatRunEngine:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
-        decisions: list[tuple[str, dict[str, Any], str, str]] = []
+        principal_id = str(context.get("principal_id") or "defaultspack")
+        decisions: list[tuple[str, dict[str, Any], str, str, Any]] = []
         for permission_id, resource_kind in checks:
             request_id, approval_token = _authority_context_token_for_permission(context, permission_id)
             resource = build_provider_authority_resource(
@@ -2216,9 +2217,8 @@ class ChatRunEngine:
                 provider=provider,
                 stream=False,
             )
-            decisions.append((permission_id, resource, request_id, approval_token))
             decision = service.check(
-                principal_id=str(context.get("principal_id") or "defaultspack"),
+                principal_id=principal_id,
                 permission_id=permission_id,
                 resource=resource,
                 reason=provider_authority_reason(permission_id, resource),
@@ -2232,9 +2232,32 @@ class ChatRunEngine:
             )
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
-        for permission_id, resource, request_id, approval_token in decisions:
+            decisions.append((permission_id, resource, request_id, approval_token, decision))
+
+        token_consumes = []
+        rechecks: list[tuple[str, dict[str, Any], str, str]] = []
+        for permission_id, resource, request_id, approval_token, decision in decisions:
+            effective_request_id = request_id or str(context.get("request_id") or "").strip()
+            if (
+                decision.reason == "One-shot approval verified"
+                and effective_request_id
+                and approval_token
+            ):
+                token_consumes.append(
+                    {
+                        "request_id": effective_request_id,
+                        "principal_id": principal_id,
+                        "permission_id": permission_id,
+                        "resource": resource,
+                        "approval_token": approval_token,
+                    }
+                )
+            else:
+                rechecks.append((permission_id, resource, request_id, approval_token))
+
+        for permission_id, resource, request_id, approval_token in rechecks:
             decision = service.check(
-                principal_id=str(context.get("principal_id") or "defaultspack"),
+                principal_id=principal_id,
                 permission_id=permission_id,
                 resource=resource,
                 reason=provider_authority_reason(permission_id, resource),
@@ -2246,6 +2269,10 @@ class ChatRunEngine:
                 approval_token=approval_token,
                 consume_approval_token=True,
             )
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
+        if token_consumes:
+            decision = service.consume_one_shot_approvals_atomically(token_consumes)
             if not decision.allowed:
                 raise AuthorityApprovalRequired(decision)
 

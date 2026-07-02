@@ -12,25 +12,36 @@
   "security": {
     "credential_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "reasoning": true
-  },
   "provider_metadata": {
     "display_name": "DeepSeek",
     "kind": "cloud",
-    "env_vars": ["DEEPSEEK_API_KEY"],
-    "base_url_envs": ["DEEPSEEK_BASE_URL"],
+    "env_vars": [
+      "DEEPSEEK_API_KEY"
+    ],
+    "base_url_envs": [
+      "DEEPSEEK_BASE_URL"
+    ],
     "catalog_only": true,
     "supports_invoke": false,
     "default_model": "deepseek-chat",
-    "capabilities": ["chat", "reasoning"]
+    "catalog_features": [
+      "chat",
+      "reasoning"
+    ]
   },
   "aliases": {
-    "provider_ids": ["deepseek"]
+    "provider_ids": [
+      "deepseek"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["deepseek"]
+    "legacy_ids": [
+      "deepseek"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "reasoning"
+  ]
 }

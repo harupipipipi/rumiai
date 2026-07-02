@@ -18,15 +18,14 @@
     "fast": "mimo-v2-flash",
     "vision": "mimo-v2-omni"
   },
-  "capabilities": {
-    "native_tool_calling": false,
-    "vision": true,
-    "embeddings": false,
-    "streaming": true
-  },
   "config": {
     "model_sync": "fixed_allowlist",
     "privacy": "external_api_key_gateway",
     "optional_api_key": false
-  }
+  },
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "vision"
+  ]
 }

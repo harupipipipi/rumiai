@@ -43,11 +43,11 @@ disabled_nodes: []
 
 node_settings:
   defaultspack.ai_client:
-    default_model: openrouter/tencent/hy3-preview:free
+    default_model: openrouter/cohere/north-mini-code:free
     model_self_selection:
       enabled: true
       allowlist:
-        - openrouter/tencent/hy3-preview:free
+        - openrouter/cohere/north-mini-code:free
         - google/gemini-2.5-flash
         - google/gemini-2.5-pro
         - openai/gpt-5.4
@@ -142,7 +142,7 @@ policy:
     - coding_terminal_exec
   tool_denylist: []
   model_allowlist:
-    - openrouter/tencent/hy3-preview:free
+    - openrouter/cohere/north-mini-code:free
     - google/gemini-2.5-flash
     - google/gemini-2.5-pro
     - openai/gpt-5.4

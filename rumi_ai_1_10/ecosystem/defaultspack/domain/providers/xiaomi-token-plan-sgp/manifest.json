@@ -15,14 +15,6 @@
     "credential_required": true,
     "region_explicit_selection_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "tool_calls": true,
-    "reasoning": true,
-    "vision": true,
-    "openai_compatible": true
-  },
   "provider_metadata": {
     "display_name": "Xiaomi MiMo Token Plan SGP",
     "kind": "cloud",
@@ -31,7 +23,9 @@
       "XIAOMI_MIMO_TOKEN_PLAN_API_KEY",
       "MIMO_API_KEY"
     ],
-    "base_url_envs": ["XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL"],
+    "base_url_envs": [
+      "XIAOMI_MIMO_TOKEN_PLAN_SGP_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://token-plan-sgp.xiaomimimo.com/v1",
@@ -44,7 +38,14 @@
       "fast": "mimo-v2.5",
       "vision": "mimo-v2-omni"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "tool_calls",
+      "reasoning",
+      "vision",
+      "openai_compatible"
+    ]
   },
   "provider_manifest": {
     "id": "xiaomi-token-plan-sgp",
@@ -74,14 +75,6 @@
       "fast": "mimo-v2.5",
       "vision": "mimo-v2-omni"
     },
-    "capabilities": {
-      "native_tool_calling": true,
-      "structured_outputs": false,
-      "vision": true,
-      "embeddings": false,
-      "streaming": true,
-      "reasoning": true
-    },
     "config": {
       "api_compatibility": "openai",
       "auth_header": "api-key",
@@ -94,7 +87,17 @@
     }
   },
   "aliases": {
-    "provider_ids": ["xiaomi-token-plan-sgp"]
+    "provider_ids": [
+      "xiaomi-token-plan-sgp"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "vision",
+    "openai_compatible"
+  ]
 }

@@ -27,6 +27,12 @@ export interface ApiPack {
   description: string;
   is_core: boolean;
   enabled: boolean;
+  approval_status?: string;
+  approval_reason?: string | null;
+  approved?: boolean;
+  hash_valid?: boolean | null;
+  critical_changed?: boolean | null;
+  approval_issues?: string[];
 }
 
 /** GET /api/panel/flows → data.flows[] */

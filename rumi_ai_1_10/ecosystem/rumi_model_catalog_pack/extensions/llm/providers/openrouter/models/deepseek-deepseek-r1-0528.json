@@ -1,0 +1,102 @@
+{
+  "id": "openrouter/deepseek/deepseek-r1-0528",
+  "category": "llm_model",
+  "version": "1",
+  "provider_id": "openrouter",
+  "model_id": "deepseek/deepseek-r1-0528",
+  "display_name": "DeepSeek R1 0528 via OpenRouter",
+  "type": "chat",
+  "enabled": true,
+  "priority": 7,
+  "routing": {
+    "default_for": [
+      "reasoning"
+    ]
+  },
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": true,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": true,
+    "structured_output": true,
+    "image_input": false,
+    "audio_input": false
+  },
+  "request_features": {
+    "json_mode": true,
+    "response_format": true,
+    "tool_choice": true
+  },
+  "context_window": 163840,
+  "thinking": {
+    "supported": true,
+    "levels": [
+      "low",
+      "medium",
+      "high",
+      "xhigh"
+    ],
+    "default_level": "high",
+    "provider_mapping": {
+      "low": {
+        "reasoning": {
+          "effort": "low"
+        }
+      },
+      "medium": {
+        "reasoning": {
+          "effort": "medium"
+        }
+      },
+      "high": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "xhigh": {
+        "reasoning": {
+          "effort": "high"
+        }
+      },
+      "none": {}
+    }
+  },
+  "metadata": {
+    "source": "openrouter_curated_allowlist",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ],
+    "max_output_tokens": 32768,
+    "supported_parameters": [
+      "frequency_penalty",
+      "include_reasoning",
+      "logit_bias",
+      "logprobs",
+      "max_tokens",
+      "min_p",
+      "presence_penalty",
+      "reasoning",
+      "repetition_penalty",
+      "response_format",
+      "seed",
+      "stop",
+      "structured_outputs",
+      "temperature",
+      "tool_choice",
+      "tools",
+      "top_k",
+      "top_logprobs",
+      "top_p"
+    ]
+  },
+  "pricing": {
+    "prompt": "0.0000005",
+    "completion": "0.00000215"
+  }
+}

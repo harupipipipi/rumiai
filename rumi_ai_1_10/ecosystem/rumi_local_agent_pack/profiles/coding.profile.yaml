@@ -45,7 +45,7 @@ disabled_nodes: []
 
 node_settings:
   defaultspack.ai_client:
-    default_model: openrouter/tencent/hy3-preview:free
+    default_model: openrouter/cohere/north-mini-code:free
 
 policy:
   write_actions_require_approval: true

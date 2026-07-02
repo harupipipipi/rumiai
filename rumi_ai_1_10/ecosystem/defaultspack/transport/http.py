@@ -1689,6 +1689,7 @@ def _apply_authenticated_principal_context(context, payload):
 
 
 def _function_principal_from_context(context, default="defaultspack"):
+    candidate = ""
     if isinstance(context, dict):
         principal = context.get("_authenticated_principal")
         if isinstance(principal, dict) and not bool(principal.get("core_role")):

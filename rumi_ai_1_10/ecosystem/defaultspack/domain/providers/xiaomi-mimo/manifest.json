@@ -7,17 +7,19 @@
   "status": "experimental",
   "display_name": "Xiaomi MiMo",
   "description": "Umbrella catalog entry for Xiaomi MiMo regional providers.",
-  "capabilities": {
-    "provider_group": true,
-    "regional_variants": true
-  },
   "provider_metadata": {
     "display_name": "Xiaomi MiMo",
     "kind": "provider_group",
     "catalog_only": true,
     "supports_invoke": false,
-    "regional_provider_ids": ["xiaomi-mimo-global", "xiaomi-mimo-cn"],
-    "capabilities": ["provider_group", "regional_variants"]
+    "regional_provider_ids": [
+      "xiaomi-mimo-global",
+      "xiaomi-mimo-cn"
+    ],
+    "catalog_features": [
+      "provider_group",
+      "regional_variants"
+    ]
   },
   "provider_manifest": {
     "id": "xiaomi-mimo",
@@ -31,14 +33,17 @@
     "catalog_only": true,
     "supports_invoke": false,
     "default_model": "",
-    "capabilities": {
-      "provider_group": true,
-      "regional_variants": true
-    },
     "config": {
       "do_not_treat_as_runtime_provider": true,
-      "regional_provider_ids": ["xiaomi-mimo-global", "xiaomi-mimo-cn"]
+      "regional_provider_ids": [
+        "xiaomi-mimo-global",
+        "xiaomi-mimo-cn"
+      ]
     }
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "provider_group",
+    "regional_variants"
+  ]
 }

@@ -582,7 +582,10 @@ class PairingManager:
                 return checked
             session = checked["session"]
             expected_delivery_id = str(session.token_delivery_envelope.get("delivery_id") or "")
-            if str(delivery_id or "").strip() and not hmac.compare_digest(str(delivery_id).strip(), expected_delivery_id):
+            provided_delivery_id = str(delivery_id or "").strip()
+            if not provided_delivery_id:
+                return {"ok": False, "reason": "delivery_id is required", "code": "DELIVERY_ID_REQUIRED"}
+            if not hmac.compare_digest(provided_delivery_id, expected_delivery_id):
                 return {"ok": False, "reason": "delivery_id does not match", "code": "DELIVERY_ID_MISMATCH"}
             session.token_pickup_consumed_at = int(now_ms if now_ms is not None else _now_ms())
             self._replace(session)

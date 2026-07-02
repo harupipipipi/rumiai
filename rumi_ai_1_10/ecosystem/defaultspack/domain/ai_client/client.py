@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
@@ -15,6 +14,11 @@ from domain.ai_client.api_key_store import provider_api_metadata, provider_has_a
 from domain.ai_client.authority_resource import build_provider_authority_resource, provider_authority_reason
 from domain.ai_client.authority_gate import provider_requires_authority
 from domain.ai_client.capabilities.registry import get_model_provider_capabilities
+from domain.ai_client.model_metadata_schema import (
+    context_window_value,
+    normalize_capability_map,
+    normalize_routing_defaults,
+)
 from domain.ai_client import rumi_process
 from domain.ai_client.rumi_process_runner import RumiProcessRunner
 from domain.ai_client.oauth_store import provider_has_oauth_connection
@@ -165,27 +169,33 @@ class AIClient:
                 qualified_model_id = f"{provider_id}/{model_id}"
             display_name = str(raw.get("display_name") or raw.get("name") or model_id)
             model_type = str(raw.get("type", "chat"))
-            defaults = dict(raw.get("defaults", {}))
+            defaults = normalize_routing_defaults(raw)
+            routing = dict(raw.get("routing", {})) if isinstance(raw.get("routing"), dict) else {}
             metadata = dict(raw.get("metadata", {}))
             raw_capabilities = raw.get("capabilities", [])
-            if isinstance(raw_capabilities, dict):
-                capability_map = dict(raw_capabilities)
-                capabilities = [str(key) for key, value in capability_map.items() if value]
-            else:
-                capabilities = [str(key) for key in raw_capabilities or [] if str(key or "").strip()]
-                capability_map = {str(key): True for key in capabilities}
+            capability_map = normalize_capability_map(raw_capabilities)
+            capability_map.setdefault("chat", bool(capability_map.get("text_input") or capability_map.get("text_output")))
+            capability_map.setdefault("vision", bool(capability_map.get("image_input")))
+            capability_map.setdefault("reasoning", bool(capability_map.get("thinking")))
+            capability_map.setdefault("tool_calls", bool(capability_map.get("tool_calling")))
+            capabilities = [str(key) for key, value in capability_map.items() if value]
             if capability_map and "capabilities" not in metadata:
                 metadata["capabilities"] = capability_map
-            context_window = int(raw.get("context_window", raw.get("max_context", raw.get("max_context_tokens", 0))) or 0)
-            max_context = int(raw.get("max_context", raw.get("max_context_tokens", context_window)) or 0)
+            context_window = context_window_value(raw, default=0)
+            max_context = context_window
+            thinking = raw.get("thinking") if isinstance(raw.get("thinking"), dict) else {}
             supports_thinking = bool(
                 raw.get("supports_thinking")
                 or capability_map.get("thinking")
-                or capability_map.get("reasoning")
+                or thinking.get("supported")
                 or metadata.get("supports_thinking")
-                or model_type == "reasoning"
             )
-            thinking_levels = list(raw.get("thinking_levels") or metadata.get("thinking_levels") or [])
+            thinking_levels = list(
+                thinking.get("levels")
+                or raw.get("thinking_levels")
+                or metadata.get("thinking_levels")
+                or []
+            )
             if supports_thinking and not thinking_levels:
                 thinking_levels = ["low", "medium", "high", "xhigh"]
         else:
@@ -207,8 +217,14 @@ class AIClient:
             "max_context_tokens": max_context,
             "supports_thinking": supports_thinking,
             "thinking_levels": thinking_levels,
-            "default_thinking_level": raw.get("default_thinking_level", metadata.get("default_thinking_level", "medium" if supports_thinking else None)) if isinstance(raw, dict) else None,
+            "default_thinking_level": (
+                raw.get("default_thinking_level", thinking.get("default_level", metadata.get("default_thinking_level", "medium" if supports_thinking else None)))
+                if isinstance(raw, dict)
+                else None
+            ),
             "capabilities": capabilities,
+            "routing": routing if isinstance(raw, dict) else {},
+            "thinking": thinking if isinstance(raw, dict) else {},
             "availability": dict(provider_entry.get("availability", {})),
             "supports_invoke": bool(
                 provider_entry.get("availability", {}).get("supports_invoke", False)
@@ -226,6 +242,8 @@ class AIClient:
                 "max_context": max_context,
                 "supports_thinking": supports_thinking,
                 "thinking_levels": thinking_levels,
+                "routing": normalized.get("routing", {}),
+                "thinking": normalized.get("thinking", {}),
             },
         )
         normalized["provider_capabilities"] = provider_capabilities
@@ -238,6 +256,8 @@ class AIClient:
                 "max_context": max_context,
                 "supports_thinking": supports_thinking,
                 "thinking_levels": thinking_levels,
+                "routing": normalized.get("routing", {}),
+                "thinking": normalized.get("thinking", {}),
                 "provider_capabilities": provider_capabilities,
             }
         )
@@ -486,6 +506,24 @@ class AIClient:
         clean.pop("_authority_context", None)
         return clean
 
+    def _authority_batch_consume_item(self, params, permission_id, decision):
+        if not getattr(decision, "allowed", False):
+            return None
+        if getattr(decision, "reason", "") != "One-shot approval verified":
+            return None
+        context = self._authority_context_from_params(params)
+        request_id, approval_token = self._authority_token_for_permission(context, permission_id)
+        request_id = request_id or str(context.get("request_id") or "").strip()
+        if not request_id or not approval_token:
+            return None
+        return {
+            "request_id": request_id,
+            "principal_id": getattr(decision, "principal_id", "") or str(context.get("principal_id") or "defaultspack"),
+            "permission_id": permission_id,
+            "resource": dict(getattr(decision, "resource", {}) or {}),
+            "approval_token": approval_token,
+        }
+
     @staticmethod
     def _provider_api_key_configured(provider_id, api_id):
         provider_id = str(provider_id or "").strip()
@@ -565,6 +603,7 @@ class AIClient:
         )
         if not decision.allowed:
             raise AuthorityApprovalRequired(decision)
+        return decision
 
     def _check_authority_for_model_api(
         self,
@@ -578,7 +617,7 @@ class AIClient:
         stream=False,
         consume_approval_token=True,
     ):
-        self._check_authority_for_provider_api(
+        return self._check_authority_for_provider_api(
             permission_id="model.invoke",
             resource_kind="model",
             provider_id=provider_id,
@@ -604,7 +643,7 @@ class AIClient:
         stream=False,
         consume_approval_token=True,
     ):
-        self._check_authority_for_provider_api(
+        return self._check_authority_for_provider_api(
             permission_id="api_key.use",
             resource_kind="api_key",
             provider_id=provider_id,
@@ -630,7 +669,7 @@ class AIClient:
         stream=False,
         consume_approval_token=True,
     ):
-        self._check_authority_for_provider_api(
+        return self._check_authority_for_provider_api(
             permission_id="network.egress",
             resource_kind="network",
             provider_id=provider_id,
@@ -695,10 +734,23 @@ class AIClient:
             ]
             if missing_related:
                 checks = missing_related + [item for item in checks if item not in missing_related]
-        for _, check in checks:
-            check(consume_approval_token=False)
-        for _, check in checks:
+        token_consumes = []
+        rechecks = []
+        for permission_id, check_fn in checks:
+            decision = check_fn(consume_approval_token=False)
+            consume_item = self._authority_batch_consume_item(params, permission_id, decision)
+            if consume_item:
+                token_consumes.append(consume_item)
+            else:
+                rechecks.append(check_fn)
+        for check in rechecks:
             check(consume_approval_token=True)
+        if token_consumes:
+            from core_runtime.authority import get_authority_service
+
+            decision = get_authority_service().consume_one_shot_approvals_atomically(token_consumes)
+            if not decision.allowed:
+                raise AuthorityApprovalRequired(decision)
 
     def _api_route_attempts(self, model, route_refs, params=None, stream=False):
         attempts = []

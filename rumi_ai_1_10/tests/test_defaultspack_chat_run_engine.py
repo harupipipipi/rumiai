@@ -1038,7 +1038,7 @@ def _run_ir_tool_loop(tmp_path, monkeypatch):
     monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
     ChatStore._instance = None
     store = ChatStore()
-    conversation = store.create_conversation(model="openai/gpt-5.4")
+    conversation = store.create_conversation(model="openai/gpt-5.5")
     monkeypatch.setattr(ToolExecutor, "execute", lambda self, name, arguments, context: {"result": "tool ok", "is_error": False})
     gateway = _IRFakeGateway()
     engine = ChatRunEngine(store=store, gateway=gateway)

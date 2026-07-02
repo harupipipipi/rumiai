@@ -221,6 +221,69 @@ class AuthorityService:
             consume_approval_token=False,
         )
 
+    def consume_one_shot_approvals_atomically(
+        self,
+        items: list[dict[str, Any]],
+    ) -> AuthorityDecision:
+        normalized: list[dict[str, Any]] = []
+        for item in items or []:
+            permission_id = str(item.get("permission_id") or "").strip()
+            principal_id = str(item.get("principal_id") or "").strip()
+            resource = self._normalize_resource(
+                item.get("resource") if isinstance(item.get("resource"), dict) else {}
+            )
+            risk_level = self._risk_level(permission_id, resource)
+            if permission_id not in AUTHORITY_PERMISSION_IDS:
+                return self._decision(
+                    False,
+                    permission_id,
+                    principal_id,
+                    resource,
+                    "Unknown authority permission",
+                    risk_level,
+                    request_id=str(item.get("request_id") or "") or None,
+                    approval_required=True,
+                )
+            normalized.append(
+                {
+                    "request_id": str(item.get("request_id") or "").strip(),
+                    "principal_id": principal_id,
+                    "permission_id": permission_id,
+                    "resource": resource,
+                    "token": str(item.get("approval_token") or item.get("token") or "").strip(),
+                }
+            )
+
+        if not normalized:
+            return self._decision(True, "", "", {}, "No one-shot approvals to consume", "low")
+
+        result = self._request_store.consume_one_shots_atomically(normalized)
+        first = normalized[0]
+        if result.get("success"):
+            return self._decision(
+                True,
+                first["permission_id"],
+                first["principal_id"],
+                first["resource"],
+                "One-shot approvals consumed",
+                self._risk_level(first["permission_id"], first["resource"]),
+            )
+
+        failed_index = int(result.get("failed_index") or 0)
+        failed_index = max(0, min(failed_index, len(normalized) - 1))
+        failed = normalized[failed_index]
+        reason = str(result.get("reason") or "one_shot_consume_failed")
+        return self._decision(
+            False,
+            failed["permission_id"],
+            failed["principal_id"],
+            failed["resource"],
+            f"One-shot approval could not be consumed: {reason}",
+            self._risk_level(failed["permission_id"], failed["resource"]),
+            request_id=failed["request_id"] or None,
+            approval_required=True,
+        )
+
     def _check(
         self,
         *,
@@ -318,6 +381,16 @@ class AuthorityService:
             request_id=request.request_id,
             approval_required=True,
         )
+
+    @staticmethod
+    def _settlement_failure_response(settlement: dict[str, Any]) -> dict[str, Any]:
+        request = settlement.get("request")
+        if request is None:
+            return {"success": False, "error": "Authority request not found", "status_code": 404}
+        status = getattr(request, "status", "pending")
+        if status == "expired":
+            return {"success": False, "error": "Authority request expired", "status_code": 409}
+        return {"success": False, "error": f"Authority request is {status}", "status_code": 409}
 
     def approve_request(
         self,
@@ -434,15 +507,65 @@ class AuthorityService:
             else (expires_in_seconds or 86400)
         )
         if scope == "once":
-            token = self._request_store.issue_one_shot(request, expires_in_seconds=expires)
-            self._request_store.set_request_status(request.request_id, "approved")
-            related = self._approve_related_once(
-                request,
-                related_permissions=related_permissions,
-                expires_in_seconds=expires,
-                operator_audit=operator_audit,
-            )
-            self._request_store.audit(
+            def settle_once(settled_request: AuthorityRequest) -> dict[str, Any]:
+                issued_token_ids: list[str] = []
+                try:
+                    token = self._request_store.issue_one_shot(settled_request, expires_in_seconds=expires)
+                    issued_token_ids.append(token["token_id"])
+                    related = self._approve_related_once(
+                        settled_request,
+                        related_permissions=related_permissions,
+                        expires_in_seconds=expires,
+                        operator_audit=operator_audit,
+                        issued_token_ids=issued_token_ids,
+                    )
+                except Exception:
+                    self._request_store.revoke_one_shots(
+                        issued_token_ids,
+                        reason="approval_settlement_failed",
+                    )
+                    self._request_store.audit(
+                        "authority_request_approval_failed",
+                        {
+                            "request_id": settled_request.request_id,
+                            "scope": "once",
+                            "principal_id": settled_request.principal_id,
+                            "permission_id": settled_request.permission_id,
+                            "error": "one_shot_settlement_failed",
+                            **operator_audit,
+                        },
+                    )
+                    raise
+                return {"token": token, "related": related, "issued_token_ids": issued_token_ids}
+
+            def rollback_once(_settled_request: AuthorityRequest, result: dict[str, Any] | None) -> None:
+                self._rollback_related_request_statuses((result or {}).get("related") or [])
+                self._request_store.revoke_one_shots(
+                    (result or {}).get("issued_token_ids") or [],
+                    reason="approval_settlement_failed",
+                )
+
+            try:
+                settlement = self._request_store.settle_pending_request(
+                    request.request_id,
+                    "approved",
+                    settle_once,
+                    rollback_once,
+                )
+            except Exception:
+                return {
+                    "success": False,
+                    "error": "One-shot authority approval failed",
+                    "status_code": 500,
+                    "reason": "one_shot_settlement_failed",
+                }
+            if not settlement.get("settled"):
+                return self._settlement_failure_response(settlement)
+            request = settlement["request"]
+            settled_result = settlement.get("result") or {}
+            token = settled_result["token"]
+            related = settled_result["related"]
+            self._audit_best_effort(
                 "authority_request_approved",
                 {
                     "request_id": request.request_id,
@@ -474,17 +597,88 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
-        manager.grant_permission(grant_principal, request.permission_id, grant_config)
-        related = self._approve_related_persistent(
-            request,
-            grant_principal=grant_principal,
-            scope=scope,
-            config=config,
-            related_permissions=related_permissions,
-            operator_audit=operator_audit,
-        )
-        self._request_store.set_request_status(request.request_id, "approved")
-        self._request_store.audit(
+        grant_snapshot = self._snapshot_capability_grant(manager, grant_principal)
+
+        def settle_persistent(settled_request: AuthorityRequest) -> dict[str, Any]:
+            try:
+                manager.grant_permission(grant_principal, settled_request.permission_id, grant_config)
+                related = self._approve_related_persistent(
+                    settled_request,
+                    grant_principal=grant_principal,
+                    scope=scope,
+                    config=config,
+                    related_permissions=related_permissions,
+                    operator_audit=operator_audit,
+                )
+            except AuthorityConfigError:
+                self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+                self._request_store.audit(
+                    "authority_request_approval_failed",
+                    {
+                        "request_id": settled_request.request_id,
+                        "scope": scope,
+                        "principal_id": grant_principal,
+                        "permission_id": settled_request.permission_id,
+                        "error": "persistent_grant_config_failed",
+                        **operator_audit,
+                    },
+                )
+                raise
+            except Exception:
+                self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+                self._request_store.audit(
+                    "authority_request_approval_failed",
+                    {
+                        "request_id": settled_request.request_id,
+                        "scope": scope,
+                        "principal_id": grant_principal,
+                        "permission_id": settled_request.permission_id,
+                        "error": "persistent_grant_failed",
+                        **operator_audit,
+                    },
+                )
+                raise
+            return {"related": related}
+
+        def rollback_persistent(
+            _settled_request: AuthorityRequest,
+            result: dict[str, Any] | None,
+        ) -> None:
+            self._rollback_related_request_statuses((result or {}).get("related") or [])
+            self._restore_capability_grant(manager, grant_principal, grant_snapshot)
+            self._request_store.audit(
+                "authority_request_approval_failed",
+                {
+                    "request_id": request.request_id,
+                    "scope": scope,
+                    "principal_id": grant_principal,
+                    "permission_id": request.permission_id,
+                    "error": "persistent_settlement_failed",
+                    **operator_audit,
+                },
+            )
+
+        try:
+            settlement = self._request_store.settle_pending_request(
+                request.request_id,
+                "approved",
+                settle_persistent,
+                rollback_persistent,
+            )
+        except AuthorityConfigError as exc:
+            return {"success": False, "error": str(exc), "status_code": 400}
+        except Exception:
+            return {
+                "success": False,
+                "error": "Persistent authority grant failed",
+                "status_code": 500,
+                "reason": "persistent_grant_failed",
+            }
+        if not settlement.get("settled"):
+            return self._settlement_failure_response(settlement)
+        request = settlement["request"]
+        related = (settlement.get("result") or {})["related"]
+        self._audit_best_effort(
             "authority_request_approved",
             {
                 "request_id": request.request_id,
@@ -505,6 +699,79 @@ class AuthorityService:
             "config": grant_config,
             "related_approvals": related,
         }
+
+    @staticmethod
+    def _snapshot_capability_grant(manager: Any, principal_id: str) -> dict[str, Any] | None:
+        get_grant = getattr(manager, "get_grant", None)
+        grant = get_grant(principal_id) if callable(get_grant) else None
+        if grant is None:
+            return None
+        return {
+            "principal_id": grant.principal_id,
+            "enabled": bool(grant.enabled),
+            "granted_at": str(grant.granted_at or ""),
+            "updated_at": str(grant.updated_at or ""),
+            "permissions": {
+                permission_id: {
+                    "enabled": bool(permission.enabled),
+                    "config": dict(permission.config or {}),
+                }
+                for permission_id, permission in dict(grant.permissions).items()
+            },
+        }
+
+    @staticmethod
+    def _restore_capability_grant(
+        manager: Any,
+        principal_id: str,
+        snapshot: dict[str, Any] | None,
+    ) -> None:
+        if snapshot is None:
+            delete_grant = getattr(manager, "delete_grant", None)
+            if callable(delete_grant):
+                delete_grant(principal_id)
+            return
+
+        from ..capability_grant_manager import CapabilityGrant, CapabilityPermissionGrant
+
+        def restore() -> None:
+            grants = getattr(manager, "_grants", None)
+            if not isinstance(grants, dict):
+                return
+            grant = grants.get(principal_id)
+            if grant is None:
+                grant = CapabilityGrant(
+                    principal_id=str(snapshot.get("principal_id") or principal_id),
+                    enabled=bool(snapshot.get("enabled")),
+                    granted_at=str(snapshot.get("granted_at") or ""),
+                    updated_at=str(snapshot.get("updated_at") or ""),
+                )
+                grants[principal_id] = grant
+            grant.principal_id = str(snapshot.get("principal_id") or principal_id)
+            grant.enabled = bool(snapshot.get("enabled"))
+            grant.granted_at = str(snapshot.get("granted_at") or grant.granted_at)
+            grant.updated_at = str(snapshot.get("updated_at") or grant.updated_at)
+            grant.permissions = {
+                permission_id: CapabilityPermissionGrant(
+                    enabled=bool(permission.get("enabled")),
+                    config=dict(permission.get("config") or {}),
+                )
+                for permission_id, permission in dict(snapshot.get("permissions") or {}).items()
+                if isinstance(permission, dict)
+            }
+            tampered = getattr(manager, "_tampered_principals", None)
+            if isinstance(tampered, set):
+                tampered.discard(principal_id)
+            save_grant = getattr(manager, "_save_grant", None)
+            if callable(save_grant):
+                save_grant(grant)
+
+        lock = getattr(manager, "_lock", None)
+        if lock is None:
+            restore()
+            return
+        with lock:
+            restore()
 
     def _normalized_related_permissions(
         self,
@@ -559,11 +826,14 @@ class AuthorityService:
         related_permissions: list[str] | tuple[str, ...] | None,
         expires_in_seconds: int,
         operator_audit: dict[str, Any],
+        issued_token_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         approvals: list[dict[str, Any]] = []
         for permission_id in self._normalized_related_permissions(request, related_permissions):
             related_request = self._create_related_request(request, permission_id)
             token = self._request_store.issue_one_shot(related_request, expires_in_seconds=expires_in_seconds)
+            if issued_token_ids is not None:
+                issued_token_ids.append(token["token_id"])
             self._request_store.set_request_status(related_request.request_id, "approved")
             self._request_store.audit(
                 "authority_request_approved",
@@ -603,11 +873,18 @@ class AuthorityService:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "grant_permission", None)):
             return []
-        approvals: list[dict[str, Any]] = []
+        grant_items: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
         for permission_id in self._normalized_related_permissions(request, related_permissions):
-            related_request = self._create_related_request(request, permission_id)
-            grant_config = self._grant_config_for_persistent_approval(related_request.resource, config)
+            resource = self._resource_for_related_permission(request.resource, permission_id)
+            grant_config = self._grant_config_for_persistent_approval(resource, config)
+            grant_items.append((permission_id, resource, grant_config))
+
+        for permission_id, _, grant_config in grant_items:
             manager.grant_permission(grant_principal, permission_id, grant_config)
+
+        approvals: list[dict[str, Any]] = []
+        for permission_id, _, grant_config in grant_items:
+            related_request = self._create_related_request(request, permission_id)
             self._request_store.set_request_status(related_request.request_id, "approved")
             self._request_store.audit(
                 "authority_request_approved",
@@ -633,6 +910,15 @@ class AuthorityService:
                 }
             )
         return approvals
+
+    def _rollback_related_request_statuses(self, related_approvals: list[dict[str, Any]]) -> None:
+        for item in related_approvals or []:
+            request_id = str(item.get("request_id") or "").strip()
+            if not request_id:
+                continue
+            request = self._request_store.get_request(request_id)
+            if request is not None and request.status == "approved":
+                self._request_store.set_request_status(request_id, "pending")
 
     def deny_request(
         self,
@@ -698,16 +984,49 @@ class AuthorityService:
                 )
                 return {"success": False, "error": operator_error, "status_code": 403}
             operator_audit = ui_operator_audit_record(operator_payload)
-        self._request_store.set_request_status(request.request_id, "denied")
-        deny_record = None
-        if persist:
-            deny_record = self._request_store.add_deny(
-                principal_id=request.principal_id,
-                permission_id=request.permission_id,
-                resource=request.resource,
-                reason=reason or request.reason,
+
+        def settle_deny(settled_request: AuthorityRequest) -> dict[str, Any]:
+            deny_record = None
+            if persist:
+                deny_record = self._request_store.add_deny(
+                    principal_id=settled_request.principal_id,
+                    permission_id=settled_request.permission_id,
+                    resource=settled_request.resource,
+                    reason=reason or settled_request.reason,
+                )
+            return {"deny": deny_record}
+
+        def rollback_deny(
+            _settled_request: AuthorityRequest,
+            result: dict[str, Any] | None,
+        ) -> None:
+            deny_record = (result or {}).get("deny")
+            deny_id = str((deny_record or {}).get("deny_id") or "")
+            if deny_id:
+                self._request_store.remove_deny(
+                    deny_id,
+                    reason="deny_settlement_failed",
+                )
+
+        try:
+            settlement = self._request_store.settle_pending_request(
+                request.request_id,
+                "denied",
+                settle_deny,
+                rollback_deny,
             )
-        self._request_store.audit(
+        except Exception:
+            return {
+                "success": False,
+                "error": "Authority denial failed",
+                "status_code": 500,
+                "reason": "deny_settlement_failed",
+            }
+        if not settlement.get("settled"):
+            return self._settlement_failure_response(settlement)
+        request = settlement["request"]
+        deny_record = (settlement.get("result") or {}).get("deny")
+        self._audit_best_effort(
             "authority_request_denied",
             {
                 "request_id": request.request_id,
@@ -722,6 +1041,12 @@ class AuthorityService:
             "denied": True,
             "deny": deny_record,
         }
+
+    def _audit_best_effort(self, action: str, details: dict[str, Any]) -> None:
+        try:
+            self._request_store.audit(action, details)
+        except Exception:
+            pass
 
     def list_requests(
         self,
@@ -910,14 +1235,36 @@ class AuthorityService:
         result = {pid: grant.to_dict() if hasattr(grant, "to_dict") else grant for pid, grant in dict(all_grants or {}).items()}
         return {"grants": result, "count": len(result)}
 
-    def delete_grant(self, principal_id: str, permission_id: str) -> dict[str, Any]:
+    def delete_grant(
+        self,
+        principal_id: str,
+        permission_id: str,
+        *,
+        actor_principal: Any = None,
+    ) -> dict[str, Any]:
         manager = self._capability_grant_manager
         if manager is None or not callable(getattr(manager, "revoke_permission", None)):
             return {"success": False, "error": "CapabilityGrantManager unavailable", "status_code": 500}
+        principal_id = str(principal_id or "").strip()
+        permission_id = str(permission_id or "").strip()
+        if not principal_id or not permission_id:
+            return {"success": False, "error": "principal_id and permission_id are required", "status_code": 400}
+        actor_profile_id = self._actor_profile_id(actor_principal)
+        if actor_principal is not None and not bool(getattr(actor_principal, "core_role", False)):
+            if not actor_profile_id:
+                return {"success": False, "error": "Forbidden", "status_code": 403}
+            profile_prefix = f"profile:{actor_profile_id}"
+            if principal_id != profile_prefix and not principal_id.startswith(f"{profile_prefix}__"):
+                return {"success": False, "error": "Authority grants not found", "status_code": 404}
         revoked = bool(manager.revoke_permission(principal_id, permission_id))
         self._request_store.audit(
             "authority_grant_deleted",
-            {"principal_id": principal_id, "permission_id": permission_id, "revoked": revoked},
+            {
+                "principal_id": principal_id,
+                "permission_id": permission_id,
+                "revoked": revoked,
+                "actor_profile_id": actor_profile_id,
+            },
         )
         return {"success": True, "principal_id": principal_id, "permission_id": permission_id, "revoked": revoked}
 

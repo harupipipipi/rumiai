@@ -235,7 +235,7 @@ def test_model_profiles_expose_required_context_and_thinking_metadata():
     assert by_id["stub/default"]["max_context"] == -1
     assert isinstance(by_id["openrouter/tencent/hy3-preview:free"]["max_context"], int)
     assert "supports_thinking" in by_id["openrouter/tencent/hy3-preview:free"]
-    assert isinstance(by_id["openai/gpt-5.4"]["thinking_levels"], list)
+    assert isinstance(by_id["openai/gpt-5.5"]["thinking_levels"], list)
 
 
 def test_chat_send_attaches_tools_and_persists_activity_events(tmp_path, monkeypatch):

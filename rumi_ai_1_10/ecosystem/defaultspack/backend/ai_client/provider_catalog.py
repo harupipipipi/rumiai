@@ -22,6 +22,7 @@ from ecosystem.defaultspack.domain.ai_client.model_capabilities import (
 from ecosystem.defaultspack.domain.ai_client.model_capability_schema import (
     knowledge_band_for_level,
 )
+from ecosystem.defaultspack.domain.ai_client.model_metadata_schema import context_window_value
 
 
 def list_provider_catalog() -> List[Dict[str, Any]]:
@@ -79,10 +80,9 @@ def _model_context(model: Dict[str, Any]) -> int:
     qualified = str(model.get("qualified_model_id") or model.get("id") or "")
     if qualified == "stub/default":
         return -1
-    raw = model.get("max_context", model.get("max_context_tokens", model.get("context_window", -1)))
     try:
-        return int(raw)
-    except (TypeError, ValueError):
+        return context_window_value(model, default=-1)
+    except Exception:
         return -1
 
 
@@ -217,6 +217,9 @@ def _with_legacy_model_fields(model: Dict[str, Any]) -> Dict[str, Any]:
             "model_capabilities": item["model_capabilities"],
             "defaults": defaults,
             "pricing": pricing,
+            "routing": dict(item.get("routing", {})) if isinstance(item.get("routing"), dict) else {},
+            "request_features": dict(item.get("request_features", {})) if isinstance(item.get("request_features"), dict) else {},
+            "thinking": dict(item.get("thinking", {})) if isinstance(item.get("thinking"), dict) else {},
         }
     )
     item["metadata"] = metadata
@@ -235,6 +238,9 @@ def _with_legacy_profile_fields(profile: Dict[str, Any]) -> Dict[str, Any]:
         "default_thinking_level": item.get("default_thinking_level"),
         "metadata": item.get("metadata", {}),
         "defaults": item.get("defaults", {}),
+        "routing": item.get("routing", {}),
+        "request_features": item.get("request_features", {}),
+        "thinking": item.get("thinking", {}),
         "pricing": item.get("pricing", {}),
         "capabilities": item.get("capabilities", []),
         "supports_vision": item.get("supports_vision"),

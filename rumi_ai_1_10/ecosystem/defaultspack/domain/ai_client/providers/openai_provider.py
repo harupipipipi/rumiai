@@ -18,6 +18,8 @@ class OpenAIProvider(BaseProvider):
     BASE_URL = "https://api.openai.com/v1"
 
     KNOWN_MODELS = [
+        {"id": "openai/gpt-5.5", "name": "GPT-5.5", "provider": "openai", "type": "chat"},
+        {"id": "openai/gpt-5.5-mini", "name": "GPT-5.5 mini", "provider": "openai", "type": "chat"},
         {"id": "openai/gpt-5.4", "name": "GPT-5.4", "provider": "openai", "type": "chat"},
         {"id": "openai/gpt-5.4-mini", "name": "GPT-5.4 mini", "provider": "openai", "type": "chat"},
         {"id": "openai/gpt-5.4-nano", "name": "GPT-5.4 nano", "provider": "openai", "type": "chat"},

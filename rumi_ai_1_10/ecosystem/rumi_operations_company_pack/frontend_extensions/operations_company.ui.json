@@ -55,7 +55,7 @@
           "id": "model_allowlist",
           "label": "Model Allowlist",
           "type": "textarea",
-          "default": "openrouter/tencent/hy3-preview:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default"
+          "default": "openrouter/cohere/north-mini-code:free\ngoogle/gemini-2.5-flash\ngoogle/gemini-2.5-pro\nopenai/gpt-5.4\nopenai/gpt-5.4-mini\nanthropic/claude-sonnet-4-6\nstub/default"
         },
         {
           "id": "tool_denylist",

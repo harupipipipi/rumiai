@@ -12,27 +12,40 @@
   "security": {
     "credential_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "tool_calls": true,
-    "vision": true,
-    "reasoning": true
-  },
   "provider_metadata": {
     "display_name": "Anthropic",
     "kind": "cloud",
-    "env_vars": ["ANTHROPIC_API_KEY"],
-    "base_url_envs": ["ANTHROPIC_BASE_URL"],
+    "env_vars": [
+      "ANTHROPIC_API_KEY"
+    ],
+    "base_url_envs": [
+      "ANTHROPIC_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_model": "claude-sonnet-4-0",
-    "capabilities": ["chat", "tool_calls", "vision", "reasoning"]
+    "catalog_features": [
+      "chat",
+      "tool_calls",
+      "vision",
+      "reasoning"
+    ]
   },
   "aliases": {
-    "provider_ids": ["anthropic"]
+    "provider_ids": [
+      "anthropic"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["anthropic"]
+    "legacy_ids": [
+      "anthropic"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "tool_calls",
+    "vision",
+    "reasoning"
+  ]
 }

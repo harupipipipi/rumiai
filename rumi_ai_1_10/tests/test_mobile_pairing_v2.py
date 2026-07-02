@@ -79,6 +79,43 @@ def _review_claim(store_path: str, pairing_id: str) -> dict:
     return review["data"]
 
 
+def _mobile_route_server():
+    from transport.http import DefaultsHttpServer
+    from transport.registry import build_fallback_http_routes
+
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+    server._build_context = lambda: {"request_id": "test-mobile-route"}
+    server._routes = build_fallback_http_routes(server)
+    return server
+
+
+def _invoke_mobile_route(server, method: str, path: str, body: dict) -> dict:
+    handler, path_params, _source, _path_inject, pattern = server._match_route(
+        method,
+        path,
+    )
+    assert handler is not None, f"missing route: {method} {path}"
+    expected_pattern = path
+    for key, value in path_params.items():
+        expected_pattern = expected_pattern.replace(value, f"{{{key}}}")
+    assert pattern == expected_pattern
+    return handler(body, path_params)
+
+
+def _assert_no_plain_tokens_outside_envelope(data: dict) -> None:
+    public_data = dict(data)
+    public_data.pop("token_delivery_envelope", None)
+    rendered = json.dumps(public_data, sort_keys=True)
+    for forbidden in (
+        "device_token",
+        "approval_token",
+        "client_access_token",
+        "approver_access_token",
+        "dtk_",
+    ):
+        assert forbidden not in rendered
+
+
 def test_pairing_v2_claim_approve_flow():
     from domain.p2p.pairing import PairingManager
     from domain.p2p.device_store import DeviceStore
@@ -769,6 +806,117 @@ def test_mobile_pairing_status_splits_normal_and_approval_tokens():
     assert "tools.approve" not in normal.scopes
     assert approver is not None
     assert approver.scopes == AUTHORITY_APPROVER_SCOPES
+
+
+def test_mobile_pairing_token_pickup_and_ack_routes_return_only_encrypted_envelope():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    server = _mobile_route_server()
+    session = PairingManager(tmp).start_pairing(capabilities=["chat.read", "chat.write"])
+    private_key, public_key = _x25519_keypair()
+
+    claim = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/claim",
+        {
+            "store_path": tmp,
+            "code": session.code,
+            "device_id": "mobile-route-1",
+            "device_label": "Route Phone",
+            "encryption_public_key": public_key,
+            "requested_capabilities": ["chat.read", "chat.write"],
+        },
+    )
+    assert claim["status"] == "ok"
+
+    review = _invoke_mobile_route(
+        server,
+        "GET",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/review",
+        {"store_path": tmp},
+    )
+    assert review["status"] == "ok"
+
+    approved = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/approve",
+        {
+            "store_path": tmp,
+            "claim_hash": review["data"]["claim_hash"],
+            "scopes": review["data"]["claim"]["requested_scopes"],
+        },
+    )
+    assert approved["status"] == "ok"
+    _assert_no_plain_tokens_outside_envelope(approved["data"])
+
+    pickup = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/token/pickup",
+        {
+            "store_path": tmp,
+            "pickup_secret": session.token_pickup_secret,
+            "device_id": "mobile-route-1",
+        },
+    )
+    assert pickup["status"] == "ok"
+    pickup_data = pickup["data"]
+    _assert_no_plain_tokens_outside_envelope(pickup_data)
+    envelope = pickup_data["token_delivery_envelope"]
+    delivery = _decrypt_delivery_envelope(
+        private_key,
+        envelope,
+        pairing_id=session.pairing_id,
+        device_id="mobile-route-1",
+    )
+    assert delivery["device_token"].startswith("dtk_")
+    assert delivery["scopes"] == ["chat.read", "chat.write"]
+    rendered_pickup = json.dumps(pickup_data, sort_keys=True)
+    assert delivery["device_token"] not in rendered_pickup
+
+    missing_delivery_id = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/token/ack",
+        {
+            "store_path": tmp,
+            "pickup_secret": session.token_pickup_secret,
+            "device_id": "mobile-route-1",
+        },
+    )
+    assert missing_delivery_id["status"] == "error"
+    assert missing_delivery_id["error"]["code"] == "DELIVERY_ID_REQUIRED"
+
+    ack = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/token/ack",
+        {
+            "store_path": tmp,
+            "pickup_secret": session.token_pickup_secret,
+            "device_id": "mobile-route-1",
+            "delivery_id": envelope["delivery_id"],
+        },
+    )
+    assert ack["status"] == "ok"
+    _assert_no_plain_tokens_outside_envelope(ack["data"])
+    assert "token_delivery_envelope" not in ack["data"]
+
+    replay = _invoke_mobile_route(
+        server,
+        "POST",
+        f"/api/mobile/v1/pairings/{session.pairing_id}/token/pickup",
+        {
+            "store_path": tmp,
+            "pickup_secret": session.token_pickup_secret,
+            "device_id": "mobile-route-1",
+        },
+    )
+    assert replay["status"] == "error"
+    assert replay["error"]["code"] == "TOKEN_PICKUP_CONSUMED"
 
 
 def test_mobile_pairing_status_returns_pc_label(monkeypatch):

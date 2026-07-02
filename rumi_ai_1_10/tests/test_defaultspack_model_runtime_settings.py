@@ -219,6 +219,17 @@ def test_thinking_level_validation_and_provider_normalization(tmp_path):
     assert normalized["provider_params"]["reasoning_effort"] == "high"
     assert normalized["level"] == "high"
 
+    cerebras = service.normalize_for_provider("cerebras", "gpt-oss-120b", "xhigh")
+    assert cerebras["provider_params"] == {"reasoning_effort": "high"}
+    assert cerebras["level"] == "xhigh"
+
+    nvidia_model = "nvidia/llama-3.3-nemotron-super-49b-v1.5"
+    nvidia = service.normalize_for_provider("nvidia", nvidia_model, "high")
+    assert nvidia["provider_params"] == {"reasoning_effort": "high"}
+
+    nvidia_qualified = service.normalize_for_provider("nvidia", f"nvidia/{nvidia_model}", "medium")
+    assert nvidia_qualified["provider_params"] == {"reasoning_effort": "medium"}
+
 
 def test_resolve_model_candidates_exact_and_ambiguous_matches(tmp_path, monkeypatch):
     service = ModelRuntimeSettingsService(tmp_path)

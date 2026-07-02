@@ -8,25 +8,27 @@
   "type": "chat",
   "enabled": true,
   "priority": 4,
-  "defaults": {
-    "fast": true
+  "routing": {
+    "speed_tier": "fast"
   },
   "capabilities": {
-    "chat": true,
+    "text_input": true,
+    "text_output": true,
     "streaming": true,
-    "reasoning": false,
-    "tool_calls": true,
-    "function_calling": true,
-    "structured_outputs": true,
-    "json_mode": true,
-    "tool_choice": true,
+    "thinking": false,
+    "tool_calling": true,
     "parallel_tool_calls": false,
+    "json_schema": true,
+    "structured_output": true,
+    "image_input": false,
+    "audio_input": false
+  },
+  "request_features": {
+    "json_mode": true,
     "response_format": true,
-    "vision": false
+    "tool_choice": true
   },
   "context_window": 32768,
-  "max_context": 32768,
-  "max_context_tokens": 32768,
   "metadata": {
     "service_tier_supported": true,
     "owned_by": "Meta",

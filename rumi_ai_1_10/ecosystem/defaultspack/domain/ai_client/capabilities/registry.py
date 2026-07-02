@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import json
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 from domain.ai_client.capabilities.quirks import merged_quirks
 from domain.ai_client.capabilities.schema import ProviderCapabilities, merge_capabilities
+from domain.ai_client.metadata_json import load_strict_metadata_json
 
 
 _MANIFEST_DIR = Path(__file__).resolve().parent / "manifests"
@@ -22,10 +22,9 @@ class ProviderCapabilityRegistry:
         if not self.manifest_dir.exists():
             return manifests
         for path in sorted(self.manifest_dir.glob("*.json")):
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
+            raw = load_strict_metadata_json(path)
+            if not isinstance(raw, dict):
+                raise ValueError(f"{path}: provider capability manifest must be an object")
             provider_id = str(raw.get("provider_id") or raw.get("id") or path.stem).strip()
             if provider_id:
                 manifests[provider_id] = raw
