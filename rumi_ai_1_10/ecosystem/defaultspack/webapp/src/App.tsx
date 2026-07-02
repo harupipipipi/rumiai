@@ -26,6 +26,7 @@ import {
   type WorkspaceTabKind,
 } from "./components/WorkspaceTabs";
 import { PromptStudio } from "./pages/PromptStudio";
+import { UiPrecisionComparator } from "./pages/UiPrecisionComparator";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
@@ -6027,6 +6028,9 @@ export default function App() {
   }
   if (pathname === "/prompts") {
     return <PromptStudio />;
+  }
+  if (pathname === "/ui-precision" || searchParams.get("ui-precision") === "1") {
+    return <UiPrecisionComparator />;
   }
   if (pathname === "/ambient") {
     return <AmbientTriggerPanel variant="window" />;
