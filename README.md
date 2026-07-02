@@ -40,9 +40,33 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - npm
 - uv (`rumi_viewer` を触る場合)
 - Rust / Cargo (`rumi_viewer` を触る場合)
+- Tauri CLI (`rumi_viewer` を触る場合): `cargo install tauri-cli --locked`
 - Flutter SDK (`rumi_mobile` を触る場合)
 
 ### Clone and install
+
+Windows PowerShell:
+
+```powershell
+git clone https://github.com/harupipipipi/rumiai.git
+cd rumiai
+
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r rumi_ai_1_10\requirements.txt
+python -m pip install -r rumi_ai_1_10\requirements-dev.txt
+python -m pip install -e .\rumi_ai_1_10
+
+cd rumi_viewer\frontend
+npm install
+cd ..\..
+cargo install tauri-cli --locked
+```
+
+If `py` is not available, use `python -m venv .venv` instead. If PowerShell blocks `Activate.ps1`, run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` in the same terminal, then activate the venv again.
+
+macOS / Linux:
 
 ```bash
 git clone https://github.com/harupipipipi/rumiai.git
@@ -51,21 +75,36 @@ cd rumiai
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -r rumi_ai_1_10/requirements.txt
-pip install -r rumi_ai_1_10/requirements-dev.txt
-pip install -e ./rumi_ai_1_10
+python -m pip install -r rumi_ai_1_10/requirements.txt
+python -m pip install -r rumi_ai_1_10/requirements-dev.txt
+python -m pip install -e ./rumi_ai_1_10
 
 cd rumi_viewer/frontend
 npm install
 cd ../..
+cargo install tauri-cli --locked
 ```
 
 ## Start
 
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python -m rumi_ai --health
+cd rumi_viewer
+cargo tauri dev
+```
+
+When the viewer window opens, complete setup if prompted, then use Home -> `Open Defaultspack` to launch the defaultspack UI. `python -m rumi_ai` is useful for starting or checking the kernel, but the fresh-user desktop path for defaultspack is through the viewer button, not a manual port-8766 launch.
+
+macOS / Linux:
+
 ```bash
 source .venv/bin/activate
 python -m rumi_ai --health
-python -m rumi_ai
+cd rumi_viewer
+cargo tauri dev
 ```
 
 `--health` はシステムボリューム使用率も確認します。`disk` probe が `DEGRADED` / `DOWN` の場合は、コード不具合ではなく空き容量不足の可能性があります。
@@ -100,6 +139,7 @@ python -m rumi_ai
 cd rumi_viewer/frontend
 npm install
 cd ..
+cargo install tauri-cli --locked
 cargo tauri dev
 ```
 

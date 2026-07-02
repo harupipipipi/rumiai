@@ -14,10 +14,23 @@ control panel frontend の source は `rumi_viewer/frontend` が所有し、kern
 
 repo ルートで次を実行します。
 
+Windows PowerShell:
+
+```powershell
+cd rumi_viewer\frontend
+npm install
+cd ..
+cargo install tauri-cli --locked
+cargo tauri dev
+```
+
+macOS / Linux:
+
 ```bash
 cd rumi_viewer/frontend
 npm install
 cd ..
+cargo install tauri-cli --locked
 cargo tauri dev
 ```
 
@@ -27,6 +40,8 @@ cargo tauri dev
 cd rumi_viewer
 cargo tauri dev
 ```
+
+`cargo tauri dev` が `error: no such command: tauri` で失敗する場合は、Tauri CLI が未インストールです。`cargo install tauri-cli --locked` を実行してから再試行してください。
 
 開発起動では viewer が次を自動で行います。
 
@@ -74,6 +89,7 @@ viewer 経由で検証するときは、まず `rumi_viewer` を起動し、view
 `pack-shell run defaultspack` を先に直接実行すると、pack-shell が別の kernel を `8765` に起動することがあります。その kernel は viewer が生成した `RUMI_PANEL_BOOTSTRAP_SECRET` を知らないため、あとから viewer を開いたときに bootstrap 401、黒画面、または「Rumi Viewer と Rumi AI/defaultspack が複数起動している」状態に見えます。
 
 defaultspack の独立 UI は `8766` を使います。viewer 本体は `8765` の kernel を管理し、defaultspack は viewer から必要になったタイミングで別ウィンドウとして開かれるのが通常の流れです。
+fresh checkout から確認するときは、`python -m rumi_ai` や `pack-shell run defaultspack` を先に起動するのではなく、viewer の Home から `Open Defaultspack` / `Launch Defaultspack` を押してください。
 
 `Open Defaultspack` が `desktop_app.execute not granted` または `Pack not allowed for desktop app execution: defaultspack` で失敗するときは、pack 承認とは別に desktop app 起動用 capability grant が不足しています。開発環境でだけ、次のように署名付き grant を確認・修復できます。
 
