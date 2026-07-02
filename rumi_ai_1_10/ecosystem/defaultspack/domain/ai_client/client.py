@@ -1623,20 +1623,13 @@ class AIClient:
     def _check_authority_for_direct_provider_call(self, *, provider, provider_id, model_id, model_ref, params=None):
         if not self._provider_requires_authority(provider_id, provider, "legacy"):
             return
-        self._check_authority_for_model_api(
+        self._check_authority_for_model_and_api_key_use(
             provider_id=provider_id,
             api_id="legacy",
             model_id=model_id,
             model_ref=model_ref,
             params=params,
-            stream=False,
-        )
-        self._check_authority_for_api_key_use(
-            provider_id=provider_id,
-            api_id="legacy",
-            model_id=model_id,
-            model_ref=model_ref,
-            params=params,
+            provider=provider,
             stream=False,
         )
 

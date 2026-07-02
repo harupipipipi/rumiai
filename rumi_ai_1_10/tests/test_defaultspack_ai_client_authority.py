@@ -101,6 +101,32 @@ class _DenyApiKeyUseAuthority:
         )
 
 
+class _DenyNetworkEgressAuthority:
+    def __init__(self):
+        self.calls = []
+
+    def check(self, **kwargs):
+        from core_runtime.authority.models import AuthorityDecision
+
+        self.calls.append({
+            "permission_id": kwargs["permission_id"],
+            "request_id": kwargs.get("request_id"),
+            "approval_token": kwargs.get("approval_token"),
+            "consume_approval_token": kwargs.get("consume_approval_token"),
+        })
+        allowed = kwargs["permission_id"] != "network.egress"
+        return AuthorityDecision(
+            allowed=allowed,
+            permission_id=kwargs["permission_id"],
+            principal_id=kwargs["principal_id"],
+            reason="allowed" if allowed else "network denied",
+            request_id=None if allowed else "auth_network_test",
+            approval_required=not allowed,
+            risk_level="medium",
+            resource=kwargs["resource"],
+        )
+
+
 class _TokenAwareAllowAuthority:
     def __init__(self):
         self.calls = []
@@ -1108,6 +1134,79 @@ def test_ai_client_non_chat_provider_calls_require_authority(monkeypatch, method
         method("openai/gpt-5.4", *args, **kwargs)
 
     assert exc_info.value.decision.permission_id == "model.invoke"
+    assert client._providers["openai"].calls == []
+
+
+def test_ai_client_non_chat_provider_calls_require_network_egress(monkeypatch):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_api_key",
+        lambda provider_id: provider_id == "openai",
+    )
+    authority = _DenyNetworkEgressAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    with pytest.raises(AuthorityApprovalRequired) as exc_info:
+        client.image_gen(
+            "openai/gpt-image-1",
+            "prompt",
+            params={"_authority_context": {"principal_id": "profile:work"}},
+        )
+
+    assert exc_info.value.decision.permission_id == "network.egress"
+    assert [call["permission_id"] for call in authority.calls] == [
+        "model.invoke",
+        "api_key.use",
+        "network.egress",
+    ]
+    assert client._providers["openai"].calls == []
+
+
+def test_ai_client_non_chat_does_not_consume_model_token_before_network_approval(monkeypatch):
+    client = _client(monkeypatch)
+    monkeypatch.setattr(client, "_routes_for_model", lambda model: [])
+    monkeypatch.setattr(
+        "domain.ai_client.authority_gate.provider_has_api_key",
+        lambda provider_id: provider_id == "openai",
+    )
+    authority = _DenyNetworkEgressAuthority()
+    monkeypatch.setattr("core_runtime.authority.get_authority_service", lambda: authority)
+
+    from domain.ai_client.client import AuthorityApprovalRequired
+
+    with pytest.raises(AuthorityApprovalRequired) as exc_info:
+        client.transcribe(
+            "openai/whisper-1",
+            "audio",
+            params={
+                "_authority_context": {
+                    "principal_id": "profile:work",
+                    "approval_tokens": {
+                        "model.invoke": {
+                            "request_id": "model_req",
+                            "approval_token": "model-token",
+                        },
+                        "api_key.use": {
+                            "request_id": "api_req",
+                            "approval_token": "api-token",
+                        },
+                    },
+                },
+            },
+        )
+
+    assert exc_info.value.decision.permission_id == "network.egress"
+    assert authority.calls == [
+        {
+            "permission_id": "network.egress",
+            "request_id": None,
+            "approval_token": "",
+            "consume_approval_token": False,
+        },
+    ]
     assert client._providers["openai"].calls == []
 
 
