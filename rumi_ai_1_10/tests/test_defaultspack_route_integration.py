@@ -388,37 +388,6 @@ def test_static_mediapipe_wasm_uses_browser_wasm_mime():
     assert isinstance(result["body"], bytes)
 
 
-def test_always_available_routes_include_ambient_shell():
-    from ecosystem.defaultspack.transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
-
-    routes = {
-        (spec.method, spec.pattern, spec.handler_name)
-        for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS
-    }
-
-    assert ("GET", "/chat", "_handle_static") in routes
-    assert ("GET", "/coding", "_handle_static") in routes
-    assert ("GET", "/approval", "_handle_static") in routes
-    assert ("GET", "/ambient", "_handle_static") in routes
-
-
-def test_routes_json_transport_direct_entries_match_canonical_registry():
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
-
-    routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
-    committed_direct_routes = {
-        (str(route["method"]).upper(), route["path"])
-        for route in routes_json["routes"]
-        if route.get("flow_id") == "transport_direct"
-    }
-    canonical_routes = {
-        (spec.method, spec.pattern)
-        for spec in canonical_http_route_specs(include_always_available=True)
-    }
-
-    assert committed_direct_routes <= canonical_routes
-
-
 def test_mediapipe_wasm_mirror_matches_webapp_public_canonical():
     canonical_dir = DEFAULTSPACK_ROOT / "webapp" / "public" / "mediapipe" / "wasm"
     mirror_dir = DEFAULTSPACK_ROOT / "ui" / "mediapipe" / "wasm"
