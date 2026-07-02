@@ -1975,6 +1975,8 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "GET",
         "/api/tools/browser-companion/session",
         block_module="blocks.tool.browser_companion_session",
+        sensitive=True,
+        local_only=True,
     ),
     HttpRouteSpec(
         "POST",

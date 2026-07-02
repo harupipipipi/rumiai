@@ -145,6 +145,50 @@ def test_dynamic_tool_post_routes_are_guarded():
     )
 
 
+def test_browser_companion_session_get_is_local_guarded():
+    from domain.safety.local_guard import require_local_guard
+    from transport.http import _RequestHandler, _is_sensitive_http_path
+
+    path = "/api/tools/browser-companion/session"
+
+    assert _is_sensitive_http_path(path) is True
+    assert require_local_guard(
+        path,
+        "GET",
+        {"Origin": "https://example.test"},
+        ("127.0.0.1", 54321),
+    ) == (
+        403,
+        "origin not allowed for sensitive local route",
+        "ORIGIN_DENIED",
+    )
+    assert require_local_guard(
+        path,
+        "GET",
+        {"Origin": "http://localhost:8766"},
+        ("203.0.113.10", 54321),
+    ) == (
+        403,
+        "sensitive local route requires a loopback client",
+        "LOCAL_ONLY_REQUIRED",
+    )
+    assert require_local_guard(
+        path,
+        "GET",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) is None
+
+    handler = _RequestHandler.__new__(_RequestHandler)
+    handler.headers = {"Origin": "https://example.test"}
+    handler.client_address = ("127.0.0.1", 54321)
+    assert handler._sensitive_request_error("GET", path) == (
+        403,
+        "origin not allowed for sensitive local route",
+        "ORIGIN_DENIED",
+    )
+
+
 def test_non_loopback_websocket_upgrade_requires_local_auth(monkeypatch):
     from transport.http import _websocket_auth_error
 

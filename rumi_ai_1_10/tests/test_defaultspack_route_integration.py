@@ -120,6 +120,42 @@ def test_tool_selection_resource_routes_have_authority_metadata():
     assert trace.resource_template == {"trace_id": "{path.trace_id}"}
 
 
+def test_browser_companion_session_route_is_sensitive_local_only():
+    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+
+    specs = {(spec.method, spec.pattern): spec for spec in canonical_http_route_specs()}
+    route = specs[("GET", "/api/tools/browser-companion/session")]
+
+    assert route.sensitive is True
+    assert route.local_only is True
+
+
+def test_tool_setup_registers_browser_companion_session_route_metadata():
+    from blocks.tool.setup import run
+
+    class Registry:
+        def __init__(self):
+            self.entries = []
+
+        def register(self, key, value, meta=None):
+            self.entries.append((key, value, meta))
+
+    registry = Registry()
+    run({"interface_registry": registry})
+
+    routes = {
+        (entry["method"], entry["pattern"]): entry
+        for key, entry, _meta in registry.entries
+        if key == "io.http.route"
+    }
+    route = routes[("GET", "/api/tools/browser-companion/session")]
+
+    assert route["sensitive"] is True
+    assert route["local_only"] is True
+    assert getattr(route["handler"], "__rumi_route_sensitive__") is True
+    assert getattr(route["handler"], "__rumi_route_local_only__") is True
+
+
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     from ecosystem.defaultspack.transport.registry import (
         canonical_http_route_specs,
