@@ -95,17 +95,24 @@ class TemplateLifecycleStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temp_name, self.path)
-            directory_fd = os.open(self.path.parent, os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            _fsync_directory(self.path.parent)
         except Exception:
             try:
                 os.unlink(temp_name)
             except OSError:
                 pass
             raise
+
+
+def _fsync_directory(path: Path) -> None:
+    directory_flag = getattr(os, "O_DIRECTORY", None)
+    if directory_flag is None:
+        return
+    directory_fd = os.open(path, directory_flag)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
 
 
 def plan_template_lifecycle(

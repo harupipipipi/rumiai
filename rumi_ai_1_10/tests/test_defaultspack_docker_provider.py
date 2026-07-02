@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 
 from ecosystem.defaultspack.backend.sandbox.provider_registry import ProviderRegistry
@@ -255,7 +256,12 @@ def test_docker_provider_seeds_trusted_workspace_overlay(tmp_path, monkeypatch) 
     docker_run = fake.command_with("run")
     docker_cp = fake.command_with("cp")
     assert "--mount" not in docker_run
-    assert docker_cp[-2:] == [f"{workspace_root}/.", docker_run[docker_run.index("--name") + 1] + ":/workspace"]
+    copy_source, copy_target = docker_cp[-2:]
+    assert os.path.basename(copy_source) == "."
+    assert os.path.normcase(os.path.abspath(os.path.dirname(copy_source))) == os.path.normcase(
+        str(workspace_root)
+    )
+    assert copy_target == docker_run[docker_run.index("--name") + 1] + ":/workspace"
 
 
 def test_docker_provider_rejects_untrusted_workspace_binding(tmp_path, monkeypatch) -> None:

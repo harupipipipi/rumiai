@@ -9,12 +9,14 @@ from domain.ai_client.provider_compiler.local_openai_compatible import LocalOpen
 from domain.ai_client.provider_compiler.openai_chat import OpenAIChatCompiler
 from domain.ai_client.provider_compiler.openai_compatible import OpenAICompatibleCompiler
 from domain.ai_client.provider_compiler.openai_responses import OpenAIResponsesCompiler
+from domain.ai_client.provider_compiler.vercel_ai_gateway import VercelAIGatewayCompiler
 
 
 _COMPILERS = {
     "openai_chat": OpenAIChatCompiler(),
     "openai_responses": OpenAIResponsesCompiler(),
     "openai_compatible": OpenAICompatibleCompiler(),
+    "vercel_ai_gateway": VercelAIGatewayCompiler(),
     "google_openai": GoogleOpenAICompiler(),
     "google_native": GoogleNativeCompiler(),
     "anthropic_messages": AnthropicMessagesCompiler(),

@@ -304,6 +304,16 @@ test('apiFetch waits for panel bootstrap before GET requests to panel APIs when 
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
 });
 
+test('apiFetch waits for panel bootstrap before GET requests to setup APIs when code is pending', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
+
+  await apiFetch<{ok: boolean}>('/api/setup/packs');
+
+  assert.equal(panelExchangeCount, 1);
+  assert.equal(lastFetchUrl, '/api/setup/packs');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/');
+});
+
 test('apiFetch does not bootstrap non-panel GET requests when code is pending', async () => {
   installBrowser('http://127.0.0.1:8765/panel/?code=one-time-code');
 
@@ -410,6 +420,64 @@ test('apiFetch recovers an expired panel session through the desktop shell and r
   assert.equal(panelExchangeCount, 1);
   assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'csrf-from-server');
   assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/packs?v=42');
+});
+
+test('apiFetch recovers an expired panel session for setup APIs and retries once', async () => {
+  installBrowser('http://127.0.0.1:8765/panel/setup?v=42');
+
+  let requestCount = 0;
+  fetchHandler = async (input: string | URL | Request, init?: RequestInit) => {
+    lastFetchUrl = String(input);
+    lastFetchInit = init;
+
+    if (lastFetchUrl === '/api/panel/auth/exchange') {
+      panelExchangeCount += 1;
+      return new Response(
+        JSON.stringify({
+          data: {csrf_token: 'csrf-from-server'},
+          success: true,
+        }),
+        {
+          headers: {'Content-Type': 'application/json'},
+          status: 200,
+        },
+      );
+    }
+
+    requestCount += 1;
+    if (requestCount === 1) {
+      return new Response(
+        JSON.stringify({
+          error: 'Invalid or expired code',
+          success: false,
+        }),
+        {
+          headers: {'Content-Type': 'application/json'},
+          status: 401,
+        },
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        data: {ok: true},
+        success: true,
+      }),
+      {
+        headers: {'Content-Type': 'application/json'},
+        status: 200,
+      },
+    );
+  };
+
+  const response = await apiFetch<{ok: boolean}>('/api/setup/packs');
+
+  assert.deepEqual(response, {ok: true});
+  assert.equal(requestCount, 2);
+  assert.equal(tauriReauthorizeCount, 1);
+  assert.equal(panelExchangeCount, 1);
+  assert.equal(sessionStorageRef.getItem('rumi-panel-csrf'), 'csrf-from-server');
+  assert.equal(window.location.href, 'http://127.0.0.1:8765/panel/setup?v=42');
 });
 
 test('openExternalUrl uses the desktop shell when Tauri is available', async () => {

@@ -33,11 +33,13 @@ export function rememberBrowserApprovalToken(token: string): void {
   writeStorageValue("localStorage", normalized);
 }
 
-export function browserAuthorityApprovalPath(requestId: string, browserApprovalToken: string): string {
+export function browserAuthorityApprovalPath(requestId: string, browserApprovalToken: string, returnTo = ""): string {
   const params = new URLSearchParams();
   params.set("request_id", requestId);
   const token = browserApprovalToken.trim();
   if (token) params.set("browser_approval_token", token);
+  const normalizedReturnTo = returnTo.trim();
+  if (normalizedReturnTo) params.set("return_to", normalizedReturnTo);
   return `/approval?${params.toString()}`;
 }
 
