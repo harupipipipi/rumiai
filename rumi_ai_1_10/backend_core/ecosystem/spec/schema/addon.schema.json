@@ -103,6 +103,11 @@
       "type": "object",
       "description": "パッチ適用対象の定義",
       "required": ["apply"],
+      "anyOf": [
+        {"required": ["pack_identity"]},
+        {"required": ["pack_uuid"]},
+        {"required": ["component"]}
+      ],
       "properties": {
         "pack_identity": {
           "type": "string",
@@ -117,6 +122,11 @@
         "component": {
           "type": "object",
           "description": "対象Componentの指定",
+          "anyOf": [
+            {"required": ["type"]},
+            {"required": ["id"]},
+            {"required": ["component_uuid"]}
+          ],
           "properties": {
             "type": {
               "type": "string",
@@ -150,7 +160,20 @@
     "apply_operation": {
       "type": "object",
       "description": "適用する操作",
-      "required": ["kind"],
+      "required": ["kind", "patch"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {"const": "file_json_patch"}
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["file"]
+          }
+        }
+      ],
       "properties": {
         "kind": {
           "type": "string",
@@ -165,6 +188,7 @@
         "patch": {
           "type": "array",
           "description": "RFC 6902 JSON Patch操作のリスト",
+          "minItems": 1,
           "items": {
             "$ref": "#/definitions/json_patch_operation"
           }
@@ -181,6 +205,21 @@
       "type": "object",
       "description": "RFC 6902 JSON Patch操作（move/copyは禁止）",
       "required": ["op", "path"],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": ["add", "replace", "test"]
+              }
+            },
+            "required": ["op"]
+          },
+          "then": {
+            "required": ["value"]
+          }
+        }
+      ],
       "properties": {
         "op": {
           "type": "string",

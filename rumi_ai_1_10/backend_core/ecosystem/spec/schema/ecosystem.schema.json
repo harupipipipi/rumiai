@@ -146,6 +146,25 @@
     "metadata": {
       "type": "object",
       "description": "追加のメタデータ（自由形式）",
+      "properties": {
+        "asset_index": {
+          "$ref": "#/definitions/asset_index_categories",
+          "description": "Pack asset index category map. The standalone asset_index.json/yaml files wrap this under asset_index.categories."
+        },
+        "runtime_type": {
+          "type": "string",
+          "description": "Declarative/runtime classification used by pack tooling.",
+          "enum": [
+            "python_host",
+            "python_docker",
+            "binary",
+            "command",
+            "wasm",
+            "declarative_pack",
+            "declarative_setup_pack"
+          ]
+        }
+      },
       "additionalProperties": true
     },
     "capability_bindings": {
@@ -450,7 +469,9 @@
             "python_docker",
             "binary",
             "command",
-            "wasm"
+            "wasm",
+            "declarative_pack",
+            "declarative_setup_pack"
           ]
         },
         "language": {
@@ -517,6 +538,60 @@
         }
       },
       "additionalProperties": false
+    }
+  },
+  "definitions": {
+    "asset_index_categories": {
+      "type": "object",
+      "description": "Canonical asset index category map. Singular and plural category names are accepted as explicit aliases for existing packs.",
+      "propertyNames": {
+        "enum": [
+          "catalog",
+          "catalogs",
+          "checklist",
+          "checklists",
+          "coordination",
+          "docs",
+          "evidence",
+          "evidence_ledgers",
+          "example",
+          "examples",
+          "fixtures",
+          "frontend",
+          "glossary",
+          "index",
+          "ledger",
+          "ledgers",
+          "manifest",
+          "metadata",
+          "policies",
+          "policy",
+          "preset",
+          "presets",
+          "profile",
+          "profiles",
+          "prompt",
+          "prompts",
+          "readme",
+          "resource_templates",
+          "root",
+          "runbook",
+          "schema",
+          "schemas",
+          "spec",
+          "specs",
+          "template",
+          "templates",
+          "workflows"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
   },
   "additionalProperties": false

@@ -19,6 +19,8 @@ def test_default_runtime_config_loads_from_config_dir(monkeypatch):
 
     assert config["tool_policy"]["allow_shell"] is False
     assert config["scheduler"]["allow_no_agent_scripts"] is False
+    assert config["context"]["compression"]["max_active_transcript_bytes"] == 20 * 1024 * 1024
+    assert isinstance(config["context"]["compression"]["max_active_transcript_bytes"], int)
 
 
 def test_user_runtime_config_overrides_default(tmp_path, monkeypatch):

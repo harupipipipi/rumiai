@@ -12,7 +12,8 @@
     "default_for": [
       "chat",
       "reasoning"
-    ]
+    ],
+    "speed_tier": "fast"
   },
   "capabilities": {
     "text_input": true,

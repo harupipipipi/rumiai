@@ -28,19 +28,47 @@
     "schema": {
       "parameters": {
         "type": "object",
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "required": [
+              "code"
+            ]
+          },
+          {
+            "required": [
+              "script_path"
+            ]
+          }
+        ],
         "properties": {
           "code": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           },
           "script_path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "template_id": {
+            "type": "string"
+          },
+          "provider_id": {
+            "type": "string"
+          },
+          "name": {
             "type": "string"
           },
           "timeout": {
             "type": "integer"
+          },
+          "timeout_ms": {
+            "type": "integer"
           }
-        },
-        "required": []
+        }
       }
     },
     "execution": {
