@@ -23,6 +23,28 @@ def _as_int(value, default):
     return int(value)
 
 
+def _as_optional_int(value):
+    if value in (None, ""):
+        return None
+    text = str(value).strip().lower()
+    if text in {"none", "null", "unlimited", "infinite", "infinity"}:
+        return None
+    return int(value)
+
+
+def _as_bool(value, default):
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on", "enabled"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled"}:
+        return False
+    return default
+
+
 def _as_string_list(value):
     if value is None:
         return []
@@ -45,6 +67,12 @@ def run(input_data, context):
     if not isinstance(input_data, dict):
         return error("input_data must be a dict", "INVALID_INPUT")
     try:
+        docker_worker_count = max(0, min(_as_int(input_data.get("docker_worker_count"), 3), 16))
+        worker_mode = str(input_data.get("worker_mode") or "").strip().lower()
+        docker_enabled_default = worker_mode not in {"non_docker", "non-docker", "managed_desktop", "managed-desktop", "desktop"}
+        docker_enabled = _as_bool(input_data.get("docker_enabled"), docker_enabled_default)
+        if docker_worker_count <= 0:
+            docker_enabled = False
         status = MimoCodingCompanyRuntime().bootstrap(
             start_nonstop=bool(input_data.get("start_nonstop", True)),
             heartbeat_minutes=_as_int(input_data.get("heartbeat_minutes"), 30),
@@ -54,9 +82,10 @@ def run(input_data, context):
             vision_model=_validated_model(input_data.get("vision_model"), label="vision_model", default=DEFAULT_VISION_MODEL),
             fast_model=_validated_model(input_data.get("fast_model"), label="fast_model", default=DEFAULT_FAST_MODEL),
             qa_targets=_as_string_list(input_data.get("qa_targets")),
-            docker_worker_count=max(1, min(_as_int(input_data.get("docker_worker_count"), 3), 16)),
+            docker_worker_count=docker_worker_count,
             docker_personas=_as_string_list(input_data.get("docker_personas")),
-            max_tool_calls=max(1, min(_as_int(input_data.get("max_tool_calls"), 80), 200)),
+            docker_enabled=docker_enabled,
+            max_tool_calls=_as_optional_int(input_data.get("max_tool_calls")),
             workspace_id=str(input_data.get("workspace_id") or "").strip() or None,
             workspace_label=str(input_data.get("workspace_label") or "").strip() or None,
             workspace_root=str(input_data.get("workspace_root") or "").strip() or None,

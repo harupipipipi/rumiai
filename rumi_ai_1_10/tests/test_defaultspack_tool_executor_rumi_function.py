@@ -111,6 +111,17 @@ def _pack_not_approved_executor():
     return capability_executor
 
 
+def _permission_denied_executor():
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="Permission denied: function.call",
+        error_type="permission_denied",
+    )
+    return capability_executor
+
+
 def _success_executor():
     capability_executor = MagicMock()
     capability_executor.execute.return_value = SimpleNamespace(
@@ -566,6 +577,70 @@ def test_tool_executor_mimo_company_rumi_api_denial_falls_back_to_direct_pack_ca
     assert seen["context"]["_tool_server_approved"] is True
 
 
+def test_tool_executor_mimo_company_rumi_api_permission_denied_falls_back_to_direct_pack_call(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+    capability_executor = MagicMock()
+    capability_executor.execute.return_value = SimpleNamespace(
+        success=False,
+        output=None,
+        error="Permission denied: function.call",
+        error_type="permission_denied",
+    )
+    seen = {}
+
+    def fake_invoke(pack_id, function_id, *, args, context):
+        seen["pack_id"] = pack_id
+        seen["function_id"] = function_id
+        seen["args"] = args
+        seen["context"] = context
+        return {"status": "ok", "data": {"routes": [], "count": 0}}
+
+    monkeypatch.setattr("core_runtime.pack_function_runtime.invoke_pack_function", fake_invoke)
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("rumi_api"),
+        {"action": "list_routes"},
+        {
+            "profile_id": "defaultspack.mimo_coding_company",
+            "principal_id": "rumi_default_tools_pack",
+            "capability_executor": capability_executor,
+        },
+    )
+
+    assert result["is_error"] is False
+    assert seen["pack_id"] == "rumi_default_tools_pack"
+    assert seen["function_id"] == "rumi_api"
+    assert seen["args"] == {"action": "list_routes"}
+    assert seen["context"]["_tool_server_approved"] is True
+
+
+def test_tool_executor_rumi_api_permission_denied_without_internal_approval_does_not_fallback(monkeypatch):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    def fail_invoke(*args, **kwargs):
+        raise AssertionError("rumi_api permission_denied must not fallback without internal approval")
+
+    ToolRegistry._instance = None
+    monkeypatch.setattr("core_runtime.pack_function_runtime.invoke_pack_function", fail_invoke)
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("rumi_api"),
+        {"action": "list_routes"},
+        {
+            "profile_id": "defaultspack.regular",
+            "principal_id": "rumi_default_tools_pack",
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is True
+    assert result["result"] == "Permission denied: function.call"
+
+
 def test_tool_executor_mimo_company_post_rumi_api_request_still_requires_approval():
     from domain.tool.executor import ToolExecutor
     from domain.tool.registry import ToolRegistry
@@ -639,6 +714,66 @@ def test_tool_executor_todo_pack_not_approved_without_autonomy_still_requires_ap
     assert result["is_error"] is False
     assert result["widget"]["type"] == "approval_request"
     assert result["widget"]["tool_name"] == "todo"
+
+
+def test_tool_executor_todo_permission_denied_with_server_approval_falls_back_locally(tmp_path, monkeypatch):
+    from domain.safety import approval
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_DB_PATH", str(tmp_path / "safety" / "approval.sqlite3"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_APPROVAL_SECRET_PATH", str(tmp_path / "safety" / "approval.secret"))
+    approval.reset_approval_state_for_tests()
+    ToolRegistry._instance = None
+
+    arguments = {"action": "list"}
+    request = approval.create_approval_request(
+        "tool.todo",
+        "medium",
+        arguments,
+        details={
+            "tool_name": "todo",
+            "action": "tool.todo",
+            "function_id": "tool.todo",
+            "pack_id": "defaultspack",
+            "arguments": arguments,
+        },
+    )
+    decision = approval.approve(request["request_id"])
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("todo"),
+        {**arguments, "approval_token": decision["token"]},
+        {
+            "owner_pack": "defaultspack",
+            "conversation_workspace_dir": str(tmp_path),
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is False
+    assert result["widget"]["type"] == "todo"
+    assert approval.get_approval_request(request["request_id"])["status"] == "consumed"
+
+
+def test_tool_executor_todo_permission_denied_without_server_approval_does_not_fallback(tmp_path):
+    from domain.tool.executor import ToolExecutor
+    from domain.tool.registry import ToolRegistry
+
+    ToolRegistry._instance = None
+
+    result = ToolExecutor()._execute_rumi_function(
+        ToolRegistry().get("todo"),
+        {"action": "list"},
+        {
+            "conversation_workspace_dir": str(tmp_path),
+            "capability_executor": _permission_denied_executor(),
+        },
+    )
+
+    assert result["is_error"] is True
+    assert result["result"] == "Permission denied: function.call"
+    assert result["widget"] is None
 
 
 def test_tool_executor_falls_back_to_local_browser_computer_with_server_approval(monkeypatch):
@@ -1109,6 +1244,108 @@ def test_desktop_frame_tool_returns_base64_frame_payload(monkeypatch):
     assert result["data"]["width"] == 800
     assert result["data"]["height"] == 600
     assert fake_api.calls[0][0]["owner_id"] == "agent-1"
+    assert fake_api.calls[0][1]["principal_id"] == "agent-1"
+
+
+def test_desktop_frame_tool_ignores_payload_owner_without_trusted_context(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class UnexpectedSandboxApi:
+        def run(self, payload, context):
+            raise AssertionError(f"unexpected sandbox api call: {payload}, {context}")
+
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: UnexpectedSandboxApi())
+
+    result = desktop_tools.desktop_frame({"desktop_id": "seat-1", "owner_id": "spoofed-owner"}, {})
+
+    assert result["is_error"] is True
+    assert result["widget"]["error"]["code"] == "DESKTOP_PRINCIPAL_REQUIRED"
+
+
+def test_desktop_frame_tool_overwrites_payload_owner_with_trusted_context(monkeypatch):
+    from domain.tool import desktop_tools
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((payload, context))
+            return {
+                "_binary": True,
+                "content_type": "image/png",
+                "body": b"fake-png",
+                "headers": {},
+            }
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+
+    result = desktop_tools.desktop_frame(
+        {"desktop_id": "seat-1", "owner_id": "spoofed-owner", "access": {"owner_id": "spoofed-owner"}},
+        {"agent_id": "agent-1"},
+    )
+
+    payload, context = fake_api.calls[0]
+    assert result["status"] == "ok"
+    assert payload["owner_id"] == "agent-1"
+    assert payload["access_owner_id"] == "agent-1"
+    assert payload["access"]["owner_id"] == "agent-1"
+    assert context["principal_id"] == "agent-1"
+
+
+def test_defaultspack_desktop_tools_use_local_owner_but_keep_agent_identity(tmp_path, monkeypatch):
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import seal_tool_context
+
+    class FakeSandboxApi:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def run(self, payload, context):
+            self.calls.append((dict(payload), dict(context)))
+            if payload["_handler"] == "desktop_frame":
+                return {
+                    "_binary": True,
+                    "content_type": "image/png",
+                    "body": b"fake-png",
+                    "headers": {},
+                }
+            if payload["_handler"] == "desktop_ai_input":
+                return {"status": "ok", "data": {"ok": True}}
+            raise AssertionError(f"unexpected sandbox api call: {payload}")
+
+    fake_api = FakeSandboxApi()
+    monkeypatch.setattr(desktop_tools, "_sandbox_api", lambda: fake_api)
+    context = seal_tool_context(
+        {
+            "workspace_root": str(tmp_path),
+            "owner_pack": "defaultspack",
+            "source": "scheduler_approval_followup",
+            "agent_id": "browser_qa",
+        },
+        {"action": "allow", "allowed": True},
+    )
+
+    frame = desktop_tools.desktop_frame({"desktop_id": "seat-1"}, context)
+    input_result = desktop_tools.desktop_input(
+        {"desktop_id": "seat-1", "action": "click", "x": 1, "y": 2},
+        context,
+    )
+
+    assert frame["status"] == "ok"
+    assert input_result["status"] == "ok"
+    frame_payload, frame_context = fake_api.calls[0]
+    input_payload, input_context = fake_api.calls[1]
+    assert frame_payload["owner_id"] == "local-user"
+    assert frame_payload["access_owner_id"] == "local-user"
+    assert frame_context["principal_id"] == "local-user"
+    assert frame_context["agent_id"] == "browser_qa"
+    assert input_payload["owner_id"] == "local-user"
+    assert input_payload["access_owner_id"] == "local-user"
+    assert input_payload["agent_id"] == "browser_qa"
+    assert input_context["principal_id"] == "local-user"
+    assert input_context["agent_id"] == "browser_qa"
 
 
 def test_desktop_input_tool_generates_client_action_id_when_manifest_omits_it(tmp_path, monkeypatch):

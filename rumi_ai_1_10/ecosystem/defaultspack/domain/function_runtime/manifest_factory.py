@@ -22,6 +22,7 @@ class FunctionSpec:
     caller_requires: tuple[str, ...] = ()
     input_schema: dict[str, Any] | None = None
     permission_id: str | None = None
+    grant_config: dict[str, Any] | None = None
 
 
 def _alias_pair(namespace: str, operation: str) -> tuple[str, str]:
@@ -74,6 +75,7 @@ def _spec(
     requires: tuple[str, ...] | None = None,
     caller_requires: tuple[str, ...] | None = None,
     input_schema: dict[str, Any] | None = None,
+    grant_config: dict[str, Any] | None = None,
 ) -> FunctionSpec:
     all_aliases = tuple(dict.fromkeys([*_default_aliases(function_id), *aliases]))
     return FunctionSpec(
@@ -87,6 +89,7 @@ def _spec(
         requires=_requires(function_id, risk) if requires is None else requires,
         caller_requires=_caller_requires(risk) if caller_requires is None else caller_requires,
         input_schema=input_schema,
+        grant_config=dict(grant_config) if grant_config is not None else None,
     )
 
 
@@ -116,6 +119,8 @@ def manifest_for(spec: FunctionSpec) -> dict[str, Any]:
     }
     if spec.permission_id:
         manifest["permission_id"] = spec.permission_id
+    if spec.grant_config is not None:
+        manifest["grant_config"] = dict(spec.grant_config)
     return manifest
 
 
@@ -240,6 +245,18 @@ TOOL_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("computer_scroll", "Scroll with the computer controller.", ("tool", "computer"), "high"),
     )
 )
+TOOL_FUNCTIONS = tuple(
+    _spec(
+        "tool_subagent",
+        "Run the default subagent tool.",
+        ("tool", "agent"),
+        risk="medium",
+        grant_config={"timeout": 240},
+    )
+    if spec.function_id == "tool_subagent"
+    else spec
+    for spec in TOOL_FUNCTIONS
+)
 SKILL_CREATE_FROM_FEEDBACK_INPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -331,6 +348,7 @@ CODING_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("coding_approval_list", "List pending coding approvals.", "low", "blocks.coding.approval_list"),
         ("coding_approval_approve", "Approve a pending coding operation.", "medium", "blocks.coding.approval_approve"),
         ("coding_approval_deny", "Deny a pending coding operation.", "medium", "blocks.coding.approval_deny"),
+        ("coding_github_pr_create", "Create a GitHub pull request for a pushed branch.", "high", "blocks.coding.github_pr_create"),
         ("coding_github_pr_read", "Read GitHub pull request metadata.", "medium", "blocks.coding.github_pr_read"),
         ("coding_github_issue_read", "Read GitHub issue metadata.", "medium", "blocks.coding.github_issue_read"),
         ("coding_github_ci_status", "Read GitHub pull request CI status.", "medium", "blocks.coding.github_ci_status"),
@@ -583,7 +601,14 @@ AMBIENT_FUNCTIONS: tuple[FunctionSpec, ...] = (
 
 
 AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
-    _spec(function_id, description, ("agent",), risk=risk, block=block)
+    _spec(
+        function_id,
+        description,
+        ("agent",),
+        risk=risk,
+        block=block,
+        grant_config={"timeout": 300} if function_id == "agent_run_subagent" else None,
+    )
     for function_id, description, risk, block in (
         ("agent_execute", "Start an agent execution.", "medium", "blocks.agent.execute"),
         ("agent_plan", "Create an agent plan.", "medium", "blocks.agent.plan"),
@@ -607,7 +632,14 @@ AGENT_FUNCTIONS: tuple[FunctionSpec, ...] = tuple(
         ("agent_run_subagent", "Compatibility alias for utility model routing or delegated runs.", "medium", "blocks.agent.run_subagent"),
     )
 ) + tuple(
-    _spec(f"agent_schedule_{name}", f"{label} an agent schedule.", ("agent", "scheduler"), risk=risk, block=f"blocks.agent.scheduler.{module}")
+    _spec(
+        f"agent_schedule_{name}",
+        f"{label} an agent schedule.",
+        ("agent", "scheduler"),
+        risk=risk,
+        block=f"blocks.agent.scheduler.{module}",
+        grant_config={"timeout": 1800} if name == "trigger" else None,
+    )
     for name, label, risk, module in (
         ("create", "Create", "medium", "create"),
         ("list", "List", "low", "list"),

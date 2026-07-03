@@ -102,6 +102,7 @@ export type HistoryBoardRendererProps = {
   isCalendarActive?: boolean;
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
+  onGroupSelect?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
   onDesktopsOpen?: () => void;
   isDesktopsActive?: boolean;

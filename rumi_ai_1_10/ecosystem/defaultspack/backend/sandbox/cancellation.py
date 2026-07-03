@@ -111,6 +111,8 @@ def run_cancellable_subprocess(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         start_new_session=os.name != "nt",
         creationflags=_windows_process_group_flags(),
     )

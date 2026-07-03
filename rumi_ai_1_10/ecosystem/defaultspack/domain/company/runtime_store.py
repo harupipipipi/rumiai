@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import sqlite3
 import threading
 from pathlib import Path
@@ -69,6 +70,14 @@ def _clean_agent_ids(agent_ids: Any) -> list[str]:
             seen.add(agent_id)
             result.append(agent_id)
     return result
+
+
+def _stable_sync_id(prefix: str, metadata: dict[str, Any] | None) -> str | None:
+    sync_key = str((metadata or {}).get("sync_key") or "").strip()
+    if not sync_key:
+        return None
+    digest = hashlib.sha256(sync_key.encode("utf-8", errors="replace")).hexdigest()[:32]
+    return f"{prefix}{digest}"
 
 
 class CompanyRuntimeStore:
@@ -345,21 +354,23 @@ class CompanyRuntimeStore:
         task_ids: list[str] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        metadata_dict = metadata or {}
+        message_id = _stable_sync_id("msg_sync_", metadata_dict) or gen_id("msg_")
+        resolved_thread_id = thread_id or _stable_sync_id("thread_sync_", metadata_dict)
         title = str(content or "").strip().splitlines()[0][:120] if str(content or "").strip() else "Company message"
         thread = self.ensure_thread(
             company_id,
             channel_id=channel_id,
-            thread_id=thread_id,
+            thread_id=resolved_thread_id,
             title=title,
-            metadata={"source": "message", **(metadata or {})},
+            metadata={"source": "message", **metadata_dict},
         )
         tid = str(thread["thread_id"])
         now = utc_now()
-        message_id = gen_id("msg_")
         with self.conn:
             self.conn.execute(
                 """
-                INSERT INTO company_messages(
+                INSERT OR IGNORE INTO company_messages(
                   message_id, company_id, channel_id, thread_id, sender_id, content,
                   mentions_json, task_ids_json, metadata_json, created_at, updated_at
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -373,7 +384,7 @@ class CompanyRuntimeStore:
                     str(content),
                     json_dumps(list(mentions or [])),
                     json_dumps(list(task_ids or [])),
-                    json_dumps(metadata or {}),
+                    json_dumps(metadata_dict),
                     now,
                     now,
                 ),
@@ -404,6 +415,49 @@ class CompanyRuntimeStore:
             )
         return self.get_message(message_id)
 
+    def update_message(
+        self,
+        message_id: str,
+        updates: dict[str, Any],
+        *,
+        company_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(updates, dict):
+            return None
+        message = self.get_message(message_id)
+        if message is None:
+            return None
+        if company_id and str(message.get("company_id") or "") != str(company_id):
+            return None
+        assignments = []
+        params: list[Any] = []
+        for key, value in updates.items():
+            if key == "metadata" and isinstance(value, dict):
+                metadata = {**(message.get("metadata") if isinstance(message.get("metadata"), dict) else {}), **value}
+                assignments.append("metadata_json = ?")
+                params.append(json_dumps(metadata))
+            elif key == "mentions":
+                assignments.append("mentions_json = ?")
+                params.append(json_dumps(list(value or [])))
+            elif key == "task_ids":
+                assignments.append("task_ids_json = ?")
+                params.append(json_dumps(list(value or [])))
+            elif key in {"content", "sender_id", "channel_id", "thread_id"}:
+                assignments.append(key + " = ?")
+                params.append(str(value))
+        if not assignments:
+            return message
+        now = utc_now()
+        assignments.append("updated_at = ?")
+        params.extend([now, str(message_id)])
+        with self.conn:
+            self.conn.execute("UPDATE company_messages SET " + ", ".join(assignments) + " WHERE message_id = ?", params)
+        updated = self.get_message(message_id)
+        if updated is not None:
+            self.mark_summary_dirty(str(updated.get("company_id") or ""), "thread", str(updated.get("thread_id") or ""))
+            self.mark_summary_dirty(str(updated.get("company_id") or ""), "channel", str(updated.get("channel_id") or DEFAULT_CHANNEL_ID))
+        return updated
+
     def list_messages(
         self,
         company_id: str,
@@ -412,6 +466,7 @@ class CompanyRuntimeStore:
         thread_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        order: str = "asc",
     ) -> tuple[list[dict[str, Any]], int]:
         sql = "SELECT * FROM company_messages WHERE company_id = ?"
         params: list[Any] = [str(company_id)]
@@ -422,7 +477,8 @@ class CompanyRuntimeStore:
             sql += " AND thread_id = ?"
             params.append(str(thread_id))
         total = self.conn.execute("SELECT COUNT(*) AS count FROM (" + sql + ")", params).fetchone()["count"]
-        sql += " ORDER BY created_at ASC LIMIT ? OFFSET ?"
+        direction = "DESC" if str(order or "").strip().lower() in {"desc", "descending", "latest", "newest"} else "ASC"
+        sql += f" ORDER BY created_at {direction}, rowid {direction} LIMIT ? OFFSET ?"
         rows = self.conn.execute(sql, [*params, int(limit), int(offset)]).fetchall()
         messages = []
         for row in rows:
@@ -430,6 +486,24 @@ class CompanyRuntimeStore:
             item["id"] = item.get("message_id")
             messages.append(item)
         return messages, int(total)
+
+    def list_channel_ids(self, company_id: str) -> list[str]:
+        rows = self.conn.execute(
+            """
+            SELECT channel_id
+            FROM (
+              SELECT DISTINCT channel_id FROM company_messages WHERE company_id = ?
+              UNION
+              SELECT DISTINCT channel_id FROM company_threads WHERE company_id = ?
+              UNION
+              SELECT DISTINCT channel_id FROM company_tasks WHERE company_id = ? AND channel_id IS NOT NULL
+            )
+            WHERE channel_id IS NOT NULL AND channel_id != ''
+            ORDER BY channel_id
+            """,
+            (str(company_id), str(company_id), str(company_id)),
+        ).fetchall()
+        return [str(row["channel_id"]) for row in rows if str(row["channel_id"] or "").strip()]
 
     def create_task(
         self,
@@ -633,7 +707,9 @@ class CompanyRuntimeStore:
         task_id: str | None = None,
         status: str | None = None,
         limit: int = 100,
-    ) -> list[dict[str, Any]]:
+        offset: int = 0,
+        include_total: bool = False,
+    ) -> list[dict[str, Any]] | tuple[list[dict[str, Any]], int]:
         sql = "SELECT * FROM company_agent_runs WHERE company_id = ?"
         params: list[Any] = [str(company_id)]
         if agent_id:
@@ -645,9 +721,12 @@ class CompanyRuntimeStore:
         if status:
             sql += " AND status = ?"
             params.append(str(status))
-        sql += " ORDER BY updated_at DESC LIMIT ?"
-        rows = self.conn.execute(sql, [*params, int(limit)]).fetchall()
-        return [_decode_row(row) or {} for row in rows]
+        total = int(self.conn.execute("SELECT COUNT(*) AS count FROM (" + sql + ")", params).fetchone()["count"])
+        rows = self.conn.execute(sql + " ORDER BY updated_at DESC LIMIT ? OFFSET ?", [*params, int(limit), int(offset)]).fetchall()
+        runs = [_decode_row(row) or {} for row in rows]
+        if include_total:
+            return runs, total
+        return runs
 
     def update_run_link_status(self, run_id: str, status: str, *, heartbeat_at: str | None = None) -> None:
         now = utc_now()
