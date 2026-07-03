@@ -2,15 +2,32 @@ import { Link, useLocation } from 'react-router-dom';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
-import { panelRoutes } from '@/src/lib/routes';
-import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
+import { panelRouteMeta, panelRoutes, viewerNavGroups, type PanelRouteKey } from '@/src/lib/routes';
+import { Avatar } from '@/src/components/ui/Avatar';
+import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route, Rocket } from 'lucide-react';
 
 type NavGroup = {
   id: 'workspace' | 'advanced';
+  label: string;
   items: { to: string; icon: typeof Home; label: string }[];
 };
 
 const sidebarAnimation = 'duration-300 ease-[cubic-bezier(0.4,0,0.2,1)]';
+
+const routeIcons: Record<PanelRouteKey, typeof Home> = {
+  home: Home,
+  setup: Home,
+  packs: Folder,
+  nodes: Network,
+  graphEditor: GitBranch,
+  profileGraph: Share2,
+  aiInput: BrainCircuit,
+  apiMap: Route,
+  profileWorkspace: FolderCog,
+  startup: Rocket,
+  flows: LayoutGrid,
+  settings: Settings,
+};
 
 export function Sidebar() {
   const t = useT();
@@ -19,39 +36,23 @@ export function Sidebar() {
   const isSidebarOpen = useAppStore(state => state.isSidebarOpen);
   const setSidebarOpen = useAppStore(state => state.setSidebarOpen);
 
-  // Ordered: workspace surfaces first, advanced/developer surfaces last
-  const navGroups: NavGroup[] = [
-    {
-      id: 'workspace',
-      items: [
-        { to: panelRoutes.home, icon: Home, label: t('nav.home') },
-        { to: panelRoutes.packs, icon: Folder, label: t('nav.packs') },
-        { to: panelRoutes.flows, icon: LayoutGrid, label: t('nav.flows') },
-        { to: panelRoutes.nodes, icon: Network, label: t('nav.nodes') },
-      ],
-    },
-    {
-      id: 'advanced',
-      items: [
-        { to: panelRoutes.graphEditor, icon: GitBranch, label: 'Graphs' },
-        { to: panelRoutes.profileGraph, icon: Share2, label: 'Profile Graph' },
-        { to: panelRoutes.aiInput, icon: BrainCircuit, label: 'AI Input' },
-        { to: panelRoutes.apiMap, icon: Route, label: 'API Map' },
-        { to: panelRoutes.profileWorkspace, icon: FolderCog, label: 'Profile Workspace' },
-        { to: panelRoutes.settings, icon: Settings, label: t('nav.settings') },
-      ],
-    },
-  ];
-
-  const groupLabels: Record<NavGroup['id'], string> = {
-    workspace: 'Workspace',
-    advanced: 'Advanced',
-  };
+  const navGroups: NavGroup[] = viewerNavGroups.map((group) => ({
+    id: group.id,
+    label: t(group.labelKey),
+    items: group.routes.map((route) => {
+      const meta = panelRouteMeta[route];
+      return {
+        to: meta.path,
+        icon: routeIcons[route],
+        label: t(meta.navKey || meta.titleKey),
+      };
+    }),
+  }));
 
   return (
     <aside
       className={cn(
-        "flex-shrink-0 flex flex-col bg-bg-sidebar border-r border-border transition-[width] overflow-hidden will-change-[width]",
+        "hidden flex-shrink-0 flex-col bg-bg-sidebar border-r border-border transition-[width] overflow-hidden will-change-[width] md:flex",
         sidebarAnimation,
         isSidebarOpen ? "w-[240px]" : "w-[56px]"
       )}
@@ -126,7 +127,7 @@ export function Sidebar() {
                 )}
                 aria-hidden={!isSidebarOpen}
               >
-                {groupLabels[group.id]}
+                {group.label}
               </div>
               <ul
                 className={cn(
@@ -203,13 +204,7 @@ export function Sidebar() {
               isSidebarOpen ? "gap-3 p-2 w-full" : "justify-center gap-0 p-2"
             )}
           >
-            {profile.avatar ? (
-              <img src={profile.avatar} alt="" className="w-7 h-7 rounded-full object-cover border border-border" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-semibold">
-                {profile.username.charAt(0).toUpperCase()}
-              </div>
-            )}
+            <Avatar src={profile.avatar} username={profile.username} className="h-7 w-7 text-xs" />
             <div
               className={cn(
                 "min-w-0 flex-1 overflow-hidden transition-[max-width,opacity,transform]",
