@@ -1231,6 +1231,100 @@ def test_desktop_api_create_frame_lease_and_input_happy_path(monkeypatch, tmp_pa
     assert agent.desktop_inputs[0].action == "click"
 
 
+def test_desktop_create_tool_seat_is_visible_to_long_lived_desktop_api(tmp_path, monkeypatch) -> None:
+    from ecosystem.defaultspack.blocks.sandbox import api
+
+    monkeypatch.syspath_prepend(str(DEFAULTSPACK_ROOT))
+    from domain.tool import desktop_tools
+    from domain.tool_policy.internal_context import (
+        mark_tool_server_approval_context as mark_domain_tool_server_approval_context,
+    )
+
+    capabilities = {
+        "sandbox.exec",
+        "sandbox.files",
+        "sandbox.resource_limits",
+        "sandbox.network_policy",
+        "sandbox.desktop",
+        "sandbox.desktop_input",
+        "sandbox.snapshot",
+    }
+    http_registry = ProviderRegistry()
+    http_agent = FakeGuestAgent()
+    http_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            guest_agent=http_agent,
+        )
+    )
+    http_service = SimpleNamespace(
+        provider_registry=http_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=http_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    tool_registry = ProviderRegistry()
+    tool_registry.register(
+        FakeRuntimeProvider(
+            provider_id="fake-runtime",
+            capabilities=capabilities,
+            sandbox_id_factory=lambda: "tool-seat",
+        )
+    )
+    tool_service = SimpleNamespace(
+        provider_registry=tool_registry,
+        manager=SandboxManager(state_dir=tmp_path, provider_registry=tool_registry),
+        frame_cache=FrameCache(min_capture_interval_seconds=0),
+        lease_manager=ControlLeaseManager(),
+    )
+    tool_context = mark_domain_tool_server_approval_context({"user_id": "local-user", "agent_id": "agent-1"})
+
+    api._reset_service_for_tests(http_service)
+    try:
+        before_create = api.run({"_handler": "desktops_list"}, {})
+        api._reset_service_for_tests(tool_service)
+        created = desktop_tools.desktop_create(
+            {
+                "name": "Tool-created Ubuntu",
+                "template_id": "desktop.ubuntu",
+                "provider_id": "fake-runtime",
+                "resolution": {"width": 800, "height": 600},
+            },
+            tool_context,
+        )
+        api._reset_service_for_tests(http_service)
+        listed = api.run({"_handler": "desktops_list"}, {})
+        fetched = api.run({"_handler": "desktop_get", "seat_id": "tool-seat"}, {"user_id": "local-user"})
+        ai_input = api.run(
+            {
+                "_handler": "desktop_ai_input",
+                "seat_id": "tool-seat",
+                "action": "click",
+                "client_action_id": "ai-click-1",
+                "x": 12,
+                "y": 34,
+                "button": "left",
+            },
+            {"user_id": "local-user", "agent_id": "agent-1"},
+        )
+    finally:
+        api._reset_service_for_tests(None)
+
+    assert before_create["status"] == "ok"
+    assert before_create["data"]["desktops"] == []
+    assert created["status"] == "ok"
+    assert created["data"]["seat_id"] == "tool-seat"
+    assert listed["status"] == "ok"
+    assert [desktop["seat_id"] for desktop in listed["data"]["desktops"]] == ["tool-seat"]
+    assert fetched["status"] == "ok"
+    assert fetched["data"]["seat_id"] == "tool-seat"
+    assert fetched["data"]["status"] == "running"
+    assert ai_input["status"] == "ok"
+    assert ai_input["data"]["accepted"] is True
+    assert http_agent.desktop_inputs[0].action == "click"
+
+
 def test_sandbox_stop_and_delete_require_destructive_confirmation(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
 
