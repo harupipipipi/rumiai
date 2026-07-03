@@ -670,6 +670,15 @@ def test_edge_haze_draw_path_uses_cached_state():
     assert "controller.targetWindowDrawRect" in draw_body
 
 
+def test_mac_swift_host_click_text_accepts_text_aliases():
+    source = ROOT / "ecosystem" / "rumi_default_tools_pack" / "domain" / "computer" / "mac" / "ComputerUseHost.swift"
+    text = source.read_text(encoding="utf-8")
+    semantic_text_body = text.split("func semanticText(args: [String: Any]) -> String", 1)[1].split("struct AXCandidate", 1)[0]
+
+    assert '"text_query"' in semantic_text_body
+    assert '"match_text"' in semantic_text_body
+
+
 def test_edge_haze_swift_self_test_passes(tmp_path):
     if sys.platform != "darwin":
         return

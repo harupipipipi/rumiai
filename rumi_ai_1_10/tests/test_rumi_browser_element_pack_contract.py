@@ -57,4 +57,16 @@ def test_browser_element_pack_tracks_extension_semantic_contract() -> None:
     assert schema["schema_id"] == "rumi.browser.semantic_dom_v2"
     for field in schema["required_fields"]:
         assert field in content
+    for field in (
+        "viewport_center",
+        "page_rect",
+        "page_center",
+        "selector_hints",
+        "snapshot_metadata",
+        "client_profile",
+        "browser_profile_id",
+        "profile_label",
+        "installation_id",
+    ):
+        assert field in content
     assert "page.highlight" in content

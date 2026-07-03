@@ -137,6 +137,8 @@ class BrowserComputerController:
             return self._select_window(payload)
         if action == "computer.screenshot":
             return self._screenshot(payload=payload, dry_run=self._truthy(payload.get("dry_run")), yolo_mode=yolo_mode)
+        if action in {"computer.ocr", "computer.ax_tree"}:
+            return self._computer_read_action(action, payload, yolo_mode=yolo_mode)
         if action in {"computer.clipboard", "computer.clipboard.get", "computer.clipboard.read"}:
             return self._clipboard_read(payload, yolo_mode=yolo_mode)
         if action in {"computer.clipboard.set", "computer.clipboard.write", "computer.clipboard.clear"}:
@@ -152,6 +154,8 @@ class BrowserComputerController:
             return self._desktop_action(action, payload, yolo_mode=yolo_mode)
         if action == "computer.observe":
             return self._computer_seat_observe(payload, yolo_mode=yolo_mode)
+        if action == "computer.click_text":
+            return self._computer_click_text(payload, yolo_mode=yolo_mode)
         if action in {"computer.semantic_action", "computer.press"}:
             return self._computer_seat_semantic_action(payload, yolo_mode=yolo_mode)
         if action == "computer.pid_event":
@@ -172,6 +176,15 @@ class BrowserComputerController:
             "app_context": "computer.context",
             "state": "computer.context",
             "screenshot": "computer.screenshot",
+            "ocr": "computer.ocr",
+            "computer_ocr": "computer.ocr",
+            "ax_tree": "computer.ax_tree",
+            "accessibility_tree": "computer.ax_tree",
+            "computer_ax_tree": "computer.ax_tree",
+            "click_text": "computer.click_text",
+            "text_click": "computer.click_text",
+            "click_by_text": "computer.click_text",
+            "computer_click_text": "computer.click_text",
             "move": "computer.move",
             "cursor_move": "computer.move",
             "mouse_move": "computer.move",
@@ -1613,6 +1626,221 @@ class BrowserComputerController:
             return result
         except Exception as e:
             return {"action": "computer.observe", "error": str(e)}
+
+    def _computer_read_action(self, action: str, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        """Run high-risk read actions through Swift host first, then ComputerSeat fallback."""
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, action, approval_payload)):
+            return self._approval_required(action, approval_payload)
+        swift_result = self._darwin_swift_optional_action_result(action, payload)
+        if swift_result is not None:
+            swift_result.setdefault("action", action)
+            return swift_result
+        if action == "computer.ax_tree":
+            return self._computer_seat_ax_tree(payload)
+        if action == "computer.ocr":
+            return self._computer_seat_ocr(payload)
+        return self._unsupported_computer_action(action, payload, reason="Unsupported computer read action.")
+
+    def _computer_seat_ax_tree(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            svc = self._get_computer_seat()
+            result = svc.observe(self._computer_seat_target(payload))
+        except Exception as e:
+            return {"action": "computer.ax_tree", "supported": False, "is_error": True, "reason": str(e)}
+        ax_tree = result.get("ax_tree") if isinstance(result.get("ax_tree"), dict) else {}
+        response: dict[str, Any] = {
+            "action": "computer.ax_tree",
+            "platform": result.get("platform", platform.system()),
+            "supported": bool(ax_tree),
+            "ax_tree": ax_tree,
+        }
+        self._copy_optional_keys(
+            result,
+            response,
+            ("target_window", "capabilities", "recommended_next_actions", "fallback_available"),
+        )
+        if self._truthy(payload.get("include_screenshot")) and isinstance(result.get("screenshot"), dict):
+            response["screenshot"] = result.get("screenshot")
+        if self._truthy(payload.get("include_ocr")):
+            ocr_payload = self._ocr_payload_from_observe(result)
+            if ocr_payload:
+                response["ocr"] = ocr_payload
+        if not ax_tree:
+            response["reason"] = "No accessibility tree is available from the current computer drivers."
+            response["recovery"] = {
+                "kind": "driver_not_supported",
+                "note": "Try computer.observe or use a host/driver with accessibility tree support.",
+            }
+        return response
+
+    def _computer_seat_ocr(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            svc = self._get_computer_seat()
+            result = svc.observe(self._computer_seat_target(payload))
+        except Exception as e:
+            return {"action": "computer.ocr", "supported": False, "is_error": True, "reason": str(e)}
+        ocr_payload = self._ocr_payload_from_observe(result)
+        response: dict[str, Any] = {
+            "action": "computer.ocr",
+            "platform": result.get("platform", platform.system()),
+            "supported": bool(ocr_payload),
+        }
+        if ocr_payload:
+            response.update(ocr_payload)
+        self._copy_optional_keys(result, response, ("target_window", "capabilities", "fallback_available"))
+        if self._truthy(payload.get("include_ax_tree")) and isinstance(result.get("ax_tree"), dict):
+            response["ax_tree"] = result.get("ax_tree")
+        if self._truthy(payload.get("include_screenshot")) and isinstance(result.get("screenshot"), dict):
+            response["screenshot"] = result.get("screenshot")
+        if not ocr_payload:
+            response["reason"] = "No OCR-capable computer host or fallback driver is available for this target."
+            response["recovery"] = {
+                "kind": "driver_not_supported",
+                "note": "Use computer.screenshot for visual inspection, or enable a host/driver that exposes OCR.",
+            }
+        return response
+
+    @staticmethod
+    def _ocr_payload_from_observe(result: dict[str, Any]) -> dict[str, Any]:
+        for key in ("ocr", "ocr_result"):
+            value = result.get(key)
+            if isinstance(value, dict) and value:
+                return dict(value)
+        text = str(result.get("ocr_text") or "").strip()
+        if text:
+            return {"text": text, "ocr_text": text}
+        items = result.get("ocr_items")
+        if isinstance(items, list) and items:
+            return {"items": items}
+        screenshot = result.get("screenshot")
+        if isinstance(screenshot, dict):
+            for key in ("ocr", "ocr_result"):
+                value = screenshot.get(key)
+                if isinstance(value, dict) and value:
+                    return dict(value)
+            text = str(screenshot.get("ocr_text") or "").strip()
+            if text:
+                return {"text": text, "ocr_text": text}
+            items = screenshot.get("ocr_items")
+            if isinstance(items, list) and items:
+                return {"items": items}
+        return {}
+
+    @staticmethod
+    def _copy_optional_keys(source: dict[str, Any], target: dict[str, Any], keys: tuple[str, ...]) -> None:
+        for key in keys:
+            value = source.get(key)
+            if value not in (None, {}, []):
+                target[key] = value
+
+    def _computer_click_text(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
+        approval_payload = self._safe_payload(payload)
+        if not (yolo_mode or self._consume_approval(payload, "computer.click_text", approval_payload)):
+            return self._approval_required("computer.click_text", approval_payload)
+        swift_result = self._darwin_swift_optional_action_result(
+            "computer.click_text",
+            self._click_text_swift_payload(payload),
+        )
+        if swift_result is not None:
+            swift_result.setdefault("action", "computer.click_text")
+            return swift_result
+        text_query = self._text_query_from_payload(payload)
+        if not text_query and not str(payload.get("element_id") or "").strip():
+            return {
+                "action": "computer.click_text",
+                "executed": False,
+                "supported": False,
+                "is_error": True,
+                "reason": "computer.click_text requires text, query, text_query, match_text, or element_id.",
+            }
+        try:
+            svc = self._get_computer_seat()
+            target = self._computer_seat_target(payload)
+            element_or_point = self._click_text_element_or_point(payload, text_query)
+            intent = self._click_text_intent(payload, text_query)
+            with self._edge_haze("computer.click_text", payload):
+                result = svc.semantic_action(target, intent=intent, element_or_point=element_or_point)
+            result["action"] = "computer.click_text"
+            result.setdefault("underlying_action", "computer.semantic_action")
+            if text_query:
+                result.setdefault("text_query", text_query)
+            if not result.get("executed"):
+                result.setdefault("supported", False)
+                result.setdefault("reason", "No text-click capable host or semantic fallback driver accepted the request.")
+            return result
+        except Exception as e:
+            return {"action": "computer.click_text", "supported": False, "is_error": True, "reason": str(e)}
+
+    @classmethod
+    def _text_query_from_payload(cls, payload: dict[str, Any]) -> str:
+        for key in ("text", "query", "text_query", "match_text"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @classmethod
+    def _click_text_swift_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(payload.get("text") or "").strip():
+            return payload
+        for key in ("text_query", "match_text"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                swift_payload = dict(payload)
+                swift_payload["text"] = value
+                return swift_payload
+        return payload
+
+    @classmethod
+    def _click_text_intent(cls, payload: dict[str, Any], text_query: str) -> str:
+        explicit = str(payload.get("intent") or "").strip()
+        if explicit:
+            return explicit
+        role = str(payload.get("role") or "").strip()
+        if text_query and role:
+            return f"click the {role} matching text: {text_query}"
+        if text_query:
+            return f"click text: {text_query}"
+        element_id = str(payload.get("element_id") or "").strip()
+        return f"click accessibility element: {element_id}"
+
+    @classmethod
+    def _click_text_element_or_point(cls, payload: dict[str, Any], text_query: str) -> dict[str, Any]:
+        element: dict[str, Any] = {}
+        for key in ("element_id", "role", "confidence_threshold"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                output_key = "id" if key == "element_id" else key
+                element[output_key] = value
+        if text_query:
+            element["text"] = text_query
+        for key in ("query", "text_query", "match_text"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                element[key] = value
+        return element
+
+    def _unsupported_computer_action(
+        self,
+        action: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
+            "action": action,
+            "supported": False,
+            "platform": platform.system(),
+            "reason": reason,
+            "recovery": {
+                "kind": "driver_not_supported",
+                "note": "Use computer.observe/screenshot or enable a host driver that supports this action.",
+            },
+        }
+        if payload:
+            result["payload"] = self._safe_payload(payload)
+        return result
 
     def _computer_seat_semantic_action(self, payload: dict[str, Any], *, yolo_mode: bool) -> dict[str, Any]:
         """Delegate to ComputerSeatService.semantic_action with approval."""
@@ -3775,6 +4003,28 @@ end tell
                 return None
             result = host.run(action, dict(payload or {}))
             return result if isinstance(result, dict) and not result.get("is_error") else None
+        except Exception:
+            return None
+
+    @staticmethod
+    def _darwin_swift_optional_action_result(action: str, payload: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        if platform.system() != "Darwin":
+            return None
+        try:
+            from ..computer.mac.swift_host import MacSwiftComputerHost
+
+            host = MacSwiftComputerHost()
+            if not host.available():
+                return None
+            result = host.run(action, dict(payload or {}))
+            if not isinstance(result, dict):
+                return {"action": action, "result": result}
+            if result.get("is_error"):
+                code = str(result.get("error_code") or "").strip().upper()
+                reason = str(result.get("reason") or "")
+                if code == "UNSUPPORTED_ACTION" or reason.startswith("Unsupported macOS computer action"):
+                    return None
+            return dict(result)
         except Exception:
             return None
 
