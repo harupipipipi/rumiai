@@ -57,6 +57,31 @@ class _FakeApprovalManager:
         return (reason is None, reason)
 
 
+class _FakeDesktopExecuteGrantManager:
+    def __init__(self, *, grant=None, check_reason: str = "No capability grant for principal 'defaultspack'") -> None:
+        self.grant = grant
+        self.check_reason = check_reason
+        self.check_calls = []
+        self.grant_calls = []
+
+    def get_grant(self, principal_id: str):
+        if principal_id == "defaultspack":
+            return self.grant
+        return None
+
+    def check(self, principal_id: str, permission_id: str):
+        self.check_calls.append((principal_id, permission_id))
+        return SimpleNamespace(
+            allowed=False,
+            reason=self.check_reason,
+            config={},
+        )
+
+    def grant_permission(self, principal_id: str, permission_id: str, config: dict):
+        self.grant_calls.append((principal_id, permission_id, dict(config)))
+        return SimpleNamespace(principal_id=principal_id, permissions={permission_id: config})
+
+
 @pytest.fixture(autouse=True)
 def _stub_approval_manager(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
@@ -464,6 +489,113 @@ def test_default_manager_uses_rumi_user_data_and_seeds_default_profile(
     assert profile["base_pack"] == "defaultspack"
     assert profile["graph_id"] == "defaultspack.startup"
     assert any(port["port_key"] == "agent.start" for port in profile["graph_ports"])
+
+
+def test_default_profile_bootstrap_seeds_scoped_desktop_execute_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root,
+        "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    user_data_dir = tmp_path / "app-data" / "user_data"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_dir))
+    grant_manager = _FakeDesktopExecuteGrantManager()
+    manager = StartupProfileManager()
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        with patch(
+            "core_runtime.capability_grant_manager.get_capability_grant_manager",
+            return_value=grant_manager,
+        ):
+            payload = manager.list_profiles_payload()
+
+    assert payload["active_profile_id"] == "default-profile"
+    assert grant_manager.check_calls == [("defaultspack", "desktop_app.execute")]
+    assert grant_manager.grant_calls == [
+        (
+            "defaultspack",
+            "desktop_app.execute",
+            {
+                "allowed_packs": ["defaultspack"],
+                "source": "default_profile_bootstrap",
+                "profile_id": "default-profile",
+            },
+        )
+    ]
+
+
+def test_default_profile_bootstrap_does_not_reenable_disabled_desktop_execute_grant(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root,
+        "defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    user_data_dir = tmp_path / "app-data" / "user_data"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_dir))
+    disabled_grant = SimpleNamespace(
+        enabled=True,
+        permissions={
+            "desktop_app.execute": SimpleNamespace(
+                enabled=False,
+                config={"allowed_packs": ["defaultspack"]},
+            )
+        },
+    )
+    grant_manager = _FakeDesktopExecuteGrantManager(grant=disabled_grant)
+    manager = StartupProfileManager()
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        with patch(
+            "core_runtime.capability_grant_manager.get_capability_grant_manager",
+            return_value=grant_manager,
+        ):
+            payload = manager.list_profiles_payload()
+
+    assert payload["active_profile_id"] == "default-profile"
+    assert grant_manager.check_calls == []
+    assert grant_manager.grant_calls == []
+
+
+def test_default_profile_bootstrap_requires_canonical_defaultspack_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    eco_root = tmp_path / "ecosystem"
+    _write_pack(
+        eco_root,
+        "defaultspack",
+        identity="local:defaultspack",
+        graphs=[_startup_graph("defaultspack")],
+        nodes=["agent", "ai_client", "tool", "memory", "frontend"],
+    )
+    locations = _discover_locations(eco_root, ["defaultspack"])
+    user_data_dir = tmp_path / "app-data" / "user_data"
+    monkeypatch.setenv("RUMI_USER_DATA", str(user_data_dir))
+    grant_manager = _FakeDesktopExecuteGrantManager()
+    manager = StartupProfileManager()
+
+    with patch("core_runtime.startup_profiles.discover_pack_locations", return_value=locations):
+        with patch(
+            "core_runtime.capability_grant_manager.get_capability_grant_manager",
+            return_value=grant_manager,
+        ):
+            payload = manager.list_profiles_payload()
+
+    assert payload["active_profile_id"] == "default-profile"
+    assert grant_manager.check_calls == []
+    assert grant_manager.grant_calls == []
 
 
 def test_add_pack_to_profile(tmp_path: Path):
