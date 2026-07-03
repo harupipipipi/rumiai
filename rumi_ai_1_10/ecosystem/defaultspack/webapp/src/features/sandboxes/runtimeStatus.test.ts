@@ -61,6 +61,32 @@ test("runtimeAvailability selects a ready provider when the preferred provider s
   assert.equal(availability.message, "Mac Lima is ready.");
 });
 
+test("runtimeAvailability treats whitespace capability strings as desktop capable", () => {
+  const availability = runtimeAvailability(
+    {
+      providers: [
+        {
+          provider_id: "windows_wsl",
+          label: "RumiUbuntu WSL2",
+          status: "ready",
+          available: true,
+          installed: true,
+          ready: true,
+          selected: true,
+          capabilities: "sandbox.desktop sandbox.desktop_input sandbox.exec sandbox.snapshot",
+        },
+      ],
+      selected_provider_id: "windows_wsl",
+    },
+    null,
+    null,
+  );
+
+  assert.equal(availability.status, "ready");
+  assert.equal(availability.selectedProvider?.provider_id, "windows_wsl");
+  assert.equal(availability.message, "RumiUbuntu WSL2 is ready.");
+});
+
 test("runtimeAvailability does not treat exec-only ready provider as desktop ready", () => {
   const availability = runtimeAvailability(
     {

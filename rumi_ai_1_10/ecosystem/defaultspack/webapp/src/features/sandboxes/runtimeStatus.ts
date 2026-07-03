@@ -35,11 +35,19 @@ function providerIsReady(provider: RuntimeProviderStatus): boolean {
   return provider.ready === true;
 }
 
+function providerCapabilities(provider: RuntimeProviderStatus): Set<string> {
+  const capabilities = provider.capabilities ?? [];
+  if (typeof capabilities === "string") {
+    return new Set(capabilities.split(/\s+/).map((capability) => capability.trim()).filter(Boolean));
+  }
+  return new Set(capabilities);
+}
+
 export function providerSupportsDesktop(
   provider: RuntimeProviderStatus | null | undefined,
 ): boolean {
   if (!provider) return false;
-  const capabilities = new Set(provider.capabilities ?? []);
+  const capabilities = providerCapabilities(provider);
   return DESKTOP_RUNTIME_CAPABILITIES.every((capability) =>
     capabilities.has(capability),
   );
