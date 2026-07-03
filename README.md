@@ -28,7 +28,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - `rumi_ai/`: version-stable Python entrypoint package
 - `pack-shell/`: desktop pack launcher
 - `rumi_viewer/`: desktop shell and control panel frontend source
-- `rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
+- `rumi_ai_1_10/ecosystem/rumi_mobile/`: Flutter iOS/Android app for trusted-LAN defaultspack access
 - `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/`: browser companion assets bundled with defaultspack
 
 ## Setup
@@ -40,7 +40,7 @@ The repository keeps the runtime implementation under `rumi_ai_1_10/`, while `ru
 - npm
 - uv (`rumi_viewer` を触る場合)
 - Rust / Cargo (`rumi_viewer` を触る場合)
-- Flutter SDK (`rumi_mobile` を触る場合)
+- Flutter SDK (`rumi_ai_1_10/ecosystem/rumi_mobile` を触る場合)
 
 ### Clone and install
 
@@ -143,7 +143,7 @@ python -m rumi_ai migrate-hmac
 - `rumi_ai_1_10`: kernel, runtime, API, backend, and docs
 - `pack-shell`: launches desktop packs and brokers token/bootstrap flow
 - `rumi_viewer`: viewer-side application shell and canonical panel frontend source
-- `rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
+- `rumi_ai_1_10/ecosystem/rumi_mobile`: mobile remote client for the bearer-auth Kernel Pack API
 - `rumi_ai_1_10/ecosystem/defaultspack/browser_extensions/rumi_browser_companion`: unpacked Chromium extension for the defaultspack `browser_companion` tool
 
 For architecture and runtime details, see [rumi_ai_1_10/README.md](./rumi_ai_1_10/README.md).

@@ -27,13 +27,24 @@ def _path_is_inside_pack(path: Path) -> bool:
         return False
 
 
+def _path_contains_pack(path: Path) -> bool:
+    try:
+        _PACK_ROOT.resolve().relative_to(path.resolve())
+        return True
+    except (OSError, ValueError):
+        return False
+
+
 def _module_is_from_pack(module: Any) -> bool:
     module_file = getattr(module, "__file__", None)
     if not module_file:
         module_paths = getattr(module, "__path__", None)
         if module_paths is None:
             return False
-        return any(_path_is_inside_pack(Path(item)) for item in module_paths)
+        return any(
+            _path_is_inside_pack(Path(item)) or _path_contains_pack(Path(item))
+            for item in module_paths
+        )
     return _path_is_inside_pack(Path(module_file))
 
 
