@@ -3,7 +3,7 @@ from domain.company.message_router import CompanySlackRuntime
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 
-from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict
+from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -38,6 +38,9 @@ def run(input_data, context):
                 return error("message not found: " + str(message_id), "NOT_FOUND")
             return ok(message)
         if action in {"add", "create"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             content = input_data.get("content")
             if not content:
                 return invalid("content is required")

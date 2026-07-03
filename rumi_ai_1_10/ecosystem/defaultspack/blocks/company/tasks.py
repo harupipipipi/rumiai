@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.company.task_store import CompanyTaskStore
 
-from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict
+from ._helpers import company_id_from, invalid, limit_offset, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -35,6 +35,9 @@ def run(input_data, context):
                 return error("task not found: " + str(task_id), "NOT_FOUND")
             return ok(task)
         if action in {"create", "add"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             title = input_data.get("title")
             if not title:
                 return invalid("title is required")
@@ -53,6 +56,9 @@ def run(input_data, context):
                 return missing_company(company_id)
             return ok(task)
         if action == "update":
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             task_id = input_data.get("task_id") or input_data.get("id")
             updates = input_data.get("updates")
             if not task_id:

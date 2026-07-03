@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.company.settings_store import CompanySettingsStore
 
-from ._helpers import company_id_from, invalid, missing_company, require_dict
+from ._helpers import company_id_from, invalid, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -19,6 +19,9 @@ def run(input_data, context):
                 return missing_company(company_id)
             return ok({"settings": settings})
         if action in {"update", "set"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             settings = input_data.get("settings")
             if not isinstance(settings, dict):
                 return invalid("settings must be a dict")

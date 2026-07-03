@@ -1,0 +1,47 @@
+{
+  "function_id": "subagent_channel_join",
+  "description": "Ask Creator to join a subagent to a team channel.",
+  "tags": [
+    "subagent_team",
+    "channel"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.channel.join"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.channel_join",
+    "defaultspack.subagent.channel_join",
+    "defaults.subagent.channel.join",
+    "defaultspack.subagent.channel.join",
+    "subagent.channel.join"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_channel_join"
+      }
+    }
+  }
+}

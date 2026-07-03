@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.company.agent_store import CompanyAgentStore
 
-from ._helpers import company_id_from, invalid, missing_company, require_dict
+from ._helpers import company_id_from, invalid, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -27,6 +27,9 @@ def run(input_data, context):
                 return error("agent not found: " + str(agent_id), "NOT_FOUND")
             return ok(agent)
         if action in {"upsert", "update", "create"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             agent = input_data.get("agent")
             if not isinstance(agent, dict):
                 return invalid("agent must be a dict")
@@ -35,6 +38,9 @@ def run(input_data, context):
                 return missing_company(company_id)
             return ok(updated)
         if action in {"remove", "delete"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             agent_id = input_data.get("agent_id")
             if not agent_id:
                 return invalid("agent_id is required")
