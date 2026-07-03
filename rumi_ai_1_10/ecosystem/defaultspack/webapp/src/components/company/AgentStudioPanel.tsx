@@ -2,10 +2,11 @@ import { CheckCircle2, Download, Layers3, Sparkles, Upload, Users2 } from "lucid
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  type AgentSelectionDecision,
+  type AgentSelectionHistoryEntry,
   type AgentStudioActivityEntry,
   type AgentStudioConversationState,
   type AgentFusionDefinition,
-  type AgentSelectionRule,
   type AgentStudioManifest,
   type AgentTeamDefinition,
   type Conversation,
@@ -35,13 +36,6 @@ function conversationFromActionResult(value: unknown): Conversation | null {
     : null;
 }
 
-function matchesSelectionRule(rule: AgentSelectionRule, prompt: string): boolean {
-  const text = prompt.trim().toLowerCase();
-  if (!text) return false;
-  const terms = [...(rule.prompt_contains ?? []), ...(rule.match_terms ?? [])]
-    .map((item) => item.toLowerCase());
-  return terms.some((item) => item && text.includes(item));
-}
 
 function surfaceLabel(value: unknown): string {
   switch (textValue(value)) {
@@ -82,10 +76,21 @@ export function AgentStudioPanel({
   const [importText, setImportText] = useState("");
   const [exportText, setExportText] = useState("");
   const [playgroundInput, setPlaygroundInput] = useState("");
+  const [selectionPreview, setSelectionPreview] = useState<AgentSelectionDecision | null>(null);
+  const [autoSelectEnabled, setAutoSelectEnabled] = useState(false);
   const [profileDraft, setProfileDraft] = useState({ id: "", display_name: "", base_profile_id: "", aliases: "", description: "" });
   const [teamDraft, setTeamDraft] = useState({ id: "", display_name: "", coordinator_profile_id: "", member_profile_ids: "", description: "" });
   const [fusionDraft, setFusionDraft] = useState({ id: "", display_name: "", synthesis_profile_id: "", participant_profile_ids: "", description: "" });
-  const [ruleDraft, setRuleDraft] = useState({ display_name: "", target_type: "profile", target_id: "", match_terms: "" });
+  const [ruleDraft, setRuleDraft] = useState({
+    display_name: "",
+    target_type: "profile",
+    target_id: "",
+    match_terms: "",
+    prompt_contains: "",
+    condition_prompt: "",
+    reason: "",
+    requires_confirmation: false,
+  });
 
   const loadManifest = async () => {
     setBusy(true);
@@ -103,10 +108,15 @@ export function AgentStudioPanel({
     void loadManifest();
   }, []);
 
+  useEffect(() => {
+    setAutoSelectEnabled(Boolean(manifest?.settings?.selection_defaults?.auto_select));
+  }, [manifest]);
+
   const profiles = manifest?.profiles ?? [];
   const teams = manifest?.teams ?? [];
   const fusions = manifest?.fusions ?? [];
   const rules = manifest?.selection_rules ?? [];
+  const selectionRuleHistory = manifest?.selection_rule_history ?? [];
   const recentActivity = useMemo(() => activityEntries(conversationState?.activity_log), [conversationState]);
   const activeLabel = textValue(conversationState?.active_label) || textValue(conversationState?.active_profile_id) || textValue(conversationState?.active_team_id) || textValue(conversationState?.active_fusion_id);
   const activeSurface = textValue(conversationState?.surface) || "human";
@@ -156,7 +166,27 @@ export function AgentStudioPanel({
     void performAction({ action: "activate_fusion", conversation_id: conversationId, fusion_id: fusionId }, `Fusion Agent switched to ${fusionId}.`);
   };
 
-  const matchedRule = useMemo(() => rules.find((rule) => matchesSelectionRule(rule, playgroundInput)) ?? null, [playgroundInput, rules]);
+  const previewSelection = async () => {
+    if (!textValue(playgroundInput)) {
+      setSelectionPreview(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await companyResources.updateAgentStudio({
+        action: "preview_selection",
+        prompt: playgroundInput,
+        conversation_id: conversationId ?? undefined,
+      }) as { decision?: AgentSelectionDecision };
+      setSelectionPreview(result?.decision ?? null);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Selection preview failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const conversationStatus = conversationId ? (
     <div className="mx-2 mt-2 rounded-xl border border-zinc-800/70 bg-zinc-950/50 p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -191,6 +221,9 @@ export function AgentStudioPanel({
                 {textValue(entry.created_at) && <span className="text-[10px]">{textValue(entry.created_at)}</span>}
               </div>
               <div className="mt-1 text-zinc-200">{textValue(entry.message) || "Activity recorded."}</div>
+              {textValue(entry.reason) && (
+                <div className="mt-1 font-mono text-[10px] text-zinc-500">{textValue(entry.reason)}</div>
+              )}
             </div>
           ))}
         </div>
@@ -381,17 +414,71 @@ export function AgentStudioPanel({
   const selectionSection = (
     <div className="space-y-3 p-2">
       <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/50 p-3">
-        <div className="mb-2 text-[12px] font-semibold text-zinc-200">Selection Playground</div>
-        <textarea value={playgroundInput} onChange={(event) => setPlaygroundInput(event.target.value)} placeholder="Type a prompt to see which selection rule matches." className="min-h-24 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="text-[12px] font-semibold text-zinc-200">Selection Playground</div>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              const next = !autoSelectEnabled;
+              setAutoSelectEnabled(next);
+              void performAction({
+                action: "update_settings",
+                settings: {
+                  selection_defaults: {
+                    ...(manifest?.settings?.selection_defaults ?? {}),
+                    auto_select: next,
+                  },
+                },
+              }, next ? "Enabled automatic profile switching." : "Disabled automatic profile switching.");
+            }}
+            className={`rounded-md px-2.5 py-1 text-[10px] font-semibold ${
+              autoSelectEnabled
+                ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-100"
+                : "border border-zinc-800 bg-zinc-900/70 text-zinc-300"
+            }`}
+          >
+            Auto-select {autoSelectEnabled ? "On" : "Off"}
+          </button>
+        </div>
+        <textarea
+          value={playgroundInput}
+          onChange={(event) => {
+            setPlaygroundInput(event.target.value);
+            setSelectionPreview(null);
+          }}
+          placeholder="Type a prompt to preview which registered target the router would choose."
+          className="min-h-24 w-full rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600"
+        />
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            disabled={busy || !textValue(playgroundInput)}
+            onClick={() => void previewSelection()}
+            className="rounded-md border border-zinc-700 px-3 py-1.5 text-[11px] font-semibold text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
+          >
+            Preview Selection
+          </button>
+        </div>
         <div className="mt-2 rounded-lg border border-zinc-800 bg-black/20 p-2 text-[11px] text-zinc-400">
-          {matchedRule ? (
-            <>
-              <div className="font-medium text-zinc-100">{matchedRule.display_name || matchedRule.id}</div>
-              <div className="mt-1">target: {matchedRule.target_type} / {matchedRule.target_id}</div>
-              <div className="mt-1">reason: {matchedRule.reason || "No reason."}</div>
-            </>
+          {selectionPreview ? (
+            selectionPreview.selected ? (
+              <>
+                <div className="font-medium text-zinc-100">{selectionPreview.selected_label || selectionPreview.selected_target_id || "Matched target"}</div>
+                <div className="mt-1">target: {selectionPreview.selected_target_type} / {selectionPreview.selected_target_id}</div>
+                <div className="mt-1">rule: {selectionPreview.rule_display_name || selectionPreview.rule_id || "unnamed"}</div>
+                <div className="mt-1">confidence: {typeof selectionPreview.confidence === "number" ? selectionPreview.confidence.toFixed(2) : "0.00"}</div>
+                <div className="mt-1">reason codes: {(selectionPreview.reason_codes ?? []).join(", ") || "none"}</div>
+                {selectionPreview.rule_reason && <div className="mt-1">rule note: {selectionPreview.rule_reason}</div>}
+                {selectionPreview.requires_confirmation && (
+                  <div className="mt-1 text-amber-200">Manual confirmation is required before this switch can apply.</div>
+                )}
+              </>
+            ) : (
+              <div>No matching selection rule. {(selectionPreview.reason_codes ?? []).join(", ")}</div>
+            )
           ) : (
-            "No matching selection rule."
+            "Run a preview to inspect the structured router decision."
           )}
         </div>
       </div>
@@ -401,9 +488,17 @@ export function AgentStudioPanel({
         <div className="space-y-2">
           {rules.map((rule) => (
             <div key={rule.id} className="rounded-lg border border-zinc-800 bg-black/20 p-2 text-[11px]">
-              <div className="font-medium text-zinc-100">{rule.display_name || rule.id}</div>
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-medium text-zinc-100">{rule.display_name || rule.id}</div>
+                {rule.requires_confirmation && (
+                  <span className="rounded border border-amber-500/20 bg-amber-500/10 px-1.5 py-0.5 text-[9px] text-amber-100">confirm</span>
+                )}
+              </div>
               <div className="mt-1 text-zinc-500">{rule.target_type} / {rule.target_id}</div>
-              <div className="mt-1 text-zinc-400">{(rule.prompt_contains ?? rule.match_terms ?? []).join(", ") || "No terms."}</div>
+              <div className="mt-1 text-zinc-400">literal: {(rule.prompt_contains ?? []).join(", ") || "none"}</div>
+              <div className="mt-1 text-zinc-400">terms: {(rule.match_terms ?? []).join(", ") || "none"}</div>
+              <div className="mt-1 text-zinc-400">condition: {rule.condition_prompt || "none"}</div>
+              {rule.reason && <div className="mt-1 text-zinc-500">note: {rule.reason}</div>}
             </div>
           ))}
         </div>
@@ -416,11 +511,18 @@ export function AgentStudioPanel({
           </select>
           <input value={ruleDraft.target_id} onChange={(event) => setRuleDraft((current) => ({ ...current, target_id: event.target.value }))} placeholder="target id" className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
           <input value={ruleDraft.match_terms} onChange={(event) => setRuleDraft((current) => ({ ...current, match_terms: event.target.value }))} placeholder="match terms" className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+          <input value={ruleDraft.prompt_contains} onChange={(event) => setRuleDraft((current) => ({ ...current, prompt_contains: event.target.value }))} placeholder="prompt contains" className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+          <input value={ruleDraft.reason} onChange={(event) => setRuleDraft((current) => ({ ...current, reason: event.target.value }))} placeholder="rule note" className="rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+          <textarea value={ruleDraft.condition_prompt} onChange={(event) => setRuleDraft((current) => ({ ...current, condition_prompt: event.target.value }))} placeholder="natural-language condition" className="md:col-span-2 min-h-20 rounded-md border border-zinc-800 bg-zinc-950 px-2 py-1.5 text-[11px] text-zinc-200 outline-none focus:border-zinc-600" />
+          <label className="inline-flex items-center gap-2 text-[11px] text-zinc-300">
+            <input type="checkbox" checked={ruleDraft.requires_confirmation} onChange={(event) => setRuleDraft((current) => ({ ...current, requires_confirmation: event.target.checked }))} />
+            Require manual confirmation
+          </label>
         </div>
         <div className="mt-2 flex justify-end">
           <button
             type="button"
-            disabled={busy || !textValue(ruleDraft.target_id)}
+            disabled={busy || !textValue(ruleDraft.target_id) || (!textValue(ruleDraft.match_terms) && !textValue(ruleDraft.prompt_contains) && !textValue(ruleDraft.condition_prompt))}
             onClick={() => void performAction({
               action: "set_selection_rules",
               selection_rules: [
@@ -430,7 +532,10 @@ export function AgentStudioPanel({
                   target_type: ruleDraft.target_type,
                   target_id: ruleDraft.target_id,
                   match_terms: listValue(ruleDraft.match_terms),
-                  prompt_contains: listValue(ruleDraft.match_terms),
+                  prompt_contains: listValue(ruleDraft.prompt_contains),
+                  condition_prompt: ruleDraft.condition_prompt,
+                  reason: ruleDraft.reason,
+                  requires_confirmation: ruleDraft.requires_confirmation,
                 },
               ],
             }, "Saved selection rule.")}
@@ -440,6 +545,33 @@ export function AgentStudioPanel({
           </button>
         </div>
       </div>
+
+      {selectionRuleHistory.length > 0 && (
+        <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/50 p-3">
+          <div className="mb-2 text-[12px] font-semibold text-zinc-200">Rule History</div>
+          <div className="space-y-2">
+            {selectionRuleHistory.map((entry: AgentSelectionHistoryEntry) => (
+              <div key={entry.id} className="rounded-lg border border-zinc-800 bg-black/20 p-2 text-[11px]">
+                <div className="flex items-center justify-between gap-2">
+                  <div>
+                    <div className="font-medium text-zinc-100">{entry.rule_count ?? entry.rules.length} rules</div>
+                    <div className="text-[10px] text-zinc-500">{entry.created_at || entry.id}</div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void performAction({ action: "set_selection_rules", selection_rules: entry.rules }, "Restored selection rule snapshot.")}
+                    className="rounded-md border border-zinc-800 px-2 py-1 text-[10px] text-zinc-200 hover:bg-zinc-900 disabled:opacity-40"
+                  >
+                    Restore
+                  </button>
+                </div>
+                <div className="mt-1 text-zinc-500">{entry.reason || "selection_rules_updated"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border border-zinc-800/70 bg-zinc-950/50 p-3">
         <div className="mb-2 flex items-center justify-between gap-2 text-[12px] font-semibold text-zinc-200">

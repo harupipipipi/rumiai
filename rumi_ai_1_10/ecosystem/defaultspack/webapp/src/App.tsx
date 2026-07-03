@@ -5087,6 +5087,33 @@ function ChatApp() {
       });
       replaceChatIdInUrl(conversation.id, true);
 
+      try {
+        const autoSelectionResult = await api.updateAgentStudio({
+          action: "auto_select_for_conversation",
+          conversation_id: conversation.id,
+          prompt: userText,
+        }) as {
+          conversation?: Conversation;
+          decision?: {
+            selected_target_id?: string;
+            requires_confirmation?: boolean;
+          };
+        };
+        const selectedConversation = autoSelectionResult?.conversation;
+        if (selectedConversation && typeof selectedConversation === "object" && selectedConversation.id) {
+          conversation = selectedConversation;
+          applyConversationUpdate(selectedConversation, { attachToActiveTab: wasNewConversation });
+        }
+        const selectionDecision = autoSelectionResult?.decision;
+        if (
+          selectionDecision?.requires_confirmation === true
+          && typeof selectionDecision.selected_target_id === "string"
+          && selectionDecision.selected_target_id.trim()
+        ) {
+          setError(`Agent Studio suggested ${selectionDecision.selected_target_id.trim()} but requires confirmation before switching.`);
+        }
+      } catch {}
+
       const title =
         conversation.title === "New Conversation"
           ? deriveConversationTitle(userText)
@@ -5106,7 +5133,7 @@ function ChatApp() {
         const withoutCurrent = current.filter((candidate) => candidate.id !== conversation.id);
         return [item, ...withoutCurrent];
       });
-      const assistantDraft = optimisticAssistantMessage(conversation.id, preferredModel || "stub/default");
+      const assistantDraft = optimisticAssistantMessage(conversation.id, conversation.model || preferredModel || "stub/default");
       const abortController = new AbortController();
       currentAbortControllerRef.current = abortController;
       streamingConversationIdRef.current = conversation.id;

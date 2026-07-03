@@ -924,10 +924,38 @@ export type AgentSelectionRule = {
   target_id?: string;
   match_terms?: string[];
   prompt_contains?: string[];
+  condition_prompt?: string;
   reason?: string;
+  requires_confirmation?: boolean;
   metadata?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
+};
+
+export type AgentSelectionHistoryEntry = {
+  id: string;
+  created_at?: string;
+  rule_count?: number;
+  reason?: string;
+  rules: AgentSelectionRule[];
+};
+
+export type AgentSelectionDecision = {
+  prompt?: string;
+  selected?: boolean;
+  selected_target_type?: "profile" | "team" | "fusion" | string;
+  selected_target_id?: string;
+  selected_profile_id?: string;
+  selected_team_id?: string;
+  selected_fusion_id?: string;
+  selected_label?: string;
+  surface?: "human" | "mode_agent" | "team_agent" | "fusion_agent" | string;
+  rule_id?: string;
+  rule_display_name?: string;
+  rule_reason?: string;
+  reason_codes?: string[];
+  confidence?: number;
+  requires_confirmation?: boolean;
 };
 
 export type AgentStudioActivityEntry = {
@@ -970,6 +998,7 @@ export type AgentStudioManifest = {
   teams: AgentTeamDefinition[];
   fusions: AgentFusionDefinition[];
   selection_rules: AgentSelectionRule[];
+  selection_rule_history?: AgentSelectionHistoryEntry[];
   settings: {
     model_defaults?: AgentModelSettings;
     terminology?: Record<string, string>;
@@ -2284,16 +2313,16 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
 
 function defaultspackApiCodeHint(code: string | undefined): string | null {
   if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
-    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+    return "Browser approval QA is not enabled for this Defaultspack session. Approve in Rumi Viewer or relaunch with a browser QA token.";
   }
   if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
-    return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
+    return "Browser approval requires a browser_approval_token in the approval URL or settings.";
   }
   if (code === "AUTHORITY_BROWSER_TOKEN_INVALID") {
-    return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
+    return "The browser_approval_token does not match this Defaultspack session. Reopen with the correct token.";
   }
   if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
-    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+    return "This Defaultspack session does not have the approval signing secret. Relaunch from Rumi Viewer or pass the same RUMI_PANEL_BOOTSTRAP_SECRET for browser QA.";
   }
   return null;
 }
@@ -2301,14 +2330,14 @@ function defaultspackApiCodeHint(code: string | undefined): string | null {
 function defaultspackApiStatusHint(status: number, code?: string): string {
   const codeHint = defaultspackApiCodeHint(code);
   if (codeHint) return codeHint;
-  if (status === 400) return "リクエスト形式、モデル設定、添付ファイル、または選択中の tool が backend と噛み合っていません。";
-  if (status === 401) return "認証が必要です。ログイン状態、APIキー、OAuth 接続を確認してください。";
-  if (status === 403) return "権限または承認で拒否されました。承認カード、CSRF、APIキーの利用権限、モデルアクセス権を確認してください。";
-  if (status === 404) return "対象の会話、モデル、ファイル、または endpoint が見つかりません。";
-  if (status === 409) return "同時実行や状態の衝突が起きています。画面を更新して再試行してください。";
-  if (status === 429) return "レート制限またはクォータ上限です。少し待つか、別のキー/モデルに切り替えてください。";
-  if (status >= 500) return "backend または provider 側の障害です。少し待って再試行してください。";
-  return "backend からエラーが返りました。詳細を確認して再試行してください。";
+  if (status === 400) return "The request payload, model settings, attachments, or selected tools were invalid for this backend.";
+  if (status === 401) return "Authentication is required. Check your login state, API key, or OAuth connection.";
+  if (status === 403) return "The request was denied by permissions or approval policy. Check approvals, CSRF, API key scope, or model access.";
+  if (status === 404) return "The requested conversation, model, file, or endpoint could not be found.";
+  if (status === 409) return "A concurrent update or state conflict occurred. Refresh and try again.";
+  if (status === 429) return "Rate limits or quota were exceeded. Wait a moment or switch keys/models.";
+  if (status >= 500) return "The backend or provider encountered an internal error. Please retry shortly.";
+  return "The backend returned an error. Check the details and try again.";
 }
 
 export function explainDefaultspackApiError(
@@ -2322,7 +2351,7 @@ export function explainDefaultspackApiError(
   return [
     `${label}${code}`,
     defaultspackApiStatusHint(status, error?.code),
-    detail ? `詳細: ${detail}` : "",
+    detail ? `髫ｧ・ｳ驍擾ｽｰ: ${detail}` : "",
   ].filter(Boolean).join("\n");
 }
 

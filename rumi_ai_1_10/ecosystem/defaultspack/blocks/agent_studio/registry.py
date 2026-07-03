@@ -58,6 +58,23 @@ def run(input_data, context):
             if not isinstance(rules, list):
                 return error("selection_rules must be a list", "INVALID_INPUT")
             return ok({"selection_rules": service.replace_selection_rules(rules)})
+        if action == "preview_selection":
+            return ok({
+                "decision": service.preview_selection(
+                    str((input_data or {}).get("prompt") or ""),
+                    conversation_id=str((input_data or {}).get("conversation_id") or "").strip(),
+                )
+            })
+        if action == "auto_select_for_conversation":
+            conversation_id = str((input_data or {}).get("conversation_id") or "").strip()
+            if not conversation_id:
+                return error("conversation_id is required", "INVALID_INPUT")
+            return ok(
+                service.auto_select_for_conversation(
+                    conversation_id,
+                    str((input_data or {}).get("prompt") or ""),
+                )
+            )
 
         if action == "update_settings":
             settings = (input_data or {}).get("settings")

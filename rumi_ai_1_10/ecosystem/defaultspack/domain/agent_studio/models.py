@@ -321,7 +321,13 @@ def normalize_selection_rule(value: Any) -> dict[str, Any]:
         "prompt_contains": list_strings(
             data.get("prompt_contains") or data.get("when_contains")
         ),
+        "condition_prompt": text_value(
+            data.get("condition_prompt")
+            or data.get("natural_language_condition")
+            or data.get("when_prompt")
+        ),
         "reason": text_value(data.get("reason")),
+        "requires_confirmation": bool(data.get("requires_confirmation")),
         "metadata": dict_value(data.get("metadata")),
         "created_at": text_value(data.get("created_at")) or now,
         "updated_at": now,

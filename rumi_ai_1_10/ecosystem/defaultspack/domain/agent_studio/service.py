@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any
 
@@ -205,6 +206,7 @@ class AgentStudioService:
             "teams": self.list_teams(),
             "fusions": self.list_fusions(),
             "selection_rules": self.list_selection_rules(),
+            "selection_rule_history": self.selection_rule_history(),
             "settings": normalize_settings(bundle.get("settings")),
             "shortcut_index": self.shortcut_index(),
             "compatibility_alias_index": self.compatibility_alias_index(),
@@ -213,6 +215,8 @@ class AgentStudioService:
                 "builtin_profile_count": len(self.builtin_profiles()),
                 "team_count": len(self.list_teams()),
                 "fusion_count": len(self.list_fusions()),
+                "selection_rule_count": len(self.list_selection_rules()),
+                "selection_rule_history_count": len(self.selection_rule_history()),
             },
         }
 
@@ -263,6 +267,33 @@ class AgentStudioService:
     def list_selection_rules(self) -> list[dict[str, Any]]:
         bundle = self.store.read()
         return [normalize_selection_rule(item) for item in bundle.get("selection_rules", [])]
+
+    def selection_rule_history(self) -> list[dict[str, Any]]:
+        metadata = dict_value(normalize_settings(self.store.read().get("settings")).get("metadata"))
+        history = metadata.get("selection_rule_history")
+        if not isinstance(history, list):
+            return []
+        items: list[dict[str, Any]] = []
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            rules = [
+                normalize_selection_rule(rule)
+                for rule in (entry.get("rules") or [])
+                if isinstance(rule, dict)
+            ]
+            created_at = text_value(entry.get("created_at")) or timestamp()
+            items.append(
+                {
+                    "id": text_value(entry.get("id"))
+                    or safe_id("selection-rule-history", f"{created_at}-{len(rules)}"),
+                    "created_at": created_at,
+                    "rule_count": len(rules),
+                    "reason": text_value(entry.get("reason") or "selection_rules_updated"),
+                    "rules": rules,
+                }
+            )
+        return items[:10]
 
     def builtin_profiles(self) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -411,6 +442,10 @@ class AgentStudioService:
 
     def replace_selection_rules(self, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
         self._validate_selection_rules(rules)
+        current_rules = self.list_selection_rules()
+        next_rules = [normalize_selection_rule(rule) for rule in rules if isinstance(rule, dict)]
+        if current_rules and self._selection_rules_signature(current_rules) != self._selection_rules_signature(next_rules):
+            self._append_selection_rule_history(current_rules)
         return self.store.replace_selection_rules(rules)
 
     def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
@@ -456,6 +491,113 @@ class AgentStudioService:
             "fusions": list(bundle.get("fusions", {}).values()),
             "selection_rules": list(bundle.get("selection_rules", [])),
         }
+
+    def preview_selection(
+        self,
+        prompt: str,
+        *,
+        conversation_id: str = "",
+    ) -> dict[str, Any]:
+        del conversation_id
+        prompt_text = text_value(prompt)
+        decision = self._empty_selection_decision(prompt_text)
+        if not prompt_text:
+            decision["reason_codes"] = ["empty_prompt"]
+            return decision
+
+        candidates: list[dict[str, Any]] = []
+        for index, rule in enumerate(self.list_selection_rules()):
+            if rule.get("enabled") is False:
+                continue
+            evaluation = self._evaluate_selection_rule(rule, prompt_text)
+            if evaluation is None:
+                continue
+            evaluation["index"] = index
+            candidates.append(evaluation)
+
+        if not candidates:
+            decision["reason_codes"] = ["no_rule_match"]
+            return decision
+
+        best = sorted(
+            candidates,
+            key=lambda item: (
+                -int(item.get("score") or 0),
+                -float(item.get("confidence") or 0),
+                int(item.get("index") or 0),
+            ),
+        )[0]
+        rule = dict_value(best.get("rule"))
+        target_type = text_value(rule.get("target_type") or "profile")
+        target_id = text_value(rule.get("target_id"))
+        requires_confirmation = bool(rule.get("requires_confirmation"))
+        if target_type == "profile":
+            target_profile = self.resolve_profile(target_id) or {}
+            requires_confirmation = requires_confirmation or bool(
+                dict_value(target_profile.get("selection")).get("manual_only")
+            )
+
+        decision.update(
+            {
+                "selected": True,
+                "selected_target_type": target_type,
+                "selected_target_id": target_id,
+                "selected_profile_id": target_id if target_type == "profile" else "",
+                "selected_team_id": target_id if target_type == "team" else "",
+                "selected_fusion_id": target_id if target_type == "fusion" else "",
+                "selected_label": self._selection_target_label(target_type, target_id),
+                "surface": self._selection_surface(target_type),
+                "rule_id": text_value(rule.get("id")),
+                "rule_display_name": text_value(rule.get("display_name")),
+                "rule_reason": text_value(rule.get("reason")),
+                "reason_codes": list(best.get("reason_codes") or []),
+                "confidence": round(float(best.get("confidence") or 0.0), 2),
+                "requires_confirmation": requires_confirmation,
+            }
+        )
+        if requires_confirmation and "requires_confirmation" not in decision["reason_codes"]:
+            decision["reason_codes"] = [*decision["reason_codes"], "requires_confirmation"]
+        return decision
+
+    def auto_select_for_conversation(
+        self,
+        conversation_id: str,
+        prompt: str,
+    ) -> dict[str, Any]:
+        settings = normalize_settings(self.store.read().get("settings"))
+        if not bool(dict_value(settings.get("selection_defaults")).get("auto_select")):
+            decision = self._empty_selection_decision(prompt)
+            decision["reason_codes"] = ["auto_select_disabled"]
+            return {"applied": False, "decision": decision}
+
+        decision = self.preview_selection(prompt, conversation_id=conversation_id)
+        if not decision.get("selected"):
+            return {"applied": False, "decision": decision}
+        if self._selection_target_is_active(conversation_id, decision):
+            decision["reason_codes"] = [*list_strings(decision.get("reason_codes")), "already_active"]
+            return {"applied": False, "decision": decision}
+        if decision.get("requires_confirmation"):
+            conversation = self._record_selection_decision(conversation_id, decision, applied=False)
+            return {"applied": False, "decision": decision, "conversation": conversation}
+
+        target_type = text_value(decision.get("selected_target_type") or "profile")
+        target_id = text_value(decision.get("selected_target_id"))
+        reason = self._selection_activation_reason(decision)
+        if target_type == "team":
+            result = self.activate_team_for_conversation(conversation_id, target_id, reason=reason)
+        elif target_type == "fusion":
+            result = self.activate_fusion_for_conversation(conversation_id, target_id, reason=reason)
+        else:
+            result = self.activate_profile_for_conversation(
+                conversation_id,
+                target_id,
+                surface="mode_agent",
+                reason=reason,
+            )
+        result["decision"] = decision
+        result["applied"] = True
+        result["conversation"] = self._record_selection_decision(conversation_id, decision, applied=True)
+        return result
 
     def activate_profile_for_conversation(
         self,
@@ -1140,9 +1282,13 @@ class AgentStudioService:
             if not target_id:
                 raise ValueError("selection rule target_id is required")
             normalized = normalize_selection_rule(rule)
-            if not normalized.get("match_terms") and not normalized.get("prompt_contains"):
+            if (
+                not normalized.get("match_terms")
+                and not normalized.get("prompt_contains")
+                and not text_value(normalized.get("condition_prompt"))
+            ):
                 raise ValueError(
-                    f"selection rule '{text_value(normalized.get('id')) or target_id}' requires match_terms or prompt_contains"
+                    f"selection rule '{text_value(normalized.get('id')) or target_id}' requires match_terms, prompt_contains, or condition_prompt"
                 )
             target_type = text_value(normalized.get("target_type") or "profile")
             if target_type == "profile":
@@ -1179,6 +1325,51 @@ class AgentStudioService:
         if self.resolve_profile(cleaned) is not None:
             return
         raise ValueError(f"{owner_label} references unknown profile '{cleaned}' in {field_name}")
+
+    @staticmethod
+    def _selection_rules_signature(rules: list[dict[str, Any]]) -> list[tuple[Any, ...]]:
+        signature: list[tuple[Any, ...]] = []
+        for rule in rules:
+            normalized = normalize_selection_rule(rule)
+            signature.append(
+                (
+                    text_value(normalized.get("id")),
+                    text_value(normalized.get("display_name")),
+                    normalized.get("enabled") is not False,
+                    text_value(normalized.get("target_type") or "profile"),
+                    text_value(normalized.get("target_id")),
+                    tuple(list_strings(normalized.get("match_terms"))),
+                    tuple(list_strings(normalized.get("prompt_contains"))),
+                    text_value(normalized.get("condition_prompt")),
+                    text_value(normalized.get("reason")),
+                    bool(normalized.get("requires_confirmation")),
+                )
+            )
+        return signature
+
+    def _append_selection_rule_history(self, rules: list[dict[str, Any]]) -> None:
+        if not rules:
+            return
+        settings = normalize_settings(self.store.read().get("settings"))
+        metadata = dict_value(settings.get("metadata"))
+        history = self.selection_rule_history()
+        created_at = timestamp()
+        history.insert(
+            0,
+            {
+                "id": safe_id("selection-rule-history", f"{created_at}-{len(rules)}"),
+                "created_at": created_at,
+                "rule_count": len(rules),
+                "reason": "selection_rules_updated",
+                "rules": [
+                    normalize_selection_rule(rule)
+                    for rule in rules
+                    if isinstance(rule, dict)
+                ],
+            },
+        )
+        metadata["selection_rule_history"] = history[:10]
+        self.store.update_settings({"metadata": metadata})
 
     @staticmethod
     def _bundle_records(value: Any, *, label: str) -> list[dict[str, Any]]:
@@ -1251,6 +1442,169 @@ class AgentStudioService:
         )
         metadata["agent_studio"] = current_state
         self._update_conversation(cleaned_conversation_id, {"metadata": metadata})
+
+    def _selection_target_is_active(
+        self,
+        conversation_id: str,
+        decision: dict[str, Any],
+    ) -> bool:
+        state = dict_value(self._conversation_metadata(conversation_id).get("agent_studio"))
+        target_type = text_value(decision.get("selected_target_type") or "profile")
+        target_id = text_value(decision.get("selected_target_id"))
+        if target_type == "team":
+            return text_value(state.get("active_team_id")) == target_id
+        if target_type == "fusion":
+            return text_value(state.get("active_fusion_id")) == target_id
+        return (
+            text_value(state.get("active_profile_id")) == target_id
+            and text_value(state.get("surface") or "mode_agent") == "mode_agent"
+        )
+
+    @staticmethod
+    def _selection_activation_reason(decision: dict[str, Any]) -> str:
+        rule_id = text_value(decision.get("rule_id") or decision.get("selected_target_id"))
+        codes = list_strings(decision.get("reason_codes"))
+        suffix = ",".join(codes[:2]) or "rule_match"
+        return f"auto_select:{rule_id}:{suffix}"
+
+    def _record_selection_decision(
+        self,
+        conversation_id: str,
+        decision: dict[str, Any],
+        *,
+        applied: bool,
+    ) -> dict[str, Any]:
+        metadata = self._conversation_metadata(conversation_id)
+        state = dict_value(metadata.get("agent_studio"))
+        reason_codes = list_strings(decision.get("reason_codes"))
+        target_label = text_value(decision.get("selected_label")) or text_value(
+            decision.get("selected_target_id")
+        )
+        if decision.get("selected"):
+            message = (
+                f"Selection router chose {target_label or 'a target'} "
+                f"({text_value(decision.get('selected_target_type')) or 'profile'}) "
+                f"with confidence {float(decision.get('confidence') or 0.0):.2f}."
+            )
+        else:
+            message = "Selection router found no matching registered target."
+        if decision.get("requires_confirmation"):
+            message += " Manual confirmation is required before switching."
+        elif applied:
+            message += " Activation applied."
+        self._append_activity_entry(
+            state,
+            self._activity_entry(
+                event_type="selection_router",
+                message=message,
+                surface=text_value(decision.get("surface")) or text_value(state.get("surface")) or "mode_agent",
+                target_id=text_value(decision.get("selected_target_id")),
+                label=target_label,
+                reason=",".join(reason_codes),
+                reason_code=reason_codes[0] if reason_codes else "",
+            ),
+        )
+        metadata["agent_studio"] = state
+        return self._update_conversation(conversation_id, {"metadata": metadata})
+
+    @staticmethod
+    def _selection_keywords(value: str) -> list[str]:
+        stop_words = {
+            "and",
+            "the",
+            "with",
+            "that",
+            "this",
+            "from",
+            "into",
+            "about",
+            "your",
+            "need",
+            "please",
+        }
+        result: list[str] = []
+        for token in re.findall(r"[0-9a-z][0-9a-z_-]{2,}|[\u3040-\u30ff\u3400-\u9fff]{2,}", text_value(value).lower()):
+            if token in stop_words or token in result:
+                continue
+            result.append(token)
+        return result[:12]
+
+    @staticmethod
+    def _empty_selection_decision(prompt: str) -> dict[str, Any]:
+        return {
+            "prompt": text_value(prompt),
+            "selected": False,
+            "selected_target_type": "",
+            "selected_target_id": "",
+            "selected_profile_id": "",
+            "selected_team_id": "",
+            "selected_fusion_id": "",
+            "selected_label": "",
+            "surface": "human",
+            "rule_id": "",
+            "rule_display_name": "",
+            "rule_reason": "",
+            "reason_codes": [],
+            "confidence": 0.0,
+            "requires_confirmation": False,
+        }
+
+    def _evaluate_selection_rule(
+        self,
+        rule: dict[str, Any],
+        prompt: str,
+    ) -> dict[str, Any] | None:
+        prompt_text = text_value(prompt).lower()
+        if not prompt_text:
+            return None
+        reason_codes: list[str] = []
+        score = 0
+
+        for term in list_strings(rule.get("prompt_contains")):
+            cleaned = text_value(term).lower()
+            if cleaned and cleaned in prompt_text:
+                score += 4
+                reason_codes.append(f"prompt_contains:{cleaned}")
+        for term in list_strings(rule.get("match_terms")):
+            cleaned = text_value(term).lower()
+            if cleaned and cleaned in prompt_text:
+                score += 3
+                reason_codes.append(f"match_terms:{cleaned}")
+
+        condition_prompt = text_value(rule.get("condition_prompt"))
+        keywords = self._selection_keywords(condition_prompt)
+        matched_keywords = [keyword for keyword in keywords if keyword in prompt_text]
+        threshold = 1 if len(keywords) <= 2 else 2
+        if matched_keywords and len(matched_keywords) >= threshold:
+            score += 1 + len(matched_keywords)
+            reason_codes.append("condition_prompt:" + "+".join(matched_keywords[:3]))
+
+        if not reason_codes:
+            return None
+        confidence = min(0.99, 0.35 + (score * 0.07))
+        return {
+            "rule": dict_value(rule),
+            "score": score,
+            "confidence": confidence,
+            "reason_codes": reason_codes,
+        }
+
+    @staticmethod
+    def _selection_surface(target_type: str) -> str:
+        if target_type == "team":
+            return "team_agent"
+        if target_type == "fusion":
+            return "fusion_agent"
+        return "mode_agent"
+
+    def _selection_target_label(self, target_type: str, target_id: str) -> str:
+        if target_type == "team":
+            item = self.resolve_team(target_id) or {}
+        elif target_type == "fusion":
+            item = self.resolve_fusion(target_id) or {}
+        else:
+            item = self.resolve_profile(target_id) or {}
+        return text_value(item.get("display_name")) or text_value(target_id)
 
     @staticmethod
     def _activity_entry(

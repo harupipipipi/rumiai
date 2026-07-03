@@ -183,3 +183,105 @@ def test_agent_studio_builtin_frontend_and_mini_profiles_are_resolvable(tmp_path
     assert frontend["id"] == "builtin.frontend"
     assert mini is not None
     assert mini["id"] == "builtin.mini_coding"
+def test_agent_studio_preview_selection_returns_structured_router_decision(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    service = AgentStudioService()
+    service.replace_selection_rules(
+        [
+            {
+                "display_name": "Frontend Polish",
+                "target_type": "profile",
+                "target_id": "builtin.frontend",
+                "prompt_contains": ["frontend", "css"],
+                "condition_prompt": "responsive layout polish",
+                "requires_confirmation": True,
+                "reason": "Use the frontend specialist for UI cleanup.",
+            }
+        ]
+    )
+
+    decision = service.preview_selection("Please polish this frontend css layout for mobile.")
+
+    assert decision["selected"] is True
+    assert decision["selected_profile_id"] == "builtin.frontend"
+    assert decision["selected_target_type"] == "profile"
+    assert decision["rule_display_name"] == "Frontend Polish"
+    assert decision["requires_confirmation"] is True
+    assert any(code.startswith("prompt_contains:") for code in decision["reason_codes"])
+    assert decision["confidence"] > 0.4
+
+
+def test_agent_studio_auto_select_applies_profile_and_records_router_activity(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+    from domain.chat.store import ChatStore
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    service = AgentStudioService()
+    service.update_settings({"selection_defaults": {"auto_select": True}})
+    service.replace_selection_rules(
+        [
+            {
+                "display_name": "Reviewer Route",
+                "target_type": "profile",
+                "target_id": "builtin.review",
+                "match_terms": ["review", "bug"],
+            }
+        ]
+    )
+
+    result = service.auto_select_for_conversation(conversation["id"], "Please review this for bugs before commit.")
+    updated = result["conversation"]
+    activity_types = {entry["type"] for entry in updated["metadata"]["agent_studio"]["activity_log"]}
+
+    assert result["applied"] is True
+    assert result["decision"]["selected_profile_id"] == "builtin.review"
+    assert updated["metadata"]["agent_studio"]["active_profile_id"] == "builtin.review"
+    assert updated["metadata"]["agent_studio"]["activation_reason"].startswith("auto_select:")
+    assert {"activation", "selection_router"} <= activity_types
+
+
+def test_agent_studio_selection_rule_history_snapshots_previous_rules(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    service = AgentStudioService()
+    service.replace_selection_rules(
+        [
+            {
+                "display_name": "Initial Review Route",
+                "target_type": "profile",
+                "target_id": "builtin.review",
+                "match_terms": ["review"],
+            }
+        ]
+    )
+    service.replace_selection_rules(
+        [
+            {
+                "display_name": "Frontend Route",
+                "target_type": "profile",
+                "target_id": "builtin.frontend",
+                "match_terms": ["frontend"],
+            }
+        ]
+    )
+
+    manifest = service.manifest()
+    history = manifest["selection_rule_history"]
+
+    assert len(history) >= 1
+    assert history[0]["rule_count"] == 1
+    assert history[0]["rules"][0]["target_id"] == "builtin.review"
