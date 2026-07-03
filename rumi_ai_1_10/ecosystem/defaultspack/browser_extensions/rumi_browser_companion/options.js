@@ -3,6 +3,7 @@ const DEFAULT_SETTINGS = {
   serverUrl: "http://127.0.0.1:8766",
   pairingToken: "",
   clientLabel: "",
+  profileLabel: "",
   pollIntervalMinutes: 1
 };
 
@@ -32,6 +33,7 @@ async function loadSettings() {
   form.serverUrl.value = settings.serverUrl;
   form.pairingToken.value = settings.pairingToken;
   form.clientLabel.value = settings.clientLabel;
+  form.profileLabel.value = settings.profileLabel;
   form.pollIntervalMinutes.value = settings.pollIntervalMinutes;
 
   const backgroundStatus = await chrome.runtime.sendMessage({ type: "rumi:get-status" });
@@ -43,6 +45,7 @@ async function saveSettings() {
     serverUrl: String(form.serverUrl.value || "").trim(),
     pairingToken: String(form.pairingToken.value || "").trim(),
     clientLabel: String(form.clientLabel.value || "").trim(),
+    profileLabel: String(form.profileLabel.value || "").trim(),
     pollIntervalMinutes: Math.max(1, Number(form.pollIntervalMinutes.value) || 1)
   };
   await chrome.storage.local.set({ [STORAGE_KEY]: settings });
