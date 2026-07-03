@@ -12,6 +12,7 @@ import {
   serializeSlashCommandDrafts,
   slashCommandDraftRowsFromValue,
 } from "./settings/renderers/slashCommandsField";
+import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
 import type { SettingsSection } from "../lib/api";
@@ -141,6 +142,12 @@ test("api_key_setup renderer actions target the rendered template field", () => 
     label: "API Setup",
     type: "api_key_setup",
   } as TemplateSettingsField), "api_key_setup_template");
+});
+
+test("cleartext mobile QR flag only enables on explicit opt-in", () => {
+  assert.equal(allowCleartextMobileQr({}), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "0" }), false);
+  assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "1" }), true);
 });
 
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {
@@ -372,9 +379,30 @@ test("SettingsModalRenderer renders template api_key_setup with setup control", 
   assert.match(html, />Save</);
 });
 
-test("CredentialTransferModal exposes QR import surface for provider keys", () => {
+test("CredentialTransferModal hides cleartext QR import surface by default", () => {
   const html = renderToStaticMarkup(
     createElement(CredentialTransferModal, {
+      providerId: "anthropic",
+      providerLabel: "Anthropic",
+      apiKey: "sk-ant-test",
+      apiId: "main",
+      onClose: () => undefined,
+    }),
+  );
+
+  assert.match(html, /モバイル転送は無効です/);
+  assert.match(html, /API設定はPC側に保存されました/);
+  assert.doesNotMatch(html, /Rumi Mobile QR/);
+  assert.doesNotMatch(html, /QRには今回入力したAPI key/);
+  assert.doesNotMatch(html, /QRを準備しています/);
+  assert.doesNotMatch(html, /sk-ant-test/);
+  assert.match(html, /Anthropic/);
+});
+
+test("CredentialTransferModal exposes QR import surface when cleartext transfer is enabled", () => {
+  const html = renderToStaticMarkup(
+    createElement(CredentialTransferModal, {
+      enabled: true,
       providerId: "anthropic",
       providerLabel: "Anthropic",
       apiKey: "sk-ant-test",
@@ -386,6 +414,7 @@ test("CredentialTransferModal exposes QR import surface for provider keys", () =
   assert.match(html, /API設定の転送/);
   assert.match(html, /Rumi Mobile QR/);
   assert.match(html, /QRを準備しています/);
+  assert.match(html, /QRには今回入力したAPI key/);
   assert.match(html, /Anthropic/);
 });
 

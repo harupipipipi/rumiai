@@ -237,7 +237,7 @@ def status(input_data, context=None):
     session = manager.get_pairing(pairing_id)
     if session is None:
         return error("pairing not found", "PAIRING_NOT_FOUND")
-    pairing = _public_pairing(session.as_dict())
+    pairing = session.public_dict()
     result: dict = dict(pairing)
     result["pairing"] = pairing
     result["pc_label"] = _pc_label()

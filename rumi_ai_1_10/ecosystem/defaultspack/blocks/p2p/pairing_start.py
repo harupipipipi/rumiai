@@ -24,7 +24,7 @@ def run(input_data, context=None):
         allowed_company_ids=input_data.get("allowed_company_ids") if isinstance(input_data.get("allowed_company_ids"), list) else None,
         settings=settings,
     )
-    pairing = session.as_dict()
+    pairing = session.admin_dict()
     if session.token_pickup_secret:
         pairing["pickup_secret"] = session.token_pickup_secret
     pairing["base_urls"] = mobile_base_urls_from_headers(

@@ -8,15 +8,14 @@ at approval time. Tokens carry scopes and can be revoked individually.
 from __future__ import annotations
 
 import hashlib
-import json
-import os
 import secrets
 import time
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
+from .json_store import file_lock, load_json_object, save_json_object
 from .settings import default_store_path
 
 DEVICE_ACTIVE = "active"
@@ -38,8 +37,6 @@ APPROVER_SCOPES = [
 LEGACY_APPROVER_SCOPES = {"tools.approve"}
 ALL_SCOPES = DEFAULT_SCOPES + APPROVER_SCOPES + ["credentials.request"]
 _TOUCH_THROTTLE_MS = 30_000
-_LOCK_TIMEOUT_SECONDS = 5.0
-_LOCK_STALE_SECONDS = 30.0
 
 
 def _now_ms() -> int:
@@ -329,12 +326,7 @@ class DeviceStore:
         }
 
     def _load(self) -> dict[str, Any]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
+        data = load_json_object(self.path)
         data.setdefault("schema_version", 1)
         data.setdefault("devices", {})
         return data
@@ -350,40 +342,7 @@ class DeviceStore:
             self._data["devices"][did]["approval_token_hash"] = d.approval_token_hash
             self._data["devices"][did]["public_key"] = d.public_key
             self._data["devices"][did]["profile_id"] = d.profile_id
-        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
-        tmp.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        tmp.replace(self.path)
+        save_json_object(self.path, self._data)
 
-    @contextmanager
-    def _file_lock(self) -> Iterator[None]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
-        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
-        fd: int | None = None
-        while fd is None:
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-                os.write(fd, f"{os.getpid()}\n".encode("ascii"))
-            except FileExistsError:
-                try:
-                    age = time.time() - lock_path.stat().st_mtime
-                    if age > _LOCK_STALE_SECONDS:
-                        lock_path.unlink(missing_ok=True)
-                        continue
-                except OSError:
-                    pass
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out acquiring device store lock: {lock_path}")
-                time.sleep(0.025)
-        try:
-            yield
-        finally:
-            if fd is not None:
-                os.close(fd)
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
+    def _file_lock(self) -> AbstractContextManager[None]:
+        return file_lock(self.path, lock_name="device store")

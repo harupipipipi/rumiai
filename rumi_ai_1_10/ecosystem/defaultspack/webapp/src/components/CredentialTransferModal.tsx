@@ -8,6 +8,7 @@ import { mobileApiResources } from "../features/mobile/resources/mobileApiResour
 import type { MobileDevice } from "../features/mobile/resources/mobileApiResources";
 
 type CredentialTransferModalProps = {
+  enabled?: boolean;
   providerId: string;
   providerLabel?: string;
   apiKey?: string;
@@ -18,6 +19,7 @@ type CredentialTransferModalProps = {
 };
 
 export function CredentialTransferModal({
+  enabled = false,
   providerId,
   providerLabel,
   apiKey,
@@ -28,7 +30,7 @@ export function CredentialTransferModal({
 }: CredentialTransferModalProps) {
   const [devices, setDevices] = useState<MobileDevice[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
@@ -44,7 +46,14 @@ export function CredentialTransferModal({
   }, []);
 
   useEffect(() => {
+    if (!enabled) {
+      setDevices([]);
+      setSelected(new Set());
+      setLoading(false);
+      return;
+    }
     let disposed = false;
+    setLoading(true);
     const load = async () => {
       try {
         const result = await mobileApiResources.listDevices();
@@ -63,7 +72,7 @@ export function CredentialTransferModal({
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [enabled]);
 
   const toggleDevice = (deviceId: string) => {
     setSelected((prev) => {
@@ -89,6 +98,7 @@ export function CredentialTransferModal({
 
   const displayName = providerLabel || providerId;
   const qrPayload = useMemo(() => {
+    if (!enabled) return "";
     if (!apiKey?.trim()) return "";
     return JSON.stringify({
       kind: "rumi_api",
@@ -106,7 +116,7 @@ export function CredentialTransferModal({
       apiCompatibility: providerApiCompatibility(providerId),
       api_compatibility: providerApiCompatibility(providerId),
     });
-  }, [apiId, apiKey, baseUrl, defaultModel, displayName, providerId]);
+  }, [apiId, apiKey, baseUrl, defaultModel, displayName, enabled, providerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -162,6 +172,23 @@ export function CredentialTransferModal({
                 <h3 className="mt-4 text-sm font-medium text-zinc-100">送信完了</h3>
                 <p className="mt-1 text-xs text-zinc-500">
                   「{displayName}」のAPI設定を選択した端末に送信しました。
+                </p>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="mt-4 rounded-lg border border-zinc-700 px-4 py-2 text-sm text-zinc-200 hover:border-zinc-500"
+                >
+                  閉じる
+                </button>
+              </div>
+            ) : !enabled ? (
+              <div className="text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900">
+                  <QrCode size={22} className="text-zinc-500" />
+                </div>
+                <h3 className="mt-4 text-sm font-medium text-zinc-100">モバイル転送は無効です</h3>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  「{displayName}」のAPI設定はPC側に保存されました。スマホへの認証情報転送は明示的に有効化されていません。
                 </p>
                 <button
                   type="button"

@@ -18,6 +18,7 @@ import {
 import { cn } from "../lib/cn";
 import { mobileApiResources } from "../features/mobile/resources/mobileApiResources";
 import type { MobileDevice, P2PPairing } from "../features/mobile/resources/mobileApiResources";
+import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { buildMobilePairingBaseUrls } from "../lib/mobilePairingUrls";
 import { MobilePairingApproval } from "./MobilePairingApproval";
 import {
@@ -82,14 +83,6 @@ function useQrDataUrl(value: string): { dataUrl: string | null; error: string | 
 function windowOrigin() {
   if (typeof window === "undefined") return "";
   return window.location?.origin ?? "";
-}
-
-function viteEnv(): Record<string, string | undefined> {
-  return ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env) ?? {};
-}
-
-function allowCleartextPairingQr(): boolean {
-  return viteEnv().VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR === "1";
 }
 
 function friendlyScope(scope: string) {
@@ -353,7 +346,7 @@ function PairingV2Section({
   const qrBaseUrls = useMemo(
     () => buildMobilePairingBaseUrls(
       [manualBaseUrl, ...advertisedBaseUrls, kernelBaseUrl, currentOrigin],
-      { allowCleartext: allowCleartextPairingQr() },
+      { allowCleartext: allowCleartextMobileQr() },
     ),
     [advertisedBaseUrls, currentOrigin, kernelBaseUrl, manualBaseUrl],
   );

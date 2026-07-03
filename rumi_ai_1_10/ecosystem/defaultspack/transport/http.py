@@ -1997,6 +1997,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
             return None
         if not _configured_local_auth_tokens():
             if str(method or "").upper() == "POST" and path == "/api/p2p/pairing/start":
+                if not _local_is_loopback_request(
+                    {str(key): str(value) for key, value in self.headers.items()},
+                    self.client_address,
+                ):
+                    return (403, "sensitive local route requires a loopback client", "LOCAL_ONLY_REQUIRED")
                 if not self.headers.get("X-Rumi-CSRF", "").strip():
                     return (403, "CSRF header required for sensitive integration mutation", "CSRF_REQUIRED")
                 return None

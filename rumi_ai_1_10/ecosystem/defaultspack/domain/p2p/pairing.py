@@ -4,15 +4,15 @@ import base64
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
+from .json_store import file_lock, load_json_object, save_json_object
 from .peer_store import PeerRecord, PeerStore, generate_shared_secret
 from .settings import P2PSettings, default_store_path
 
@@ -31,8 +31,6 @@ _DEFAULT_MOBILE_SCOPES = [
     "tools.invoke.basic",
     "tools.invoke.cloud",
 ]
-_LOCK_TIMEOUT_SECONDS = 5.0
-_LOCK_STALE_SECONDS = 30.0
 
 
 def _now_ms() -> int:
@@ -182,6 +180,9 @@ class PairingSession:
         )
 
     def as_dict(self) -> dict[str, Any]:
+        return self.public_dict()
+
+    def admin_dict(self) -> dict[str, Any]:
         return {
             "pairing_id": self.pairing_id,
             "code": self.code,
@@ -252,12 +253,34 @@ class PairingSession:
         }
 
     def to_storage_dict(self) -> dict[str, Any]:
-        data = self.as_dict()
-        data["claimed_device_public_key"] = self.claimed_device_public_key
-        data["claimed_device_encryption_public_key"] = self.claimed_device_encryption_public_key
-        data["token_pickup_secret_hash"] = self.token_pickup_secret_hash
-        data["token_delivery_envelope"] = dict(self.token_delivery_envelope)
-        return data
+        return {
+            "pairing_id": self.pairing_id,
+            "code": self.code,
+            "status": self.status,
+            "expires_at": int(self.expires_at),
+            "created_at": int(self.created_at),
+            "peer_id": self.peer_id,
+            "peer_fingerprint": self.peer_fingerprint,
+            "peer_label": self.peer_label,
+            "capabilities": list(self.capabilities),
+            "allowed_company_ids": list(self.allowed_company_ids),
+            "accepted_at": int(self.accepted_at),
+            "approved_at": int(self.accepted_at),
+            "rejected_at": int(self.rejected_at),
+            "reason": self.reason,
+            "claimed_device_id": self.claimed_device_id,
+            "claimed_device_label": self.claimed_device_label,
+            "claimed_device_public_key": self.claimed_device_public_key,
+            "claimed_device_encryption_public_key": self.claimed_device_encryption_public_key,
+            "claimed_capabilities": list(self.claimed_capabilities),
+            "requested_scopes": list(self.claimed_capabilities),
+            "claimed_at": int(self.claimed_at),
+            "token_pickup_secret_hash": self.token_pickup_secret_hash,
+            "token_pickup_consumed_at": int(self.token_pickup_consumed_at),
+            "token_delivery_envelope": dict(self.token_delivery_envelope),
+            "token_delivery_ready": bool(self.token_delivery_envelope),
+            "token_delivery_created_at": int(self.token_delivery_created_at),
+        }
 
     def expired(self, now: int | None = None) -> bool:
         return int(self.expires_at) <= int(now if now is not None else _now_ms())
@@ -361,7 +384,7 @@ class PairingManager:
             self._replace(session)
             return {
                 "ok": True,
-                "pairing": session.as_dict(),
+                "pairing": session.admin_dict(),
                 "peer": peer.as_dict(),
                 "hmac_secret": secret,
             }
@@ -378,7 +401,7 @@ class PairingManager:
             session.rejected_at = int(now_ms if now_ms is not None else _now_ms())
             session.reason = str(reason or "rejected")
             self._replace(session)
-            return {"ok": True, "pairing": session.as_dict()}
+            return {"ok": True, "pairing": session.admin_dict()}
 
     def claim_pairing(
         self,
@@ -430,7 +453,7 @@ class PairingManager:
             session.claimed_at = now
             session.status = PAIRING_CLAIMED
             self._replace(session)
-            return {"ok": True, "pairing": session.as_dict()}
+            return {"ok": True, "pairing": session.public_dict()}
 
     def get_pairing(self, pairing_id: str) -> PairingSession | None:
         self._data = self._load()
@@ -494,7 +517,7 @@ class PairingManager:
             self._replace(session)
             return {
                 "ok": True,
-                "pairing": session.as_dict(),
+                "pairing": session.admin_dict(),
                 "device_id": session.claimed_device_id,
                 "device_label": session.claimed_device_label,
                 "device_public_key": session.claimed_device_public_key,
@@ -523,7 +546,7 @@ class PairingManager:
             session.token_delivery_created_at = int(now_ms if now_ms is not None else _now_ms())
             session.token_pickup_consumed_at = 0
             self._replace(session)
-            return {"ok": True, "pairing": session.as_dict()}
+            return {"ok": True, "pairing": session.admin_dict()}
 
     def rollback_approved_pairing(
         self,
@@ -549,7 +572,7 @@ class PairingManager:
             session.token_delivery_created_at = 0
             session.token_pickup_consumed_at = 0
             self._replace(session)
-            return {"ok": True, "pairing": session.as_dict()}
+            return {"ok": True, "pairing": session.admin_dict()}
 
     def peek_token_delivery(
         self,
@@ -567,7 +590,7 @@ class PairingManager:
             session = checked["session"]
             return {
                 "ok": True,
-                "pairing": session.as_dict(),
+                "pairing": session.public_dict(),
                 "device_id": session.claimed_device_id,
                 "device_label": session.claimed_device_label,
                 "device_public_key": session.claimed_device_public_key,
@@ -601,7 +624,7 @@ class PairingManager:
             self._replace(session)
             return {
                 "ok": True,
-                "pairing": session.as_dict(),
+                "pairing": session.public_dict(),
             }
 
     def consume_token_pickup(
@@ -654,7 +677,7 @@ class PairingManager:
     def list_pairings(self) -> list[dict[str, Any]]:
         self.cleanup_expired()
         self._data = self._load()
-        return [session.as_dict() for session in self._sessions().values()]
+        return [session.admin_dict() for session in self._sessions().values()]
 
     def cleanup_expired(self, *, now_ms: int | None = None) -> None:
         now = int(now_ms if now_ms is not None else _now_ms())
@@ -704,12 +727,7 @@ class PairingManager:
         }
 
     def _load(self) -> dict[str, Any]:
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            data = {}
-        if not isinstance(data, dict):
-            data = {}
+        data = load_json_object(self.path)
         data.setdefault("schema_version", 1)
         data.setdefault("pairings", {})
         return data
@@ -719,37 +737,7 @@ class PairingManager:
         self._data["schema_version"] = 1
         self._data["updated_at"] = _now_ms()
         self._data["pairings"] = {session_id: session.to_storage_dict() for session_id, session in sessions.items()}
-        tmp = self.path.with_name(f"{self.path.name}.{os.getpid()}.{secrets.token_hex(8)}.tmp")
-        tmp.write_text(json.dumps(self._data, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        tmp.replace(self.path)
+        save_json_object(self.path, self._data)
 
-    @contextmanager
-    def _file_lock(self) -> Iterator[None]:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = self.path.with_suffix(self.path.suffix + ".lock")
-        deadline = time.monotonic() + _LOCK_TIMEOUT_SECONDS
-        fd: int | None = None
-        while fd is None:
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_RDWR)
-                os.write(fd, f"{os.getpid()}\n".encode("ascii"))
-            except FileExistsError:
-                try:
-                    age = time.time() - lock_path.stat().st_mtime
-                    if age > _LOCK_STALE_SECONDS:
-                        lock_path.unlink(missing_ok=True)
-                        continue
-                except OSError:
-                    pass
-                if time.monotonic() >= deadline:
-                    raise TimeoutError(f"timed out acquiring pairing store lock: {lock_path}")
-                time.sleep(0.025)
-        try:
-            yield
-        finally:
-            if fd is not None:
-                os.close(fd)
-            try:
-                lock_path.unlink()
-            except FileNotFoundError:
-                pass
+    def _file_lock(self) -> AbstractContextManager[None]:
+        return file_lock(self.path, lock_name="pairing store")

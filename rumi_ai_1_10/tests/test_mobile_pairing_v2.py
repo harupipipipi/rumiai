@@ -139,7 +139,8 @@ def test_pairing_v2_claim_approve_flow():
     )
     assert claim["ok"]
     assert claim["pairing"]["status"] == "claimed"
-    assert claim["pairing"]["claimed_device_id"] == "iphone-1"
+    assert set(claim["pairing"]) == {"pairing_id", "status", "expires_at"}
+    assert pm.get_pairing(session.pairing_id).claimed_device_id == "iphone-1"
 
     # Approve
     approve = pm.approve_pairing_v2(session.pairing_id)
@@ -267,9 +268,9 @@ def test_pairing_default_mobile_scopes_include_tool_invoke_routes():
         device_id="d-default",
     )
     assert claim["ok"]
-    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(
-        claim["pairing"]["claimed_capabilities"]
-    )
+    claimed = pm.get_pairing(session.pairing_id)
+    assert claimed is not None
+    assert {"tools.invoke.basic", "tools.invoke.cloud"} <= set(claimed.claimed_capabilities)
 
     approve = pm.approve_pairing_v2(session.pairing_id)
     assert approve["ok"]
@@ -439,6 +440,29 @@ def test_mobile_pairing_review_returns_admin_claim_details_without_secrets():
     review_blob = json.dumps(data, ensure_ascii=False)
     assert session.code not in review_blob
     assert session.token_pickup_secret not in review_blob
+
+
+def test_pairing_session_default_dict_is_public_and_storage_is_explicit():
+    from domain.p2p.pairing import PairingManager
+
+    tmp = tempfile.mkdtemp()
+    manager = PairingManager(tmp)
+    session = manager.start_pairing(capabilities=["chat.read"])
+
+    public = session.as_dict()
+    assert public == session.public_dict()
+    assert set(public) == {"pairing_id", "status", "expires_at"}
+    assert "code" not in public
+    assert "token_pickup_secret_hash" not in public
+
+    storage = session.to_storage_dict()
+    assert storage["code"] == session.code
+    assert storage["token_pickup_secret_hash"]
+    assert "token_pickup_secret" not in storage
+
+    admin = session.admin_dict()
+    assert admin["code"] == session.code
+    assert admin["token_delivery_ready"] is False
 
 
 def test_mobile_pairing_approve_requires_review_claim_hash():
