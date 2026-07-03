@@ -1738,7 +1738,10 @@ class BrowserComputerController:
         approval_payload = self._safe_payload(payload)
         if not (yolo_mode or self._consume_approval(payload, "computer.click_text", approval_payload)):
             return self._approval_required("computer.click_text", approval_payload)
-        swift_result = self._darwin_swift_optional_action_result("computer.click_text", payload)
+        swift_result = self._darwin_swift_optional_action_result(
+            "computer.click_text",
+            self._click_text_swift_payload(payload),
+        )
         if swift_result is not None:
             swift_result.setdefault("action", "computer.click_text")
             return swift_result
@@ -1776,6 +1779,18 @@ class BrowserComputerController:
             if value:
                 return value
         return ""
+
+    @classmethod
+    def _click_text_swift_payload(cls, payload: dict[str, Any]) -> dict[str, Any]:
+        if str(payload.get("text") or "").strip():
+            return payload
+        for key in ("text_query", "match_text"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                swift_payload = dict(payload)
+                swift_payload["text"] = value
+                return swift_payload
+        return payload
 
     @classmethod
     def _click_text_intent(cls, payload: dict[str, Any], text_query: str) -> str:

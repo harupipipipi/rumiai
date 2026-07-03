@@ -153,6 +153,28 @@ def test_click_text_yolo_uses_semantic_action_fallback(controller):
     }
 
 
+@pytest.mark.parametrize("alias_key", ["text_query", "match_text"])
+def test_click_text_yolo_normalizes_aliases_before_swift_host(controller, monkeypatch, alias_key):
+    """Swift host only understands text-like canonical fields, so click_text aliases are normalized first."""
+    captured = {}
+
+    def fake_swift_action(action, payload):
+        captured["action"] = action
+        captured["payload"] = payload
+        return {"driver": "mac_swift_host", "executed": True}
+
+    monkeypatch.setattr(controller, "_darwin_swift_optional_action_result", fake_swift_action)
+
+    result = controller.run("computer.click_text", {alias_key: "Save"}, yolo_mode=True)
+
+    assert result["action"] == "computer.click_text"
+    assert result["executed"] is True
+    assert captured["action"] == "computer.click_text"
+    assert captured["payload"][alias_key] == "Save"
+    assert captured["payload"]["text"] == "Save"
+    controller._computer_seat.semantic_action.assert_not_called()
+
+
 def test_pid_event_requires_approval(controller):
     """pid_event is high-risk and requires approval."""
     result = controller.run("computer.pid_event", {"pid": 123, "sub_action": "click", "x": 10, "y": 10})
