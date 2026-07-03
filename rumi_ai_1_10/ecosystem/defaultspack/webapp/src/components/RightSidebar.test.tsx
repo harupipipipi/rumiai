@@ -3,10 +3,29 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
+import { getRailFloatingMenuPosition, RightSidebar, sidebarActionDisabledReason } from "./RightSidebar";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
+
+test("share and export actions are disabled until a conversation is saved", () => {
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.export", label: "Export Active Conversation" }, null),
+    "エクスポートする会話がありません。会話を保存してから実行してください。",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.share", label: "Create Local Share Link" }, ""),
+    "共有する会話がありません。会話を保存してから実行してください。",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "conversation.export", label: "Export Active Conversation" }, "chat-1"),
+    "",
+  );
+  assert.equal(
+    sidebarActionDisabledReason({ id: "artifacts.list", label: "List Artifacts" }, null),
+    "",
+  );
+});
 
 test("left sidebar default does not render every tool detail panel", () => {
   const html = renderToStaticMarkup(
