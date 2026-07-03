@@ -34,7 +34,7 @@ def _provider(monkeypatch):
     return OpencodeZenProvider()
 
 
-def test_opencode_zen_catalog_includes_minimax_m3_free():
+def test_opencode_zen_catalog_includes_curated_free_models():
     from domain.ai_client.providers import get_all_known_models, get_provider_catalog_map
 
     catalog = get_provider_catalog_map()
@@ -45,11 +45,21 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert provider["metadata"]["default_base_url"] == "https://opencode.ai/zen"
     assert provider["env_vars"] == ["OPENCODE_ZEN_API_KEY"]
     assert provider["default_model_for"]["coding"] == "minimax-m3-free"
+    assert provider["default_model_for"]["cheap"] == "mimo-v2.5-free"
     assert "opencode-zen/minimax-m3-free" in models
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["transport"] == "anthropic_messages"
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
     assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
+    assert "opencode-zen/mimo-v2.5-free" in models
+    mimo = models["opencode-zen/mimo-v2.5-free"]
+    assert mimo["metadata"]["transport"] == "openai_chat_completions"
+    assert mimo["metadata"]["endpoint_path"] == "/v1/chat/completions"
+    assert mimo["metadata"]["free_tier"] is True
+    assert mimo["metadata"]["capabilities"]["tool_calls"] is False
+    assert mimo["metadata"]["capabilities"]["reasoning"] is False
+    assert "tool_calls_verified" not in mimo["metadata"]
+    assert "reasoning_effort_verified" not in mimo["metadata"]
 
 
 def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
@@ -85,6 +95,91 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
     assert captured["body"]["system"] == [{"type": "text", "text": "Be terse."}]
     assert "tools" not in captured["body"]
     assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_mimo_free_uses_openai_chat_completions(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_openai_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_test",
+            "model": "mimo-v2.5-free",
+            "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    with patch.object(provider, "_request_openai_json", side_effect=fake_request_openai_json):
+        result = provider.complete(
+            "opencode-zen/mimo-v2.5-free",
+            [{"role": "user", "content": "Say OK"}],
+            [{"type": "function", "function": {"name": "noop"}}],
+            {
+                "max_tokens": 8,
+                "temperature": 0,
+                "reasoning_effort": "high",
+                "tool_choice": "auto",
+            },
+        )
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["model"] == "mimo-v2.5-free"
+    assert captured["body"]["max_tokens"] == 8
+    assert captured["body"]["temperature"] == 0
+    assert "tools" not in captured["body"]
+    assert "tool_choice" not in captured["body"]
+    assert "reasoning_effort" not in captured["body"]
+    assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_mimo_free_preserves_tool_call_continuations(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_openai_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_tool_followup",
+            "model": "mimo-v2.5-free",
+            "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+        }
+
+    messages = [
+        {"role": "user", "content": "Call noop."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_noop",
+                    "type": "function",
+                    "function": {"name": "noop", "arguments": "{}"},
+                }
+            ],
+            "metadata": {"thinking": {"transcript": "Need the noop result."}},
+        },
+        {"role": "tool", "tool_call_id": "call_noop", "name": "noop", "content": {"ok": True}},
+    ]
+
+    with patch.object(provider, "_request_openai_json", side_effect=fake_request_openai_json):
+        result = provider.complete("opencode-zen/mimo-v2.5-free", messages, [], {"max_tokens": 8})
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["messages"][1]["tool_calls"] == messages[1]["tool_calls"]
+    assert captured["body"]["messages"][1]["reasoning_content"] == "Need the noop result."
+    assert captured["body"]["messages"][2] == {
+        "role": "tool",
+        "tool_call_id": "call_noop",
+        "name": "noop",
+        "content": '{"ok": true}',
+    }
+    assert result["content"] == [{"type": "text", "text": "Done"}]
 
 
 def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
