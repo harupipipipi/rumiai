@@ -20,6 +20,20 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+def _force_utf8_stdio() -> None:
+    for stream_name in ("stdin", "stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                if stream_name == "stdin":
+                    reconfigure(encoding="utf-8")
+                else:
+                    reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 def _emit_error(message: str, error_type: str) -> None:
     print(json.dumps({"error": message, "error_type": error_type}))
 
@@ -62,6 +76,7 @@ def _load_callable(module_path: str, callable_name: str):
 
 
 def main() -> int:
+    _force_utf8_stdio()
     parser = argparse.ArgumentParser(description="Run a Python callable from JSON input.")
     parser.add_argument("--input-file", help="Path to JSON input file")
     parsed = parser.parse_args()

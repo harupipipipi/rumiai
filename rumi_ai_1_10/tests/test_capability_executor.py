@@ -6,6 +6,7 @@ test_capability_executor.py - CapabilityExecutor ユニットテスト
 """
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import threading
@@ -779,6 +780,115 @@ class TestHandlerSubprocessEntrypointCompatibility(unittest.TestCase):
 
         self.assertTrue(resp.success)
         mock_run.assert_called_once()
+
+    def test_execute_handler_subprocess_preserves_non_ascii_handler_path_in_runner_payload(self):
+        executor = _make_executor()
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        handler_dir = Path(tmp_ctx.name) / "ユーザー" / "rumi_api 繝なし"
+        handler_dir.mkdir(parents=True)
+        handler_path = handler_dir / "handler.py"
+        handler_path.write_text("def run(ctx, args): return {'ok': True}\n", encoding="utf-8")
+        handler_def = _MockHandlerDef(
+            handler_py_path=str(handler_path),
+            handler_dir=handler_dir,
+            entrypoint="handler.py",
+            is_builtin=False,
+        )
+        success = CapabilityResponse(success=True, output={"ok": True})
+
+        with patch.object(executor, "_handler_def_requires_managed_sandbox", return_value=False):
+            with patch.object(executor, "_run_runner_on_host", return_value=success) as mock_run:
+                resp = executor._execute_handler_subprocess(
+                    handler_def=handler_def,
+                    principal_id="principal_a",
+                    permission_id="perm.test",
+                    grant_config={},
+                    args={},
+                    timeout_seconds=5,
+                    request_id="req-subproc",
+                    start_time=time.time(),
+                )
+
+        self.assertTrue(resp.success)
+        runner_kwargs = mock_run.call_args.kwargs
+        runner_payload = json.loads(runner_kwargs["payload"])
+        self.assertEqual(runner_payload["module_path"], str(handler_path.resolve()))
+        self.assertIn("ユーザー", runner_kwargs["payload"])
+        self.assertIn("繝なし", runner_kwargs["payload"])
+        self.assertNotIn("\\u30e6", runner_kwargs["payload"])
+        self.assertEqual(runner_kwargs["cwd"], str(handler_dir))
+
+
+class TestHostRunnerEncoding(unittest.TestCase):
+    def test_run_runner_on_host_forces_utf8_subprocess_io(self):
+        executor = _make_executor()
+        payload = executor._build_runner_payload(
+            "/tmp/ユーザー/rumi_api 繝なし/handler.py",
+            "run",
+            {"workspace": "/tmp/ドキュメント"},
+            {"marker": "パス"},
+        )
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+        mock_proc.stdout = '{"ok": true}'
+        mock_proc.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_proc) as mock_run:
+            resp = executor._run_runner_on_host(
+                payload=payload,
+                cwd="/tmp/ユーザー/rumi_api 繝なし",
+                timeout=5,
+                start_time=time.time(),
+                failure_prefix="Handler execution failed",
+            )
+
+        self.assertTrue(resp.success)
+        runner_kwargs = mock_run.call_args.kwargs
+        self.assertEqual(runner_kwargs["encoding"], "utf-8")
+        self.assertEqual(runner_kwargs["errors"], "replace")
+        self.assertEqual(runner_kwargs["env"]["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(runner_kwargs["env"]["PYTHONUTF8"], "1")
+        self.assertIn("ユーザー", runner_kwargs["input"])
+        self.assertIn("繝なし", runner_kwargs["input"])
+        self.assertNotIn("\\u30e6", runner_kwargs["input"])
+
+    def test_run_runner_on_host_executes_module_under_non_ascii_path(self):
+        executor = _make_executor()
+        tmp_ctx = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp_ctx.cleanup)
+        handler_dir = Path(tmp_ctx.name) / "ユーザー" / "rumi_api 繝なし"
+        handler_dir.mkdir(parents=True)
+        handler_path = handler_dir / "handler.py"
+        handler_path.write_text(
+            "from pathlib import Path\n"
+            "def run(context, args):\n"
+            "    return {\n"
+            "        'module_path': str(Path(__file__).resolve()),\n"
+            "        'workspace': args['workspace'],\n"
+            "        'marker': args['marker'],\n"
+            "    }\n",
+            encoding="utf-8",
+        )
+        payload = executor._build_runner_payload(
+            str(handler_path),
+            "run",
+            {},
+            {"workspace": str(handler_dir), "marker": "日本語パス"},
+        )
+
+        resp = executor._run_runner_on_host(
+            payload=payload,
+            cwd=str(handler_dir),
+            timeout=5,
+            start_time=time.time(),
+            failure_prefix="Handler execution failed",
+        )
+
+        self.assertTrue(resp.success, resp.error)
+        self.assertEqual(resp.output["module_path"], str(handler_path.resolve()))
+        self.assertEqual(resp.output["workspace"], str(handler_dir))
+        self.assertEqual(resp.output["marker"], "日本語パス")
 
 
 def test_get_capability_executor_initializes_cached_container_instance(monkeypatch):
