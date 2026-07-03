@@ -31,6 +31,9 @@ from domain.agent.schedule_store import (
 )
 
 
+_APPROVAL_FINISH_REASONS = {"approval_required", "authority_approval_required"}
+
+
 # ---------------------------------------------------------------------------
 # Minimal cron expression parser (5-field: minute hour day month weekday)
 # ---------------------------------------------------------------------------
@@ -174,6 +177,48 @@ def _parse_iso_datetime(dt_str):
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt
+
+
+def _success_status_from_data(data):
+    if not isinstance(data, dict):
+        return "completed"
+    finish_reason = str(data.get("finish_reason") or "").strip()
+    status = str(data.get("status") or "").strip()
+    metadata = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    if (
+        finish_reason in _APPROVAL_FINISH_REASONS
+        or status in _APPROVAL_FINISH_REASONS
+        or status in {"waiting_approval", "pending_approval"}
+        or isinstance(metadata.get("pending_approval"), dict)
+        or isinstance(metadata.get("pendingAuthorityApproval"), dict)
+        or isinstance(metadata.get("pending_authority_approval"), dict)
+    ):
+        return "approval_required"
+    return "completed"
+
+
+def _content_from_result_data(data):
+    if isinstance(data, dict):
+        content = data.get("content", data.get("text", str(data)))
+        if isinstance(content, list):
+            return "\n".join(
+                str(item.get("text", ""))
+                for item in content
+                if isinstance(item, dict) and item.get("text")
+            )
+        return str(content)
+    if isinstance(data, str):
+        return data
+    return str(data)
+
+
+def _error_details_from_result(result):
+    if not isinstance(result, dict):
+        return str(result), "INVALID_RESULT"
+    err = result.get("error", {})
+    if isinstance(err, dict):
+        return str(err.get("message") or err), str(err.get("code") or "")
+    return str(err), ""
 
 
 # ---------------------------------------------------------------------------
@@ -539,6 +584,44 @@ class Scheduler:
         if timer is not None:
             timer.cancel()
 
+    def _mark_running_execution(self, schedule_id, history_entry):
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+        if sched is None:
+            return
+        updated = dict(sched)
+        updated["running_execution"] = {
+            "execution_id": history_entry.get("execution_id"),
+            "started_at": history_entry.get("started_at"),
+            "trigger": history_entry.get("trigger"),
+            "status": "running",
+        }
+        updated["updated_at"] = timestamp()
+        save_schedule(updated)
+        with self._lock:
+            self._schedules[schedule_id] = updated
+
+    def _finish_execution(self, schedule_id, exec_id, history_entry):
+        with self._lock:
+            sched = self._schedules.get(schedule_id)
+        if sched is not None:
+            updated = dict(sched)
+            running = updated.get("running_execution")
+            if not isinstance(running, dict) or running.get("execution_id") == exec_id:
+                updated.pop("running_execution", None)
+            updated["execution_count"] = updated.get("execution_count", 0) + 1
+            updated["last_executed_at"] = history_entry["completed_at"]
+            updated["last_execution_status"] = history_entry.get("status")
+            if history_entry.get("error"):
+                updated["last_execution_error"] = history_entry.get("error")
+            else:
+                updated.pop("last_execution_error", None)
+            updated["updated_at"] = timestamp()
+            save_schedule(updated)
+            with self._lock:
+                self._schedules[schedule_id] = updated
+        append_history(schedule_id, history_entry)
+
     def _on_timer_fire(self, schedule_id):
         """Called when a timer fires. Execute the task and re-arm."""
         with self._lock:
@@ -593,6 +676,8 @@ class Scheduler:
             "error": None,
         }
 
+        self._mark_running_execution(schedule_id, history_entry)
+
         try:
             if conversation_id:
                 from blocks.chat.send import run as chat_send_run
@@ -640,49 +725,23 @@ class Scheduler:
                 empty_context = {}
                 result = ai_complete_run({"messages": messages, "model": model}, empty_context)
 
-            if result.get("status") == "ok":
+            if isinstance(result, dict) and result.get("status") == "ok":
                 data = result.get("data", {})
-                content = ""
-                if isinstance(data, dict):
-                    content = data.get("content", data.get("text", str(data)))
-                    if isinstance(content, list):
-                        content = "\n".join(
-                            str(item.get("text", ""))
-                            for item in content
-                            if isinstance(item, dict) and item.get("text")
-                        )
-                elif isinstance(data, str):
-                    content = data
-                else:
-                    content = str(data)
-                history_entry["status"] = "completed"
-                history_entry["result"] = content
+                history_entry["status"] = _success_status_from_data(data)
+                history_entry["result"] = _content_from_result_data(data)
             else:
-                err = result.get("error", {})
-                if isinstance(err, dict):
-                    err_msg = err.get("message", str(err))
-                else:
-                    err_msg = str(err)
+                err_msg, err_code = _error_details_from_result(result)
                 history_entry["status"] = "error"
                 history_entry["error"] = err_msg
+                if err_code:
+                    history_entry["error_code"] = err_code
 
         except Exception as exc:
             history_entry["status"] = "error"
             history_entry["error"] = str(exc)
 
         history_entry["completed_at"] = timestamp()
-        append_history(schedule_id, history_entry)
-
-        # Update schedule metadata
-        with self._lock:
-            sched = self._schedules.get(schedule_id)
-        if sched is not None:
-            sched["execution_count"] = sched.get("execution_count", 0) + 1
-            sched["last_executed_at"] = history_entry["completed_at"]
-            sched["updated_at"] = timestamp()
-            save_schedule(sched)
-            with self._lock:
-                self._schedules[schedule_id] = sched
+        self._finish_execution(schedule_id, exec_id, history_entry)
 
         return history_entry
 
