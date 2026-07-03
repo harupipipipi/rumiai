@@ -377,6 +377,14 @@ class ChangeRequestService:
         message = str(payload.get("message") or "").strip()
         if not message:
             raise ValueError("message is required")
+        readiness_block = self._commit_readiness_block(record)
+        if readiness_block:
+            return {
+                "committed": False,
+                "blocked": True,
+                **readiness_block,
+                "change_request": self._public_record(record),
+            }
         seal = self.commit_seal(change_request_id)
         if not seal.get("valid"):
             return {
@@ -425,6 +433,30 @@ class ChangeRequestService:
             },
         )
         return {"committed": True, "commit": result, "change_request": self._public_record(updated), "seal": seal}
+
+    def _commit_readiness_block(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        decision = str(record.get("decision") or "none")
+        status = str(record.get("status") or "open")
+        if decision != "approved" or status != "approved":
+            return {
+                "reason": "review_not_approved",
+                "review_decision": decision,
+                "review_status": status,
+            }
+        refresh_review_counts(record)
+        unresolved_count = int(record.get("unresolved_count") or 0)
+        if unresolved_count > 0:
+            return {
+                "reason": "unresolved_review_comments",
+                "unresolved_count": unresolved_count,
+            }
+        summary = check_summary(self._checks(record))
+        if int(summary.get("failed") or 0) > 0:
+            return {
+                "reason": "failing_checks",
+                "check_summary": summary,
+            }
+        return None
 
     def commit_seal(self, change_request_id: str) -> dict[str, Any]:
         record = self._record_or_raise(change_request_id)

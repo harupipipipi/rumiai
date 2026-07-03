@@ -146,6 +146,7 @@ def test_commit_seal_blocks_drift_and_commit_updates_status(tmp_path, monkeypatc
     service = _service(tmp_path, monkeypatch)
     created = service.create(workspace_root=str(workspace), title="Review")
 
+    service.submit_decision(created["id"], {"decision": "approve"})
     (workspace / "app.py").write_text("print('drift')\n", encoding="utf-8")
     blocked = service.commit(created["id"], {"message": "sealed"})
     assert blocked["blocked"] is True
@@ -158,6 +159,47 @@ def test_commit_seal_blocks_drift_and_commit_updates_status(tmp_path, monkeypatc
     assert committed["committed"] is True
     assert committed["change_request"]["status"] == "committed"
     assert committed["commit"]["commit_hash"]
+
+
+def test_commit_requires_approved_review_and_clear_blockers(tmp_path, monkeypatch):
+    workspace = _workspace(tmp_path)
+    service = _service(tmp_path, monkeypatch)
+    created = service.create(workspace_root=str(workspace), title="Review")
+
+    blocked = service.commit(created["id"], {"message": "sealed"})
+    assert blocked["blocked"] is True
+    assert blocked["reason"] == "review_not_approved"
+    assert blocked["review_decision"] == "none"
+
+    service.submit_decision(created["id"], {"decision": "approve"})
+    commented = service.add_comment(
+        created["id"],
+        {"kind": "comment", "body": "Please address this first.", "path": "app.py", "line": 1},
+    )
+    blocked = service.commit(created["id"], {"message": "sealed"})
+    assert blocked["blocked"] is True
+    assert blocked["reason"] == "unresolved_review_comments"
+    assert blocked["unresolved_count"] == 1
+
+    service.update_comment(created["id"], commented["comment"]["id"], {"resolved": True})
+
+    def add_failed_check(record):
+        record["checks"] = [
+            {
+                "id": "chk_failed",
+                "name": "pytest",
+                "command": "python -m pytest",
+                "status": "failed",
+                "exit_code": 1,
+            }
+        ]
+        return record
+
+    service.store.mutate(created["id"], add_failed_check)
+    blocked = service.commit(created["id"], {"message": "sealed"})
+    assert blocked["blocked"] is True
+    assert blocked["reason"] == "failing_checks"
+    assert blocked["check_summary"]["failed"] == 1
 
 
 def test_commit_block_ignores_client_approved_flag(tmp_path, monkeypatch):

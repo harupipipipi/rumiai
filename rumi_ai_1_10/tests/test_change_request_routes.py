@@ -99,6 +99,8 @@ def test_change_request_routes_are_sensitive_local_routes_with_origin_and_csrf_c
     assert is_sensitive_coding_path("/api/change-requests/cr_test/run-check", "POST") is True
     assert is_sensitive_coding_path("/api/change-requests/cr_test/checks/run", "GET") is False
     assert is_sensitive_coding_path("/api/change-requests/cr_test/seal", "GET") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/commit", "POST") is True
+    assert is_sensitive_coding_path("/api/change-requests/cr_test/commit", "GET") is False
 
     assert require_local_guard(
         "/api/change-requests/cr_test/seal",
@@ -108,6 +110,18 @@ def test_change_request_routes_are_sensitive_local_routes_with_origin_and_csrf_c
     ) == (403, "origin not allowed for sensitive local route", "ORIGIN_DENIED")
     assert require_local_guard(
         "/api/change-requests/cr_test/export-patch",
+        "POST",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) == (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
+    assert require_local_guard(
+        "/api/change-requests/cr_test",
+        "PATCH",
+        {"Origin": "http://localhost:8766"},
+        ("127.0.0.1", 54321),
+    ) == (403, "CSRF header required for sensitive local mutation", "CSRF_REQUIRED")
+    assert require_local_guard(
+        "/api/change-requests/cr_test/commit",
         "POST",
         {"Origin": "http://localhost:8766"},
         ("127.0.0.1", 54321),

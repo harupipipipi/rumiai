@@ -1110,6 +1110,7 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
 
     from blocks.company import create as company_create
     from blocks.company import channels as company_channels
+    from blocks.company import dispatch as company_dispatch
     from blocks.company import messages as company_messages
     from blocks.company import settings as company_settings
     from blocks.company import tasks as company_tasks
@@ -1136,6 +1137,9 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
     )
     assert task_write["status"] == "error"
     assert task_write["error"]["code"] == "SUBAGENT_TEAM_POLICY_REQUIRED"
+    dispatch_write = company_dispatch.run({"company_id": company["id"], "task_id": "task_bypass"}, {})
+    assert dispatch_write["status"] == "error"
+    assert dispatch_write["error"]["code"] == "SUBAGENT_TEAM_POLICY_REQUIRED"
 
     settings_write = company_settings.run(
         {"company_id": company["id"], "action": "update", "settings": {"subagent_team": {"rich_enabled": True}}},
@@ -1185,6 +1189,9 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
     )
     assert marker_task_write["status"] == "error"
     assert marker_task_write["error"]["code"] == "SUBAGENT_TEAM_POLICY_REQUIRED"
+    marker_dispatch_write = company_dispatch.run({"company_id": marker_company_id, "task_id": "task_bypass"}, {})
+    assert marker_dispatch_write["status"] == "error"
+    assert marker_dispatch_write["error"]["code"] == "SUBAGENT_TEAM_POLICY_REQUIRED"
 
     normal = company_create.run({"id": "plain-company", "name": "Plain Company"}, {})
     assert normal["status"] == "ok"
@@ -1196,7 +1203,7 @@ def test_subagent_team_company_write_bypass_is_blocked_on_company_routes(tmp_pat
 
 
 def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
-    from ecosystem.defaultspack.transport.registry import canonical_http_route_specs
+    from ecosystem.defaultspack.transport.registry import _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS, canonical_http_route_specs
 
     expected_routes = {
         ("POST", "/api/subagent-team/bootstrap"),
@@ -1229,10 +1236,15 @@ def test_subagent_team_routes_are_registered_in_runtime_and_api_map():
         ("PATCH", "/api/subagent-team/goals/{goal_id}"),
         ("POST", "/api/subagent-team/goals/{goal_id}/approve"),
         ("POST", "/api/subagent-team/tasks/{task_id}/complete"),
+        ("GET", "/api/subagent-team/file-tree"),
+        ("GET", "/api/subagent-team/file-tree/open"),
     }
 
     runtime_routes = {(spec.method, spec.pattern) for spec in canonical_http_route_specs()}
     assert expected_routes <= runtime_routes
+    registry_mode_routes = {(spec.method, spec.pattern) for spec in _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS}
+    assert expected_routes <= registry_mode_routes
+    assert ("GET", "/api/subagent-team/{company_id}/channels") in registry_mode_routes
 
     routes_json = json.loads((DEFAULTSPACK_ROOT / "routes.json").read_text(encoding="utf-8"))
     api_map_routes = {

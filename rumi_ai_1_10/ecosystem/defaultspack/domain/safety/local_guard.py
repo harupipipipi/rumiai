@@ -116,7 +116,7 @@ def origin_allowed(origin: str | None) -> bool:
 
 
 def csrf_required(method: str, origin: str | None) -> bool:
-    return str(method or "").upper() in {"POST", "PUT", "DELETE"} and bool(origin)
+    return str(method or "").upper() in {"POST", "PUT", "PATCH", "DELETE"} and bool(origin)
 
 
 def is_sensitive_coding_path(path: str, method: str | None = None) -> bool:
@@ -204,6 +204,7 @@ def _is_change_request_sensitive_path(path: str, method: str | None) -> bool:
         "checks",
         "run-check",
         "seal",
+        "commit",
     }:
         allowed_methods = {
             "refresh": {"POST"},
@@ -214,6 +215,7 @@ def _is_change_request_sensitive_path(path: str, method: str | None) -> bool:
             "checks": {"GET", "POST"},
             "run-check": {"POST"},
             "seal": {"GET"},
+            "commit": {"POST"},
         }
         return method is None or method in allowed_methods[parts[1]]
     if len(parts) == 3 and parts[1] == "comments":

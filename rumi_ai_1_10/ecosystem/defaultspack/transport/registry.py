@@ -2256,6 +2256,10 @@ _ADAPTIVE_HTTP_ROUTE_SPECS = [
     ),
 ]
 
+_SUBAGENT_TEAM_HTTP_ROUTE_SPECS = [
+    spec for spec in _FALLBACK_HTTP_ROUTE_SPECS if spec.pattern.startswith("/api/subagent-team")
+]
+
 _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/api/health", handler_name="_handle_health"),
     HttpRouteSpec("GET", "/api/context", handler_name="_handle_context_info"),
@@ -2275,6 +2279,7 @@ _ALWAYS_AVAILABLE_HTTP_ROUTE_SPECS = [
     HttpRouteSpec("GET", "/host-permissions", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/adaptive", handler_name="_handle_static"),
     HttpRouteSpec("GET", "/operating-profile", handler_name="_handle_static"),
+    *_SUBAGENT_TEAM_HTTP_ROUTE_SPECS,
     HttpRouteSpec("GET", "/static/{path}", handler_name="_handle_static_file"),
 ]
 
