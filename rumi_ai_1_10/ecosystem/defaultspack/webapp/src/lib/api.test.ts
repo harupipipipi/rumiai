@@ -2271,6 +2271,7 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     if (path.includes("/p2p/messages/send")) data = { envelope: {}, peer: { peer_id: "peer-a" } };
     if (path.includes("/company/status")) data = { bootstrapped: true, company_id: "chat-team-c1", conversation_id: "c1", company: null };
     if (path.includes("/company/bootstrap")) data = { bootstrapped: true, company: { id: "chat-team-c1", name: "Executive Team" } };
+    if (path.includes("/subagent-team/creator/settings")) data = { settings: { auto_create_agents: false, default_channel_id: "ops" } };
     if (path.includes("/research/web-search")) data = { provider: "external_web", sources: [] };
     if (path.includes("/company/operations-company/runs")) data = { runs: [], total: 0 };
     if (path.includes("/company/operations-company/agents/reviewer/inbox")) data = { inbox: [], total: 0 };
@@ -2292,6 +2293,12 @@ test("company and p2p helpers target frontend workspace routes", async () => {
     await api.dispatchCompanyTask("operations-company", "task-1");
     await api.listCompanyRuns("operations-company", { task_id: "task-1", limit: 5 });
     await api.listCompanyAgentInbox("operations-company", "reviewer", { limit: 5 });
+    await api.updateSubagentTeamCreatorSettings({
+      companyId: "operations-company",
+      conversationId: "c1",
+      auto_create_agents: false,
+      default_channel_id: "ops",
+    });
     await api.getP2PStatus();
     await api.sendP2PMessage("peer-a", { text: "hello" });
   } finally {
@@ -2339,8 +2346,20 @@ test("company and p2p helpers target frontend workspace routes", async () => {
   });
   assert.equal(seen[7].input, "/api/company/operations-company/runs?company_id=operations-company&task_id=task-1&limit=5");
   assert.equal(seen[8].input, "/api/company/operations-company/agents/reviewer/inbox?company_id=operations-company&agent_id=reviewer&limit=5");
-  assert.equal(seen[9].input, "/api/p2p/status");
-  assert.deepEqual(seen[10], {
+  assert.deepEqual(seen[9], {
+    input: "/api/subagent-team/creator/settings",
+    method: "PATCH",
+    body: {
+      company_id: "operations-company",
+      conversation_id: "c1",
+      settings: {
+        auto_create_agents: false,
+        default_channel_id: "ops",
+      },
+    },
+  });
+  assert.equal(seen[10].input, "/api/p2p/status");
+  assert.deepEqual(seen[11], {
     input: "/api/p2p/messages/send",
     method: "POST",
     body: { peer_id: "peer-a", text: "hello" },

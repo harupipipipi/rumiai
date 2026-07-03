@@ -5,6 +5,7 @@ from typing import Any
 from domain.adaptive.lease_guard import AdaptiveLeaseConflict, enforce_adaptive_lease
 from domain.coding.workspace_policy import (
     WorkspaceTrustRequired,
+    require_registered_trusted_workspace,
     require_trusted_workspace,
 )
 from domain.coding.workspace_resolver import (
@@ -35,6 +36,29 @@ def resolve_workspace(
     return resolution
 
 
+def resolve_registered_workspace(
+    input_data: dict[str, Any] | None,
+    context: dict[str, Any] | None = None,
+    *,
+    operation: str | None = None,
+    allow_cwd_fallback: bool = False,
+) -> WorkspaceResolution:
+    context = context if isinstance(context, dict) else {}
+    resolution = WorkspaceResolver().resolve(
+        input_data,
+        context,
+        allow_cwd_fallback=allow_cwd_fallback,
+    )
+    if _allows_unregistered_workspace_root(context):
+        if resolution.uses_workspace_id:
+            require_trusted_workspace(resolution, operation=operation)
+        return resolution
+    if not resolution.uses_workspace_id:
+        suffix = f" for {operation}" if operation else ""
+        raise WorkspaceTrustRequired("registered trusted workspace_id required" + suffix)
+    return require_registered_trusted_workspace(resolution, operation=operation)
+
+
 def workspace_error_response(exc: Exception, error_func):
     if isinstance(exc, AdaptiveLeaseConflict):
         result = error_func(str(exc), code=exc.code)
@@ -60,3 +84,11 @@ def with_workspace(data: dict[str, Any], resolution: WorkspaceResolution) -> dic
     payload.setdefault("workspace_root", resolution.root_path)
     payload.setdefault("root", resolution.root_path)
     return payload
+
+
+def _allows_unregistered_workspace_root(context: dict[str, Any]) -> bool:
+    return bool(
+        context.get("trusted_internal")
+        or context.get("_trusted_internal")
+        or context.get("allow_unregistered_workspace_root")
+    )
