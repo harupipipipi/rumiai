@@ -41,6 +41,15 @@ from transport.registry import (
 
 logger = logging.getLogger(__name__)
 
+_SPA_SHELL_FALLBACK_ROUTES = {
+    "/",
+    "/chat",
+    "/coding",
+    "/defaultspack",
+    "/desktops",
+    "/pack/defaultspack",
+}
+
 
 _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.ai.catalog",
@@ -304,7 +313,19 @@ class DefaultsHttpServer:
             m = compiled.match(path)
             if m is not None:
                 return handler, m.groupdict(), source, path_inject, pattern
+        if self._is_spa_shell_fallback_route(method, path):
+            return self._handle_static, {}, "fallback", {}, ""
         return None, None, None, None, None
+
+    @staticmethod
+    def _is_spa_shell_fallback_route(method, path):
+        if str(method or "").upper() != "GET":
+            return False
+        request_path = str(path or "")
+        if "." in request_path.rsplit("/", 1)[-1]:
+            return False
+        normalized = request_path.rstrip("/") or "/"
+        return normalized in _SPA_SHELL_FALLBACK_ROUTES
 
     def _active_profile_policy(self):
         try:
