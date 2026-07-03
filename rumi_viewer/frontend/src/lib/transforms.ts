@@ -21,6 +21,7 @@ import type {
   Profile,
   VersionInfo,
 } from '../store';
+import { DEFAULT_AVATAR } from './avatar';
 import { RUMI_DISPLAY_VERSION } from './version';
 
 // ============================================================
@@ -102,8 +103,6 @@ export function transformDashboard(api: ApiDashboard): DashboardData {
 // ============================================================
 // Profile
 // ============================================================
-
-const DEFAULT_AVATAR = 'https://picsum.photos/seed/rumi-av1/128/128';
 
 export function transformProfile(api: ApiProfile): Profile {
   return {
