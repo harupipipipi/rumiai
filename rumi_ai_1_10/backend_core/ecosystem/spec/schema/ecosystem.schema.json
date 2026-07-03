@@ -448,6 +448,8 @@
           "enum": [
             "python_host",
             "python_docker",
+            "declarative_pack",
+            "declarative_setup_pack",
             "binary",
             "command",
             "wasm"

@@ -3,7 +3,6 @@
 Phase 2 スキーマ定義のテスト
 """
 
-import json
 from pathlib import Path
 import pytest
 import sys
@@ -85,6 +84,18 @@ class TestEcosystemSchema:
         }
         errors = validate_ecosystem(data, raise_on_error=False)
         assert errors == []
+
+    def test_declarative_pack_runtime_types_are_valid(self):
+        """宣言的pack runtime が canonical schema でも有効"""
+        for runtime_type in ("declarative_pack", "declarative_setup_pack"):
+            data = {
+                "pack_id": "contract_pack",
+                "pack_identity": "local:contract-pack",
+                "version": "1.0.0",
+                "vocabulary": {"types": ["workflow"]},
+                "runtime": {"type": runtime_type, "protocol": "stdio_json"},
+            }
+            assert validate_ecosystem(data, raise_on_error=False) == []
     
     def test_missing_required_fields(self):
         """必須フィールドが欠けている場合"""
@@ -262,6 +273,49 @@ class TestAddonSchema:
         }
         errors = validate_addon(data, raise_on_error=False)
         assert errors == []
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {
+                "apply": [
+                    {
+                        "kind": "manifest_json_patch",
+                        "patch": [{"op": "add", "path": "/x", "value": 1}],
+                    }
+                ]
+            },
+            {"pack_identity": "github:haru/default-pack", "apply": [{"kind": "manifest_json_patch"}]},
+            {
+                "pack_identity": "github:haru/default-pack",
+                "apply": [{"kind": "manifest_json_patch", "patch": []}],
+            },
+            {
+                "pack_identity": "github:haru/default-pack",
+                "apply": [
+                    {
+                        "kind": "file_json_patch",
+                        "patch": [{"op": "add", "path": "/x", "value": 1}],
+                    }
+                ],
+            },
+            {
+                "pack_identity": "github:haru/default-pack",
+                "apply": [
+                    {
+                        "kind": "manifest_json_patch",
+                        "patch": [{"op": "replace", "path": "/x"}],
+                    }
+                ],
+            },
+        ],
+    )
+    def test_rejects_underspecified_addon_contracts(self, target):
+        data = {"addon_id": "bad_addon", "version": "1.0.0", "targets": [target]}
+
+        errors = validate_addon(data, raise_on_error=False)
+
+        assert errors
 
 
 class TestJsonPatchValidation:
