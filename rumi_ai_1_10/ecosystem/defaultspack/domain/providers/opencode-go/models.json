@@ -348,7 +348,7 @@
       "version": "1",
       "provider_id": "opencode-go",
       "model_id": "mimo-v2.5-free",
-      "display_name": "MiMo V2.5 Free alias via OpenCode Go",
+      "display_name": "MiMo V2.5 Free via OpenCode Go",
       "type": "chat",
       "enabled": true,
       "priority": 14,
@@ -393,10 +393,8 @@
       "metadata": {
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
-        "source": "opencode_go_alias",
-        "alias_of": "opencode-go/mimo-v2.5",
+        "source": "opencode_go_docs",
         "free_tier": true,
-        "openai_model": "mimo-v2.5",
         "tool_calls_verified": true,
         "reasoning_effort_verified": true
       }

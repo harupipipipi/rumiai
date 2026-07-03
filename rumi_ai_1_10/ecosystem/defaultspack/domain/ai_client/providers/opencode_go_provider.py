@@ -89,15 +89,13 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "model_id": "mimo-v2.5-free",
-        "display_name": "MiMo V2.5 Free alias via OpenCode Go",
+        "display_name": "MiMo V2.5 Free via OpenCode Go",
         "priority": 14,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
-        "source": "opencode_go_alias",
-        "alias_of": "opencode-go/mimo-v2.5",
+        "source": "opencode_go_docs",
         "free_tier": True,
-        "openai_model": "mimo-v2.5",
     },
     {
         "model_id": "minimax-m3",
@@ -157,10 +155,9 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
 ]
-_OPENCODE_GO_MODEL_ALIASES = {"mimo-v2.5-free": "mimo-v2.5"}
-_OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
-_OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
-_OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
 _OPENCODE_GO_NATIVE_THINKING_MODELS = {"kimi-k2.6"}
 _OPENCODE_GO_DISABLE_THINKING_FOR_TOOL_MODELS = {"kimi-k2.6"}
 _OPENCODE_GO_OPENAI_VISION_MODELS = {"kimi-k2.6"}
@@ -168,9 +165,7 @@ _OPENCODE_GO_OPENAI_VISION_MODELS = {"kimi-k2.6"}
 
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     model_id = spec["model_id"]
-    runtime_model_id = str(
-        spec.get("openai_model") or _OPENCODE_GO_MODEL_ALIASES.get(model_id) or model_id
-    )
+    runtime_model_id = str(spec.get("openai_model") or model_id)
     defaults = dict(spec.get("defaults", {}))
     tool_calls = bool(spec.get("tool_calls", runtime_model_id in _OPENCODE_GO_TOOL_CALL_MODELS))
     reasoning = bool(spec.get("reasoning", runtime_model_id in _OPENCODE_GO_REASONING_MODELS))
@@ -241,8 +236,8 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "deepseek-v4-flash",
         "mimo-v2.5-pro",
         "mimo-v2.5",
+        "mimo-v2.5-free",
     }
-    MODEL_ALIASES = dict(_OPENCODE_GO_MODEL_ALIASES)
     ANTHROPIC_MESSAGES_MODELS = {
         "minimax-m3",
         "minimax-m2.7",
@@ -251,7 +246,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "qwen3.7-max",
         "qwen3.6-plus",
     }
-    MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS | set(MODEL_ALIASES)
+    MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS
     TOOL_CALL_MODELS = set(_OPENCODE_GO_TOOL_CALL_MODELS)
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_GO_MODEL_SPECS]
     _OPENAI_CHAT_PARAM_KEYS = {
@@ -294,7 +289,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         model_id = str(model or "").strip()
         if model_id.startswith("opencode-go/"):
             model_id = model_id.split("/", 1)[1]
-        return cls.MODEL_ALIASES.get(model_id, model_id)
+        return model_id
 
     @classmethod
     def _assert_supported_model(cls, model: str) -> str:

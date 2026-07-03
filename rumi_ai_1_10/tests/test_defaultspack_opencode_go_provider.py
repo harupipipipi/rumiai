@@ -41,6 +41,7 @@ OPENAI_CHAT_MODELS = [
     "deepseek-v4-flash",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "mimo-v2.5-free",
 ]
 
 ANTHROPIC_MESSAGES_MODELS = [
@@ -155,10 +156,10 @@ def test_opencode_go_catalog_includes_all_models():
     assert "mimo-v2.5-free" not in provider["default_model_for"].values()
     assert mimo_free["metadata"]["transport"] == "openai_chat_completions"
     assert mimo_free["metadata"]["endpoint_path"] == "/chat/completions"
-    assert mimo_free["metadata"]["source"] == "opencode_go_alias"
-    assert mimo_free["metadata"]["alias_of"] == "opencode-go/mimo-v2.5"
+    assert mimo_free["metadata"]["source"] == "opencode_go_docs"
     assert mimo_free["metadata"]["free_tier"] is True
-    assert mimo_free["metadata"]["openai_model"] == "mimo-v2.5"
+    assert "alias_of" not in mimo_free["metadata"]
+    assert "openai_model" not in mimo_free["metadata"]
     assert mimo_free["metadata"]["capabilities"]["tool_calls"] is True
     assert mimo_free["metadata"]["capabilities"]["reasoning"] is True
     assert mimo_free["metadata"]["reasoning_effort_verified"] is True
@@ -287,7 +288,7 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
-def test_opencode_go_mimo_free_alias_resolves_to_mimo_base(monkeypatch):
+def test_opencode_go_mimo_free_runtime_model_stays_free(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}
 
@@ -297,7 +298,7 @@ def test_opencode_go_mimo_free_alias_resolves_to_mimo_base(monkeypatch):
         captured["body"] = body
         return {
             "id": "chatcmpl_test",
-            "model": "mimo-v2.5",
+            "model": "mimo-v2.5-free",
             "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
             "usage": {},
         }
@@ -315,7 +316,7 @@ def test_opencode_go_mimo_free_alias_resolves_to_mimo_base(monkeypatch):
         )
 
     assert captured["path"] == "/chat/completions"
-    assert captured["body"]["model"] == "mimo-v2.5"
+    assert captured["body"]["model"] == "mimo-v2.5-free"
     assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
     assert captured["body"]["tool_choice"] == "auto"
     assert captured["body"]["reasoning_effort"] == "high"
