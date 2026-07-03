@@ -50,6 +50,13 @@ def test_opencode_zen_catalog_includes_minimax_m3_free():
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["endpoint_path"] == "/v1/messages"
     assert not models["opencode-zen/minimax-m3-free"]["metadata"]["capabilities"]["tool_calls"]
     assert models["opencode-zen/minimax-m3-free"]["metadata"]["min_output_tokens"] == 96
+    assert "opencode-zen/mimo-v2.5-free" in models
+    mimo_free = models["opencode-zen/mimo-v2.5-free"]
+    assert mimo_free["metadata"]["transport"] == "openai_chat_completions"
+    assert mimo_free["metadata"]["endpoint_path"] == "/v1/chat/completions"
+    assert mimo_free["metadata"]["free_tier"] is True
+    assert mimo_free["metadata"]["capabilities"]["tool_calls"] is True
+    assert mimo_free["metadata"]["capabilities"]["reasoning"] is True
 
 
 def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
@@ -84,6 +91,40 @@ def test_opencode_zen_complete_uses_anthropic_messages(monkeypatch):
     assert captured["body"]["temperature"] == 0
     assert captured["body"]["system"] == [{"type": "text", "text": "Be terse."}]
     assert "tools" not in captured["body"]
+    assert result["content"] == [{"type": "text", "text": "OK"}]
+
+
+def test_opencode_zen_mimo_free_uses_chat_completions(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_json(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_test",
+            "model": "mimo-v2.5-free",
+            "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        result = provider.complete(
+            "opencode-zen/mimo-v2.5-free",
+            [{"role": "user", "content": "Say OK"}],
+            [{"type": "function", "function": {"name": "noop"}}],
+            {
+                "max_tokens": 8,
+                "reasoning_effort": "high",
+                "tool_choice": "auto",
+            },
+        )
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["model"] == "mimo-v2.5-free"
+    assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
+    assert captured["body"]["tool_choice"] == "auto"
+    assert captured["body"]["reasoning_effort"] == "high"
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 

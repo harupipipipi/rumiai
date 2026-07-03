@@ -88,16 +88,6 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
     {
-        "model_id": "mimo-v2.5-free",
-        "display_name": "MiMo V2.5 Free via OpenCode Go",
-        "priority": 14,
-        "defaults": {"chat": True},
-        "transport": "openai_chat_completions",
-        "endpoint_path": "/chat/completions",
-        "source": "opencode_go_docs",
-        "free_tier": True,
-    },
-    {
         "model_id": "minimax-m3",
         "display_name": "MiniMax M3 via OpenCode Go",
         "priority": 8,
@@ -155,9 +145,9 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
 ]
-_OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
-_OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
-_OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5-free", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
+_OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
 _OPENCODE_GO_NATIVE_THINKING_MODELS = {"kimi-k2.6"}
 _OPENCODE_GO_DISABLE_THINKING_FOR_TOOL_MODELS = {"kimi-k2.6"}
 _OPENCODE_GO_OPENAI_VISION_MODELS = {"kimi-k2.6"}
@@ -236,7 +226,6 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "deepseek-v4-flash",
         "mimo-v2.5-pro",
         "mimo-v2.5",
-        "mimo-v2.5-free",
     }
     ANTHROPIC_MESSAGES_MODELS = {
         "minimax-m3",
