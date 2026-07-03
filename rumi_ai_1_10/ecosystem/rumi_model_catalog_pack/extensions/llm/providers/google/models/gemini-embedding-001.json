@@ -5,9 +5,23 @@
   "provider_id": "google",
   "model_id": "gemini-embedding-001",
   "display_name": "Gemini Embedding 001",
+  "type": "embedding",
   "priority": 30,
-  "defaults": {
-    "embedding": true
+  "routing": {
+    "default_for": [
+      "embedding"
+    ]
   },
-  "type": "embedding"
+  "capabilities": {
+    "text_input": true,
+    "text_output": true,
+    "streaming": true,
+    "thinking": false,
+    "tool_calling": false,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": false,
+    "audio_input": false
+  }
 }

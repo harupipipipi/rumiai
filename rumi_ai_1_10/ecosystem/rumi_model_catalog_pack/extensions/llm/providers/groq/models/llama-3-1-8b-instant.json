@@ -8,15 +8,22 @@
   "type": "chat",
   "enabled": true,
   "priority": 4,
-  "defaults": {
-    "cheap": true,
-    "fast": true
+  "routing": {
+    "default_for": [
+      "cheap"
+    ],
+    "speed_tier": "fast"
   },
   "capabilities": {
-    "chat": true,
+    "text_input": true,
+    "text_output": true,
     "streaming": true,
-    "reasoning": false,
-    "tool_calls": true,
-    "vision": false
+    "thinking": false,
+    "tool_calling": true,
+    "parallel_tool_calls": false,
+    "json_schema": false,
+    "structured_output": false,
+    "image_input": false,
+    "audio_input": false
   }
 }

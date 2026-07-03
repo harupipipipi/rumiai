@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -434,6 +437,162 @@ def test_authority_non_consuming_check_does_not_spend_one_shot_token(tmp_path, m
     assert after_consumed.approval_required is True
 
 
+def test_authority_batch_consume_one_shots_is_atomic(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    model_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+    )
+    api_decision = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+    )
+    model_approval = service.approve_request(
+        model_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(model_decision.request_id),
+    )
+    api_approval = service.approve_request(
+        api_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(api_decision.request_id),
+    )
+
+    consumed_api = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+        request_id=api_decision.request_id,
+        approval_token=api_approval["token"],
+    )
+    batch = service.consume_one_shot_approvals_atomically(
+        [
+            {
+                "request_id": model_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": model_resource,
+                "approval_token": model_approval["token"],
+            },
+            {
+                "request_id": api_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "api_key.use",
+                "resource": api_resource,
+                "approval_token": api_approval["token"],
+            },
+        ]
+    )
+    model_still_valid = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+        request_id=model_decision.request_id,
+        approval_token=model_approval["token"],
+        consume_approval_token=False,
+    )
+
+    assert consumed_api.allowed is True
+    assert batch.allowed is False
+    assert batch.permission_id == "api_key.use"
+    assert batch.approval_required is True
+    assert "token_already_consumed" in batch.reason
+    assert model_still_valid.allowed is True
+    assert model_still_valid.reason == "One-shot approval verified"
+
+
+def test_authority_batch_consume_rolls_back_when_later_token_write_fails(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    model_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+    )
+    api_decision = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+    )
+    model_approval = service.approve_request(
+        model_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(model_decision.request_id),
+    )
+    api_approval = service.approve_request(
+        api_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(api_decision.request_id),
+    )
+    api_token_id = hashlib.sha256(api_approval["token"].encode("utf-8")).hexdigest()
+    original_write_json = store._write_json
+
+    def fail_api_token_consume_write(path, payload):
+        if Path(path).name == f"{api_token_id}.json" and payload.get("consumed") is True:
+            raise OSError("token consume write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_api_token_consume_write)
+
+    batch = service.consume_one_shot_approvals_atomically(
+        [
+            {
+                "request_id": model_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": model_resource,
+                "approval_token": model_approval["token"],
+            },
+            {
+                "request_id": api_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "api_key.use",
+                "resource": api_resource,
+                "approval_token": api_approval["token"],
+            },
+        ]
+    )
+
+    assert batch.allowed is False
+    assert batch.permission_id == "api_key.use"
+    assert "consume_write_failed" in batch.reason
+    assert store.one_shot_matches_request(
+        request_id=model_decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        token=model_approval["token"],
+    )
+    assert store.one_shot_matches_request(
+        request_id=api_decision.request_id,
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        token=api_approval["token"],
+    )
+
+
 def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     model_resource = {
@@ -494,6 +653,57 @@ def test_authority_approve_once_can_bundle_model_api_key_and_network_tokens(tmp_
     assert network_allowed.allowed is True
 
 
+def test_authority_once_approval_revokes_token_when_related_approval_fails(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        conversation_id="c1",
+    )
+    original_issue_one_shot = store.issue_one_shot
+    issued_tokens = []
+
+    def record_issue_one_shot(*args, **kwargs):
+        token = original_issue_one_shot(*args, **kwargs)
+        issued_tokens.append(token)
+        return token
+
+    def fail_related_once(*args, **kwargs):
+        raise RuntimeError("related approval failed")
+
+    monkeypatch.setattr(store, "issue_one_shot", record_issue_one_shot)
+    monkeypatch.setattr(service, "_approve_related_once", fail_related_once)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        related_permissions=["api_key.use"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "one_shot_settlement_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert len(issued_tokens) == 1
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=model_resource,
+        token=issued_tokens[0]["token"],
+    ) is False
+
+
 def test_authority_persistent_approval_can_bundle_model_api_key_and_network_grants(tmp_path, monkeypatch):
     service, grants, _ = _service(tmp_path, monkeypatch)
     resource = {
@@ -524,6 +734,435 @@ def test_authority_persistent_approval_can_bundle_model_api_key_and_network_gran
     assert "model.invoke" in grant.permissions
     assert "api_key.use" in grant.permissions
     assert "network.egress" in grant.permissions
+
+
+def test_authority_persistent_approval_rolls_back_grants_when_related_grant_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    original_grant_permission = grants.grant_permission
+    grant_calls = []
+
+    def fail_related_grant(principal_id, permission_id, config=None):
+        grant_calls.append(permission_id)
+        if permission_id == "api_key.use":
+            raise RuntimeError("related grant failed")
+        return original_grant_permission(principal_id, permission_id, config)
+
+    monkeypatch.setattr(grants, "grant_permission", fail_related_grant)
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use", "network.egress"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "persistent_grant_failed"
+    assert grant_calls == ["model.invoke", "api_key.use"]
+    assert grants.get_grant("conversation:c1") is None
+    assert store.get_request(decision.request_id).status == "pending"
+    assert [request.permission_id for request in store.list_requests("all")] == ["model.invoke"]
+
+
+def test_authority_persistent_approval_restores_existing_grant_when_related_grant_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    grants.grant_permission(
+        "conversation:c1",
+        "model.invoke",
+        {"provider_ids": ["anthropic"], "api_ids": ["personal"], "model_ids": ["claude"]},
+    )
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+        "domain": "api.openai.com",
+        "port": 443,
+    }
+    original_grant_permission = grants.grant_permission
+
+    def fail_related_grant(principal_id, permission_id, config=None):
+        if permission_id == "api_key.use":
+            raise RuntimeError("related grant failed")
+        return original_grant_permission(principal_id, permission_id, config)
+
+    monkeypatch.setattr(grants, "grant_permission", fail_related_grant)
+    decision = service.check(
+        principal_id="conversation:c1",
+        permission_id="model.invoke",
+        resource=resource,
+        conversation_id="c1",
+    )
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="conversation",
+        related_permissions=["api_key.use"],
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    restored = grants.get_grant("conversation:c1")
+
+    assert approval["success"] is False
+    assert restored is not None
+    assert restored.permissions["model.invoke"].enabled is True
+    assert restored.permissions["model.invoke"].config == {
+        "provider_ids": ["anthropic"],
+        "api_ids": ["personal"],
+        "model_ids": ["claude"],
+    }
+    assert "api_key.use" not in restored.permissions
+    assert store.get_request(decision.request_id).status == "pending"
+
+
+def test_authority_persistent_approval_rolls_back_grant_when_status_write_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    request_path = store._request_path(decision.request_id)
+    original_write_json = store._write_json
+
+    def fail_terminal_status_write(path, payload):
+        if Path(path) == request_path and payload.get("status") == "approved":
+            raise OSError("request status write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_terminal_status_write)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is False
+    assert approval["status_code"] == 500
+    assert approval["reason"] == "persistent_grant_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert grants.get_grant("profile:work") is None
+
+
+def test_authority_persistent_deny_rolls_back_deny_when_status_write_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    request_path = store._request_path(decision.request_id)
+    original_write_json = store._write_json
+
+    def fail_terminal_status_write(path, payload):
+        if Path(path) == request_path and payload.get("status") == "denied":
+            raise OSError("request status write failed")
+        return original_write_json(path, payload)
+
+    monkeypatch.setattr(store, "_write_json", fail_terminal_status_write)
+
+    denial = service.deny_request(
+        decision.request_id,
+        reason="not now",
+        persist=True,
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert denial["success"] is False
+    assert denial["status_code"] == 500
+    assert denial["reason"] == "deny_settlement_failed"
+    assert store.get_request(decision.request_id).status == "pending"
+    assert store.list_denies() == []
+
+
+def test_authority_once_approval_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_approved"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        token=approval["token"],
+    )
+
+
+def test_authority_single_token_consume_succeeds_when_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    approval = service.approve_request(
+        decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+    original_audit = store.audit
+
+    def fail_consume_audit(action, details=None):
+        if action == "authority_one_shot_consumed":
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_consume_audit)
+
+    consumed = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+
+    assert consumed.allowed is True
+    assert consumed.reason == "One-shot approval consumed"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        token=approval["token"],
+    ) is False
+
+
+def test_authority_batch_consume_succeeds_when_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    model_resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    api_resource = {**model_resource, "kind": "api_key"}
+    model_decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        profile_id="work",
+    )
+    api_decision = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        profile_id="work",
+    )
+    model_approval = service.approve_request(
+        model_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(model_decision.request_id),
+    )
+    api_approval = service.approve_request(
+        api_decision.request_id,
+        scope="once",
+        ui_operator=_ui_operator(api_decision.request_id),
+    )
+    original_audit = store.audit
+
+    def fail_consume_audit(action, details=None):
+        if action == "authority_one_shot_consumed":
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_consume_audit)
+
+    batch = service.consume_one_shot_approvals_atomically(
+        [
+            {
+                "request_id": model_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "model.invoke",
+                "resource": model_resource,
+                "approval_token": model_approval["token"],
+            },
+            {
+                "request_id": api_decision.request_id,
+                "principal_id": "profile:work",
+                "permission_id": "api_key.use",
+                "resource": api_resource,
+                "approval_token": api_approval["token"],
+            },
+        ]
+    )
+
+    assert batch.allowed is True
+    assert batch.reason == "One-shot approvals consumed"
+    assert store.one_shot_matches_request(
+        request_id=model_decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=model_resource,
+        token=model_approval["token"],
+    ) is False
+    assert store.one_shot_matches_request(
+        request_id=api_decision.request_id,
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource=api_resource,
+        token=api_approval["token"],
+    ) is False
+
+
+def test_authority_persistent_approval_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_approved"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    approval = service.approve_request(
+        decision.request_id,
+        scope="profile",
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert approval["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+    assert grants.get_grant("profile:work") is not None
+
+
+def test_authority_deny_succeeds_when_post_commit_audit_fails(
+    tmp_path,
+    monkeypatch,
+):
+    service, _, store = _service(tmp_path, monkeypatch)
+    resource = {
+        "kind": "model",
+        "provider_id": "openai",
+        "api_id": "work",
+        "model_id": "gpt-5.4",
+    }
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+    original_audit = store.audit
+
+    def fail_post_commit_audit(action, details=None):
+        if action in {"authority_request_status", "authority_request_denied"}:
+            raise OSError("audit unavailable")
+        return original_audit(action, details)
+
+    monkeypatch.setattr(store, "audit", fail_post_commit_audit)
+
+    denial = service.deny_request(
+        decision.request_id,
+        reason="not now",
+        persist=True,
+        ui_operator=_ui_operator(decision.request_id),
+    )
+
+    assert denial["success"] is True
+    assert store.get_request(decision.request_id).status == "denied"
+    assert len(store.list_denies()) == 1
 
 
 def test_authority_request_display_metadata_explains_provider_endpoint_and_key(tmp_path, monkeypatch):
@@ -882,6 +1521,122 @@ def test_authority_request_cannot_be_approved_twice(tmp_path, monkeypatch):
     assert second["status_code"] == 409
 
 
+def test_authority_concurrent_once_approval_issues_single_token(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    original_issue_one_shot = store.issue_one_shot
+    issue_count = 0
+    issue_lock = threading.Lock()
+
+    def slow_issue_one_shot(*args, **kwargs):
+        nonlocal issue_count
+        with issue_lock:
+            issue_count += 1
+        time.sleep(0.05)
+        return original_issue_one_shot(*args, **kwargs)
+
+    monkeypatch.setattr(store, "issue_one_shot", slow_issue_one_shot)
+    start = threading.Barrier(2)
+    results = []
+    results_lock = threading.Lock()
+
+    def approve_once():
+        start.wait(timeout=2)
+        result = service.approve_request(
+            decision.request_id,
+            scope="once",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+        with results_lock:
+            results.append(result)
+
+    threads = [threading.Thread(target=approve_once) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+    successes = [result for result in results if result["success"]]
+    failures = [result for result in results if not result["success"]]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert failures[0]["status_code"] == 409
+    assert issue_count == 1
+    assert store.get_request(decision.request_id).status == "approved"
+    assert store.one_shot_matches_request(
+        request_id=decision.request_id,
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        token=successes[0]["token"],
+    )
+
+
+def test_authority_concurrent_persistent_approve_and_deny_settles_once(
+    tmp_path,
+    monkeypatch,
+):
+    service, grants, store = _service(tmp_path, monkeypatch)
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource={"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"},
+        profile_id="work",
+    )
+    original_grant_permission = grants.grant_permission
+    grant_entered = threading.Event()
+    release_grant = threading.Event()
+
+    def blocking_grant_permission(*args, **kwargs):
+        result = original_grant_permission(*args, **kwargs)
+        grant_entered.set()
+        assert release_grant.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(grants, "grant_permission", blocking_grant_permission)
+    results = {}
+
+    def approve_persistent():
+        results["approve"] = service.approve_request(
+            decision.request_id,
+            scope="profile",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+
+    def deny_request():
+        results["deny"] = service.deny_request(
+            decision.request_id,
+            reason="not now",
+            ui_operator=_ui_operator(decision.request_id),
+        )
+
+    approve_thread = threading.Thread(target=approve_persistent)
+    approve_thread.start()
+    assert grant_entered.wait(timeout=5)
+    deny_thread = threading.Thread(target=deny_request)
+    deny_thread.start()
+    time.sleep(0.05)
+    release_grant.set()
+    approve_thread.join(timeout=5)
+    deny_thread.join(timeout=5)
+    assert not approve_thread.is_alive()
+    assert not deny_thread.is_alive()
+
+    assert results["approve"]["success"] is True
+    assert results["deny"]["success"] is False
+    assert results["deny"]["status_code"] == 409
+    assert store.get_request(decision.request_id).status == "approved"
+    grant = grants.get_grant("profile:work")
+    assert grant is not None
+    assert "model.invoke" in grant.permissions
+
+
 def test_authority_rejects_global_scope(tmp_path, monkeypatch):
     service, _, _ = _service(tmp_path, monkeypatch)
     decision = service.check(
@@ -1010,6 +1765,51 @@ def test_authority_scoped_grants_are_profile_filtered(tmp_path, monkeypatch):
     assert other["success"] is False
     assert other["status_code"] == 404
     assert set(core_all["grants"]) >= {"profile:work", "profile:personal"}
+
+
+def test_authority_scoped_grant_delete_is_profile_filtered(tmp_path, monkeypatch):
+    from core_runtime.access_tokens import AuthenticatedPrincipal
+
+    service, grants, _ = _service(tmp_path, monkeypatch)
+    grants.grant_permission("profile:work", "model.invoke", {"provider_ids": ["openai"]})
+    grants.grant_permission("profile:work__graph:startup", "network.egress", {"domains": ["example.com"]})
+    grants.grant_permission("profile:personal", "model.invoke", {"provider_ids": ["anthropic"]})
+    actor = AuthenticatedPrincipal(
+        token_id="tok",
+        profile_id="work",
+        surface_id="mobile",
+        device_id="phone-1",
+        role="mobile_client",
+        audiences=("kernel_api",),
+        issued_at="",
+        expires_at=None,
+    )
+
+    own = service.delete_grant("profile:work", "model.invoke", actor_principal=actor)
+    own_child = service.delete_grant(
+        "profile:work__graph:startup",
+        "network.egress",
+        actor_principal=actor,
+    )
+    cross_profile = service.delete_grant(
+        "profile:personal",
+        "model.invoke",
+        actor_principal=actor,
+    )
+
+    assert own["success"] is True
+    assert own["revoked"] is True
+    assert own_child["success"] is True
+    assert own_child["revoked"] is True
+    assert cross_profile["success"] is False
+    assert cross_profile["status_code"] == 404
+    work_grant = grants.get_grant("profile:work")
+    work_child_grant = grants.get_grant("profile:work__graph:startup")
+    personal_grant = grants.get_grant("profile:personal")
+    assert work_grant is None or not work_grant.permissions["model.invoke"].enabled
+    assert work_child_grant is None or not work_child_grant.permissions["network.egress"].enabled
+    assert personal_grant is not None
+    assert "model.invoke" in personal_grant.permissions
 
 
 def test_authority_events_are_core_only(tmp_path, monkeypatch):

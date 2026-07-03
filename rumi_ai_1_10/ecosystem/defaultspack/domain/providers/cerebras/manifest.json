@@ -13,18 +13,15 @@
   "security": {
     "credential_required": true
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "tool_calls": true,
-    "reasoning": true,
-    "openai_compatible": true
-  },
   "provider_metadata": {
     "display_name": "Cerebras",
     "kind": "cloud",
-    "env_vars": ["CEREBRAS_API_KEY"],
-    "base_url_envs": ["CEREBRAS_BASE_URL"],
+    "env_vars": [
+      "CEREBRAS_API_KEY"
+    ],
+    "base_url_envs": [
+      "CEREBRAS_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://api.cerebras.ai/v1",
@@ -37,7 +34,13 @@
       "coding": "zai-glm-4.7",
       "agent": "zai-glm-4.7"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "openai_compatible"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "tool_calls",
+      "reasoning",
+      "openai_compatible"
+    ]
   },
   "provider_manifest": {
     "id": "cerebras",
@@ -62,18 +65,15 @@
       "coding": "zai-glm-4.7",
       "agent": "zai-glm-4.7"
     },
-    "capabilities": {
-      "native_tool_calling": true,
-      "structured_outputs": true,
-      "vision": false,
-      "embeddings": false,
-      "streaming": true,
-      "reasoning": true
-    },
     "config": {
       "api_compatibility": "openai",
       "supports_service_tier": true,
-      "service_tier_values": ["default", "auto", "flex", "priority"],
+      "service_tier_values": [
+        "default",
+        "auto",
+        "flex",
+        "priority"
+      ],
       "default_service_tier": "default",
       "priority_tier_private_preview": true,
       "service_tier_request_injection": "explicit_only",
@@ -83,10 +83,21 @@
     }
   },
   "aliases": {
-    "provider_ids": ["cerebras"]
+    "provider_ids": [
+      "cerebras"
+    ]
   },
   "compatibility": {
-    "legacy_ids": ["cerebras"]
+    "legacy_ids": [
+      "cerebras"
+    ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "openai_compatible"
+  ]
 }

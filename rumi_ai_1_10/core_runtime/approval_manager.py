@@ -33,7 +33,7 @@ from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple
 
 
 from .paths import (
@@ -379,7 +379,7 @@ class ApprovalManager:
                     if self._should_skip_hash_file(file_path, local_dir):
                         continue
                     
-                    relative_path = str(file_path.relative_to(local_dir))
+                    relative_path = file_path.relative_to(local_dir).as_posix()
                     hash_value = self._compute_file_hash(file_path)
                     hashes[relative_path] = hash_value
         
@@ -893,11 +893,11 @@ class ApprovalManager:
                     "added_files": [],
                     "removed_files": [],
                 }
-            stored_hashes = dict(approval.file_hashes)
+            stored_hashes = self._normalize_hash_paths(approval.file_hashes)
 
         # ロック外でファイル I/O
         if pack_id == LOCAL_PACK_ID:
-            current_hashes = self._compute_local_pack_hashes()
+            current_hashes = self._normalize_hash_paths(self._compute_local_pack_hashes())
         else:
             pack_dir = self._resolve_pack_dir(pack_id)
             if pack_dir is None or not pack_dir.exists():
@@ -909,9 +909,9 @@ class ApprovalManager:
                     "removed_files": [],
                 }
             if use_cache:
-                current_hashes = self._compute_pack_hashes(pack_dir)
+                current_hashes = self._normalize_hash_paths(self._compute_pack_hashes(pack_dir))
             else:
-                current_hashes = self._compute_pack_hashes_nocache(pack_dir)
+                current_hashes = self._normalize_hash_paths(self._compute_pack_hashes_nocache(pack_dir))
 
         stored_keys = set(stored_hashes.keys())
         current_keys = set(current_hashes.keys())
@@ -956,12 +956,24 @@ class ApprovalManager:
 
     def _is_critical_path(self, file_path: str) -> bool:
         """ファイルパスがセキュリティクリティカルかどうかを判定する。"""
+        file_path = self._normalize_hash_path(file_path)
         if file_path in self.CRITICAL_FILES:
             return True
         for critical_dir in self.CRITICAL_DIRS:
             if file_path.startswith(critical_dir):
                 return True
         return False
+
+    @staticmethod
+    def _normalize_hash_path(file_path: str) -> str:
+        return str(file_path or "").replace("\\", "/")
+
+    @classmethod
+    def _normalize_hash_paths(cls, file_hashes: Mapping[str, str]) -> Dict[str, str]:
+        return {
+            cls._normalize_hash_path(path): value
+            for path, value in dict(file_hashes or {}).items()
+        }
 
     def verify_hash(self, pack_id: str, use_cache: bool = True) -> bool:
         """Packのファイルハッシュを検証"""
@@ -1018,7 +1030,7 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
                 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = file_path.relative_to(pack_dir).as_posix()
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
         
@@ -1036,7 +1048,7 @@ class ApprovalManager:
                 if self._should_skip_hash_file(file_path, pack_dir):
                     continue
 
-                relative_path = str(file_path.relative_to(pack_dir))
+                relative_path = file_path.relative_to(pack_dir).as_posix()
                 hash_value = self._compute_file_hash(file_path)
                 hashes[relative_path] = hash_value
 

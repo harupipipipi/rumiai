@@ -72,7 +72,7 @@ ecosystem/defaultspack/extensions/
 - [ ] B3: OpenRouter provider を追加（動的モデル同期）
   - 受け入れ: ハードコードモデル一覧なし、`GET /api/v1/models` 同期 + キャッシュ + fallback が動く
 - [ ] B4: 既定モデル選択を manifest / model metadata ベースに移行
-  - 受け入れ: stale 固定値に依存しない（例: OpenAI は `gpt-5.4`、Anthropic は Claude 4.6 系、Google は Gemini 2.5 系）
+  - 受け入れ: stale 固定値に依存しない（例: OpenAI は `gpt-5.5`、Anthropic は Claude 4.6 系、Google は Gemini 2.5 系）
 - [ ] B5: OpenAI / Anthropic / Google の modern catalog を manifest 側へ寄せる
   - 受け入れ: `ProfileLoader` の default / fast / large / embedding が registry 起点で決まる
 - [ ] B6: OpenRouter と generic OpenAI-compatible を分離する

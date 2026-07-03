@@ -16,19 +16,16 @@
     "fixed_model_allowlist": true,
     "privacy": "external_api_key_gateway"
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "openai_compatible": true,
-    "vision": false,
-    "reasoning": true
-  },
   "provider_metadata": {
     "display_name": "OpenCode Zen",
     "kind": "cloud",
     "description": "OpenCode Zen free gateway for MiMo V2.5 Free.",
-    "env_vars": ["OPENCODE_ZEN_API_KEY"],
-    "base_url_envs": ["OPENCODE_ZEN_BASE_URL"],
+    "env_vars": [
+      "OPENCODE_ZEN_API_KEY"
+    ],
+    "base_url_envs": [
+      "OPENCODE_ZEN_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opencode.ai/zen",
@@ -38,7 +35,12 @@
       "coding": "mimo-v2.5-free",
       "reasoning": "mimo-v2.5-free"
     },
-    "capabilities": ["chat", "streaming", "openai_compatible", "reasoning"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "openai_compatible",
+      "reasoning"
+    ]
   },
   "provider_manifest": {
     "id": "opencode-zen",
@@ -50,7 +52,9 @@
     "priority": 63,
     "adapter": "python_entrypoint",
     "entrypoint": "domain.ai_client.providers.opencode_zen_provider:OpencodeZenProvider",
-    "api_key_env": ["OPENCODE_ZEN_API_KEY"],
+    "api_key_env": [
+      "OPENCODE_ZEN_API_KEY"
+    ],
     "base_url_env": "OPENCODE_ZEN_BASE_URL",
     "credential_required": true,
     "catalog_only": false,
@@ -62,14 +66,6 @@
       "coding": "mimo-v2.5-free",
       "reasoning": "mimo-v2.5-free"
     },
-    "capabilities": {
-      "native_tool_calling": false,
-      "structured_outputs": false,
-      "vision": false,
-      "embeddings": false,
-      "streaming": true,
-      "reasoning": true
-    },
     "config": {
       "api_compatibility": "openai_chat_completions",
       "source_docs": "opencode_zen",
@@ -78,7 +74,10 @@
     }
   },
   "aliases": {
-    "provider_ids": ["opencode-zen", "opencode"]
+    "provider_ids": [
+      "opencode-zen",
+      "opencode"
+    ]
   },
   "compatibility": {
     "legacy_ids": [
@@ -87,5 +86,11 @@
       "opencode/mimo-v2.5-free"
     ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "openai_compatible",
+    "reasoning"
+  ]
 }

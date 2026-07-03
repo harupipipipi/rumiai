@@ -102,6 +102,7 @@ class TestVerifyHashDetailed(unittest.TestCase):
                 return dict(self._current)
 
             def _is_critical_path(self, file_path):
+                file_path = str(file_path).replace("\\", "/")
                 if file_path in self.CRITICAL_FILES:
                     return True
                 for d in self.CRITICAL_DIRS:
@@ -115,8 +116,8 @@ class TestVerifyHashDetailed(unittest.TestCase):
                 approval = self._approvals.get(pack_id)
                 if not approval or not approval.file_hashes:
                     return {"valid": False, "critical_changed": True, "changed_files": [], "added_files": [], "removed_files": []}
-                stored = dict(approval.file_hashes)
-                current = self._current
+                stored = {str(k).replace("\\", "/"): v for k, v in dict(approval.file_hashes).items()}
+                current = {str(k).replace("\\", "/"): v for k, v in self._current.items()}
                 stored_k = set(stored.keys())
                 current_k = set(current.keys())
                 removed = sorted(stored_k - current_k)
@@ -157,6 +158,23 @@ class TestVerifyHashDetailed(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertTrue(result["critical_changed"])
         self.assertIn("backend/ecosystem.json", result["changed_files"])
+
+    def test_windows_backslash_paths_detect_critical_change(self):
+        stored = {
+            r"backend\components\secure.py": "sha256:aaa",
+            r"blocks\main.py": "sha256:bbb",
+        }
+        current = {
+            "backend/components/secure.py": "sha256:CHANGED",
+            "blocks/main.py": "sha256:bbb",
+        }
+        am, _ = self._make_manager(stored, current)
+        result = am.verify_hash_detailed("test_pack")
+        self.assertFalse(result["valid"])
+        self.assertTrue(result["critical_changed"])
+        self.assertEqual(result["changed_files"], ["backend/components/secure.py"])
+        self.assertEqual(result["added_files"], [])
+        self.assertEqual(result["removed_files"], [])
 
     # ------------------------------------------------------------------
     # テストケース 2: blocks/ 内のみ変更 → critical_changed=False

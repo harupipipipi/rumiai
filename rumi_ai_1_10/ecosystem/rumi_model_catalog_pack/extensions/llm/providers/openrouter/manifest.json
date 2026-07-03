@@ -10,14 +10,32 @@
   "api_key_env": "OPENROUTER_API_KEY",
   "base_url_env": "OPENROUTER_BASE_URL",
   "credential_required": true,
-  "default_model": "tencent/hy3-preview:free",
-  "capabilities": {
-    "native_tool_calling": false,
-    "vision": false,
-    "embeddings": false,
-    "streaming": true
+  "catalog_only": false,
+  "supports_invoke": true,
+  "default_base_url": "https://openrouter.ai/api/v1",
+  "default_model": "cohere/north-mini-code:free",
+  "default_model_for": {
+    "chat": "cohere/north-mini-code:free",
+    "fast": "cohere/north-mini-code:free",
+    "cheap": "cohere/north-mini-code:free",
+    "general": "anthropic/claude-sonnet-5",
+    "reasoning": "deepseek/deepseek-r1-0528",
+    "coding": "qwen/qwen3-coder-next",
+    "agent": "moonshotai/kimi-k2.7-code",
+    "vision": "google/gemini-2.5-pro",
+    "legacy": "tencent/hy3-preview:free"
   },
   "config": {
-    "model_sync": "fixed_allowlist"
-  }
+    "api_compatibility": "openai",
+    "model_sync": "bundled_catalog_allowlist",
+    "model_list_path": "/models"
+  },
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "vision",
+    "openai_compatible"
+  ]
 }

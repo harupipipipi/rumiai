@@ -16,21 +16,17 @@
     "fixed_model_allowlist": true,
     "privacy": "external_subscription_gateway"
   },
-  "capabilities": {
-    "chat": true,
-    "streaming": true,
-    "tool_calls": true,
-    "reasoning": true,
-    "vision": true,
-    "openai_compatible": true,
-    "anthropic_compatible": true
-  },
   "provider_metadata": {
     "display_name": "OpenCode Go",
     "kind": "cloud",
     "description": "OpenCode Go subscription provider with a mixed OpenAI chat completions and Anthropic messages transport.",
-    "env_vars": ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"],
-    "base_url_envs": ["OPENCODE_GO_BASE_URL"],
+    "env_vars": [
+      "OPENCODE_GO_API_KEY",
+      "OPENCODE_ZEN_API_KEY"
+    ],
+    "base_url_envs": [
+      "OPENCODE_GO_BASE_URL"
+    ],
     "catalog_only": false,
     "supports_invoke": true,
     "default_base_url": "https://opencode.ai/zen/go/v1",
@@ -44,7 +40,15 @@
       "reasoning": "mimo-v2.5-pro",
       "vision": "qwen3.7-plus"
     },
-    "capabilities": ["chat", "streaming", "tool_calls", "reasoning", "vision", "openai_compatible", "anthropic_compatible"]
+    "catalog_features": [
+      "chat",
+      "streaming",
+      "tool_calls",
+      "reasoning",
+      "vision",
+      "openai_compatible",
+      "anthropic_compatible"
+    ]
   },
   "provider_manifest": {
     "id": "opencode-go",
@@ -56,7 +60,10 @@
     "priority": 64,
     "adapter": "python_entrypoint",
     "entrypoint": "domain.ai_client.providers.opencode_go_provider:OpencodeGoProvider",
-    "api_key_env": ["OPENCODE_GO_API_KEY", "OPENCODE_ZEN_API_KEY"],
+    "api_key_env": [
+      "OPENCODE_GO_API_KEY",
+      "OPENCODE_ZEN_API_KEY"
+    ],
     "base_url_env": "OPENCODE_GO_BASE_URL",
     "credential_required": true,
     "catalog_only": false,
@@ -72,14 +79,6 @@
       "reasoning": "mimo-v2.5-pro",
       "vision": "qwen3.7-plus"
     },
-    "capabilities": {
-      "native_tool_calling": true,
-      "reasoning": true,
-      "structured_outputs": false,
-      "vision": true,
-      "embeddings": false,
-      "streaming": true
-    },
     "config": {
       "api_compatibility": "mixed",
       "source_docs": "opencode_go",
@@ -87,7 +86,9 @@
     }
   },
   "aliases": {
-    "provider_ids": ["opencode-go"]
+    "provider_ids": [
+      "opencode-go"
+    ]
   },
   "compatibility": {
     "legacy_ids": [
@@ -108,5 +109,14 @@
       "opencode-go/minimax-m2.5"
     ]
   },
-  "source_pack_id": "defaultspack"
+  "source_pack_id": "defaultspack",
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "vision",
+    "openai_compatible",
+    "anthropic_compatible"
+  ]
 }

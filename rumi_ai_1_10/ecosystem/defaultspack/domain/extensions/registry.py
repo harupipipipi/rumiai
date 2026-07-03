@@ -258,15 +258,31 @@ class LLMRegistry:
         candidates = self.models(provider_id=provider_id, enabled_only=True)
         if not candidates:
             return None
+        provider_manifest = self._registry.get("llm_provider", provider_id) or {}
+        default_model_for = provider_manifest.get("default_model_for", {}) or {}
+        if not isinstance(default_model_for, dict):
+            default_model_for = {}
+        preferred_ref = str(default_model_for.get(use_case) or "").strip()
+        if not preferred_ref and use_case == "chat":
+            preferred_ref = str(provider_manifest.get("default_model") or "").strip()
 
-        def _score(model: Dict[str, Any]) -> tuple[int, int, int]:
+        def _matches_preferred(model: Dict[str, Any]) -> bool:
+            if not preferred_ref:
+                return False
+            model_id = str(model.get("model_id") or "").strip()
+            full_id = str(model.get("id") or "").strip()
+            qualified = f"{provider_id}/{preferred_ref}"
+            return preferred_ref in {model_id, full_id} or qualified == full_id
+
+        def _score(model: Dict[str, Any]) -> tuple[int, int, int, int]:
             defaults = model.get("defaults", {}) or {}
+            manifest_default_hit = int(_matches_preferred(model))
             exact_hit = int(bool(defaults.get(use_case, False)))
             chat_fallback_hit = int(
                 use_case != "chat" and bool(defaults.get("chat", False))
             )
             priority = int(model.get("priority", 100))
-            return exact_hit, chat_fallback_hit, -priority
+            return manifest_default_hit, exact_hit, chat_fallback_hit, -priority
 
         candidates.sort(key=_score, reverse=True)
         return candidates[0]

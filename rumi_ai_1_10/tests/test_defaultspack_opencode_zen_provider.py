@@ -53,7 +53,7 @@ def test_opencode_zen_catalog_includes_mimo_v2_5_free():
     assert mimo["metadata"]["transport"] == "openai_chat_completions"
     assert mimo["metadata"]["api_compatibility"] == "openai_chat_completions"
     assert mimo["metadata"]["endpoint_path"] == "/v1/chat/completions"
-    assert not mimo["metadata"]["capabilities"]["tool_calls"]
+    assert not mimo["metadata"]["capabilities"]["tool_calling"]
 
 
 def test_opencode_zen_complete_uses_openai_chat_completions(monkeypatch):

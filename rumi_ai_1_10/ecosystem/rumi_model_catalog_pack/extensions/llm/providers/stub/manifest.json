@@ -9,4 +9,3 @@
   "entrypoint": "domain.ai_client.providers.stub_provider:StubProvider",
   "credential_required": false
 }
-

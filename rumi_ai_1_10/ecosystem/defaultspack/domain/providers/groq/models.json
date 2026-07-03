@@ -7,23 +7,52 @@
       "provider_id": "groq",
       "model_id": "openai/gpt-oss-120b",
       "display_name": "GPT OSS 120B via Groq",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 1,
-      "defaults": {
-        "chat": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "reasoning"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": false
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "groq/openai/gpt-oss-20b",
@@ -32,23 +61,48 @@
       "provider_id": "groq",
       "model_id": "openai/gpt-oss-20b",
       "display_name": "GPT OSS 20B via Groq",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 2,
-      "defaults": {
-        "fast": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "reasoning"
+        ],
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": true,
-        "vision": false
+        "thinking": true,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium"
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      }
     },
     {
       "id": "groq/llama-3.3-70b-versatile",
@@ -60,15 +114,22 @@
       "type": "chat",
       "enabled": true,
       "priority": 3,
-      "defaults": {
-        "general": true
+      "routing": {
+        "default_for": [
+          "general"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
-        "vision": false
+        "thinking": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -81,16 +142,23 @@
       "type": "chat",
       "enabled": true,
       "priority": 4,
-      "defaults": {
-        "cheap": true,
-        "fast": true
+      "routing": {
+        "default_for": [
+          "cheap"
+        ],
+        "speed_tier": "fast"
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
-        "vision": false
+        "thinking": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -103,15 +171,22 @@
       "type": "chat",
       "enabled": true,
       "priority": 5,
-      "defaults": {
-        "coding": true
+      "routing": {
+        "default_for": [
+          "coding"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
-        "vision": false
+        "thinking": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     },
     {
@@ -121,18 +196,25 @@
       "provider_id": "groq",
       "model_id": "meta-llama/llama-4-scout-17b-16e-instruct",
       "display_name": "Llama 4 Scout 17B 16E Instruct via Groq",
-      "type": "vision",
+      "type": "chat",
       "enabled": true,
       "priority": 5,
-      "defaults": {
-        "vision": true
+      "routing": {
+        "default_for": [
+          "vision"
+        ]
       },
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
-        "vision": true
+        "thinking": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": true,
+        "audio_input": false
       },
       "metadata": {
         "preview": true,
@@ -149,17 +231,39 @@
       "type": "chat",
       "enabled": true,
       "priority": 7,
-      "defaults": {},
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": false,
-        "vision": false
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium",
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "provider_tools_only": true,
         "do_not_use_with_custom_tools": true
@@ -175,17 +279,39 @@
       "type": "chat",
       "enabled": true,
       "priority": 8,
-      "defaults": {},
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": true,
-        "tool_calls": false,
-        "vision": false
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       },
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high"],
-      "default_thinking_level": "medium",
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "provider_tools_only": true,
         "do_not_use_with_custom_tools": true
@@ -201,13 +327,17 @@
       "type": "chat",
       "enabled": true,
       "priority": 9,
-      "defaults": {},
       "capabilities": {
-        "chat": true,
+        "text_input": true,
+        "text_output": true,
         "streaming": true,
-        "reasoning": false,
-        "tool_calls": true,
-        "vision": false
+        "thinking": false,
+        "tool_calling": true,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
       }
     }
   ]

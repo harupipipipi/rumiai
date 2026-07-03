@@ -7,17 +7,52 @@
       "provider_id": "gitlawb-opengateway",
       "model_id": "mimo-v2.5-pro",
       "display_name": "MiMo V2.5 Pro via Gitlawb OpenGateway",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 1,
-      "defaults": {
-        "chat": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "reasoning"
+        ]
       },
-      "capabilities": ["streaming", "reasoning"],
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
+      },
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",
@@ -36,11 +71,24 @@
       "type": "chat",
       "enabled": true,
       "priority": 2,
-      "defaults": {
-        "chat": true,
-        "fast": true
+      "routing": {
+        "default_for": [
+          "chat"
+        ],
+        "speed_tier": "fast"
       },
-      "capabilities": ["streaming"],
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
+      },
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",
@@ -59,11 +107,24 @@
       "type": "chat",
       "enabled": true,
       "priority": 3,
-      "defaults": {
-        "chat": true,
-        "vision": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "vision"
+        ]
       },
-      "capabilities": ["streaming", "vision"],
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": false,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": true,
+        "audio_input": false
+      },
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",
@@ -80,16 +141,51 @@
       "provider_id": "gitlawb-opengateway",
       "model_id": "mimo-v2-pro",
       "display_name": "MiMo V2 Pro via Gitlawb OpenGateway",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 4,
-      "defaults": {
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "reasoning"
+        ]
       },
-      "capabilities": ["streaming", "reasoning"],
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
+      },
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",
@@ -105,17 +201,52 @@
       "provider_id": "gitlawb-opengateway",
       "model_id": "mimo-v2.5",
       "display_name": "MiMo V2.5 via Gitlawb OpenGateway",
-      "type": "reasoning",
+      "type": "chat",
       "enabled": true,
       "priority": 5,
-      "defaults": {
-        "chat": true,
-        "reasoning": true
+      "routing": {
+        "default_for": [
+          "chat",
+          "reasoning"
+        ]
       },
-      "capabilities": ["streaming", "reasoning"],
-      "supports_thinking": true,
-      "thinking_levels": ["low", "medium", "high", "xhigh"],
-      "default_thinking_level": "medium",
+      "capabilities": {
+        "text_input": true,
+        "text_output": true,
+        "streaming": true,
+        "thinking": true,
+        "tool_calling": false,
+        "parallel_tool_calls": false,
+        "json_schema": false,
+        "structured_output": false,
+        "image_input": false,
+        "audio_input": false
+      },
+      "thinking": {
+        "supported": true,
+        "levels": [
+          "low",
+          "medium",
+          "high",
+          "xhigh"
+        ],
+        "default_level": "medium",
+        "provider_mapping": {
+          "low": {
+            "reasoning_effort": "low"
+          },
+          "medium": {
+            "reasoning_effort": "medium"
+          },
+          "high": {
+            "reasoning_effort": "high"
+          },
+          "xhigh": {
+            "reasoning_effort": "high"
+          },
+          "none": {}
+        }
+      },
       "metadata": {
         "source": "gitlawb-opengateway",
         "privacy": "external_api_key_gateway",

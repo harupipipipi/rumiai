@@ -19,17 +19,16 @@
     "agent": "kimi-k2-0711-preview",
     "legacy": "moonshot-v1-8k"
   },
-  "capabilities": {
-    "native_tool_calling": true,
-    "structured_outputs": true,
-    "vision": false,
-    "embeddings": false,
-    "streaming": true,
-    "reasoning": true
-  },
   "config": {
     "api_compatibility": "openai",
     "model_sync": "fixed_allowlist",
     "official_model_ids_need_refresh": true
-  }
+  },
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "reasoning",
+    "openai_compatible"
+  ]
 }

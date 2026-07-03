@@ -18,11 +18,11 @@
     "large": "gemini-2.5-pro",
     "embedding": "gemini-embedding-001"
   },
-  "capabilities": {
-    "native_tool_calling": true,
-    "vision": true,
-    "embeddings": true,
-    "streaming": true,
-    "structured_output": true
-  }
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "vision",
+    "embedding"
+  ]
 }

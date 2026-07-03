@@ -11,8 +11,10 @@
   "default_base_url": "http://127.0.0.1:8001/v1",
   "credential_required": false,
   "default_model": "custom-model",
-  "capabilities": {
-    "native_tool_calling": true,
-    "streaming": true
-  }
+  "catalog_features": [
+    "chat",
+    "streaming",
+    "tool_calls",
+    "openai_compatible"
+  ]
 }
