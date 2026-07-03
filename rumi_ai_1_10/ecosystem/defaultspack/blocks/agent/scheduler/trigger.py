@@ -15,6 +15,20 @@ from blocks._common import ok, error
 from domain.agent.scheduler import Scheduler
 
 
+def _trigger_failure_response(history_entry):
+    err_msg = str(history_entry.get("error") or "schedule execution failed")
+    response = error("schedule trigger failed: " + err_msg, "SCHEDULE_TRIGGER_FAILED")
+    response["data"] = {
+        "history_entry": history_entry,
+        "cause_code": history_entry.get("error_code"),
+    }
+    if history_entry.get("error_code") == "NOT_FOUND":
+        response["_http_status"] = 409
+    else:
+        response["_http_status"] = 500
+    return response
+
+
 def run(input_data, context):
     schedule_id = input_data.get("schedule_id") if isinstance(input_data, dict) else None
     if not schedule_id:
@@ -28,5 +42,8 @@ def run(input_data, context):
 
     if history_entry is None:
         return error("schedule not found: " + schedule_id, "NOT_FOUND")
+
+    if history_entry.get("status") == "error":
+        return _trigger_failure_response(history_entry)
 
     return ok(history_entry)
