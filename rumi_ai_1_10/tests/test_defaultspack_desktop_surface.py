@@ -121,6 +121,31 @@ class TestDefaultspackDesktopSurface(unittest.TestCase):
         self.assertEqual(busy_event["port_owners"], [{"pid": "123", "command": "python3"}])
         self.assertNotIn("RUMI_API_TOKEN", events[0]["env"])
 
+    def test_wait_until_chat_ready_sleeps_after_unmatched_200_response(self):
+        from defaultspack import desktop_app
+
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self, _limit):
+                return b"still warming"
+
+        sleeps = []
+
+        with patch.object(desktop_app.urllib.request, "urlopen", return_value=FakeResponse()):
+            with patch.object(desktop_app.time, "time", side_effect=[0.0, 0.0, 0.1, 0.3]):
+                with patch.object(desktop_app.time, "sleep", side_effect=sleeps.append):
+                    result = desktop_app._wait_until_chat_ready("http://localhost:8766/chat", timeout=0.25)
+
+        self.assertFalse(result)
+        self.assertEqual(sleeps, [0.2, 0.2])
+
     def test_managed_pack_root_alias_supports_ecosystem_defaultspack_imports(self):
         from defaultspack import desktop_app
 

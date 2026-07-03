@@ -499,13 +499,15 @@ fn is_legacy_defaultspack_app_bundle(app_dir: &Path) -> bool {
     let plist = fs::read_to_string(app_dir.join("Contents").join("Info.plist")).unwrap_or_default();
     let launch = fs::read_to_string(app_dir.join("Contents").join("MacOS").join("launch"))
         .unwrap_or_default();
-    let looks_like_defaultspack = plist.contains("Defaultspack")
-        || plist.contains("defaultspack")
-        || launch.contains("defaultspack");
+    let has_generated_legacy_bundle_id = plist.contains("ai.rumi.pack.defaultspack");
+    let has_generated_launch_shape = launch.contains("pack-shell")
+        && launch.contains("run \"defaultspack\"")
+        && (launch.contains("/Applications/Rumi AI.app/")
+            || launch.contains("Contents/Resources/app/bundled/pack-shell"));
     let looks_legacy = plist.contains("ai.rumi.pack.defaultspack")
         || !launch.contains("--api-token")
         || !launch.contains("RUMI_LOG_DIR");
-    looks_like_defaultspack && looks_legacy
+    has_generated_legacy_bundle_id && has_generated_launch_shape && looks_legacy
 }
 
 fn cleanup_legacy_defaultspack_app_bundles(apps_base: &Path, current_bundle_dir: &Path) {
@@ -1434,6 +1436,7 @@ mod tests {
         let dir = std::env::temp_dir().join("rumi_dock_test_legacy_detection");
         let app_dir = dir.join("Rumi_Defaultspack.app");
         let macos_dir = app_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
         fs::create_dir_all(&macos_dir).unwrap();
         fs::write(
             app_dir.join("Contents").join("Info.plist"),
@@ -1452,11 +1455,36 @@ mod tests {
     }
 
     #[test]
+    fn legacy_defaultspack_bundle_detection_rejects_manual_same_name_app() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_manual_legacy_reject");
+        let app_dir = dir.join("Rumi_Defaultspack.app");
+        let macos_dir = app_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::write(
+            app_dir.join("Contents").join("Info.plist"),
+            "<string>Manual Defaultspack Launcher</string>",
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+echo "manual defaultspack helper"
+"#,
+        )
+        .unwrap();
+
+        assert!(!is_legacy_defaultspack_app_bundle(&app_dir));
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn cleanup_legacy_defaultspack_bundle_removes_only_old_underscore_bundle() {
         let dir = std::env::temp_dir().join("rumi_dock_test_legacy_cleanup");
         let legacy_dir = dir.join("Rumi_Defaultspack.app");
         let current_dir = dir.join("Rumi Defaultspack.app");
         let macos_dir = legacy_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
         fs::create_dir_all(&macos_dir).unwrap();
         fs::create_dir_all(&current_dir).unwrap();
         fs::write(
@@ -1473,6 +1501,35 @@ mod tests {
         cleanup_legacy_defaultspack_app_bundles(&dir, &current_dir);
 
         assert!(!legacy_dir.exists());
+        assert!(current_dir.exists());
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn cleanup_legacy_defaultspack_bundle_keeps_manual_same_name_app() {
+        let dir = std::env::temp_dir().join("rumi_dock_test_manual_legacy_cleanup");
+        let legacy_dir = dir.join("Rumi_Defaultspack.app");
+        let current_dir = dir.join("Rumi Defaultspack.app");
+        let macos_dir = legacy_dir.join("Contents").join("MacOS");
+        fs::remove_dir_all(&dir).ok();
+        fs::create_dir_all(&macos_dir).unwrap();
+        fs::create_dir_all(&current_dir).unwrap();
+        fs::write(
+            legacy_dir.join("Contents").join("Info.plist"),
+            "<string>Manual Defaultspack Launcher</string>",
+        )
+        .unwrap();
+        fs::write(
+            macos_dir.join("launch"),
+            r#"#!/bin/bash
+echo "manual defaultspack helper"
+"#,
+        )
+        .unwrap();
+
+        cleanup_legacy_defaultspack_app_bundles(&dir, &current_dir);
+
+        assert!(legacy_dir.exists());
         assert!(current_dir.exists());
         fs::remove_dir_all(&dir).ok();
     }

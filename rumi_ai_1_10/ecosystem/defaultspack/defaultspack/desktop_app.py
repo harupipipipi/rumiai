@@ -233,7 +233,8 @@ def _wait_until_chat_ready(url: str, timeout: float = 10.0) -> bool:
                 if 200 <= response.status < 300 and ("<title>" in body or 'id="root"' in body):
                     return True
         except (OSError, urllib.error.URLError):
-            time.sleep(0.2)
+            pass
+        time.sleep(0.2)
     return False
 
 
