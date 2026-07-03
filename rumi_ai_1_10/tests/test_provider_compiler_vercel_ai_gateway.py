@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -115,3 +118,23 @@ def test_vercel_ai_gateway_legacy_provider_moves_gateway_params_to_body(monkeypa
     assert captured["body"]["providerOptions"] == {"google": {"safetySettings": []}}
     assert captured["body"]["models"] == ["google/gemma-4-31b-it"]
     assert "reasoning_effort" not in captured["body"]
+
+
+@pytest.mark.skipif(
+    not os.environ.get("RUMI_RUN_VERCEL_AI_GATEWAY_LIVE")
+    or not (os.environ.get("AI_GATEWAY_API_KEY") or os.environ.get("VERCEL_AI_GATEWAY_API_KEY")),
+    reason="Set RUMI_RUN_VERCEL_AI_GATEWAY_LIVE=1 and AI_GATEWAY_API_KEY or VERCEL_AI_GATEWAY_API_KEY to run live smoke.",
+)
+def test_vercel_ai_gateway_live_gemma_smoke_is_opt_in():
+    from domain.ai_client.providers import detect_available_providers
+
+    provider = detect_available_providers()["vercel-ai-gateway"]
+    response = provider.complete(
+        "google/gemma-4-31b-it",
+        [{"role": "user", "content": "Reply with exactly: ok"}],
+        [],
+        {"max_tokens": 8, "reasoning_effort": "none"},
+    )
+
+    assert isinstance(response.get("content"), str)
+    assert response["content"].strip()

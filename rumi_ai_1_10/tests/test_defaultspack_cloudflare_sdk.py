@@ -629,3 +629,394 @@ def test_cloudflare_sdk_adapter_redacts_token_from_errors(monkeypatch):
 
     assert "cloudflare-secret-token" not in str(error)
     assert error["message"] == "permission denied for [redacted]"
+
+
+def test_cloudflare_sdk_adapter_redacts_token_from_rest_error(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def rest_fetcher(_method: str, _path: str, _payload: dict[str, object] | None, _headers: dict[str, str]):
+        raise sdk_client.CloudflareSDKOperationError(
+            "permission denied for cloudflare-secret-token",
+            error_type="CloudflareAPIError",
+            status_code=403,
+        )
+
+    adapter = sdk_client.CloudflareSDKAdapter(
+        api_token="cloudflare-secret-token",
+        account_id="account-id",
+        rest_fetcher=rest_fetcher,
+    )
+    try:
+        adapter.list_workers()
+    except sdk_client.CloudflareSDKOperationError as exc:
+        error = exc.to_dict()
+    else:
+        raise AssertionError("Cloudflare REST errors should be wrapped")
+
+    assert "cloudflare-secret-token" not in str(error)
+    assert error["message"] == "permission denied for [redacted]"
+    assert error["error_type"] == "CloudflareAPIError"
+    assert error["status_code"] == 403
+
+
+def test_cloudflare_sdk_adapter_uses_rest_fallback_when_sdk_missing(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    calls: list[tuple[str, str, dict[str, object] | None, dict[str, str]]] = []
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def rest_fetcher(method: str, path: str, payload: dict[str, object] | None, headers: dict[str, str]):
+        calls.append((method, path, payload, headers))
+        return {"success": True, "result": [{"id": "worker-id"}]}
+
+    adapter = sdk_client.CloudflareSDKAdapter(
+        api_token="cloudflare-secret-token",
+        account_id="account-id",
+        rest_fetcher=rest_fetcher,
+    )
+
+    workers = adapter.list_workers(per_page=2)
+
+    assert workers == [{"id": "worker-id"}]
+    assert calls[0][0] == "GET"
+    assert calls[0][1] == "/accounts/account-id/workers/scripts?per_page=2"
+    assert calls[0][2] is None
+    assert calls[0][3]["Authorization"] == "Bearer cloudflare-secret-token"
+
+
+def test_cloudflare_sdk_adapter_routes_runner_resources_through_sdk(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class Resource:
+        def __init__(self, **payload: object) -> None:
+            self._payload = payload
+
+        def model_dump(self, *, mode: str = "json", exclude_none: bool = True) -> dict[str, object]:
+            assert mode == "json"
+            assert exclude_none is True
+            return dict(self._payload)
+
+    class WorkerSecrets:
+        def update(self, script_name: str, **kwargs: object) -> Resource:
+            calls.append(("workers.scripts.secrets.update", {"script_name": script_name, **kwargs}))
+            return Resource(name=str(kwargs["name"]))
+
+    class WorkerDeployments:
+        def list(self, script_name: str, **kwargs: object) -> list[Resource]:
+            calls.append(("workers.scripts.deployments.list", {"script_name": script_name, **kwargs}))
+            return [Resource(id="worker-deployment")]
+
+        def create(self, script_name: str, **kwargs: object) -> Resource:
+            calls.append(("workers.scripts.deployments.create", {"script_name": script_name, **kwargs}))
+            return Resource(id="worker-deployment")
+
+    class WorkerSettings:
+        def edit(self, script_name: str, **kwargs: object) -> Resource:
+            calls.append(("workers.scripts.settings.edit", {"script_name": script_name, **kwargs}))
+            return Resource(updated=True)
+
+    class WorkerScripts:
+        def __init__(self) -> None:
+            self.deployments = WorkerDeployments()
+            self.settings = WorkerSettings()
+            self.secrets = WorkerSecrets()
+
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("workers.scripts.list", dict(kwargs)))
+            return [Resource(id="rumi-worker")]
+
+        def get(self, script_name: str, **kwargs: object) -> Resource:
+            calls.append(("workers.scripts.get", {"script_name": script_name, **kwargs}))
+            return Resource(id=script_name)
+
+        def update(self, script_name: str, **kwargs: object) -> Resource:
+            calls.append(("workers.scripts.update", {"script_name": script_name, **kwargs}))
+            return Resource(id=script_name, updated=True)
+
+        def delete(self, script_name: str, **kwargs: object) -> dict[str, object]:
+            calls.append(("workers.scripts.delete", {"script_name": script_name, **kwargs}))
+            return {"id": script_name, "deleted": True}
+
+    class D1Database:
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("d1.database.list", dict(kwargs)))
+            return [Resource(name="rumi-d1", uuid="d1-id")]
+
+        def create(self, **kwargs: object) -> Resource:
+            calls.append(("d1.database.create", dict(kwargs)))
+            return Resource(name=str(kwargs["name"]), uuid="d1-id")
+
+        def get(self, database_id: str, **kwargs: object) -> Resource:
+            calls.append(("d1.database.get", {"database_id": database_id, **kwargs}))
+            return Resource(uuid=database_id)
+
+        def delete(self, database_id: str, **kwargs: object) -> dict[str, object]:
+            calls.append(("d1.database.delete", {"database_id": database_id, **kwargs}))
+            return {"uuid": database_id, "deleted": True}
+
+        def query(self, database_id: str, **kwargs: object) -> Resource:
+            calls.append(("d1.database.query", {"database_id": database_id, **kwargs}))
+            return Resource(rows=[])
+
+    class R2Objects:
+        def put(self, bucket_name: str, **kwargs: object) -> Resource:
+            calls.append(("r2.buckets.objects.put", {"bucket_name": bucket_name, **kwargs}))
+            return Resource(key=str(kwargs["key"]))
+
+    class R2Buckets:
+        def __init__(self) -> None:
+            self.objects = R2Objects()
+
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("r2.buckets.list", dict(kwargs)))
+            return [Resource(name="rumi-bucket")]
+
+        def create(self, **kwargs: object) -> Resource:
+            calls.append(("r2.buckets.create", dict(kwargs)))
+            return Resource(name=str(kwargs["name"]))
+
+        def get(self, name: str, **kwargs: object) -> Resource:
+            calls.append(("r2.buckets.get", {"name": name, **kwargs}))
+            return Resource(name=name)
+
+        def delete(self, name: str, **kwargs: object) -> dict[str, object]:
+            calls.append(("r2.buckets.delete", {"name": name, **kwargs}))
+            return {"name": name, "deleted": True}
+
+    class QueueConsumers:
+        def create(self, queue_name: str, **kwargs: object) -> Resource:
+            calls.append(("queues.consumers.create", {"queue_name": queue_name, **kwargs}))
+            return Resource(id="consumer-id")
+
+    class Queues:
+        def __init__(self) -> None:
+            self.consumers = QueueConsumers()
+
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("queues.list", dict(kwargs)))
+            return [Resource(queue_name="rumi-queue")]
+
+        def create(self, **kwargs: object) -> Resource:
+            calls.append(("queues.create", dict(kwargs)))
+            return Resource(queue_name=str(kwargs["queue_name"]))
+
+        def get(self, queue_name: str, **kwargs: object) -> Resource:
+            calls.append(("queues.get", {"queue_name": queue_name, **kwargs}))
+            return Resource(queue_name=queue_name)
+
+        def delete(self, queue_name: str, **kwargs: object) -> dict[str, object]:
+            calls.append(("queues.delete", {"queue_name": queue_name, **kwargs}))
+            return {"queue_name": queue_name, "deleted": True}
+
+    class WorkflowInstances:
+        def create(self, workflow_name: str, **kwargs: object) -> Resource:
+            calls.append(("workflows.instances.create", {"workflow_name": workflow_name, **kwargs}))
+            return Resource(id="instance-id")
+
+    class Workflows:
+        def __init__(self) -> None:
+            self.instances = WorkflowInstances()
+
+        def list(self, **kwargs: object) -> list[Resource]:
+            calls.append(("workflows.list", dict(kwargs)))
+            return [Resource(name="rumi-workflow")]
+
+        def get(self, workflow_name: str, **kwargs: object) -> Resource:
+            calls.append(("workflows.get", {"workflow_name": workflow_name, **kwargs}))
+            return Resource(name=workflow_name)
+
+        def update(self, workflow_name: str, **kwargs: object) -> Resource:
+            calls.append(("workflows.update", {"workflow_name": workflow_name, **kwargs}))
+            return Resource(name=workflow_name, updated=True)
+
+        def delete(self, workflow_name: str, **kwargs: object) -> dict[str, object]:
+            calls.append(("workflows.delete", {"workflow_name": workflow_name, **kwargs}))
+            return {"name": workflow_name, "deleted": True}
+
+    class FakeCloudflare:
+        def __init__(self, **kwargs: object) -> None:
+            calls.append(("Cloudflare", dict(kwargs)))
+            self.workers = SimpleNamespace(scripts=WorkerScripts())
+            self.d1 = SimpleNamespace(database=D1Database())
+            self.r2 = SimpleNamespace(buckets=R2Buckets())
+            self.queues = Queues()
+            self.workflows = Workflows()
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: object())
+    monkeypatch.setattr(sdk_client.importlib, "import_module", lambda _name: SimpleNamespace(Cloudflare=FakeCloudflare))
+
+    adapter = sdk_client.CloudflareSDKAdapter(api_token="cloudflare-secret-token", account_id="account-id")
+
+    adapter.list_workers(per_page=2)
+    adapter.get_worker("rumi-worker")
+    adapter.upload_worker_module("rumi-worker", main_module="worker.js", modules=[], bindings={})
+    adapter.patch_worker_settings("rumi-worker", settings={"logpush": True})
+    adapter.list_worker_deployments("rumi-worker")
+    adapter.create_worker_deployment("rumi-worker", version_id="version-id")
+    adapter.put_worker_secret("rumi-worker", "RUMI_SECRET", "secret-value")
+    adapter.delete_worker("rumi-worker")
+    adapter.list_d1_databases()
+    adapter.create_d1_database("rumi-d1")
+    adapter.get_d1_database("d1-id")
+    adapter.query_d1_database("d1-id", "select 1")
+    adapter.delete_d1_database("d1-id")
+    adapter.list_r2_buckets()
+    adapter.create_r2_bucket("rumi-bucket")
+    adapter.get_r2_bucket("rumi-bucket")
+    adapter.upload_r2_object("rumi-bucket", "key.txt", "value")
+    adapter.delete_r2_bucket("rumi-bucket")
+    adapter.list_queues()
+    adapter.create_queue("rumi-queue")
+    adapter.get_queue("rumi-queue")
+    adapter.create_queue_consumer("rumi-queue", script_name="rumi-worker")
+    adapter.delete_queue("rumi-queue")
+    adapter.list_workflows()
+    adapter.get_workflow("rumi-workflow")
+    adapter.put_workflow("rumi-workflow", script_name="rumi-worker", class_name="RumiWorkflow")
+    adapter.create_workflow_instance("rumi-workflow", {"hello": "world"})
+    adapter.delete_workflow("rumi-workflow")
+
+    call_names = [name for name, _payload in calls if name != "Cloudflare"]
+    assert call_names == [
+        "workers.scripts.list",
+        "workers.scripts.get",
+        "workers.scripts.update",
+        "workers.scripts.settings.edit",
+        "workers.scripts.deployments.list",
+        "workers.scripts.deployments.create",
+        "workers.scripts.secrets.update",
+        "workers.scripts.delete",
+        "d1.database.list",
+        "d1.database.create",
+        "d1.database.get",
+        "d1.database.query",
+        "d1.database.delete",
+        "r2.buckets.list",
+        "r2.buckets.create",
+        "r2.buckets.get",
+        "r2.buckets.objects.put",
+        "r2.buckets.delete",
+        "queues.list",
+        "queues.create",
+        "queues.get",
+        "queues.consumers.create",
+        "queues.delete",
+        "workflows.list",
+        "workflows.get",
+        "workflows.update",
+        "workflows.instances.create",
+        "workflows.delete",
+    ]
+    assert any(name == "workers.scripts.secrets.update" for name in call_names)
+
+
+def test_cloudflare_runner_provisioner_plan_and_dry_run_are_side_effect_free():
+    from domain.cloudflare.provisioning import CloudflareRunnerProvisioner, CloudflareRunnerSpec
+
+    class Client:
+        calls: list[str] = []
+
+    provisioner = CloudflareRunnerProvisioner(Client(), capabilities=["cloudflare.runner.deploy"])
+    spec = CloudflareRunnerSpec(account_id="acct", prefix="Rumi Test!")
+
+    plan = provisioner.plan(spec)
+    dry_run = provisioner.deploy(spec, dry_run=True)
+
+    assert plan["status"] == "ready"
+    assert dry_run["dry_run"] is True
+    assert plan["resources"] == {
+        "worker": "rumi-test-worker",
+        "d1": "rumi-test-d1",
+        "r2": "rumi-test-artifacts",
+        "queue": "rumi-test-queue",
+        "workflow": "rumi-test-workflow",
+    }
+    assert Client.calls == []
+
+
+def test_cloudflare_runner_provisioner_blocks_deploy_without_capability():
+    from domain.cloudflare.provisioning import CloudflareRunnerProvisioner, CloudflareRunnerSpec
+
+    class Client:
+        def __getattr__(self, name: str):
+            raise AssertionError(f"unexpected write call: {name}")
+
+    result = CloudflareRunnerProvisioner(Client()).deploy(
+        CloudflareRunnerSpec(account_id="acct", prefix="rumi-test"),
+        dry_run=False,
+    )
+
+    assert result["status"] == "blocked"
+    assert result["blockers"][0]["code"] == "insufficient_capabilities"
+
+
+def test_cloudflare_runner_provisioner_deploy_order_is_stable():
+    from domain.cloudflare.provisioning import CloudflareRunnerProvisioner, CloudflareRunnerSpec
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def list_d1_databases(self, **_kwargs: object) -> list[dict[str, object]]:
+            self.calls.append("list_d1")
+            return []
+
+        def create_d1_database(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("create_d1")
+            return {"uuid": "d1-id"}
+
+        def get_r2_bucket(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("get_r2")
+            raise RuntimeError("missing")
+
+        def create_r2_bucket(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("create_r2")
+            return {"name": "bucket"}
+
+        def get_queue(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("get_queue")
+            raise RuntimeError("missing")
+
+        def create_queue(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("create_queue")
+            return {"queue_name": "queue"}
+
+        def get_workflow(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("get_workflow")
+            raise RuntimeError("missing")
+
+        def put_workflow(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("put_workflow")
+            return {"name": "workflow"}
+
+        def upload_worker_module(self, *_args: object, **_kwargs: object) -> dict[str, object]:
+            self.calls.append("upload_worker")
+            return {"id": "worker"}
+
+        def patch_worker_secrets(self, *_args: object, **_kwargs: object) -> list[dict[str, object]]:
+            self.calls.append("patch_secrets")
+            return []
+
+    client = Client()
+    result = CloudflareRunnerProvisioner(client, capabilities=["cloudflare.runner.deploy"]).deploy(
+        CloudflareRunnerSpec(account_id="acct", prefix="rumi-test"),
+        dry_run=False,
+    )
+
+    assert result["status"] == "deployed"
+    assert client.calls == [
+        "list_d1",
+        "create_d1",
+        "get_r2",
+        "create_r2",
+        "get_queue",
+        "create_queue",
+        "get_workflow",
+        "put_workflow",
+        "upload_worker",
+        "patch_secrets",
+    ]
