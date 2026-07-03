@@ -42,6 +42,35 @@ def _handler_from_code(code: str):
     return namespace["handler"]
 
 
+def _generate_ai_code(monkeypatch, pack: str, content: str):
+    builder = _load_pack_module(pack, "domain/tool/builder.py")
+
+    class StubAIClient:
+        def list_providers(self):
+            return [{"id": "local"}]
+
+        def list_models(self, provider):
+            return [{"id": "local/model"}]
+
+        def complete(self, model, messages):
+            return {"content": content}
+
+    monkeypatch.setattr(builder, "AIClient", StubAIClient)
+    return builder.generate_handler_code_with_ai(
+        "generated_tool",
+        "Generated tool",
+        {"type": "object", "properties": {}, "required": []},
+    )
+
+
+def _assert_safe_template(code: str):
+    assert "# TODO: implement" not in code
+    handler = _handler_from_code(code)
+    result = handler({}, {})
+    assert result["is_error"] is True
+    assert result["widget"]["code"] == "NOT_IMPLEMENTED"
+
+
 @pytest.mark.parametrize("pack", PACKS)
 def test_builder_fallback_template_validates_schema_then_fails_closed(pack):
     builder = _load_pack_module(pack, "domain/tool/builder.py")
@@ -158,6 +187,83 @@ def test_builder_valid_fenced_ai_output_is_used(monkeypatch, pack):
     assert code == handler_code.strip()
     handler = _handler_from_code(code)
     assert handler({}, {}) == {"result": "ok", "is_error": False, "widget": None}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "# def handler(arguments, context):\nvalue = 1\n",
+        "def handler_wrong(arguments, context):\n    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n",
+        "def handler(arguments):\n    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n",
+        "def handler(arguments, context, extra):\n    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n",
+        "def handler(*args):\n    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n",
+    ],
+)
+@pytest.mark.parametrize("pack", PACKS)
+def test_builder_rejects_ai_output_without_exact_handler(monkeypatch, pack, content):
+    code = _generate_ai_code(monkeypatch, pack, content)
+
+    assert code != content.strip()
+    _assert_safe_template(code)
+
+
+@pytest.mark.parametrize("pack", PACKS)
+def test_builder_rejects_ai_output_with_top_level_side_effects(monkeypatch, pack):
+    content = (
+        "raise RuntimeError('top-level code must not run')\n"
+        "def handler(arguments, context):\n"
+        "    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n"
+    )
+
+    code = _generate_ai_code(monkeypatch, pack, content)
+
+    assert "top-level code must not run" not in code
+    _assert_safe_template(code)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        (
+            "def handler(arguments: (1 / 0), context):\n"
+            "    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n"
+        ),
+        (
+            "def handler(arguments, context) -> (1 / 0):\n"
+            "    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n"
+        ),
+        (
+            "def handler(arguments: dict, context: dict):\n"
+            "    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n"
+        ),
+        (
+            "def handler(arguments, context):  # type: (dict, dict) -> dict\n"
+            "    return {\"result\": \"ok\", \"is_error\": False, \"widget\": None}\n"
+        ),
+    ],
+)
+@pytest.mark.parametrize("pack", PACKS)
+def test_builder_rejects_ai_output_with_annotations(monkeypatch, pack, content):
+    code = _generate_ai_code(monkeypatch, pack, content)
+
+    assert code != content.strip()
+    _assert_safe_template(code)
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "def handler(arguments, context):\n    continue\n",
+        "def handler(arguments, context):\n    await something()\n",
+        "def handler(arguments, context):\n    nonlocal missing_outer_binding\n",
+    ],
+)
+@pytest.mark.parametrize("pack", PACKS)
+def test_builder_rejects_ai_output_with_compile_invalid_body(monkeypatch, pack, content):
+    code = _generate_ai_code(monkeypatch, pack, content)
+
+    assert code != content.strip()
+    _assert_safe_template(code)
 
 
 @pytest.mark.parametrize("pack", PACKS)

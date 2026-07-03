@@ -2,6 +2,7 @@
 domain.tool.builder — AI handler generation helpers for runtime tools.
 Falls back to a fail-closed executable template when AI code is unavailable.
 """
+import ast
 import json
 import sys
 import os
@@ -161,11 +162,60 @@ def _strip_markdown_fences(content):
 
 
 def _is_valid_handler_code(content):
-    if not content or "def handler" not in content:
+    if not content:
         return False
     try:
-        compile(content, "<generated_tool_handler>", "exec")
+        tree = ast.parse(
+            content,
+            filename="<generated_tool_handler>",
+            mode="exec",
+            type_comments=True,
+        )
     except SyntaxError:
+        return False
+
+    handler_node = None
+    for index, node in enumerate(tree.body):
+        if (
+            index == 0
+            and isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            continue
+        if isinstance(node, ast.FunctionDef) and node.name == "handler":
+            if handler_node is not None:
+                return False
+            handler_node = node
+            continue
+        return False
+
+    if handler_node is None or handler_node.decorator_list:
+        return False
+    if handler_node.returns is not None or getattr(handler_node, "type_comment", None):
+        return False
+    if getattr(handler_node, "type_params", None):
+        return False
+
+    args = handler_node.args
+    if (
+        args.posonlyargs
+        or args.vararg
+        or args.kwonlyargs
+        or args.kw_defaults
+        or args.kwarg
+        or args.defaults
+    ):
+        return False
+    for arg in args.args:
+        if arg.annotation is not None or getattr(arg, "type_comment", None):
+            return False
+    if [arg.arg for arg in args.args] != ["arguments", "context"]:
+        return False
+
+    try:
+        compile(tree, "<generated_tool_handler>", "exec")
+    except (SyntaxError, ValueError, TypeError):
         return False
     return True
 
