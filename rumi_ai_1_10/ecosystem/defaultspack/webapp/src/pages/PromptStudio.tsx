@@ -934,7 +934,7 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
   };
 
   return (
-    <div className="flex h-screen min-h-0 flex-col bg-[#09090b] text-zinc-300">
+    <div className="rumi-page-shell flex min-h-0 flex-col bg-[#09090b] text-zinc-300">
       <header className="flex h-12 shrink-0 items-center justify-between border-b border-zinc-800/70 bg-zinc-950/80 px-3 backdrop-blur">
         <div className="flex min-w-0 items-center gap-2">
           <button type="button" onClick={goBack} className="rounded-md p-2 text-zinc-500 hover:bg-zinc-900 hover:text-zinc-100" aria-label={msg("promptStudio.back")}>
@@ -1011,7 +1011,7 @@ export function PromptStudio({ locale = "auto" }: { locale?: LocaleSetting } = {
         </div>
       )}
 
-      <div className="grid min-h-0 flex-1 grid-cols-[292px_minmax(0,1fr)_390px] overflow-hidden max-[1100px]:grid-cols-[260px_minmax(0,1fr)] max-[780px]:grid-cols-1">
+      <div className="grid min-h-0 flex-1 grid-cols-[292px_minmax(0,1fr)_390px] max-[1100px]:grid-cols-[260px_minmax(0,1fr)] max-[780px]:grid-cols-1">
         <aside className="flex min-h-0 flex-col border-r border-zinc-800/70 bg-zinc-950/55 max-[780px]:max-h-[34vh] max-[780px]:border-b max-[780px]:border-r-0">
           <div className="border-b border-zinc-800/70 p-3">
             <div className="relative">

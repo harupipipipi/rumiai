@@ -16,7 +16,27 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: geometricPrecision;
-  overflow: hidden; /* Prevent body scroll, handle inside panes */
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Defaultspack scroll ownership contract:
+   route shells size themselves to the visual viewport and provide fallback scroll;
+   intentional panes own scrolling with min-h-0 plus overflow-y-auto/overflow-auto;
+   body remains unlocked so non-shell routes are not globally clipped. */
+.rumi-app-shell,
+.rumi-page-shell {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 /* ----------------------------------
@@ -988,10 +1008,13 @@ body {
 
 /* Minimal shell: remove visual frames while preserving content and layout. */
 html,
-body,
-#root {
+body {
   max-width: 100%;
   overflow-x: hidden;
+}
+
+#root {
+  max-width: 100%;
 }
 
 #root *,

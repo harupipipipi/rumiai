@@ -793,6 +793,101 @@ async function openCodingWidget(page: Page) {
   await expect(page.locator(".coding-cockpit")).toBeVisible();
 }
 
+async function scrollLayoutMetrics(page: Page) {
+  return page.evaluate(() => {
+    const shell = document.querySelector(".rumi-app-shell") as HTMLElement | null;
+    const chatPane = document.querySelector(".rumi-chat-pane") as HTMLElement | null;
+    const chatScroller = document.querySelector(".rumi-chat-scroll-pane") as HTMLElement | null;
+    const shellRect = shell?.getBoundingClientRect();
+    const chatPaneRect = chatPane?.getBoundingClientRect();
+    const shellStyle = shell ? window.getComputedStyle(shell) : null;
+    const chatScrollerStyle = chatScroller ? window.getComputedStyle(chatScroller) : null;
+    const bodyStyle = window.getComputedStyle(document.body);
+    return {
+      bodyOverflowY: bodyStyle.overflowY,
+      chatClientHeight: chatScroller?.clientHeight ?? 0,
+      chatOverflowY: chatScrollerStyle?.overflowY ?? "",
+      chatPaneHeight: chatPaneRect?.height ?? 0,
+      documentScrollWidth: document.documentElement.scrollWidth,
+      shellClientHeight: shell?.clientHeight ?? 0,
+      shellHeight: shellRect?.height ?? 0,
+      shellScrollHeight: shell?.scrollHeight ?? 0,
+      shellOverflowY: shellStyle?.overflowY ?? "",
+      shellWidth: shellRect?.width ?? 0,
+      viewportHeight: window.innerHeight,
+      viewportWidth: window.innerWidth,
+    };
+  });
+}
+
+test("app shell keeps pane scrolling and document fallback across constrained viewports", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 420 });
+  await openDefaultspack(page, "/chat");
+
+  await expect(page.locator(".rumi-app-shell")).toBeVisible();
+  const compact = await scrollLayoutMetrics(page);
+  expect(compact.bodyOverflowY).not.toBe("hidden");
+  expect(compact.shellOverflowY).toBe("auto");
+  expect(compact.shellHeight).toBeLessThanOrEqual(compact.viewportHeight + 1);
+  expect(compact.chatPaneHeight).toBeGreaterThan(80);
+  expect(compact.chatClientHeight).toBeGreaterThan(40);
+  expect(compact.chatOverflowY).toBe("auto");
+  const baselineShellHeight = compact.shellScrollHeight;
+
+  await page.evaluate(() => {
+    const probe = document.createElement("div");
+    probe.dataset.testid = "scroll-fallback-probe";
+    probe.textContent = "scroll fallback probe";
+    probe.style.cssText = [
+      "flex: 0 0 720px",
+      "height: 720px",
+      "min-height: 720px",
+      "width: 1px",
+      "pointer-events: none",
+    ].join(";");
+    document.querySelector(".rumi-app-shell")?.appendChild(probe);
+  });
+
+  const fallback = await page.evaluate(async () => {
+    const shell = document.querySelector(".rumi-app-shell") as HTMLElement | null;
+    if (!shell) throw new Error("shell not found");
+    shell.scrollTop = 0;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    const before = shell.scrollTop;
+    shell.scrollTop = shell.scrollHeight;
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    return {
+      before,
+      after: shell.scrollTop,
+      clientHeight: shell.clientHeight,
+      scrollHeight: shell.scrollHeight,
+    };
+  });
+  expect(fallback.scrollHeight).toBeGreaterThan(baselineShellHeight);
+  expect(fallback.scrollHeight).toBeGreaterThan(fallback.clientHeight);
+  expect(fallback.after).toBeGreaterThan(fallback.before);
+
+  await page.evaluate(() => {
+    document.querySelector("[data-testid='scroll-fallback-probe']")?.remove();
+    const shell = document.querySelector(".rumi-app-shell") as HTMLElement | null;
+    if (shell) shell.scrollTop = 0;
+  });
+
+  await page.setViewportSize({ width: 390, height: 300 });
+  await page.locator("textarea.rumi-composer-textarea").click();
+  const keyboardLike = await scrollLayoutMetrics(page);
+  expect(keyboardLike.bodyOverflowY).not.toBe("hidden");
+  expect(keyboardLike.shellHeight).toBeLessThanOrEqual(keyboardLike.viewportHeight + 1);
+  expect(keyboardLike.chatClientHeight).toBeGreaterThanOrEqual(24);
+  expect(keyboardLike.chatOverflowY).toBe("auto");
+
+  await page.setViewportSize({ width: 320, height: 700 });
+  const narrow = await scrollLayoutMetrics(page);
+  expect(narrow.bodyOverflowY).not.toBe("hidden");
+  expect(narrow.shellWidth).toBeLessThanOrEqual(narrow.viewportWidth + 1);
+  expect(narrow.documentScrollWidth).toBeGreaterThan(0);
+});
+
 test("tool hub search suggestions close on outside click while keeping filtered actions usable", async ({ page }) => {
   await openDefaultspack(page);
 

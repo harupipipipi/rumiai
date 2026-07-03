@@ -1894,7 +1894,7 @@ export function AmbientTriggerPanel({
       <section
         className={cn(
           standalone
-            ? "flex h-screen w-full flex-col overflow-hidden bg-zinc-950 text-zinc-200"
+            ? "rumi-page-shell flex min-h-0 w-full flex-col bg-zinc-950 text-zinc-200"
             : "fixed bottom-4 right-4 flex max-h-[calc(100vh-2rem)] w-[min(400px,calc(100vw-24px))] flex-col overflow-hidden rounded-xl border border-zinc-800/90 bg-zinc-950/96 text-zinc-200 shadow-2xl shadow-black/40 backdrop-blur",
           frontFlash && "border-emerald-300/60 shadow-emerald-500/20",
           stateCopy.tone === "red" && "border-red-400/35",

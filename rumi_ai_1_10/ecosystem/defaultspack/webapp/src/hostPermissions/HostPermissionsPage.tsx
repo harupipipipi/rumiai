@@ -42,7 +42,7 @@ export function HostPermissionsPage() {
     : "Desktop system info unavailable";
 
   return (
-    <main className="flex h-screen min-h-0 flex-col overflow-hidden bg-[#09090b] text-zinc-200">
+    <main className="rumi-page-shell flex min-h-0 flex-col bg-[#09090b] text-zinc-200">
       <header className="shrink-0 border-b border-zinc-800/70 px-4 py-3">
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">

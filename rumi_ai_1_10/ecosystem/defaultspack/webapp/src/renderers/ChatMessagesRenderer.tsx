@@ -1323,7 +1323,7 @@ export function ChatMessagesRenderer({
       ) : isNewConversation ? (
         <div className="flex-1" />
       ) : (
-        <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
+        <div className="rumi-chat-scroll-pane flex-1 overflow-x-hidden overflow-y-auto px-5 py-3 md:px-8 lg:px-10 xl:px-12">
           <div className="mx-auto w-full max-w-6xl min-w-0 space-y-4">
             {visibleMessages.map((message) => {
               const toolActivity = showActivityInMessages && message.role === "agent"
