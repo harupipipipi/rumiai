@@ -528,6 +528,11 @@ def test_authority_qa_harness_requires_explicit_test_mode(tmp_path, monkeypatch)
     with pytest.raises(AuthorityQAModeError):
         AuthorityQAHarness(service)
 
+    monkeypatch.delenv("RUMI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "production")
+    with pytest.raises(AuthorityQAModeError):
+        AuthorityQAHarness(service)
+
 
 def test_authority_qa_harness_approves_once_through_normal_settlement(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)

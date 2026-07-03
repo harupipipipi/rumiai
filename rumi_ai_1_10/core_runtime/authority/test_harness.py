@@ -121,6 +121,7 @@ def assert_authority_test_mode_enabled(env: dict[str, str] | None = None) -> Non
         raise AuthorityQAModeError("Authority QA harness is blocked in packaged production builds")
     profile_values = {
         str(env.get("RUMI_ENV") or "").strip().lower(),
+        str(env.get("RUMI_ENVIRONMENT") or "").strip().lower(),
         str(env.get("RUMI_APP_ENV") or "").strip().lower(),
         str(env.get("RUMI_RUNTIME_PROFILE") or "").strip().lower(),
         str(env.get("RUMI_AUTHORITY_PROFILE") or "").strip().lower(),
