@@ -17,6 +17,17 @@ const en: Dict = {
   'nav.flows': 'Flows',
   'nav.settings': 'Settings',
   'nav.admin': 'Admin Account',
+  'nav.setup': 'Setup',
+  'nav.graphs': 'Graphs',
+  'nav.profile_graph': 'Profile Graph',
+  'nav.ai_input': 'AI Input',
+  'nav.api_map': 'API Map',
+  'nav.profile_workspace': 'Profile Workspace',
+  'nav.group.workspace': 'Workspace',
+  'nav.group.advanced': 'Advanced',
+  'nav.open_menu': 'Open navigation',
+  'nav.mobile_navigation': 'Mobile navigation',
+  'nav.unknown': 'Viewer',
   'dashboard.title': 'Dashboard',
   'dashboard.restart_kernel': 'Restart Kernel',
   'dashboard.kernel_status': 'Kernel Status',
@@ -185,6 +196,7 @@ const en: Dict = {
   'flows.validation.single_input': '{label} does not allow multiple incoming connections.',
   'dialog.cancel': 'Cancel',
   'dialog.confirm': 'Confirm',
+  'dialog.pending': 'Working...',
 };
 
 const ja: Dict = {
@@ -195,6 +207,17 @@ const ja: Dict = {
   'nav.flows': '\u30d5\u30ed\u30fc',
   'nav.settings': '\u8a2d\u5b9a',
   'nav.admin': '\u7ba1\u7406\u8005\u30a2\u30ab\u30a6\u30f3\u30c8',
+  'nav.setup': '\u30bb\u30c3\u30c8\u30a2\u30c3\u30d7',
+  'nav.graphs': '\u30b0\u30e9\u30d5',
+  'nav.profile_graph': '\u30d7\u30ed\u30d5\u30a3\u30fc\u30eb\u30b0\u30e9\u30d5',
+  'nav.ai_input': 'AI\u5165\u529b',
+  'nav.api_map': 'API\u30de\u30c3\u30d7',
+  'nav.profile_workspace': '\u30d7\u30ed\u30d5\u30a3\u30fc\u30eb\u30ef\u30fc\u30af\u30b9\u30da\u30fc\u30b9',
+  'nav.group.workspace': '\u30ef\u30fc\u30af\u30b9\u30da\u30fc\u30b9',
+  'nav.group.advanced': '\u8a73\u7d30',
+  'nav.open_menu': '\u30ca\u30d3\u30b2\u30fc\u30b7\u30e7\u30f3\u3092\u958b\u304f',
+  'nav.mobile_navigation': '\u30e2\u30d0\u30a4\u30eb\u30ca\u30d3\u30b2\u30fc\u30b7\u30e7\u30f3',
+  'nav.unknown': 'Viewer',
   'dashboard.title': '\u30c0\u30c3\u30b7\u30e5\u30dc\u30fc\u30c9',
   'dashboard.restart_kernel': 'Kernel\u3092\u518d\u8d77\u52d5',
   'dashboard.kernel_status': 'Kernel\u30b9\u30c6\u30fc\u30bf\u30b9',
@@ -362,6 +385,7 @@ const ja: Dict = {
   'flows.validation.single_input': '{label} \u306f\u8907\u6570\u306e\u5165\u529b\u63a5\u7d9a\u3092\u8a31\u53ef\u3057\u3066\u3044\u307e\u305b\u3093\u3002',
   'dialog.cancel': '\u30ad\u30e3\u30f3\u30bb\u30eb',
   'dialog.confirm': '\u78ba\u8a8d',
+  'dialog.pending': '\u51e6\u7406\u4e2d...',
 };
 
 const zh: Dict = {
