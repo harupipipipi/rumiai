@@ -102,27 +102,67 @@ class BrowserCompanionBridgeStore:
     def upsert_client(self, payload: dict[str, Any] | None) -> dict[str, Any]:
         payload = dict(payload or {})
         client_id = _safe_id(payload.get("client_id") or payload.get("id"), fallback="client")
+        previous = _read_json(self._client_path(client_id), {})
+        previous = previous if isinstance(previous, dict) else {}
+        browser_profile_id = _safe_id(
+            payload.get("browser_profile_id") or previous.get("browser_profile_id"),
+            fallback=client_id,
+        )
+        installation_id = _safe_id(
+            payload.get("installation_id") or previous.get("installation_id"),
+            fallback=client_id,
+        )
+        profile_label = str(
+            payload.get("profile_label") or payload.get("profileLabel") or previous.get("profile_label") or ""
+        ).strip()
         tabs = payload.get("tabs")
         if not isinstance(tabs, list):
             tabs = payload.get("tabs_summary")
+        if not isinstance(tabs, list):
+            tabs = previous.get("tabs")
         active_tab_id = payload.get("active_tab_id")
+        if active_tab_id is None:
+            active_tab_id = previous.get("active_tab_id")
         if active_tab_id is None and isinstance(tabs, list):
             for tab in tabs:
                 if isinstance(tab, dict) and tab.get("active"):
                     active_tab_id = tab.get("id")
                     break
+        label = str(
+            payload.get("label")
+            or payload.get("browser_name")
+            or previous.get("label")
+            or client_id
+        )
+        browser_name = str(payload.get("browser_name") or payload.get("browser") or previous.get("browser_name") or "")
+        browser_version = str(payload.get("browser_version") or payload.get("version") or previous.get("browser_version") or "")
+        extension_id = str(payload.get("extension_id") or previous.get("extension_id") or "")
+        extension_version = str(payload.get("extension_version") or previous.get("extension_version") or "")
+        capabilities = payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else previous.get("capabilities")
         record = {
             "client_id": client_id,
-            "label": str(payload.get("label") or payload.get("browser_name") or client_id),
-            "browser_name": str(payload.get("browser_name") or payload.get("browser") or ""),
-            "browser_version": str(payload.get("browser_version") or payload.get("version") or ""),
-            "extension_version": str(payload.get("extension_version") or ""),
-            "user_agent": str(payload.get("user_agent") or ""),
-            "platform": str(payload.get("platform") or ""),
+            "label": label,
+            "browser_profile_id": browser_profile_id,
+            "profile_label": profile_label or label,
+            "installation_id": installation_id,
+            "client_profile": {
+                "browser_profile_id": browser_profile_id,
+                "profile_label": profile_label or label,
+                "installation_id": installation_id,
+                "extension_id": extension_id,
+                "browser_name": browser_name,
+                "browser_version": browser_version,
+            },
+            "browser_name": browser_name,
+            "browser_version": browser_version,
+            "extension_version": extension_version,
+            "extension_id": extension_id,
+            "user_agent": str(payload.get("user_agent") or previous.get("user_agent") or ""),
+            "platform": str(payload.get("platform") or previous.get("platform") or ""),
             "tabs": tabs if isinstance(tabs, list) else [],
             "active_tab_id": active_tab_id,
-            "capabilities": payload.get("capabilities") if isinstance(payload.get("capabilities"), dict) else {},
-            "connected_at": payload.get("connected_at") or _now_iso(),
+            "capabilities": capabilities if isinstance(capabilities, dict) else {},
+            "connected_at": payload.get("connected_at") or previous.get("connected_at") or _now_iso(),
             "last_seen": _now_iso(),
             "last_seen_ts": _now_ts(),
         }
@@ -159,7 +199,16 @@ class BrowserCompanionBridgeStore:
         value = _read_json(self._client_path(client_id), {})
         return value if isinstance(value, dict) and value.get("client_id") else None
 
-    def resolve_client(self, *, client_id: str = "", browser: str = "", label: str = "") -> dict[str, Any] | None:
+    def resolve_client(
+        self,
+        *,
+        client_id: str = "",
+        browser_profile_id: str = "",
+        installation_id: str = "",
+        browser: str = "",
+        label: str = "",
+        profile_label: str = "",
+    ) -> dict[str, Any] | None:
         candidates = self.list_clients()
         if client_id:
             normalized = _safe_id(client_id, fallback="client")
@@ -167,8 +216,21 @@ class BrowserCompanionBridgeStore:
                 if candidate.get("client_id") == normalized:
                     return candidate
             return None
+        if browser_profile_id:
+            normalized = _safe_id(browser_profile_id, fallback="profile")
+            for candidate in candidates:
+                if candidate.get("browser_profile_id") == normalized:
+                    return candidate
+            return None
+        if installation_id:
+            normalized = _safe_id(installation_id, fallback="installation")
+            for candidate in candidates:
+                if candidate.get("installation_id") == normalized:
+                    return candidate
+            return None
         browser_lower = str(browser or "").strip().casefold()
         label_lower = str(label or "").strip().casefold()
+        profile_label_lower = str(profile_label or "").strip().casefold()
         if browser_lower:
             candidates = [
                 candidate
@@ -180,6 +242,12 @@ class BrowserCompanionBridgeStore:
                 candidate
                 for candidate in candidates
                 if label_lower in str(candidate.get("label") or "").casefold()
+            ]
+        if profile_label_lower:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if profile_label_lower in str(candidate.get("profile_label") or "").casefold()
             ]
         if not candidates:
             return None

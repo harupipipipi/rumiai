@@ -18,6 +18,7 @@ EXPECTED_ACTIONS = [
     "apps", "windows", "select_app", "select_window", "show_app", "move", "drag",
     "open_url", "browser_open_url",
     "clipboard", "clipboard_read", "clipboard_write", "clipboard_clear", "backspace",
+    "ocr", "ax_tree", "click_text",
     "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose",
 ]
 
@@ -33,6 +34,15 @@ def test_action_map_observe_maps_correctly():
     main_path = Path(_funcs_dir) / "computer_use" / "main.py"
     source = main_path.read_text()
     assert '"observe": "computer.observe"' in source
+
+
+def test_action_map_ocr_ax_tree_and_click_text_map_correctly():
+    main_path = Path(_funcs_dir) / "computer_use" / "main.py"
+    source = main_path.read_text()
+    assert '"ocr": "computer.ocr"' in source
+    assert '"ax_tree": "computer.ax_tree"' in source
+    assert '"accessibility_tree": "computer.ax_tree"' in source
+    assert '"click_text": "computer.click_text"' in source
 
 
 def test_action_map_semantic_action_maps_correctly():
@@ -58,8 +68,20 @@ def test_computer_use_manifest_exposes_new_actions():
     manifest_path = Path(_funcs_dir).parent / "tools" / "computer_use" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     actions = manifest["config"]["schema"]["parameters"]["properties"]["action"]["enum"]
-    for action in ["observe", "semantic_action", "press", "pid_event", "doctor", "diagnose"]:
+    for action in ["ocr", "ax_tree", "click_text", "observe", "semantic_action", "press", "pid_event", "doctor", "diagnose"]:
         assert action in actions
+    properties = manifest["config"]["schema"]["parameters"]["properties"]
+    for key in [
+        "query",
+        "text_query",
+        "match_text",
+        "element_id",
+        "role",
+        "include_ocr",
+        "include_ax_tree",
+        "confidence_threshold",
+    ]:
+        assert key in properties
 
 
 def test_browser_computer_manifest_exposes_new_actions():
@@ -67,6 +89,9 @@ def test_browser_computer_manifest_exposes_new_actions():
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     actions = manifest["config"]["schema"]["parameters"]["properties"]["action"]["enum"]
     for action in [
+        "computer.ocr",
+        "computer.ax_tree",
+        "computer.click_text",
         "computer.observe",
         "computer.semantic_action",
         "computer.press",
@@ -126,3 +151,41 @@ def test_action_map_preserves_clipboard_and_repeat_payload(monkeypatch):
     assert captured["args"]["payload"]["count"] == 4
     assert captured["args"]["payload"]["key_combo"] == "retrun"
     assert captured["args"]["payload"]["content"] == "hello"
+
+
+def test_action_map_preserves_text_target_alias_payload(monkeypatch):
+    from computer_use import main as computer_use_main
+
+    captured = {}
+
+    def fake_run_browser_computer(context, args):
+        captured["args"] = args
+        return {"status": "ok"}
+
+    monkeypatch.setattr(computer_use_main, "_run_browser_computer", fake_run_browser_computer)
+
+    computer_use_main.run(
+        {},
+        {
+            "action": "click_text",
+            "query": "Save",
+            "text_query": "Save",
+            "match_text": "Save",
+            "element_id": "AX-1",
+            "role": "button",
+            "include_ocr": True,
+            "include_ax_tree": True,
+            "confidence_threshold": 0.73,
+        },
+    )
+
+    assert captured["args"]["action"] == "computer.click_text"
+    payload = captured["args"]["payload"]
+    assert payload["query"] == "Save"
+    assert payload["text_query"] == "Save"
+    assert payload["match_text"] == "Save"
+    assert payload["element_id"] == "AX-1"
+    assert payload["role"] == "button"
+    assert payload["include_ocr"] is True
+    assert payload["include_ax_tree"] is True
+    assert payload["confidence_threshold"] == 0.73
