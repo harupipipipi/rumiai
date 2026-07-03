@@ -22,6 +22,12 @@ for (const asset of ["shell-app.css", "shell-app.js"]) {
   }
 }
 
+const shellApp = fs.readFileSync(path.join(uiDir, "shell-app.js"), "utf8");
+const rootRelativeChunkReference = /(?:from|import\()\s*["']\.\/shell-[^"']+\.js["']/;
+if (rootRelativeChunkReference.test(shellApp)) {
+  throw new Error("shell-app.js must reference split chunks through /static/, not root-relative siblings");
+}
+
 const actualShellAssets = fs
   .readdirSync(uiDir)
   .filter((name) => /^shell-.*\.(?:js|css)$/.test(name))

@@ -37,9 +37,178 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
 const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
 const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
 const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+export const MIMO_CODING_COMPANY_ID = "mimo-coding-company";
+export const OPERATIONS_COMPANY_ID = "operations-company";
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+export function companyIdFromHint(value: unknown): string | null {
+  const text = textValue(value);
+  if (!text) return null;
+  const companyPrefix = "company:";
+  if (text.toLowerCase().startsWith(companyPrefix)) {
+    return text.slice(companyPrefix.length).trim() || null;
+  }
+  return text;
+}
+
+export function companyIdFromGroupHint(value: unknown): string | null {
+  const text = textValue(value);
+  if (!text) return null;
+  const companyPrefix = "company:";
+  if (text.toLowerCase().startsWith(companyPrefix)) {
+    return text.slice(companyPrefix.length).trim() || null;
+  }
+  return null;
+}
+
+export function companyIdFromConversationTitle(value: unknown): string | null {
+  const text = textValue(value).toLowerCase();
+  if (!text) return null;
+  const withoutGroupPrefix = text.startsWith("company:") ? text.slice("company:".length).trim() : text;
+  const normalized = withoutGroupPrefix.startsWith("[stale] ") ? withoutGroupPrefix.slice("[stale] ".length).trim() : withoutGroupPrefix;
+  if (normalized === "mimo coding company" || normalized.startsWith("mimo coding company:")) {
+    return MIMO_CODING_COMPANY_ID;
+  }
+  if (normalized === "operations company" || normalized.startsWith("operations company:")) {
+    return OPERATIONS_COMPANY_ID;
+  }
+  return null;
+}
+
+export function resolveCompanyWorkspaceHint({
+  companyId,
+  groupId,
+  conversationKind,
+  profileId,
+  tags,
+}: {
+  companyId?: unknown;
+  groupId?: unknown;
+  conversationKind?: unknown;
+  profileId?: unknown;
+  tags?: unknown;
+}): string | null {
+  const directCompanyId = companyIdFromHint(companyId);
+  if (directCompanyId) return directCompanyId;
+  const groupedCompanyId = companyIdFromGroupHint(groupId);
+  if (groupedCompanyId) return groupedCompanyId;
+
+  const kind = textValue(conversationKind);
+  const profile = textValue(profileId);
+  const tagList = Array.isArray(tags) ? tags.map((tag) => textValue(tag)).filter(Boolean) : [];
+  if (kind === "mimo_coding_company" || profile === "defaultspack.mimo_coding_company" || tagList.includes(MIMO_CODING_COMPANY_ID)) {
+    return MIMO_CODING_COMPANY_ID;
+  }
+  if (kind === "operations_company" || profile === "defaultspack.operations_company" || tagList.includes(OPERATIONS_COMPANY_ID)) {
+    return OPERATIONS_COMPANY_ID;
+  }
+  return null;
+}
+
+type CompanyHintChat = {
+  companyId?: unknown;
+  conversationKind?: unknown;
+  metadata?: Record<string, unknown> | null;
+  tags?: unknown;
+};
+
+type CompanyHintGroup = {
+  id?: unknown;
+  sourceGroupId?: unknown;
+  chats?: CompanyHintChat[];
+  subGroups?: CompanyHintGroup[];
+};
+
+export function resolveCompanyWorkspaceHintFromGroup(group: CompanyHintGroup | null | undefined): string | null {
+  if (!group) return null;
+  const groupCompanyId = companyIdFromGroupHint(group.sourceGroupId) ?? companyIdFromGroupHint(group.id);
+  if (groupCompanyId) return groupCompanyId;
+
+  for (const chat of group.chats ?? []) {
+    const metadata = chat.metadata && typeof chat.metadata === "object" ? chat.metadata : {};
+    const resolved = resolveCompanyWorkspaceHint({
+      companyId: chat.companyId ?? metadata.company_id ?? metadata.companyId,
+      groupId: metadata.group_id ?? metadata.groupId,
+      conversationKind: chat.conversationKind,
+      profileId: metadata.profile_id,
+      tags: chat.tags,
+    });
+    if (resolved) return resolved;
+  }
+
+  for (const subGroup of group.subGroups ?? []) {
+    const resolved = resolveCompanyWorkspaceHintFromGroup(subGroup);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+export function resolveActiveChannelId(
+  currentChannelId: string | null | undefined,
+  channels: Pick<CompanyChannel, "id">[],
+  fallbackChannelId = "ops-company",
+): string {
+  const current = textValue(currentChannelId);
+  if (current && channels.some((channel) => channel.id === current)) return current;
+  if (channels.some((channel) => channel.id === fallbackChannelId)) return fallbackChannelId;
+  return channels[0]?.id || fallbackChannelId;
+}
+
+export function resolveCompanyMessageListOptions(
+  channels: Pick<CompanyChannel, "id">[],
+  resolvedChannelId: string,
+): { channel_id?: string; limit: number; order: "desc" } {
+  const options = { limit: 80, order: "desc" as const };
+  if (channels.some((channel) => channel.id === resolvedChannelId)) {
+    return { ...options, channel_id: resolvedChannelId };
+  }
+  return options;
+}
+
+export function resolveSelectedCompanyId({
+  activeConversationId,
+  activeCompanyId,
+  hintedCompanyId,
+  statusCompany,
+  statusCompanyId,
+  companies,
+}: {
+  activeConversationId?: string | null;
+  activeCompanyId?: string | null;
+  hintedCompanyId?: string | null;
+  statusCompany?: CompanyRecord | null;
+  statusCompanyId?: string | null;
+  companies: CompanyRecord[];
+}): string | null {
+  const normalizedHint = companyIdFromHint(hintedCompanyId);
+  if (normalizedHint) return normalizedHint;
+  const statusCompanyTitleHint = companyIdFromConversationTitle(statusCompany?.name);
+  if (statusCompanyTitleHint) return statusCompanyTitleHint;
+  const normalizedStatusCompanyId = companyIdFromHint(statusCompanyId);
+  if (normalizedStatusCompanyId) return normalizedStatusCompanyId;
+  if (activeConversationId) return statusCompany?.id ?? null;
+  return activeCompanyId ?? companies[0]?.id ?? statusCompany?.id ?? null;
+}
+
+export function resolveEffectiveCompanies({
+  activeConversationId,
+  activeCompanyIdHint,
+  activeCompany,
+  companies,
+}: {
+  activeConversationId?: string | null;
+  activeCompanyIdHint?: string | null;
+  activeCompany?: CompanyRecord | null;
+  companies: CompanyRecord[];
+}): CompanyRecord[] {
+  const normalizedHint = companyIdFromHint(activeCompanyIdHint);
+  if (!activeCompany) return companies;
+  const ordered = [activeCompany, ...companies.filter((item) => item.id !== activeCompany.id)];
+  if (activeConversationId && !normalizedHint) return ordered;
+  return ordered;
 }
 
 function researchSources(value: unknown): Array<Record<string, unknown>> {
@@ -65,15 +234,95 @@ function researchTaskDescription(query: string, sources: Array<Record<string, un
   return lines.join("\n");
 }
 
+function settledErrorMessage(label: string, result: PromiseSettledResult<unknown>): string | null {
+  if (result.status !== "rejected") return null;
+  const detail = result.reason instanceof Error ? result.reason.message : "unavailable";
+  return `${label}: ${detail}`;
+}
+
+function preferLoadedCompanyResource<T>(loaded: T[] | null, fallback: T[]): T[] {
+  if (loaded && (loaded.length > 0 || fallback.length === 0)) return loaded;
+  return fallback;
+}
+
+function mergeCompanyRecords(primary: CompanyRecord | null, fallback: CompanyRecord | null): CompanyRecord | null {
+  if (!primary) return fallback;
+  if (!fallback) return primary;
+  return {
+    ...fallback,
+    ...primary,
+    agents: primary.agents ?? fallback.agents,
+    channels: primary.channels ?? fallback.channels,
+    messages: primary.messages ?? fallback.messages,
+    tasks: primary.tasks ?? fallback.tasks,
+    inbound_routes: primary.inbound_routes ?? fallback.inbound_routes,
+    settings: primary.settings ?? fallback.settings,
+    metadata: {
+      ...(fallback.metadata ?? {}),
+      ...(primary.metadata ?? {}),
+    },
+  };
+}
+
+function companyNameFromId(companyId: string): string {
+  if (companyId === MIMO_CODING_COMPANY_ID) return "MiMo Coding Company";
+  if (companyId === OPERATIONS_COMPANY_ID) return "Rumi Operations Company";
+  return companyId
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ") || companyId;
+}
+
+export function resolveSelectedCompanyRecord({
+  selectedId,
+  selectedCompanyDetails,
+  statusCompany,
+  listedSelectedCompany,
+}: {
+  selectedId?: string | null;
+  selectedCompanyDetails?: CompanyRecord | null;
+  statusCompany?: CompanyRecord | null;
+  listedSelectedCompany?: CompanyRecord | null;
+}): CompanyRecord | null {
+  if (!selectedId) return null;
+  return mergeCompanyRecords(selectedCompanyDetails ?? null, statusCompany ?? listedSelectedCompany ?? null) ?? {
+    id: selectedId,
+    name: companyNameFromId(selectedId),
+  };
+}
+
+export function enrichCompanyRecordWithLoadedResources(company: CompanyRecord, {
+  agents,
+  channels,
+  tasks,
+  routes,
+}: {
+  agents?: CompanyAgent[];
+  channels?: CompanyChannel[];
+  tasks?: CompanyTask[];
+  routes?: CompanyInboundRoute[];
+}): CompanyRecord {
+  return {
+    ...company,
+    ...(agents ? { agents, agent_count: Math.max(company.agent_count ?? 0, agents.length) } : {}),
+    ...(channels ? { channels, channel_count: Math.max(company.channel_count ?? 0, channels.length) } : {}),
+    ...(tasks ? { tasks, task_count: Math.max(company.task_count ?? 0, tasks.length) } : {}),
+    ...(routes ? { inbound_routes: routes } : {}),
+  };
+}
+
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
+  activeCompanyIdHint = null,
 }: {
   activeConversationId?: string | null;
   activeConversationTitle?: string | null;
+  activeCompanyIdHint?: string | null;
 }) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
-  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
+  const [activeCompanyId, setActiveCompanyId] = useState<string | null>(() => companyIdFromHint(activeCompanyIdHint));
   const [company, setCompany] = useState<CompanyRecord | null>(null);
   const [agents, setAgents] = useState<CompanyAgent[]>([]);
   const [channels, setChannels] = useState<CompanyChannel[]>([]);
@@ -92,77 +341,169 @@ export function CompanyWorkspacePanel({
   const [error, setError] = useState<string | null>(null);
   const hasActiveConversation = Boolean(activeConversationId);
   const isOverflowTabActive = OVERFLOW_TABS.some((tab) => tab.id === activeTab);
+  const titleCompanyIdHint = companyIdFromConversationTitle(activeCompanyIdHint) ?? companyIdFromConversationTitle(activeConversationTitle);
+  const normalizedActiveCompanyIdHint = (
+    titleCompanyIdHint
+    ?? companyIdFromHint(activeCompanyIdHint)
+  );
 
-  const effectiveCompanies = useMemo(() => {
-    if (activeConversationId) return company ? [company] : [];
-    if (!company) return companies;
-    return [company, ...companies.filter((item) => item.id !== company.id)];
-  }, [activeConversationId, companies, company]);
+  const effectiveCompanies = useMemo(() => resolveEffectiveCompanies({
+    activeConversationId,
+    activeCompanyIdHint: normalizedActiveCompanyIdHint,
+    activeCompany: company,
+    companies,
+  }), [activeConversationId, companies, company, normalizedActiveCompanyIdHint]);
 
-  const loadCompany = useCallback(async (requestedCompanyId?: string | null) => {
+  const loadCompany = useCallback(async (requestedCompanyId?: string | null, requestedChannelId?: string | null) => {
     setBusy(true);
     setError(null);
     try {
-      if (!requestedCompanyId && !activeConversationId) {
-        setCompanies([]);
-        setActiveCompanyId(null);
-        setCompany(null);
-        setAgents([]);
-        setChannels([]);
-        setTasks([]);
-        setRuns([]);
-        setInboxItems([]);
-        setRoutes([]);
-        setMessages([]);
-        setP2PStatus(null);
-        setP2PIdentity(null);
-        setPeers([]);
-        setActiveChannelId(null);
-        return;
-      }
+      const requestedCompanyWasProvided = requestedCompanyId !== undefined;
+      const hintedCompanyId = requestedCompanyWasProvided
+        ? companyIdFromHint(requestedCompanyId)
+        : normalizedActiveCompanyIdHint;
+      const activeCompanyCandidate = requestedCompanyWasProvided ? null : activeCompanyId;
 
-      const statusTarget = requestedCompanyId
-        ? requestedCompanyId
+      const statusTarget = hintedCompanyId
+        ? hintedCompanyId
         : activeConversationId
           ? { conversationId: activeConversationId, bootstrap: true }
-          : activeCompanyId ?? undefined;
+          : activeCompanyCandidate ?? null;
+      const statusRequest = statusTarget
+        ? companyResources.getCompanyStatus(statusTarget)
+        : Promise.resolve({ bootstrapped: false, company_id: "", company: null });
       const [companyListResult, statusResult, p2pStatusResult, p2pIdentityResult, peersResult] = await Promise.allSettled([
         companyResources.listCompanies(),
-        companyResources.getCompanyStatus(statusTarget),
+        statusRequest,
         companyResources.getP2PStatus(),
         companyResources.getP2PIdentity(),
         companyResources.listP2PPeers(),
       ]);
 
       const listedCompanies = companyListResult.status === "fulfilled" ? companyListResult.value.companies : [];
-      const statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
-      const selectedId = requestedCompanyId ?? statusCompany?.id ?? (activeConversationId ? null : activeCompanyId ?? listedCompanies[0]?.id ?? null);
-      setCompanies(activeConversationId ? (statusCompany ? [statusCompany] : []) : listedCompanies);
+      const statusCompanyId = statusResult.status === "fulfilled" ? statusResult.value.company_id : null;
+      let statusCompany = statusResult.status === "fulfilled" ? statusResult.value.company ?? null : null;
+      const selectedId = resolveSelectedCompanyId({
+        activeConversationId,
+        activeCompanyId: activeCompanyCandidate,
+        hintedCompanyId,
+        statusCompany,
+        statusCompanyId,
+        companies: listedCompanies,
+      });
+      if (statusCompany?.id && statusCompany.id !== selectedId) {
+        statusCompany = null;
+      }
+      let selectedCompanyDetails: CompanyRecord | null = null;
+      let companyDetailsResult: PromiseSettledResult<CompanyRecord> | null = null;
+      if (selectedId) {
+        const [detailsResult] = await Promise.allSettled([
+          companyResources.getCompany(selectedId),
+        ]);
+        companyDetailsResult = detailsResult;
+        if (detailsResult.status === "fulfilled") {
+          selectedCompanyDetails = detailsResult.value;
+        }
+      }
+      if (!statusCompany && selectedId) {
+        statusCompany = listedCompanies.find((item) => item.id === selectedId) ?? selectedCompanyDetails;
+      }
+      const listedSelectedCompany = selectedId
+        ? listedCompanies.find((item) => item.id === selectedId) ?? null
+        : null;
+      let selectedCompany = resolveSelectedCompanyRecord({
+        selectedId,
+        selectedCompanyDetails,
+        statusCompany,
+        listedSelectedCompany,
+      });
+      const selectedCompanyId = selectedCompany?.id;
+      const visibleCompanies = selectedCompany && selectedCompanyId
+        ? [selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompanyId)]
+        : listedCompanies;
+      setCompanies(visibleCompanies);
       setActiveCompanyId(selectedId);
-      setCompany(statusCompany);
+      setCompany(selectedCompany);
 
       if (p2pStatusResult.status === "fulfilled") setP2PStatus(p2pStatusResult.value);
       if (p2pIdentityResult.status === "fulfilled") setP2PIdentity(p2pIdentityResult.value.identity);
       if (peersResult.status === "fulfilled") setPeers(peersResult.value.peers);
 
+      const loadErrors = [
+        settledErrorMessage("Company list", companyListResult),
+        settledErrorMessage("Company status", statusResult),
+      ].filter((message): message is string => Boolean(message));
+      const companyDetailsError = companyDetailsResult ? settledErrorMessage("Company details", companyDetailsResult) : null;
+      if (companyDetailsError && !selectedCompany) loadErrors.push(companyDetailsError);
+
       if (selectedId) {
-        const [agentResult, channelResult, taskResult, routeResult, messageResult, runResult] = await Promise.allSettled([
+        const [agentResult, channelResult, taskResult, routeResult, runResult] = await Promise.allSettled([
           companyResources.listCompanyAgents(selectedId),
           companyResources.listCompanyChannels(selectedId),
           companyResources.listCompanyTasks(selectedId),
           companyResources.listCompanyInboundRoutes(selectedId),
-          companyResources.listCompanyMessages(selectedId, { limit: 80 }),
           companyResources.listCompanyRuns(selectedId, { limit: 80 }),
         ]);
-        const nextAgents = agentResult.status === "fulfilled" ? agentResult.value.agents : arrayFromRecord(statusCompany?.agents);
+        const fallbackAgents = arrayFromRecord(selectedCompany?.agents);
+        const nextAgents = preferLoadedCompanyResource(
+          agentResult.status === "fulfilled" ? agentResult.value.agents : null,
+          fallbackAgents,
+        );
         setAgents(nextAgents);
-        const nextChannels = channelResult.status === "fulfilled" ? channelResult.value.channels : arrayFromRecord(statusCompany?.channels);
+        const fallbackChannels = arrayFromRecord(selectedCompany?.channels);
+        const nextChannels = preferLoadedCompanyResource(
+          channelResult.status === "fulfilled" ? channelResult.value.channels : null,
+          fallbackChannels,
+        );
         setChannels(nextChannels);
-        setActiveChannelId((current) => current ?? nextChannels[0]?.id ?? "ops-company");
-        setTasks(taskResult.status === "fulfilled" ? taskResult.value.tasks : arrayFromRecord(statusCompany?.tasks));
-        setRoutes(routeResult.status === "fulfilled" ? routeResult.value.routes : arrayFromRecord(statusCompany?.inbound_routes));
-        setMessages(messageResult.status === "fulfilled" ? messageResult.value.messages : arrayFromRecord(statusCompany?.messages));
+        const resolvedChannelId = resolveActiveChannelId(requestedChannelId ?? activeChannelId, nextChannels);
+        setActiveChannelId(resolvedChannelId);
+        const fallbackTasks = arrayFromRecord(selectedCompany?.tasks);
+        const nextTasks = preferLoadedCompanyResource(
+          taskResult.status === "fulfilled" ? taskResult.value.tasks : null,
+          fallbackTasks,
+        );
+        setTasks(nextTasks);
+        const fallbackRoutes = arrayFromRecord(selectedCompany?.inbound_routes);
+        const nextRoutes = preferLoadedCompanyResource(
+          routeResult.status === "fulfilled" ? routeResult.value.routes : null,
+          fallbackRoutes,
+        );
+        setRoutes(nextRoutes);
+        if (selectedCompany) {
+          selectedCompany = enrichCompanyRecordWithLoadedResources(selectedCompany, {
+            agents: nextAgents,
+            channels: nextChannels,
+            tasks: nextTasks,
+            routes: nextRoutes,
+          });
+          setCompany(selectedCompany);
+          setCompanies([selectedCompany, ...listedCompanies.filter((item) => item.id !== selectedCompany?.id)]);
+        }
+        const [messageResult] = await Promise.allSettled([
+          companyResources.listCompanyMessages(selectedId, resolveCompanyMessageListOptions(nextChannels, resolvedChannelId)),
+        ]);
+        let loadedMessages = messageResult.status === "fulfilled" ? messageResult.value.messages : null;
+        let messageRetryResult: PromiseSettledResult<{ messages: CompanyMessage[]; total: number }> | null = null;
+        const selectedChannel = nextChannels.find((channel) => channel.id === resolvedChannelId);
+        const selectedChannelMessageCount = typeof selectedChannel?.message_count === "number" ? selectedChannel.message_count : 0;
+        if ((loadedMessages?.length ?? 0) === 0 && selectedChannelMessageCount > 0) {
+          [messageRetryResult] = await Promise.allSettled([
+            companyResources.listCompanyMessages(selectedId, { limit: 80, order: "desc" }),
+          ]);
+          if (messageRetryResult.status === "fulfilled" && messageRetryResult.value.messages.length > 0) {
+            loadedMessages = messageRetryResult.value.messages;
+          }
+        }
+        const fallbackMessages = arrayFromRecord(selectedCompany?.messages);
+        setMessages(preferLoadedCompanyResource(loadedMessages, fallbackMessages));
         setRuns(runResult.status === "fulfilled" ? runResult.value.runs : []);
+        const channelError = settledErrorMessage("Channels", channelResult);
+        const messageError = settledErrorMessage("Messages", messageResult);
+        const messageRetryError = messageRetryResult ? settledErrorMessage("Messages retry", messageRetryResult) : null;
+        if (channelError) loadErrors.push(channelError);
+        if (messageError) loadErrors.push(messageError);
+        if (messageRetryError) loadErrors.push(messageRetryError);
         const inboxResults = await Promise.allSettled(
           nextAgents.map((agent) => companyResources.listCompanyAgentInbox(selectedId, agent.agent_id, { limit: 20 })),
         );
@@ -179,20 +520,32 @@ export function CompanyWorkspacePanel({
         setMessages([]);
       }
 
-      const firstError = [companyListResult, statusResult]
-        .find((result) => result.status === "rejected") as PromiseRejectedResult | undefined;
-      if (firstError) {
-        setError(firstError.reason instanceof Error ? firstError.reason.message : "Company APIs are unavailable.");
+      if (loadErrors.length > 0) {
+        setError(loadErrors.join(" "));
       }
     } finally {
       setBusy(false);
     }
-  }, [activeCompanyId, activeConversationId]);
+  }, [activeChannelId, activeCompanyId, activeConversationId, normalizedActiveCompanyIdHint]);
 
   useEffect(() => {
-    setActiveCompanyId(null);
-    void loadCompany();
-  }, [activeConversationId]);
+    setActiveCompanyId(normalizedActiveCompanyIdHint);
+    void loadCompany(normalizedActiveCompanyIdHint);
+  }, [activeConversationId, normalizedActiveCompanyIdHint]);
+
+  useEffect(() => {
+    if (!titleCompanyIdHint || activeCompanyId === titleCompanyIdHint) return;
+    setActiveCompanyId(titleCompanyIdHint);
+    void loadCompany(titleCompanyIdHint);
+  }, [activeCompanyId, loadCompany, titleCompanyIdHint]);
+
+  useEffect(() => {
+    if (!activeCompanyId) return undefined;
+    const intervalId = window.setInterval(() => {
+      void loadCompany(activeCompanyId);
+    }, 30000);
+    return () => window.clearInterval(intervalId);
+  }, [activeCompanyId, loadCompany]);
 
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 
@@ -227,8 +580,9 @@ export function CompanyWorkspacePanel({
             activeChannelId={activeChannelId}
             busy={busy}
             onChannelChange={(channelId) => {
+              if (!activeCompanyId) return;
               setActiveChannelId(channelId);
-              void loadCompany(activeCompanyId);
+              void loadCompany(activeCompanyId, channelId);
             }}
             onSendMessage={(content, channelId) => activeCompanyId && void run(() => companyResources.sendCompanyMessage(activeCompanyId, { content, channel_id: channelId, sender_id: "user" }))}
           />
@@ -239,6 +593,7 @@ export function CompanyWorkspacePanel({
             agents={agents}
             runs={runs}
             inboxItems={inboxItems}
+            expectedAgentCount={activeCompany?.agent_count}
             busy={busy}
             onUpsertAgent={(agent) => activeCompanyId && void run(() => companyResources.upsertCompanyAgent(activeCompanyId, agent))}
           />
@@ -278,6 +633,7 @@ export function CompanyWorkspacePanel({
             tasks={tasks}
             agents={agents}
             runs={runs}
+            expectedTaskCount={activeCompany?.task_count}
             busy={busy}
             onCreateTask={(title, targetAgentIds) => activeCompanyId && void run(() => companyResources.createCompanyTask(activeCompanyId, {
               title,
@@ -333,6 +689,7 @@ export function CompanyWorkspacePanel({
       <CompanyTree
         companies={effectiveCompanies}
         activeCompanyId={activeCompanyId}
+        activeTaskCount={Math.max(tasks.length, activeCompany?.task_count ?? 0)}
         busy={busy}
         emptyMessage={hasActiveConversation ? "No employee group loaded." : "Start or send a chat message to create its employee group."}
         onSelect={(companyId) => void loadCompany(companyId)}

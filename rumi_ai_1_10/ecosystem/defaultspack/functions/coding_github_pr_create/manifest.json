@@ -1,0 +1,45 @@
+{
+  "function_id": "coding_github_pr_create",
+  "description": "Create a GitHub pull request for a pushed branch.",
+  "tags": [
+    "coding"
+  ],
+  "risk": "high",
+  "requires": [
+    "coding.github.pr.create"
+  ],
+  "caller_requires": [
+    "user.approved.high_risk"
+  ],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.github_pr_create",
+    "defaultspack.coding.github_pr_create",
+    "defaults.coding.github.pr.create",
+    "defaultspack.coding.github.pr.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.coding.github_pr_create",
+      "default_args": {}
+    }
+  }
+}

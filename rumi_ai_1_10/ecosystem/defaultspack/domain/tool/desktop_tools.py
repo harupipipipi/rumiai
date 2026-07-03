@@ -8,8 +8,11 @@ from .sandbox_tools import _require_server_side_approval
 
 
 def desktop_list(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
-    del arguments, context
-    return _sandbox_api().run({"_handler": "desktops_list"}, {})
+    del arguments
+    desktop_context, _owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    return _sandbox_api().run({"_handler": "desktops_list"}, desktop_context)
 
 
 def desktop_create(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -17,9 +20,12 @@ def desktop_create(arguments: dict[str, Any], context: dict[str, Any] | None = N
     if approval_error is not None:
         return approval_error
     payload = dict(arguments or {})
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = "desktops_create"
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
 def desktop_frame(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -28,9 +34,12 @@ def desktop_frame(arguments: dict[str, Any], context: dict[str, Any] | None = No
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = "desktop_frame"
-    result = _sandbox_api().run(payload, context or {})
+    result = _sandbox_api().run(payload, desktop_context)
     if not isinstance(result, dict) or result.get("_binary") is not True:
         return result
     body = result.get("body") or b""
@@ -61,10 +70,13 @@ def desktop_input(arguments: dict[str, Any], context: dict[str, Any] | None = No
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
     payload.setdefault("client_action_id", f"desktop-input-{now_slug()}")
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     _default_agent(payload, context)
     payload["_handler"] = "desktop_ai_input"
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
 def desktop_control_acquire(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -88,9 +100,12 @@ def desktop_rules_update(arguments: dict[str, Any], context: dict[str, Any] | No
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = "desktop_rules_update"
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
 def desktop_access_request(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -99,9 +114,12 @@ def desktop_access_request(arguments: dict[str, Any], context: dict[str, Any] | 
     if not seat_id:
         return err("'seat_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = "desktop_access_request"
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
 def desktop_access_grant(arguments: dict[str, Any], context: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -117,9 +135,12 @@ def desktop_access_grant(arguments: dict[str, Any], context: dict[str, Any] | No
         return err("'request_id' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
     payload["request_id"] = request_id
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = "desktop_access_grant"
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
 def _desktop_control(
@@ -139,27 +160,53 @@ def _desktop_control(
     if require_token and not str(payload.get("lease_token") or "").strip():
         return err("'lease_token' is required", "INVALID_INPUT")
     payload["seat_id"] = seat_id
-    _default_owner(payload, context)
+    desktop_context, owner_id, context_error = _trusted_desktop_context(context)
+    if context_error is not None:
+        return context_error
+    _apply_trusted_owner(payload, owner_id)
     payload["_handler"] = handler
-    return _sandbox_api().run(payload, context or {})
+    return _sandbox_api().run(payload, desktop_context)
 
 
-def _default_owner(payload: dict[str, Any], context: dict[str, Any] | None) -> None:
-    if payload.get("owner_id") or payload.get("access_owner_id"):
+def _trusted_desktop_context(context: dict[str, Any] | None) -> tuple[dict[str, Any], str, dict[str, Any] | None]:
+    desktop_context = dict(context) if isinstance(context, dict) else {}
+    owner_id = _trusted_owner_id(desktop_context)
+    if not owner_id:
+        return {}, "", err("desktop tools require a server-derived principal context", "DESKTOP_PRINCIPAL_REQUIRED")
+    desktop_context["principal_id"] = owner_id
+    return desktop_context, owner_id, None
+
+
+def _trusted_owner_id(context: dict[str, Any]) -> str:
+    if context.get("flow_id") == "transport_direct" or context.get("owner_pack") == "defaultspack":
+        return "local-user"
+    if context.get("source") == "defaultspack_local_ui":
+        return "local-user"
+    for key in (
+        "principal_id",
+        "actor_id",
+        "user_id",
+        "session_id",
+        "client_id",
+        "authenticated_agent_id",
+        "agent_id",
+        "actor_agent_id",
+    ):
+        text = str(context.get(key) or "").strip()
+        if text:
+            return text[:160]
+    return ""
+
+
+def _apply_trusted_owner(payload: dict[str, Any], owner_id: str) -> None:
+    owner_id = str(owner_id or "").strip()[:160]
+    if not owner_id:
         return
+    payload["owner_id"] = owner_id
+    payload["access_owner_id"] = owner_id
     access = payload.get("access") if isinstance(payload.get("access"), dict) else None
-    if access and access.get("owner_id"):
-        return
-    context = context if isinstance(context, dict) else {}
-    owner_id = str(
-        context.get("agent_id")
-        or context.get("actor_id")
-        or context.get("user_id")
-        or "local-agent"
-    ).strip()
-    payload["owner_id"] = owner_id[:160] or "local-agent"
     if access is not None:
-        access.setdefault("owner_id", payload["owner_id"])
+        access["owner_id"] = owner_id
 
 
 def _default_agent(payload: dict[str, Any], context: dict[str, Any] | None) -> None:

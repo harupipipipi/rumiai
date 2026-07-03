@@ -159,6 +159,12 @@ def validate_desktop_input_payload(
 
     action = payload.get("action")
     if action not in DESKTOP_ACTIONS:
+        if action is None and "text" in payload:
+            raise RequestValidationError(
+                INVALID_DESKTOP_INPUT,
+                "action is required; to type text use action=type_text with text, then action=key with key=Enter if needed",
+                field="action",
+            )
         raise RequestValidationError(INVALID_DESKTOP_INPUT, "Unsupported desktop input action", field="action")
 
     client_action_id = require_canonical_id(

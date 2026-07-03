@@ -11,6 +11,11 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
         sys.path.insert(0, _path)
 
 from domain.chat.store import ChatStore
+from domain.chat.subagent_durability import (
+    ensure_subagent_child_has_assistant_response,
+    mark_subagent_child_failed,
+)
+from domain.agent.subagent_orchestrator import extract_assistant_text_from_result
 from domain.input import RumiInputEnvelope, dispatch_input
 
 
@@ -107,27 +112,54 @@ class SubagentController:
                 "Use the connected tools directly. Do not claim missing repo or file access unless a tool call fails.\n\n"
                 + task
             )
-        result = dispatch_input(
-            RumiInputEnvelope(
-                role="user",
-                input=effective_task,
-                chat={"conversation_id": child["id"], "title": title, "model": model},
-                source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
-                target={
-                    "conversation_id": child["id"],
-                    "direct": True,
-                    "model_route": {"preferred_model": model},
-                },
-                delivery={"action_id": "chat.message"},
-                metadata=message_metadata,
-                params=params,
-                tools=inherited_tools,
-            ),
-            {**context, "chat_history_mode": "current_turn"},
-        )
+        try:
+            result = dispatch_input(
+                RumiInputEnvelope(
+                    role="user",
+                    input=effective_task,
+                    chat={"conversation_id": child["id"], "title": title, "model": model},
+                    source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
+                    target={
+                        "conversation_id": child["id"],
+                        "direct": True,
+                        "model_route": {"preferred_model": model},
+                    },
+                    delivery={"action_id": "chat.message"},
+                    metadata=message_metadata,
+                    params=params,
+                    tools=inherited_tools,
+                ),
+                {**context, "chat_history_mode": "current_turn", "subagent_child_durable_draft": True},
+            )
+        except Exception as exc:
+            code = "SUBAGENT_DISPATCH_TIMEOUT" if isinstance(exc, TimeoutError) else "SUBAGENT_DISPATCH_EXCEPTION"
+            self._mark_child_failed(store, child["id"], child_metadata, code=code)
+            return self._failed_result(
+                parent_id=parent_id,
+                child_id=child["id"],
+                title=title,
+                task=task,
+                workspace=workspace_contract,
+                code=code,
+            )
         if result.get("status") != "ok":
-            raise RuntimeError(str(result.get("error") or "failed to dispatch subagent conversation"))
-        summary = str(result.get("assistant_text") or "Subagent completed.").strip()
+            self._mark_child_failed(store, child["id"], child_metadata, code="SUBAGENT_DISPATCH_FAILED")
+            return self._failed_result(
+                parent_id=parent_id,
+                child_id=child["id"],
+                title=title,
+                task=task,
+                workspace=workspace_contract,
+                code="SUBAGENT_DISPATCH_FAILED",
+            )
+        assistant_text = extract_assistant_text_from_result(result)
+        summary = str(assistant_text or "Subagent completed.").strip()
+        ensure_subagent_child_has_assistant_response(
+            store,
+            child["id"],
+            assistant_text=assistant_text,
+            metadata=child_metadata,
+        )
         return {
             "action": "subagent.run",
             "parent_conversation_id": parent_id,
@@ -143,3 +175,35 @@ class SubagentController:
         graph = context.get("capability_graph") if isinstance(context.get("capability_graph"), dict) else {}
         connected = graph.get("connected_tools") if isinstance(graph.get("connected_tools"), list) else []
         return [str(item).strip() for item in connected if isinstance(item, str) and str(item).strip()]
+
+    @staticmethod
+    def _mark_child_failed(store: ChatStore, child_id: str, metadata: dict[str, Any], *, code: str) -> None:
+        try:
+            mark_subagent_child_failed(store, child_id, metadata=metadata, code=code)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _failed_result(
+        *,
+        parent_id: str,
+        child_id: str,
+        title: str,
+        task: str,
+        workspace: dict[str, Any],
+        code: str,
+    ) -> dict[str, Any]:
+        summary = "The delegated agent could not complete before producing a response."
+        return {
+            "action": "subagent.run",
+            "parent_conversation_id": parent_id,
+            "child_conversation_id": child_id,
+            "title": title,
+            "task": task,
+            "summary": summary,
+            "workspace": workspace,
+            "status": "error",
+            "is_error": True,
+            "error_type": "timeout" if "TIMEOUT" in code else "error",
+            "code": code,
+        }

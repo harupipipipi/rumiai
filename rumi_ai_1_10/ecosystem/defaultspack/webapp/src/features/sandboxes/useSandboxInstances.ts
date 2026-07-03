@@ -67,10 +67,9 @@ export function useDesktopInstances({
       setError(null);
       return result.desktops;
     } catch (desktopError) {
-      desktopsRef.current = [];
-      setDesktops([]);
+      setDesktops(desktopsRef.current);
       setError(desktopError instanceof Error ? desktopError.message : "Desktop lookup failed.");
-      return [];
+      return desktopsRef.current;
     } finally {
       refreshInFlightRef.current = false;
       if (!options.silent) setLoading(false);

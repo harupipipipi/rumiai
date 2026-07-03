@@ -23,7 +23,8 @@
     },
     "execution": {
       "type": "rumi_function",
-      "qualified_name": "defaultspack:tool_subagent"
+      "qualified_name": "defaultspack:tool_subagent",
+      "timeout_seconds": 240
     },
     "tool_category": "agent",
     "action_type": "execute",

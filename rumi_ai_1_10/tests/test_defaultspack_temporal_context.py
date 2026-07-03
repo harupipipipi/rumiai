@@ -52,6 +52,61 @@ def test_ai_complete_injects_temporal_context(monkeypatch):
     assert "Today is " in messages[0]["content"]
 
 
+def test_ai_complete_passes_profile_authority_context(monkeypatch):
+    from blocks.ai.complete import run
+
+    captured: dict[str, object] = {}
+
+    def fake_complete(self, request):
+        captured["request"] = request
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr("blocks.ai.complete.LLMGateway.complete", fake_complete)
+
+    result = run(
+        {
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
+            "messages": [{"role": "user", "content": "hello"}],
+            "conversation_id": "conv-1",
+        },
+        {"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    assert result["status"] == "ok"
+    assert captured["request"]["authority_context"] == {
+        "profile_id": "defaultspack.mimo_coding_company",
+        "conversation_id": "conv-1",
+        "principal_id": "profile:defaultspack.mimo_coding_company",
+    }
+
+
+def test_ai_complete_does_not_synthesize_principal_from_payload_profile(monkeypatch):
+    from blocks.ai.complete import run
+
+    captured: dict[str, object] = {}
+
+    def fake_complete(self, request):
+        captured["request"] = request
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr("blocks.ai.complete.LLMGateway.complete", fake_complete)
+
+    result = run(
+        {
+            "model": "xiaomi-token-plan-sgp/mimo-v2-omni",
+            "messages": [{"role": "user", "content": "hello"}],
+            "profile_id": "payload-profile",
+            "principal_id": "profile:payload-spoof",
+        },
+        {},
+    )
+
+    assert result["status"] == "ok"
+    authority_context = captured["request"].get("authority_context", {})
+    assert authority_context.get("profile_id") == "payload-profile"
+    assert "principal_id" not in authority_context
+
+
 def test_llm_gateway_injects_temporal_context_once():
     from domain.ai_client.gateway import LLMGateway
 

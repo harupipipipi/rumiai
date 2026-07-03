@@ -242,7 +242,7 @@ class ToolRegistry:
         """extension manifests から built-in tools を構築する。"""
         loaded = 0
         try:
-            manifests = get_extension_registry(force_reload=True).tools().list(
+            manifests = get_extension_registry().tools().list(
                 enabled_only=True
             )
         except Exception:
@@ -259,7 +259,7 @@ class ToolRegistry:
     def _apply_extension_skill_metadata(self):
         """skill manifests can annotate tools without becoming executable tools."""
         try:
-            skills = get_extension_registry(force_reload=True).skills().list(
+            skills = get_extension_registry().skills().list(
                 enabled_only=True
             )
         except Exception:
