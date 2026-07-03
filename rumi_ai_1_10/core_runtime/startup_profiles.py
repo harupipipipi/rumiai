@@ -19,6 +19,10 @@ logger = logging.getLogger(__name__)
 
 PROFILE_VERSION = 3
 START_CONTRACT = "rumiai.start.standard.v1"
+DEFAULT_PROFILE_ID = "default-profile"
+DEFAULTSPACK_PACK_ID = "defaultspack"
+DEFAULTSPACK_PACK_IDENTITY = "rumi:ecosystem/defaultspack"
+DESKTOP_APP_EXECUTE_PERMISSION = "desktop_app.execute"
 
 # --- graph loader (lazy import to avoid circular dependency) ---
 _graph_loader = None
@@ -529,6 +533,7 @@ class StartupProfileManager:
         else:
             state = self._default_state(catalog)
         normalized_state = self._normalize_state(state, catalog)
+        self._ensure_defaultspack_desktop_execute_grant(normalized_state, catalog)
         if not path.is_file() or normalized_state != state:
             self._save_state(normalized_state)
         return normalized_state
@@ -934,8 +939,8 @@ class StartupProfileManager:
 
     def _normalize_default_profile_launch_fields(self, profile: Dict[str, Any]) -> Dict[str, Any]:
         if (
-            profile.get("profile_id") != "default-profile"
-            or profile.get("base_pack") != "defaultspack"
+            profile.get("profile_id") != DEFAULT_PROFILE_ID
+            or profile.get("base_pack") != DEFAULTSPACK_PACK_ID
             or profile.get("graph_id") != "defaultspack.startup"
         ):
             return profile
@@ -957,6 +962,105 @@ class StartupProfileManager:
         if legacy_default:
             normalized["surfaces"] = {"preferred": "browser", "enabled": ["browser", "cli"]}
         return normalized
+
+    def _ensure_defaultspack_desktop_execute_grant(
+        self,
+        state: Dict[str, Any],
+        catalog: Dict[str, Any],
+    ) -> None:
+        if not self._has_defaultspack_default_profile(state):
+            return
+        if not any(
+            pack.get("pack_id") == DEFAULTSPACK_PACK_ID
+            and pack.get("pack_identity") == DEFAULTSPACK_PACK_IDENTITY
+            and pack.get("available")
+            for pack in catalog.get("packs", [])
+        ):
+            return
+
+        try:
+            from .capability_grant_manager import get_capability_grant_manager
+
+            grant_manager = get_capability_grant_manager()
+            existing_config = self._defaultspack_desktop_execute_grant_config(grant_manager)
+            if existing_config is None:
+                return
+
+            config = self._defaultspack_desktop_execute_bootstrap_config(existing_config)
+            if self._desktop_execute_config_allows_defaultspack(existing_config):
+                return
+
+            grant_manager.grant_permission(
+                DEFAULTSPACK_PACK_ID,
+                DESKTOP_APP_EXECUTE_PERMISSION,
+                config,
+            )
+        except Exception:
+            logger.debug("failed to seed defaultspack desktop_app.execute grant", exc_info=True)
+
+    def _has_defaultspack_default_profile(self, state: Dict[str, Any]) -> bool:
+        for profile in state.get("profiles") or []:
+            if not isinstance(profile, dict):
+                continue
+            if (
+                profile.get("profile_id") == DEFAULT_PROFILE_ID
+                and profile.get("base_pack") == DEFAULTSPACK_PACK_ID
+                and profile.get("graph_id") == "defaultspack.startup"
+            ):
+                return True
+        return False
+
+    def _defaultspack_desktop_execute_grant_config(self, grant_manager: Any) -> Optional[Dict[str, Any]]:
+        get_grant = getattr(grant_manager, "get_grant", None)
+        if callable(get_grant):
+            grant = get_grant(DEFAULTSPACK_PACK_ID)
+            if grant is not None:
+                if not getattr(grant, "enabled", False):
+                    return None
+                permissions = getattr(grant, "permissions", {}) or {}
+                permission = permissions.get(DESKTOP_APP_EXECUTE_PERMISSION)
+                if permission is not None:
+                    if not getattr(permission, "enabled", False):
+                        return None
+                    config = getattr(permission, "config", {}) or {}
+                    return dict(config) if isinstance(config, dict) else {}
+
+        check = getattr(grant_manager, "check", None)
+        if not callable(check):
+            return {}
+        result = check(DEFAULTSPACK_PACK_ID, DESKTOP_APP_EXECUTE_PERMISSION)
+        reason = str(getattr(result, "reason", "") or "").lower()
+        if "tamper" in reason:
+            return None
+        config = getattr(result, "config", {}) or {}
+        return dict(config) if isinstance(config, dict) else {}
+
+    def _defaultspack_desktop_execute_bootstrap_config(
+        self,
+        existing_config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        config = dict(existing_config)
+        allowed_packs = config.get("allowed_packs")
+        if isinstance(allowed_packs, list):
+            normalized = [
+                str(pack_id).strip()
+                for pack_id in allowed_packs
+                if isinstance(pack_id, str) and pack_id.strip()
+            ]
+        else:
+            normalized = []
+        if "*" not in normalized and DEFAULTSPACK_PACK_ID not in normalized:
+            normalized.append(DEFAULTSPACK_PACK_ID)
+        config["allowed_packs"] = normalized
+        config.setdefault("source", "default_profile_bootstrap")
+        config.setdefault("profile_id", DEFAULT_PROFILE_ID)
+        return config
+
+    def _desktop_execute_config_allows_defaultspack(self, config: Dict[str, Any]) -> bool:
+        allowed_packs = config.get("allowed_packs")
+        if not isinstance(allowed_packs, list):
+            return False
+        return "*" in allowed_packs or DEFAULTSPACK_PACK_ID in allowed_packs
 
     def _default_graph_for_pack(self, pack_id: str, catalog: Dict[str, Any]) -> str:
         for pack_info in catalog.get("packs", []):
