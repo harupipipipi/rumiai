@@ -1,4 +1,5 @@
 import * as React from "react"
+import { createPortal } from "react-dom"
 import { cn } from "@/src/lib/utils"
 import { viewerLayers } from "@/src/lib/layers"
 
@@ -62,7 +63,8 @@ const Popover = ({ children }: { children: React.ReactNode }) => {
           if (child.type === PopoverContent) {
             return isOpen ? React.cloneElement(child as React.ReactElement<any>, {
               ref: contentRef,
-              onClose: close
+              onClose: close,
+              triggerRef
             }) : null
           }
         }
@@ -95,14 +97,58 @@ PopoverTrigger.displayName = "PopoverTrigger"
 type PopoverContentProps = React.HTMLAttributes<HTMLDivElement> & {
   align?: "left" | "right";
   onClose?: () => void;
+  triggerRef?: React.RefObject<HTMLButtonElement>;
 };
 
 const PopoverContent = React.forwardRef<HTMLDivElement, PopoverContentProps>(
-  ({ children, className, align = "right", onClose, onClick, ...props }, ref) => {
-  return (
+  ({ children, className, align = "right", onClose, onClick, role = "menu", triggerRef, style, ...props }, ref) => {
+  const localRef = React.useRef<HTMLDivElement | null>(null)
+  const getPosition = React.useCallback(() => {
+    const trigger = triggerRef?.current
+    if (!trigger) return { top: 0, left: 0, transform: undefined as string | undefined }
+
+    const rect = trigger.getBoundingClientRect()
+    const gap = 8
+    const viewportPadding = 8
+    return {
+      top: Math.max(viewportPadding, rect.bottom + gap),
+      left: Math.max(viewportPadding, align === "right" ? rect.right : rect.left),
+      transform: align === "right" ? "translateX(-100%)" : undefined,
+    }
+  }, [align, triggerRef])
+  const [position, setPosition] = React.useState(getPosition)
+
+  const setRefs = React.useCallback((node: HTMLDivElement | null) => {
+    localRef.current = node
+    if (typeof ref === "function") {
+      ref(node)
+    } else if (ref) {
+      ref.current = node
+    }
+  }, [ref])
+
+  const updatePosition = React.useCallback(() => {
+    setPosition(getPosition())
+  }, [getPosition])
+
+  React.useLayoutEffect(() => {
+    updatePosition()
+  }, [updatePosition])
+
+  React.useEffect(() => {
+    updatePosition()
+    window.addEventListener("resize", updatePosition)
+    window.addEventListener("scroll", updatePosition, true)
+    return () => {
+      window.removeEventListener("resize", updatePosition)
+      window.removeEventListener("scroll", updatePosition, true)
+    }
+  }, [updatePosition])
+
+  return createPortal(
     <div
-      ref={ref}
-      role="menu"
+      ref={setRefs}
+      role={role}
       tabIndex={-1}
       onClick={(event) => {
         onClick?.(event)
@@ -110,16 +156,23 @@ const PopoverContent = React.forwardRef<HTMLDivElement, PopoverContentProps>(
           onClose?.()
         }
       }}
+      style={{
+        position: "fixed",
+        top: position.top,
+        left: position.left,
+        transform: position.transform,
+        ...style,
+      }}
       className={cn(
-        "absolute mt-2 min-w-[12rem] overflow-hidden rounded-xl border border-border bg-bg-card p-1 text-text-main shadow-xl animate-in fade-in zoom-in-95 duration-200 outline-none",
+        "min-w-[12rem] overflow-hidden rounded-xl border border-border bg-bg-card p-1 text-text-main shadow-xl animate-in fade-in zoom-in-95 duration-200 outline-none",
         viewerLayers.popover,
-        align === "right" ? "right-0" : "left-0",
         className
       )}
       {...props}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   )
 })
 PopoverContent.displayName = "PopoverContent"

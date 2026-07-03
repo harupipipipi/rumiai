@@ -55,10 +55,10 @@ export function Header() {
       <div className="flex min-w-0 items-center gap-3">
         <div className="md:hidden">
           <Popover>
-            <PopoverTrigger className="rounded-md p-2 text-text-muted transition hover:bg-bg-hover hover:text-text-main" aria-label={t('nav.open_menu')}>
+            <PopoverTrigger className="rounded-md p-2 text-text-muted transition hover:bg-bg-hover hover:text-text-main" aria-label={t('nav.open_menu')} aria-haspopup="dialog">
               <Menu className="h-4 w-4" />
             </PopoverTrigger>
-            <PopoverContent align="left" className="w-64">
+            <PopoverContent align="left" className="w-64" role="presentation">
               <nav aria-label={t('nav.mobile_navigation')} className="max-h-[70vh] overflow-y-auto p-1">
                 {viewerNavGroups.map((group) => (
                   <div key={group.id} className="py-1">

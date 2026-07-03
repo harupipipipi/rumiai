@@ -19,6 +19,9 @@ test('viewer popover trigger exposes keyboard and menu semantics', () => {
   assert.match(popover, /pointerdown/);
   assert.match(popover, /firstFocusable\?\.focus\(\)/);
   assert.match(popover, /triggerRef\.current\?\.focus\(\)/);
+  assert.match(popover, /createPortal/);
+  assert.match(popover, /document\.body/);
+  assert.match(popover, /position: "fixed"/);
   assert.match(dashboard, /role="menuitem"/);
   assert.match(profileCard, /role="menuitem"/);
   assert.match(popover, /onClose\?\.\(\)/);
@@ -33,6 +36,8 @@ test('viewer shell has a mobile navigation fallback and persistent desktop sideb
 
   assert.match(sidebar, /hidden[\s\S]*md:flex/);
   assert.match(header, /aria-label=\{t\('nav.open_menu'\)\}/);
+  assert.match(header, /aria-haspopup="dialog"/);
+  assert.match(header, /role="presentation"/);
   assert.match(header, /viewerNavGroups\.map/);
   assert.match(header, /aria-label=\{t\('nav.mobile_navigation'\)\}/);
   assert.match(store, /SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open'/);
