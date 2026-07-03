@@ -1486,6 +1486,8 @@ fn function_allowed(function_id: &str) -> bool {
         "computer.doctor"
             | "computer.observe"
             | "computer.screenshot"
+            | "computer.ocr"
+            | "computer.ax_tree"
             | "computer.context"
             | "computer.apps"
             | "computer.windows"
@@ -1494,6 +1496,7 @@ fn function_allowed(function_id: &str) -> bool {
             | "computer.select_window"
             | "computer.move"
             | "computer.click"
+            | "computer.click_text"
             | "computer.drag"
             | "computer.type"
             | "computer.key"
@@ -1557,8 +1560,11 @@ fn high_risk_function(function_id: &str) -> bool {
     matches!(
         function_id,
         "computer.screenshot"
+            | "computer.ocr"
+            | "computer.ax_tree"
             | "computer.move"
             | "computer.click"
+            | "computer.click_text"
             | "computer.drag"
             | "computer.type"
             | "computer.key"
@@ -2188,9 +2194,15 @@ mod tests {
     #[test]
     fn high_risk_functions_require_approval() {
         assert!(high_risk_function("computer.click"));
+        assert!(high_risk_function("computer.click_text"));
         assert!(high_risk_function("computer.move"));
         assert!(high_risk_function("computer.screenshot"));
+        assert!(high_risk_function("computer.ocr"));
+        assert!(high_risk_function("computer.ax_tree"));
         assert!(high_risk_function("computer.clipboard.read"));
+        assert!(function_allowed("computer.click_text"));
+        assert!(function_allowed("computer.ocr"));
+        assert!(function_allowed("computer.ax_tree"));
         assert!(function_allowed("computer.clipboard.clear"));
         assert!(!function_allowed("computer.launch_missiles"));
     }
