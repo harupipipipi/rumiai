@@ -346,6 +346,112 @@ def test_movie_surface_uses_attached_files_when_project_is_missing():
     assert {clip["asset_id"] for clip in project["clips"]}.issubset(asset_ids)
 
 
+def test_slide_surface_derives_project_from_text_and_attached_files():
+    from surface_helpers import open_surface
+
+    attached_files = [
+        {
+            "id": "customer-chart",
+            "name": "customer-chart.png",
+            "mime_type": "image/png",
+            "sourcePath": "/tmp/customer-chart.png",
+        },
+        {
+            "id": "research-notes",
+            "name": "research-notes.pdf",
+            "mime_type": "application/pdf",
+            "path": "/tmp/research-notes.pdf",
+        },
+    ]
+
+    opened = open_surface(
+        "slide",
+        {
+            "text": "# Customer update\n\n## Slide 1\n- Revenue is growing\n\n## Slide 2\n- Expand onboarding",
+            "resource_id": "slide:customer-update",
+            "attached_files": attached_files,
+        },
+        {"conversation_id": "conv-slide"},
+    )
+
+    surface = opened["data"]["surface"]
+    project = surface["payload"]["slide_project"]
+
+    assert surface["kind"] == "slide"
+    assert project["project_id"] == "slide:customer-update"
+    assert project["title"] == "Customer update"
+    assert [slide["title"] for slide in project["slides"]][:2] == ["Slide 1", "Slide 2"]
+    assert project["slides"][0]["bullets"] == ["Revenue is growing"]
+    assert project["slides"][0]["asset_ids"] == ["customer-chart"]
+    assert project["slides"][1]["asset_ids"] == ["research-notes"]
+    assert project["assets"][0]["kind"] == "image"
+    assert project["assets"][1]["kind"] == "document"
+    assert project["status_cards"][0]["label"] == "Slides"
+    assert project["export"]["filename"] == "slide-customer-update.pptx"
+
+
+def test_slide_surface_accepts_generated_json_deck_payload():
+    from surface_helpers import open_surface
+
+    deck_payload = {
+        "text": "Launch narrative",
+        "resource_id": "slide:mimo-launch",
+        "slide_project": {
+            "project_id": "slide:mimo-launch",
+            "title": "Mimo Launch Deck",
+            "theme": {"name": "Launch dark", "ratio": "16:9"},
+            "assets": [{"id": "hero", "name": "hero.png", "kind": "image", "source": "generated:hero"}],
+            "slides": [
+                {
+                    "id": "intro",
+                    "title": "Launch story",
+                    "subtitle": "Why now",
+                    "bullets": ["Fast setup", "Local first"],
+                    "notes": "Open with the user outcome.",
+                    "asset_ids": ["hero"],
+                }
+            ],
+            "export": {"format": "pdf", "filename": "mimo-launch.pdf", "status": "planned"},
+        },
+    }
+
+    opened = open_surface("slide", deck_payload, {"conversation_id": "conv-mimo"})
+    project = opened["data"]["surface"]["payload"]["slide_project"]
+
+    assert project["title"] == "Mimo Launch Deck"
+    assert project["theme"]["name"] == "Launch dark"
+    assert project["slides"][0]["id"] == "intro"
+    assert project["slides"][0]["bullets"] == ["Fast setup", "Local first"]
+    assert project["slides"][0]["asset_ids"] == ["hero"]
+    assert project["assets"][0]["source"] == "generated:hero"
+    assert project["export"]["filename"] == "mimo-launch.pdf"
+
+
+def test_slide_surface_parses_generated_json_deck_from_text():
+    from surface_helpers import open_surface
+
+    generated_text = json.dumps(
+        {
+            "text": "A product story for non-technical users.",
+            "slide_project": {
+                "title": "No-code onboarding",
+                "slides": [
+                    {"title": "Describe the goal", "bullets": ["No setup required", "Mimo drafts the deck"]}
+                ],
+            },
+        }
+    )
+
+    opened = open_surface("slide", {"text": generated_text, "resource_id": "slide:json-text"}, {})
+    project = opened["data"]["surface"]["payload"]["slide_project"]
+
+    assert project["project_id"] == "slide:json-text"
+    assert project["title"] == "No-code onboarding"
+    assert project["brief"] == "A product story for non-technical users."
+    assert project["slides"][0]["title"] == "Describe the goal"
+    assert project["slides"][0]["bullets"] == ["No setup required", "Mimo drafts the deck"]
+
+
 def test_movie_caption_update_replaces_existing_caption_by_id():
     from surface_helpers import movie_update_captions, open_surface
 

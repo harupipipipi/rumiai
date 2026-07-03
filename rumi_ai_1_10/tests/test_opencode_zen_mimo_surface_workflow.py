@@ -60,7 +60,62 @@ def test_mimo_text_completion_can_open_slide_surface(monkeypatch):
     assert surface["kind"] == "slide"
     assert surface["renderer"] == "rumi_workspace_surfaces.slide"
     assert surface["payload"]["initial_text"] == slide_text
+    slide_project = surface["payload"]["slide_project"]
+    assert slide_project["project_id"] == "slide:mimo-roadmap"
+    assert [slide["title"] for slide in slide_project["slides"]][:2] == ["Slide 1", "Slide 2"]
+    assert slide_project["slides"][0]["bullets"] == ["Ship OpenCode Zen Mimo"]
+    assert slide_project["status_cards"][0]["label"] == "Slides"
     assert surface_result["data"]["effects"][0]["type"] == "surface.open"
+
+
+def test_mimo_json_completion_can_open_slide_surface_with_deck_payload(monkeypatch):
+    from surface_helpers import open_surface
+
+    provider = _provider(monkeypatch)
+    slide_payload = {
+        "text": "Investor update deck",
+        "resource_id": "slide:mimo-investor-update",
+        "slide_project": {
+            "project_id": "slide:mimo-investor-update",
+            "title": "Investor Update",
+            "theme": {"name": "Boardroom", "ratio": "16:9"},
+            "assets": [
+                {"id": "metric-chart", "name": "metric-chart.png", "kind": "image", "source": "generated:metric-chart"}
+            ],
+            "slides": [
+                {
+                    "id": "traction",
+                    "title": "Traction",
+                    "subtitle": "Usage is compounding",
+                    "bullets": ["Activation up", "Retention stable"],
+                    "asset_ids": ["metric-chart"],
+                    "notes": "Lead with the chart.",
+                }
+            ],
+            "export": {"format": "pptx", "filename": "investor-update.pptx", "status": "ready"},
+        },
+    }
+
+    with _mock_openai_completion(provider, json.dumps(slide_payload)):
+        result = provider.complete(
+            "opencode-zen/mimo-v2.5-free",
+            [{"role": "user", "content": "Return a slide surface project as JSON."}],
+            [],
+            {"response_format": {"type": "json_object"}},
+        )
+
+    surface_args = json.loads(result["content"][0]["text"])
+    surface_result = open_surface("slide", surface_args, {"conversation_id": "conv-mimo"})
+    slide_project = surface_result["data"]["surface"]["payload"]["slide_project"]
+
+    assert surface_result["data"]["surface"]["kind"] == "slide"
+    assert slide_project["project_id"] == "slide:mimo-investor-update"
+    assert slide_project["theme"]["name"] == "Boardroom"
+    assert slide_project["slides"][0]["title"] == "Traction"
+    assert slide_project["slides"][0]["bullets"] == ["Activation up", "Retention stable"]
+    assert slide_project["slides"][0]["asset_ids"] == ["metric-chart"]
+    assert slide_project["assets"][0]["source"] == "generated:metric-chart"
+    assert slide_project["export"]["filename"] == "investor-update.pptx"
 
 
 def test_mimo_json_completion_can_open_movie_surface_and_create_export_render_plans(monkeypatch):

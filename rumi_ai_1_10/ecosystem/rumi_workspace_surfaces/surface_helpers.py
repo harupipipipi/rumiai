@@ -49,6 +49,7 @@ MOVIE_OPERATIONS = [
 ]
 
 MOVIE_CLIP_COLORS = ["sky", "violet", "emerald", "amber", "rose", "cyan"]
+SLIDE_ACCENTS = ["blue", "emerald", "amber", "rose", "violet", "cyan"]
 
 
 def _clean_text(value: Any, fallback: str = "") -> str:
@@ -90,6 +91,48 @@ def _asset_from_attached(item: Any, index: int) -> dict[str, Any] | None:
     }
 
 
+def _slide_asset_from_attached(item: Any, index: int) -> dict[str, Any] | None:
+    if not isinstance(item, dict):
+        return None
+    name = _clean_text(item.get("name") or item.get("path") or item.get("sourcePath"), f"asset-{index}")
+    mime_type = _clean_text(item.get("mime_type") or item.get("type"), "application/octet-stream")
+    if mime_type.startswith("image/"):
+        kind = "image"
+    elif mime_type.startswith("video/"):
+        kind = "video"
+    elif mime_type.startswith("audio/"):
+        kind = "audio"
+    elif mime_type in {"application/pdf", "text/markdown", "text/plain"}:
+        kind = "document"
+    else:
+        kind = _clean_text(item.get("kind"), "file")
+    return {
+        "id": _clean_text(item.get("id"), f"asset-{index}"),
+        "name": name,
+        "kind": _clean_text(item.get("kind"), kind),
+        "mime_type": mime_type,
+        "source": _clean_text(item.get("source") or item.get("sourcePath") or item.get("path"), name),
+    }
+
+
+def _normalize_slide_asset(item: Any, index: int) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        item = {}
+    normalized = deepcopy(item)
+    kind = _clean_text(item.get("kind") or item.get("type"), "image")
+    default_mime = "image/png" if kind == "image" else "application/octet-stream"
+    normalized.update(
+        {
+            "id": _clean_text(item.get("id"), f"asset-{index}"),
+            "name": _clean_text(item.get("name") or item.get("id"), f"Asset {index}"),
+            "kind": kind,
+            "mime_type": _clean_text(item.get("mime_type"), default_mime),
+            "source": _clean_text(item.get("source") or item.get("path") or item.get("id"), f"asset-{index}"),
+        }
+    )
+    return normalized
+
+
 def _normalize_asset(item: Any, index: int) -> dict[str, Any]:
     if not isinstance(item, dict):
         item = {}
@@ -108,6 +151,138 @@ def _normalize_asset(item: Any, index: int) -> dict[str, Any]:
             "mime_type": _clean_text(item.get("mime_type"), default_mime),
             "source": _clean_text(item.get("source") or item.get("path") or item.get("id"), f"asset-{index}"),
             "duration": _number(item.get("duration"), placement_duration or 5.0, 0.25),
+        }
+    )
+    return normalized
+
+
+def _json_object_from_text(text: str) -> dict[str, Any] | None:
+    source = str(text or "").strip()
+    if not source:
+        return None
+    if source.startswith("```"):
+        lines = source.splitlines()
+        if lines and lines[0].strip().startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip().startswith("```"):
+            lines = lines[:-1]
+        source = "\n".join(lines).strip()
+    candidates = [source]
+    if "{" in source and "}" in source:
+        candidates.append(source[source.find("{"):source.rfind("}") + 1])
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+        except (TypeError, ValueError):
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return None
+
+
+def _slide_project_payload_from_text(text: str) -> dict[str, Any] | None:
+    parsed = _json_object_from_text(text)
+    if not parsed:
+        return None
+    raw = parsed.get("slide_project") or parsed.get("deck") or parsed.get("project") or parsed
+    if not isinstance(raw, dict) or not (raw.get("slides") or raw.get("title")):
+        return None
+    project = deepcopy(raw)
+    project.setdefault("brief", parsed.get("text") or parsed.get("prompt") or "")
+    return project
+
+
+def _slug(value: str, fallback: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "-" for ch in str(value or ""))
+    slug = "-".join(part for part in cleaned.split("-") if part)
+    return slug[:48] or fallback
+
+
+def _line_items(text: str) -> list[str]:
+    items = []
+    for line in str(text or "").splitlines():
+        cleaned = line.strip().lstrip("#").strip()
+        while cleaned.startswith(("- ", "* ")):
+            cleaned = cleaned[2:].strip()
+        if cleaned:
+            items.append(cleaned)
+    return items
+
+
+def _derive_slide_specs(text: str) -> list[dict[str, Any]]:
+    lines = str(text or "").splitlines()
+    deck_title = _first_title_line(text, "Untitled deck")
+    slides: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        heading = stripped.lstrip("#").strip() if stripped.startswith("#") else ""
+        lower_heading = heading.lower()
+        is_slide_heading = bool(heading) and (
+            lower_heading.startswith("slide ")
+            or lower_heading.startswith("section ")
+            or stripped.startswith("##")
+        )
+        if is_slide_heading:
+            if current:
+                slides.append(current)
+            current = {"title": heading, "bullets": [], "notes": ""}
+            continue
+        if current is None:
+            if stripped.startswith("#"):
+                continue
+            current = {"title": deck_title, "bullets": [], "notes": ""}
+        bullet = stripped.lstrip("-*0123456789. ").strip()
+        if bullet:
+            current.setdefault("bullets", []).append(bullet)
+    if current:
+        slides.append(current)
+
+    compact = _line_items(text)
+    if not slides and compact:
+        slides = [{"title": deck_title, "bullets": compact[1:4] or compact[:3], "notes": ""}]
+    if len(slides) <= 1:
+        points = [item for item in compact if item != deck_title]
+        slides = [
+            {"title": deck_title, "subtitle": points[0] if points else "Presentation draft", "bullets": points[:2], "notes": ""},
+            {"title": "Key points", "bullets": points[:4] or ["Clarify the audience", "Show the main idea", "End with a concrete next step"], "notes": ""},
+            {"title": "Next steps", "bullets": ["Review structure", "Add visuals", "Prepare speaker notes"], "notes": ""},
+        ]
+    return slides[:12]
+
+
+def _normalize_slide(item: Any, index: int, attached_asset_ids: list[str]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        item = {}
+    raw_bullets = item.get("bullets") or item.get("points") or item.get("content")
+    if isinstance(raw_bullets, str):
+        bullets = _line_items(raw_bullets)
+    elif isinstance(raw_bullets, list):
+        bullets = [_clean_text(bullet) for bullet in raw_bullets if _clean_text(bullet)]
+    else:
+        bullets = []
+    asset_ids = item.get("asset_ids") or item.get("assets")
+    normalized_asset_ids = [
+        _clean_text(asset.get("id") if isinstance(asset, dict) else asset)
+        for asset in (asset_ids if isinstance(asset_ids, list) else [])
+        if _clean_text(asset.get("id") if isinstance(asset, dict) else asset)
+    ]
+    if not normalized_asset_ids and index <= len(attached_asset_ids):
+        normalized_asset_ids = [attached_asset_ids[index - 1]]
+    normalized = deepcopy(item)
+    normalized.update(
+        {
+            "id": _clean_text(item.get("id"), f"slide-{index}"),
+            "title": _clean_text(item.get("title") or item.get("heading"), f"Slide {index}"),
+            "subtitle": _clean_text(item.get("subtitle") or item.get("summary"), ""),
+            "layout": _clean_text(item.get("layout"), "title-and-bullets" if bullets else "title"),
+            "bullets": bullets[:8],
+            "notes": _clean_text(item.get("notes") or item.get("speaker_notes"), ""),
+            "accent": _clean_text(item.get("accent"), SLIDE_ACCENTS[(index - 1) % len(SLIDE_ACCENTS)]),
+            "asset_ids": normalized_asset_ids,
         }
     )
     return normalized
@@ -279,6 +454,91 @@ def default_image_project(text: str, attached_files: list[Any] | None = None, re
     }
 
 
+def default_slide_project(text: str, attached_files: list[Any] | None = None, resource_id: str = "") -> dict[str, Any]:
+    title = _first_title_line(text, "Untitled deck")
+    assets = [
+        asset
+        for index, item in enumerate(attached_files or [], start=1)
+        if (asset := _slide_asset_from_attached(item, index)) is not None
+    ]
+    asset_ids = [asset["id"] for asset in assets]
+    slides = [
+        _normalize_slide(slide, index, asset_ids)
+        for index, slide in enumerate(_derive_slide_specs(text), start=1)
+    ]
+    return {
+        "project_id": resource_id or "slide:scratch",
+        "title": title,
+        "brief": text,
+        "theme": {"name": "Rumi clean", "ratio": "16:9", "background": "#f8fafc", "accent": "#3b82f6"},
+        "slides": slides,
+        "assets": assets,
+        "status_cards": [
+            {"label": "Slides", "value": str(len(slides)), "status": "editable"},
+            {"label": "Assets", "value": str(len(assets)), "status": "linked" if assets else "none"},
+            {"label": "Export", "value": "pptx/json", "status": "ready"},
+        ],
+        "export": {
+            "format": "pptx",
+            "filename": f"{_slug(resource_id or title, 'deck')}.pptx",
+            "status": "ready",
+        },
+        "operations": ["slide_edit_deck", "slide_import_asset", "slide_export_deck"],
+    }
+
+
+def normalize_slide_project(
+    raw: Any,
+    fallback_text: str = "",
+    resource_id: str = "",
+    attached_files: list[Any] | None = None,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raw = _slide_project_payload_from_text(fallback_text) or {}
+    base = default_slide_project(fallback_text, attached_files=attached_files, resource_id=resource_id)
+    if not raw:
+        return base
+
+    project = deepcopy(raw)
+    project.setdefault("project_id", resource_id or base["project_id"])
+    project.setdefault("title", _first_title_line(project.get("brief") or fallback_text, base["title"]))
+    project.setdefault("brief", fallback_text)
+    project.setdefault("theme", base["theme"])
+    raw_assets = project.get("assets") if isinstance(project.get("assets"), list) else []
+    assets = [_normalize_slide_asset(asset, index) for index, asset in enumerate(raw_assets, start=1)]
+    attached_assets = [
+        asset
+        for index, item in enumerate(attached_files or [], start=len(assets) + 1)
+        if (asset := _slide_asset_from_attached(item, index)) is not None
+    ]
+    existing_asset_ids = {asset["id"] for asset in assets}
+    assets.extend(asset for asset in attached_assets if asset["id"] not in existing_asset_ids)
+    asset_ids = [asset["id"] for asset in assets]
+
+    raw_slides = project.get("slides") if isinstance(project.get("slides"), list) else []
+    slides = raw_slides or _derive_slide_specs(_clean_text(project.get("brief"), fallback_text))
+    project["slides"] = [
+        _normalize_slide(slide, index, asset_ids)
+        for index, slide in enumerate(slides, start=1)
+    ]
+    project["assets"] = assets
+
+    raw_status_cards = project.get("status_cards")
+    project["status_cards"] = raw_status_cards if isinstance(raw_status_cards, list) else [
+        {"label": "Slides", "value": str(len(project["slides"])), "status": "editable"},
+        {"label": "Assets", "value": str(len(assets)), "status": "linked" if assets else "none"},
+        {"label": "Export", "value": "pptx/json", "status": "ready"},
+    ]
+    raw_export = project.get("export") if isinstance(project.get("export"), dict) else {}
+    project["export"] = {
+        "format": _clean_text(raw_export.get("format"), "pptx"),
+        "filename": _clean_text(raw_export.get("filename"), f"{_slug(project['project_id'], 'deck')}.pptx"),
+        "status": _clean_text(raw_export.get("status"), "ready"),
+    }
+    project["operations"] = ["slide_edit_deck", "slide_import_asset", "slide_export_deck"]
+    return project
+
+
 def open_surface(surface_id: str, args: dict[str, Any] | None, context: dict[str, Any] | None) -> dict[str, Any]:
     config = SURFACES[surface_id]
     payload = dict(args or {})
@@ -302,6 +562,13 @@ def open_surface(surface_id: str, args: dict[str, Any] | None, context: dict[str
         surface_payload["tool_timeline"] = surface_payload["movie_project"]["timeline"]
     elif surface_id == "image":
         surface_payload["image_project"] = default_image_project(initial_text, attached_files, resource_id)
+    elif surface_id == "slide":
+        surface_payload["slide_project"] = normalize_slide_project(
+            payload.get("slide_project") or payload.get("deck") or payload.get("project"),
+            initial_text,
+            resource_id,
+            attached_files,
+        )
     descriptor = {
         "id": resource_id,
         "kind": config["kind"],

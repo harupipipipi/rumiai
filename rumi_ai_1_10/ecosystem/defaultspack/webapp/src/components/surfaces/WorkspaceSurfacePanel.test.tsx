@@ -6,12 +6,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { WorkspaceSurfacePanel } from "./WorkspaceSurfacePanel";
 import type { SurfaceDescriptor } from "../../lib/api";
 
-function renderSurface(kind: "write" | "image" | "slide" | "movie", draft: string): string {
+function renderSurface(kind: "write" | "image" | "slide" | "movie", draft: string, payload: Record<string, unknown> = {}): string {
   const surface: SurfaceDescriptor = {
     id: `${kind}:test`,
     kind,
     title: kind,
-    payload: { initial_text: draft },
+    payload: { initial_text: draft, ...payload },
   };
   return renderToStaticMarkup(
     createElement(WorkspaceSurfacePanel, {
@@ -34,14 +34,56 @@ test("write surface renders a Notion-like document canvas", () => {
   assert.match(html, /Rumi Canvas/);
 });
 
-test("slide surface renders a deck editor shape", () => {
-  const html = renderSurface("slide", "# Quarterly review\n\nRoadmap and milestones");
+test("slide surface renders project-driven deck slides and assets", () => {
+  const html = renderSurface("slide", "# Quarterly review\n\nRoadmap and milestones", {
+    slide_project: {
+      project_id: "slide:test",
+      title: "Quarterly review",
+      theme: { name: "Executive clean" },
+      assets: [{ id: "chart-1", name: "growth-chart.png", kind: "image", source: "generated:growth-chart" }],
+      slides: [
+        {
+          id: "opening",
+          title: "Growth story",
+          subtitle: "Quarterly review",
+          bullets: ["Revenue grew", "Roadmap is on track"],
+          asset_ids: ["chart-1"],
+          notes: "Open with the chart.",
+        },
+        {
+          id: "roadmap",
+          title: "Roadmap focus",
+          bullets: ["Ship mobile polish", "Expand onboarding"],
+        },
+      ],
+      status_cards: [{ label: "Slides", value: "2", status: "editable" }],
+      export: { format: "pptx", filename: "quarterly-review.pptx", status: "ready" },
+    },
+  });
 
   assert.match(html, /data-surface-kind="slide"/);
   assert.match(html, /Speaker notes/);
-  assert.match(html, /Title/);
-  assert.match(html, /Agenda/);
-  assert.match(html, /Quarterly review/);
+  assert.match(html, /Growth story/);
+  assert.match(html, /Roadmap focus/);
+  assert.match(html, /Revenue grew/);
+  assert.match(html, /growth-chart.png/);
+  assert.match(html, /Executive clean/);
+  assert.match(html, /quarterly-review.pptx/);
+  assert.doesNotMatch(html, /Agenda/);
+});
+
+test("slide surface fallback links attached files as deck assets", () => {
+  const html = renderSurface("slide", "# Field notes\n\nUse the captured visual", {
+    attached_files: [
+      { id: "capture-1", name: "whiteboard-capture.png", kind: "image", source: "file:whiteboard-capture.png" },
+    ],
+  });
+
+  assert.match(html, /data-surface-kind="slide"/);
+  assert.match(html, /whiteboard-capture.png/);
+  assert.match(html, /Assets/);
+  assert.match(html, /linked/);
+  assert.doesNotMatch(html, /No linked assets/);
 });
 
 test("image surface renders a dedicated image editor instead of generic draft", () => {

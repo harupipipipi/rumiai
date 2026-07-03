@@ -26,7 +26,7 @@ import {
   Volume2,
   X,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
 import type { SurfaceDescriptor } from "../../lib/api";
@@ -96,11 +96,36 @@ type ImageProject = {
   variants: { id: string; label: string; status: string }[];
 };
 
-const slideThumbs = [
-  { id: "1", title: "Title", tone: "bg-blue-500" },
-  { id: "2", title: "Agenda", tone: "bg-emerald-400" },
-  { id: "3", title: "Close", tone: "bg-amber-300" },
-];
+type SlideAsset = {
+  id: string;
+  name: string;
+  kind: string;
+  source: string;
+};
+
+type Slide = {
+  id: string;
+  title: string;
+  subtitle: string;
+  layout: string;
+  bullets: string[];
+  notes: string;
+  accent: string;
+  assetIds: string[];
+};
+
+type SlideProject = {
+  projectId: string;
+  title: string;
+  brief: string;
+  themeName: string;
+  slides: Slide[];
+  assets: SlideAsset[];
+  statusCards: { label: string; value: string; status: string }[];
+  exportFormat: string;
+  exportFilename: string;
+  exportStatus: string;
+};
 
 const clipTone: Record<string, string> = {
   sky: "bg-sky-500",
@@ -109,6 +134,24 @@ const clipTone: Record<string, string> = {
   amber: "bg-amber-300",
   rose: "bg-rose-400",
   cyan: "bg-cyan-400",
+};
+
+const slideAccentTone: Record<string, string> = {
+  blue: "bg-blue-500",
+  emerald: "bg-emerald-400",
+  amber: "bg-amber-300",
+  rose: "bg-rose-400",
+  violet: "bg-violet-400",
+  cyan: "bg-cyan-400",
+};
+
+const slideAccentText: Record<string, string> = {
+  blue: "text-blue-700",
+  emerald: "text-emerald-700",
+  amber: "text-amber-700",
+  rose: "text-rose-700",
+  violet: "text-violet-700",
+  cyan: "text-cyan-700",
 };
 
 function recordValue(value: unknown): Record<string, unknown> {
@@ -180,6 +223,46 @@ function normalizeAsset(raw: unknown, index: number): MovieAsset {
     name: stringValue(item.name, `Asset ${index}`),
     kind: stringValue(item.kind, "video"),
     duration: numberValue(item.duration, 4, 0.25),
+  };
+}
+
+function normalizeSlideAsset(raw: unknown, index: number): SlideAsset {
+  const item = recordValue(raw);
+  return {
+    id: stringValue(item.id, `asset-${index}`),
+    name: stringValue(item.name, `Asset ${index}`),
+    kind: stringValue(item.kind ?? item.type, "image"),
+    source: stringValue(item.source ?? item.path, `asset-${index}`),
+  };
+}
+
+function normalizeStatusCard(raw: unknown, index: number): { label: string; value: string; status: string } {
+  const item = recordValue(raw);
+  return {
+    label: stringValue(item.label, `Status ${index}`),
+    value: stringValue(item.value, ""),
+    status: stringValue(item.status, "ready"),
+  };
+}
+
+function normalizeSlide(raw: unknown, index: number, fallbackAssetIds: string[]): Slide {
+  const item = recordValue(raw);
+  const rawBullets = item.bullets ?? item.points ?? item.content;
+  const bullets = typeof rawBullets === "string"
+    ? rawBullets.split(/\r?\n/).map((line) => line.replace(/^[-*#\d. ]+/, "").trim()).filter(Boolean)
+    : arrayValue(rawBullets).map((bullet) => stringValue(bullet)).filter(Boolean);
+  const rawAssetIds = arrayValue(item.asset_ids ?? item.assetIds ?? item.assets)
+    .map((asset) => stringValue(recordValue(asset).id ?? asset))
+    .filter(Boolean);
+  return {
+    id: stringValue(item.id, `slide-${index}`),
+    title: stringValue(item.title ?? item.heading, `Slide ${index}`),
+    subtitle: stringValue(item.subtitle ?? item.summary, ""),
+    layout: stringValue(item.layout, bullets.length ? "title-and-bullets" : "title"),
+    bullets,
+    notes: stringValue(item.notes ?? item.speaker_notes, ""),
+    accent: stringValue(item.accent, ["blue", "emerald", "amber", "rose", "violet", "cyan"][(index - 1) % 6]),
+    assetIds: rawAssetIds.length ? rawAssetIds : fallbackAssetIds.slice(index - 1, index),
   };
 }
 
@@ -265,6 +348,93 @@ function imageProjectFromSurface(surface: SurfaceDescriptor, draft: string): Ima
         { id: "variant-1", label: "Draft", status: "editable" },
         { id: "variant-2", label: "Mask", status: "ready" },
       ],
+  };
+}
+
+function stableProjectKey(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function slideProjectSyncKey(surface: SurfaceDescriptor, draft: string): string {
+  const payload = recordValue(surface.payload);
+  const rawProject = recordValue(payload.slide_project ?? payload.deck ?? payload.project);
+  if (Object.keys(rawProject).length) {
+    return stableProjectKey({
+      id: surface.id,
+      resourceId: surface.resourceId,
+      projectId: rawProject.project_id ?? rawProject.projectId,
+      project: rawProject,
+    });
+  }
+  return stableProjectKey({
+    id: surface.id,
+    resourceId: surface.resourceId,
+    draft: stringValue(payload.initial_text, draft),
+    attachedFiles: payload.attached_files,
+  });
+}
+
+function defaultSlideProject(draft: string, surface: SurfaceDescriptor, assets: SlideAsset[] = []): SlideProject {
+  const title = cleanTitle(draft, "Untitled deck");
+  const summary = bodyPreview(draft, "A focused opening slide for the current conversation.");
+  const assetIds = assets.map((asset) => asset.id);
+  const slides = [
+    { id: "slide-1", title, subtitle: summary, layout: "title", bullets: [summary].filter(Boolean), notes: draft, accent: "blue", assetIds },
+    { id: "slide-2", title: "Key points", subtitle: "", layout: "title-and-bullets", bullets: draft.split(/\r?\n/).map((line) => line.replace(/^[-*#\d. ]+/, "").trim()).filter(Boolean).slice(1, 5), notes: "", accent: "emerald", assetIds: [] },
+    { id: "slide-3", title: "Next steps", subtitle: "", layout: "title-and-bullets", bullets: ["Review structure", "Add visuals", "Prepare speaker notes"], notes: "", accent: "amber", assetIds: [] },
+  ];
+  return {
+    projectId: surface.resourceId ?? surface.id,
+    title,
+    brief: draft,
+    themeName: "Rumi clean",
+    slides,
+    assets,
+    statusCards: [
+      { label: "Slides", value: String(slides.length), status: "editable" },
+      { label: "Assets", value: String(assets.length), status: assets.length ? "linked" : "none" },
+      { label: "Export", value: "pptx/json", status: "ready" },
+    ],
+    exportFormat: "pptx",
+    exportFilename: "deck.pptx",
+    exportStatus: "ready",
+  };
+}
+
+function slideProjectFromSurface(surface: SurfaceDescriptor, draft: string): SlideProject {
+  const payload = recordValue(surface.payload);
+  const rawProject = recordValue(payload.slide_project ?? payload.deck ?? payload.project);
+  const rawAssets = arrayValue(rawProject.assets ?? payload.attached_files);
+  const assets = rawAssets.map(normalizeSlideAsset);
+  if (!Object.keys(rawProject).length) return defaultSlideProject(draft, surface, assets);
+  const fallback = defaultSlideProject(stringValue(rawProject.brief ?? payload.initial_text, draft), surface, assets);
+  const rawSlides = arrayValue(rawProject.slides);
+  const fallbackAssetIds = assets.map((asset) => asset.id);
+  const slides = rawSlides.length
+    ? rawSlides.map((slide, index) => normalizeSlide(slide, index + 1, fallbackAssetIds))
+    : fallback.slides;
+  const rawTheme = recordValue(rawProject.theme);
+  const rawExport = recordValue(rawProject.export);
+  const statusCards = arrayValue(rawProject.status_cards ?? rawProject.statusCards).map(normalizeStatusCard);
+  return {
+    projectId: stringValue(rawProject.project_id ?? rawProject.projectId, fallback.projectId),
+    title: stringValue(rawProject.title, fallback.title),
+    brief: stringValue(rawProject.brief ?? payload.initial_text, draft),
+    themeName: stringValue(rawTheme.name ?? rawProject.theme, fallback.themeName),
+    slides,
+    assets,
+    statusCards: statusCards.length ? statusCards : [
+      { label: "Slides", value: String(slides.length), status: "editable" },
+      { label: "Assets", value: String(assets.length), status: assets.length ? "linked" : "none" },
+      { label: "Export", value: stringValue(rawExport.format, "pptx/json"), status: stringValue(rawExport.status, "ready") },
+    ],
+    exportFormat: stringValue(rawExport.format, "pptx"),
+    exportFilename: stringValue(rawExport.filename, `${surface.id.replace(/[^a-z0-9]+/gi, "-")}.pptx`),
+    exportStatus: stringValue(rawExport.status, "ready"),
   };
 }
 
@@ -503,34 +673,71 @@ function ImageSurface({ surface, draft, onDraftChange, onAppendDraftToComposer, 
   );
 }
 
-function SlideSurface({ draft, onDraftChange, onAppendDraftToComposer, onClose }: Omit<WorkspaceSurfacePanelProps, "surface">) {
-  const title = cleanTitle(draft, "Untitled deck");
-  const summary = bodyPreview(draft, "A focused opening slide for the current conversation.");
+function SlideSurface({ surface, draft, onDraftChange, onAppendDraftToComposer, onClose }: WorkspaceSurfacePanelProps) {
+  const projectSyncKey = useMemo(() => slideProjectSyncKey(surface, draft), [surface.id, surface.resourceId, surface.payload, draft]);
+  const initialProject = useMemo(() => slideProjectFromSurface(surface, draft), [projectSyncKey]);
+  const [project, setProject] = useState(initialProject);
+  const [selectedSlideId, setSelectedSlideId] = useState(initialProject.slides[0]?.id ?? "");
+  const [status, setStatus] = useState("Editable deck ready");
+  const selectedSlide = project.slides.find((slide) => slide.id === selectedSlideId) ?? project.slides[0];
+  const selectedAssets = selectedSlide
+    ? project.assets.filter((asset) => selectedSlide.assetIds.includes(asset.id))
+    : [];
+
+  useEffect(() => {
+    setProject(initialProject);
+    setSelectedSlideId(initialProject.slides[0]?.id ?? "");
+    setStatus("Editable deck ready");
+  }, [initialProject]);
+
+  const updateBrief = (value: string) => {
+    onDraftChange(value);
+    setProject((current) => ({ ...current, brief: value, title: cleanTitle(value, current.title) }));
+  };
+  const handleToolAction = (label: string) => {
+    if (label === "Image") {
+      setStatus(`${project.assets.length} deck assets linked`);
+    } else if (label === "Text" || label === "Shapes" || label === "Select") {
+      setStatus(`${label} tool selected`);
+    } else {
+      setStatus(`${label} checked`);
+    }
+  };
+  const renameSelectedSlide = (title: string) => {
+    if (!selectedSlide) return;
+    setProject((current) => ({
+      ...current,
+      slides: current.slides.map((slide) => slide.id === selectedSlide.id ? { ...slide, title } : slide),
+    }));
+  };
 
   return (
     <div data-surface-kind="slide" className="flex h-full min-h-0 flex-col bg-[#101012]">
-      <SurfaceToolbar title={title} mode="slide" onClose={onClose} />
-      <div className="grid min-h-0 flex-1 grid-cols-[68px_minmax(0,1fr)] overflow-hidden">
+      <SurfaceToolbar title={project.title} mode="slide" onClose={onClose} onToolAction={handleToolAction} />
+      <div className="grid min-h-0 flex-1 grid-cols-[78px_minmax(0,1fr)] overflow-hidden">
         <aside className="min-h-0 overflow-y-auto border-r border-zinc-800 bg-[#141416] px-2 py-3">
           <div className="mb-2 flex h-7 items-center justify-center rounded-md border border-zinc-800 text-zinc-400">
             <Film className="h-4 w-4" aria-hidden="true" />
           </div>
           <div className="space-y-2">
-            {slideThumbs.map((slide, index) => (
+            {project.slides.map((slide, index) => (
               <button
                 key={slide.id}
                 type="button"
+                aria-label={`Slide ${index + 1}: ${slide.title}`}
+                onClick={() => setSelectedSlideId(slide.id)}
                 className={cn(
                   "group w-full rounded-md border p-1 text-left transition",
-                  index === 0 ? "border-blue-500/70 bg-blue-500/10" : "border-zinc-800 bg-zinc-950 hover:border-zinc-700",
+                  selectedSlide?.id === slide.id ? "border-blue-500/70 bg-blue-500/10" : "border-zinc-800 bg-zinc-950 hover:border-zinc-700",
                 )}
               >
                 <div className="aspect-video rounded bg-zinc-900 p-1">
-                  <div className={cn("h-1.5 w-5 rounded-full", slide.tone)} />
+                  <div className={cn("h-1.5 w-5 rounded-full", slideAccentTone[slide.accent] ?? "bg-blue-500")} />
                   <div className="mt-2 h-1 w-8 rounded bg-zinc-500/80" />
                   <div className="mt-1 h-1 w-5 rounded bg-zinc-700" />
+                  {slide.assetIds.length ? <div className="mt-1 h-1 w-3 rounded bg-zinc-600" /> : null}
                 </div>
-                <div className="mt-1 truncate text-[10px] text-zinc-500">{slide.id}. {slide.title}</div>
+                <div className="mt-1 truncate text-[10px] text-zinc-500">{index + 1}. {slide.title}</div>
               </button>
             ))}
           </div>
@@ -541,30 +748,87 @@ function SlideSurface({ draft, onDraftChange, onAppendDraftToComposer, onClose }
               <div className="aspect-video rounded-md border border-zinc-600/80 bg-[#f8fafc] p-[6%] text-zinc-950 shadow-inner">
                 <div className="flex h-full flex-col justify-between">
                   <div>
-                    <div className="h-1.5 w-16 rounded-full bg-blue-500" />
-                    <h2 className="mt-5 text-[26px] font-semibold leading-tight text-zinc-950">{title}</h2>
-                    <p className="mt-3 max-w-[78%] text-sm leading-5 text-zinc-700">{summary}</p>
+                    <div className={cn("h-1.5 w-16 rounded-full", slideAccentTone[selectedSlide?.accent ?? "blue"] ?? "bg-blue-500")} />
+                    <h2 className="mt-5 text-[26px] font-semibold leading-tight text-zinc-950">{selectedSlide?.title ?? project.title}</h2>
+                    {selectedSlide?.subtitle ? <p className="mt-2 max-w-[82%] text-sm leading-5 text-zinc-700">{selectedSlide.subtitle}</p> : null}
+                    {selectedSlide?.bullets.length ? (
+                      <ul className="mt-4 max-w-[82%] space-y-1.5 text-sm leading-5 text-zinc-700">
+                        {selectedSlide.bullets.slice(0, 5).map((bullet) => (
+                          <li key={bullet} className="flex gap-2">
+                            <span className={cn("mt-2 h-1.5 w-1.5 shrink-0 rounded-full", slideAccentTone[selectedSlide.accent] ?? "bg-blue-500")} />
+                            <span>{bullet}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
                   </div>
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="h-10 rounded bg-blue-100" />
-                    <div className="h-10 rounded bg-emerald-100" />
-                    <div className="h-10 rounded bg-amber-100" />
+                    {(selectedAssets.length ? selectedAssets : project.assets.slice(0, 3)).map((asset) => (
+                      <div key={asset.id} className="min-w-0 rounded bg-zinc-100 px-2 py-1">
+                        <div className={cn("truncate text-[10px] font-medium", slideAccentText[selectedSlide?.accent ?? "blue"] ?? "text-blue-700")}>{asset.kind}</div>
+                        <div className="truncate text-[10px] text-zinc-500">{asset.name}</div>
+                      </div>
+                    ))}
+                    {!project.assets.length ? (
+                      <>
+                        <div className="h-10 rounded bg-blue-100" />
+                        <div className="h-10 rounded bg-emerald-100" />
+                        <div className="h-10 rounded bg-amber-100" />
+                      </>
+                    ) : null}
                   </div>
                 </div>
               </div>
             </div>
+            <section className="grid gap-3 min-[680px]:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium text-zinc-300">Deck status</div>
+                  <span className="text-[11px] text-zinc-500">{project.themeName}</span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {project.statusCards.map((card) => (
+                    <div key={`${card.label}-${card.status}`} className="min-w-0 rounded-md border border-zinc-800 bg-zinc-900 px-2 py-2">
+                      <div className="truncate text-[10px] uppercase tracking-wide text-zinc-500">{card.label}</div>
+                      <div className="mt-1 truncate text-xs font-medium text-zinc-200">{card.value}</div>
+                      <div className="mt-0.5 truncate text-[10px] text-zinc-500">{card.status}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
+                <div className="mb-2 text-xs font-medium text-zinc-300">Assets / export</div>
+                <div className="space-y-1.5 text-[11px] text-zinc-500">
+                  {project.assets.slice(0, 3).map((asset) => (
+                    <div key={asset.id} className="flex min-w-0 items-center justify-between gap-2">
+                      <span className="truncate text-zinc-300">{asset.name}</span>
+                      <span className="shrink-0">{asset.kind}</span>
+                    </div>
+                  ))}
+                  {!project.assets.length ? <div>No linked assets</div> : null}
+                  <div className="border-t border-zinc-800 pt-1.5">{project.exportFormat} / {project.exportFilename} / {project.exportStatus}</div>
+                </div>
+              </div>
+            </section>
             <section className="rounded-lg border border-zinc-800 bg-zinc-950/70 p-3">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div className="text-xs font-medium text-zinc-300">Speaker notes</div>
                 <SendToComposerButton onClick={onAppendDraftToComposer} />
               </div>
+              <input
+                aria-label="Selected slide title"
+                value={selectedSlide?.title ?? ""}
+                onChange={(event) => renameSelectedSlide(event.target.value)}
+                className="mb-2 h-8 w-full rounded-md border border-zinc-800 bg-[#111114] px-3 text-sm text-zinc-200 outline-none focus:border-zinc-600"
+              />
               <textarea
                 aria-label="Slide notes"
                 value={draft}
-                onChange={(event) => onDraftChange(event.target.value)}
+                onChange={(event) => updateBrief(event.target.value)}
                 spellCheck={false}
                 className="h-28 w-full resize-none rounded-md border border-zinc-800 bg-[#111114] p-3 text-sm leading-6 text-zinc-200 outline-none focus:border-zinc-600"
               />
+              <div className="mt-2 text-[11px] text-zinc-500">{status}</div>
             </section>
           </div>
         </main>
