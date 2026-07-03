@@ -211,7 +211,7 @@ function MessageBlock({
 
   if (blockType === "code") {
     return (
-      <pre className="max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">
+      <pre className="max-w-full overflow-x-auto overflow-y-auto whitespace-pre rounded-lg bg-zinc-900 p-3 font-mono text-[12px] text-zinc-200">
         <code>{String(block.text ?? "")}</code>
       </pre>
     );
@@ -256,7 +256,7 @@ function MessageBlock({
   if (unknownStrategy === "hidden") return null;
   if (unknownStrategy === "text") return <p>{JSON.stringify(block)}</p>;
   return (
-    <pre className="max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-lg bg-zinc-900 p-3 font-mono text-[11px] text-zinc-400">
+    <pre className="max-w-full overflow-x-auto overflow-y-auto whitespace-pre rounded-lg bg-zinc-900 p-3 font-mono text-[11px] text-zinc-400">
       {JSON.stringify(block, null, 2)}
     </pre>
   );
@@ -531,7 +531,7 @@ function WidgetCard({ widget }: { widget: Record<string, unknown> }) {
       <summary className="cursor-pointer select-none text-[10px] uppercase tracking-wider text-blue-300">
         Widget details
       </summary>
-      <pre className="mt-2 max-w-full overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
+      <pre className="mt-2 max-w-full overflow-x-auto overflow-y-auto whitespace-pre text-[11px] font-mono text-zinc-200">{JSON.stringify(widget, null, 2)}</pre>
     </details>
   );
 }
@@ -1386,13 +1386,13 @@ export function ChatMessagesRenderer({
                           <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
                             Trace
                           </summary>
-                          <pre className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-zinc-400">
+                          <pre className="mt-2 max-h-40 overflow-x-auto overflow-y-auto whitespace-pre font-mono text-[11px] leading-relaxed text-zinc-400">
                             {message.metadata.thinkingTranscript}
                           </pre>
                         </details>
                       )}
 
-                      <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 overflow-x-hidden break-words leading-relaxed">
+                      <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 leading-relaxed">
                         {isAuthorityPending
                           ? (
                               <AuthorityPendingNotice />
