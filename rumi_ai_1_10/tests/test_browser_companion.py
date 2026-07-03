@@ -30,6 +30,17 @@ def _browser_companion_extension_root() -> Path:
     return candidates[0]
 
 
+def _defaultspack_domain_module(module_name: str):
+    sys.modules.pop("domain", None)
+    for name in list(sys.modules):
+        if name.startswith("domain."):
+            sys.modules.pop(name, None)
+    while str(DEFAULTSPACK_ROOT) in sys.path:
+        sys.path.remove(str(DEFAULTSPACK_ROOT))
+    sys.path.insert(0, str(DEFAULTSPACK_ROOT))
+    return __import__(module_name, fromlist=["*"])
+
+
 def test_browser_companion_candidate_urls_match_defaultspack_default_port():
     from ecosystem.rumi_default_tools_pack.domain.tool.browser_companion_bridge import candidate_base_urls
 
@@ -348,7 +359,7 @@ def test_browser_companion_read_only_safety_blocks_write_actions(tmp_path):
 
 
 def test_browser_companion_executor_approval_scope_is_page_action():
-    from domain.tool.executor import _tool_approval_scope
+    _tool_approval_scope = _defaultspack_domain_module("domain.tool.executor")._tool_approval_scope
 
     operation, approval_args = _tool_approval_scope(
         {"name": "browser_companion"},
@@ -557,7 +568,7 @@ def test_browser_companion_session_route_exposes_pairing_status(tmp_path, monkey
 
 
 def test_browser_companion_pack_not_approved_does_not_fall_back_to_local(monkeypatch):
-    from domain.tool.executor import ToolExecutor
+    ToolExecutor = _defaultspack_domain_module("domain.tool.executor").ToolExecutor
 
     called = {"local": False}
 

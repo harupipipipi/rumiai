@@ -701,7 +701,7 @@ func containsLoose(_ haystack: String, _ needle: String) -> Bool {
 }
 
 func semanticText(args: [String: Any]) -> String {
-    for key in ["text", "title", "label", "name", "value"] {
+    for key in ["text", "text_query", "match_text", "title", "label", "name", "value"] {
         let value = stringValue(args[key]).trimmingCharacters(in: .whitespacesAndNewlines)
         if !value.isEmpty {
             return value
