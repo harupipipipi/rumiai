@@ -113,6 +113,7 @@ class SandboxManager:
         self.audit_path = self.state_dir / DESKTOP_CONTROL_AUDIT_FILENAME
         self._desktop_input_events: dict[tuple[str, str, str], list[float]] = {}
         self._model_mode: str = "fast"
+        self._registry_signature: tuple[int, int] | None = None
         self._load_registry()
 
     def create(
@@ -138,6 +139,7 @@ class SandboxManager:
         starter: str | None = None,
         browser_url: str | None = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         image = str(image or "").strip() or "ubuntu:22.04"
         display = bool(display)
         try:
@@ -297,6 +299,7 @@ class SandboxManager:
         return result
 
     def destroy(self, sandbox_id: str) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
@@ -343,6 +346,7 @@ class SandboxManager:
             }
 
     def start(self, sandbox_id: str) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
@@ -381,6 +385,7 @@ class SandboxManager:
             return {"ok": True, "started": inst.state in RUNNING_STATES, **self._instance_to_dict(inst)}
 
     def stop(self, sandbox_id: str, *, force: bool = False) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
             if inst is None:
@@ -425,6 +430,7 @@ class SandboxManager:
         return self.start(sandbox_id)
 
     def screenshot(self, sandbox_id: str) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -448,6 +454,7 @@ class SandboxManager:
         return self._backend_unavailable(inst, "screenshot")
 
     def click(self, sandbox_id: str, x: int, y: int) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -468,6 +475,7 @@ class SandboxManager:
         return result
 
     def type_text(self, sandbox_id: str, text: str) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -488,6 +496,7 @@ class SandboxManager:
         return result
 
     def scroll(self, sandbox_id: str, direction: str = "down", amount: int = 3) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -515,6 +524,7 @@ class SandboxManager:
         actor: str = "human",
         authenticated_agent_id: str | None = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(seat_id)
         normalized_actor = "ai" if actor == "ai" else "human"
         if normalized_actor == "ai":
@@ -634,6 +644,7 @@ class SandboxManager:
         *,
         approved_secret_ids: Any = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -683,6 +694,7 @@ class SandboxManager:
         return result
 
     def apply_file_patch(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -736,6 +748,7 @@ class SandboxManager:
         return result
 
     def read_file(self, sandbox_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -786,6 +799,7 @@ class SandboxManager:
         return result
 
     def expose_port(self, sandbox_id: str, payload: Dict[str, Any], *, approved: bool = False) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self._enforce_lifecycle_for_instance(sandbox_id)
         with self._lock:
             inst, error = self._ready_instance(sandbox_id)
@@ -847,12 +861,14 @@ class SandboxManager:
                 "code": "INVALID_MODEL_MODE",
                 "status_code": 400,
             }
+        self._refresh_registry_if_changed()
         with self._lock:
             self._model_mode = mode
             self._save_registry()
         return {"ok": True, "mode": mode}
 
     def status(self, sandbox_id: str) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         self.enforce_lifecycle()
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
@@ -861,11 +877,13 @@ class SandboxManager:
             return {"ok": True, **self._instance_to_dict(inst)}
 
     def list_instances(self) -> List[Dict[str, Any]]:
+        self._refresh_registry_if_changed()
         self.enforce_lifecycle()
         with self._lock:
             return [self._instance_to_dict(instance) for instance in self._instances.values()]
 
     def enforce_lifecycle(self, *, now: float | None = None) -> list[dict[str, Any]]:
+        self._refresh_registry_if_changed()
         current_time = time.time() if now is None else float(now)
         actions: list[tuple[str, str]] = []
         with self._lock:
@@ -885,6 +903,7 @@ class SandboxManager:
         return results
 
     def _enforce_lifecycle_for_instance(self, sandbox_id: str, *, now: float | None = None) -> list[dict[str, Any]]:
+        self._refresh_registry_if_changed()
         current_time = time.time() if now is None else float(now)
         with self._lock:
             inst = self._instances.get(str(sandbox_id))
@@ -898,6 +917,7 @@ class SandboxManager:
         return [result]
 
     def mark_provider_uninstalled(self, provider_id: str, *, remove_state: bool = False) -> list[str]:
+        self._refresh_registry_if_changed()
         clean_provider_id = str(provider_id or "").strip()
         affected: list[str] = []
         if not clean_provider_id:
@@ -934,6 +954,7 @@ class SandboxManager:
         access_owner_id: str | None = None,
         access_request_required: bool | None = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(seat_id))
             if inst is None:
@@ -1006,6 +1027,7 @@ class SandboxManager:
         *,
         owner_id: str | None = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(seat_id))
             if inst is None:
@@ -1066,6 +1088,7 @@ class SandboxManager:
         requester_id: str | None = None,
         reason: str | None = None,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(seat_id))
             if inst is None:
@@ -1123,6 +1146,7 @@ class SandboxManager:
         owner_id: str | None = None,
         approved: bool = True,
     ) -> Dict[str, Any]:
+        self._refresh_registry_if_changed()
         with self._lock:
             inst = self._instances.get(str(seat_id))
             if inst is None:
@@ -1188,6 +1212,7 @@ class SandboxManager:
     def _load_registry(self) -> None:
         with self._lock:
             if not self.registry_path.is_file():
+                self._registry_signature = None
                 return
             try:
                 data = json.loads(self.registry_path.read_text(encoding="utf-8"))
@@ -1200,6 +1225,7 @@ class SandboxManager:
                 self._instances = {}
                 self._model_mode = "fast"
                 self._load_error = str(exc)
+                self._registry_signature = self._registry_file_signature()
                 return
 
             if isinstance(data, dict):
@@ -1229,6 +1255,8 @@ class SandboxManager:
             self._desktop_access_requests = _access_requests_from_registry(raw_access_requests)
             if self._reconcile_loaded_instances():
                 self._save_registry()
+            else:
+                self._registry_signature = self._registry_file_signature()
 
     def _save_registry(self) -> None:
         self.registry_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1256,6 +1284,23 @@ class SandboxManager:
         except OSError:
             pass
         tmp.replace(self.registry_path)
+        self._registry_signature = self._registry_file_signature()
+
+    def _refresh_registry_if_changed(self) -> None:
+        with self._lock:
+            current = self._registry_file_signature()
+            if current == self._registry_signature:
+                return
+            if current is None:
+                return
+            self._load_registry()
+
+    def _registry_file_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.registry_path.stat()
+        except OSError:
+            return None
+        return (int(stat.st_mtime_ns), int(stat.st_size))
 
     def _reconcile_loaded_instances(self) -> bool:
         changed = False
