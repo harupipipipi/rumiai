@@ -5,7 +5,20 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import {
+  MIMO_CODING_DEFAULT_FAST_MODEL,
+  MIMO_CODING_DEFAULT_MODEL,
+  MIMO_CODING_DEFAULT_VISION_MODEL,
+  frontendCommandArgs,
+  keepSelectedToolsAfterSend,
+  parseCommandBoolean,
+  parseSlashCommandInput,
+  resolveMimoCodingModel,
+  resolveMimoFastModel,
+  resolveMimoVisionModel,
+  resolveUltraYoloModeState,
+  resolvedFrontendCommandArgs,
+} from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -21,6 +34,30 @@ function assertNoRiskyAuthorityFollowupPhrases(text: string): void {
     assert.equal(text.includes(phrase), false, `unexpected risky phrase: ${phrase}`);
   }
 }
+
+test("MiMo Coding Company UI model fallbacks stay backend-compatible", () => {
+  const staleLegacyAllowlist = ["opencode-go/mimo-v2.5"];
+  const currentManifestAllowlist = [
+    MIMO_CODING_DEFAULT_MODEL,
+    MIMO_CODING_DEFAULT_VISION_MODEL,
+    MIMO_CODING_DEFAULT_FAST_MODEL,
+    "stub/default",
+  ];
+
+  assert.equal(
+    resolveMimoCodingModel("opencode-go/mimo-v2.5", staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_MODEL,
+  );
+  assert.equal(
+    resolveMimoVisionModel(staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_VISION_MODEL,
+  );
+  assert.equal(
+    resolveMimoFastModel(staleLegacyAllowlist, currentManifestAllowlist),
+    MIMO_CODING_DEFAULT_FAST_MODEL,
+  );
+  assert.equal(resolveMimoCodingModel("stub/default", ["stub/default"], []), "stub/default");
+});
 
 test("startProviderOAuth posts scope mode and requested services", async () => {
   let requestUrl = "";

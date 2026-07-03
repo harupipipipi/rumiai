@@ -1693,6 +1693,66 @@ function settingList(value: unknown): string[] {
   return [];
 }
 
+export const MIMO_CODING_DEFAULT_MODEL = "xiaomi-token-plan-sgp/mimo-v2.5-pro";
+export const MIMO_CODING_DEFAULT_VISION_MODEL = "xiaomi-token-plan-sgp/mimo-v2-omni";
+export const MIMO_CODING_DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash";
+
+const MIMO_CODING_EXPIRED_MODELS = new Set([
+  "opencode-go/mimo-v2.5",
+]);
+
+const MIMO_CODING_BACKEND_COMPATIBLE_MODELS = new Set([
+  MIMO_CODING_DEFAULT_MODEL,
+  "xiaomi-token-plan-sgp/mimo-v2.5",
+  "xiaomi-token-plan-sgp/mimo-v2-pro",
+  MIMO_CODING_DEFAULT_VISION_MODEL,
+  MIMO_CODING_DEFAULT_FAST_MODEL,
+  "gitlawb-opengateway/mimo-v2.5-pro",
+  "gitlawb-opengateway/mimo-v2.5",
+  "gitlawb-opengateway/mimo-v2-pro",
+  "gitlawb-opengateway/mimo-v2-omni",
+  "gitlawb-opengateway/mimo-v2-flash",
+  "groq/openai/gpt-oss-120b",
+  "cerebras/gpt-oss-120b",
+  "stub/default",
+]);
+
+function mimoCodingCandidateModels(settingsAllowlist: string[], manifestAllowlist: string[]): string[] {
+  const sourceAllowlist = settingsAllowlist.length ? settingsAllowlist : manifestAllowlist;
+  return sourceAllowlist.filter((item) => (
+    MIMO_CODING_BACKEND_COMPATIBLE_MODELS.has(item)
+    && !MIMO_CODING_EXPIRED_MODELS.has(item)
+  ));
+}
+
+export function resolveMimoCodingModel(
+  preferredModel: string,
+  settingsAllowlist: string[],
+  manifestAllowlist: string[],
+): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  if (candidates.includes(preferredModel)) return preferredModel;
+  if (candidates.includes(MIMO_CODING_DEFAULT_MODEL)) return MIMO_CODING_DEFAULT_MODEL;
+  if (candidates.includes("stub/default")) return "stub/default";
+  return candidates[0] ?? MIMO_CODING_DEFAULT_MODEL;
+}
+
+export function resolveMimoVisionModel(settingsAllowlist: string[], manifestAllowlist: string[]): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  const visionPreferred = candidates.find((item) => /omni|vision|vl/i.test(item));
+  if (visionPreferred) return visionPreferred;
+  if (candidates.includes(MIMO_CODING_DEFAULT_VISION_MODEL)) return MIMO_CODING_DEFAULT_VISION_MODEL;
+  return MIMO_CODING_DEFAULT_VISION_MODEL;
+}
+
+export function resolveMimoFastModel(settingsAllowlist: string[], manifestAllowlist: string[]): string {
+  const candidates = mimoCodingCandidateModels(settingsAllowlist, manifestAllowlist);
+  const fastPreferred = candidates.find((item) => /flash|mini/i.test(item));
+  if (fastPreferred) return fastPreferred;
+  if (candidates.includes(MIMO_CODING_DEFAULT_FAST_MODEL)) return MIMO_CODING_DEFAULT_FAST_MODEL;
+  return MIMO_CODING_DEFAULT_FAST_MODEL;
+}
+
 function settingNumber(value: unknown, fallback: number): number {
   const numeric = Number(value ?? fallback);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -4555,25 +4615,19 @@ function ChatApp() {
   const preferredMimoCodingModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
     const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
-    const effectiveAllowlist = allowlist.length ? allowlist : manifestAllowlist;
-    if (effectiveAllowlist.includes(preferredModel)) return preferredModel;
-    if (effectiveAllowlist.includes("opencode-go/mimo-v2.5")) return "opencode-go/mimo-v2.5";
-    if (effectiveAllowlist.includes("stub/default")) return "stub/default";
-    return effectiveAllowlist[0] ?? "opencode-go/mimo-v2.5";
+    return resolveMimoCodingModel(preferredModel, allowlist, manifestAllowlist);
   };
 
   const preferredMimoVisionModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const visionPreferred = allowlist.find((item) => /omni|vision|vl/i.test(item));
-    if (visionPreferred) return visionPreferred;
-    return "xiaomi-token-plan-sgp/mimo-v2-omni";
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    return resolveMimoVisionModel(allowlist, manifestAllowlist);
   };
 
   const preferredMimoFastModel = () => {
     const allowlist = settingList(settingsValues.mimo_coding_company?.model_allowlist);
-    const fastPreferred = allowlist.find((item) => /flash|mini/i.test(item));
-    if (fastPreferred) return fastPreferred;
-    return "opencode-go/mimo-v2.5";
+    const manifestAllowlist = mimoCodingStatus?.manifest.model_self_selection?.allowlist ?? [];
+    return resolveMimoFastModel(allowlist, manifestAllowlist);
   };
 
   const mimoCodingTargets = () => settingList(settingsValues.mimo_coding_company?.qa_targets);
