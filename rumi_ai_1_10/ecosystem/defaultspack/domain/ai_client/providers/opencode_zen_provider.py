@@ -106,6 +106,7 @@ class OpencodeZenProvider(AnthropicProvider):
     ANTHROPIC_MESSAGES_MODELS = {"minimax-m3-free"}
     MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    _message_reasoning_content = staticmethod(OpenAIProvider._message_reasoning_content)
 
     def __init__(self) -> None:
         self._api_key = os.environ.get("OPENCODE_ZEN_API_KEY", "")

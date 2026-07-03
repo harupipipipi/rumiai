@@ -128,6 +128,52 @@ def test_opencode_zen_mimo_free_uses_chat_completions(monkeypatch):
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
+def test_opencode_zen_mimo_free_preserves_tool_call_continuations(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+
+    def fake_request_json(path, body):
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_tool_followup",
+            "model": "mimo-v2.5-free",
+            "choices": [{"message": {"content": "Done"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 1, "total_tokens": 5},
+        }
+
+    messages = [
+        {"role": "user", "content": "Call noop."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_noop",
+                    "type": "function",
+                    "function": {"name": "noop", "arguments": "{}"},
+                }
+            ],
+            "metadata": {"thinking": {"transcript": "Need the noop result."}},
+        },
+        {"role": "tool", "tool_call_id": "call_noop", "name": "noop", "content": {"ok": True}},
+    ]
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        result = provider.complete("opencode-zen/mimo-v2.5-free", messages, [], {"max_tokens": 8})
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["messages"][1]["tool_calls"] == messages[1]["tool_calls"]
+    assert captured["body"]["messages"][1]["reasoning_content"] == "Need the noop result."
+    assert captured["body"]["messages"][2] == {
+        "role": "tool",
+        "tool_call_id": "call_noop",
+        "name": "noop",
+        "content": '{"ok": true}',
+    }
+    assert result["content"] == [{"type": "text", "text": "Done"}]
+
+
 def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}
