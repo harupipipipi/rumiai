@@ -10,6 +10,9 @@
   ],
   "caller_requires": [],
   "host_execution": false,
+  "grant_config": {
+    "timeout": 300
+  },
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
   "vocab_aliases": [

@@ -9,9 +9,12 @@ def ok(data=None):
     return {"status": "ok", "data": data}
 
 
-def error(message, code="ERROR"):
+def error(message, code="ERROR", *, details=None):
     """Return error response"""
-    return {"status": "error", "error": {"code": code, "message": message}}
+    payload = {"code": code, "message": message}
+    if details is not None:
+        payload["details"] = details
+    return {"status": "error", "error": payload}
 
 
 def not_implemented(handler_name):

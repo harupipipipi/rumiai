@@ -54,6 +54,19 @@ def _now_ms():
     return int(time.time() * 1000)
 
 
+def _sanitize_json_text(value):
+    if isinstance(value, str):
+        return value.encode("utf-8", errors="replace").decode("utf-8")
+    if isinstance(value, list):
+        return [_sanitize_json_text(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            _sanitize_json_text(key): _sanitize_json_text(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 class ChatStore:
     _instance = None
 
@@ -65,7 +78,7 @@ class ChatStore:
             cls._instance._lock = threading.RLock()
             cls._instance._conversations = cls._instance._load_conversations()
             cls._instance._loaded_storage_signature = cls._instance._storage_signature()
-            if cls._instance._conversations:
+            if cls._instance._conversation_file_migration_needed():
                 try:
                     cls._instance._save_conversation_files()
                 except OSError:
@@ -74,7 +87,7 @@ class ChatStore:
             cls._instance._storage_path = storage_path
             cls._instance._conversations = cls._instance._load_conversations()
             cls._instance._loaded_storage_signature = cls._instance._storage_signature()
-            if cls._instance._conversations:
+            if cls._instance._conversation_file_migration_needed():
                 try:
                     cls._instance._save_conversation_files()
                 except OSError:
@@ -99,9 +112,10 @@ class ChatStore:
         with self._lock:
             current_signature = self._storage_signature()
             if getattr(self, "_loaded_storage_signature", None) == current_signature:
-                return
+                return False
             self._conversations = self._load_conversations()
             self._loaded_storage_signature = current_signature
+            return True
 
     def _load_conversations(self):
         with self._lock:
@@ -123,6 +137,50 @@ class ChatStore:
                 loaded[str(conversation_id)] = conversation
             return loaded
 
+    def _conversation_file_migration_needed(self):
+        if not self._conversations:
+            return False
+        conversations_dir = self._storage_path.parent / "conversations"
+        if not conversations_dir.is_dir():
+            return True
+        for conversation_id in self._conversations:
+            if not (conversations_dir / str(conversation_id) / "history.json").is_file():
+                return True
+        return False
+
+    def _load_conversation_file(self, conversation_id):
+        conversation_id = str(conversation_id or "").strip()
+        if not conversation_id:
+            return None
+        history_path = self.conversation_dir(conversation_id) / "history.json"
+        try:
+            payload = json.loads(history_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return None
+        conversation = payload.get("conversation") if isinstance(payload, dict) else None
+        if not isinstance(conversation, dict):
+            return None
+        stored_id = str(conversation.get("id") or conversation_id)
+        if stored_id != conversation_id:
+            return None
+        self._normalize_conversation(conversation_id, conversation)
+        self._sanitize_inline_thought_messages(conversation)
+        return conversation
+
+    def _recover_conversation_from_file(self, conversation_id):
+        with self._lock:
+            if conversation_id in self._conversations:
+                return self._conversations[conversation_id]
+            conversation = self._load_conversation_file(conversation_id)
+            if conversation is None:
+                return None
+            self._conversations[conversation_id] = conversation
+            try:
+                self._save_conversation_index()
+            except OSError:
+                pass
+            return conversation
+
     def _atomic_write_json(self, path, payload):
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp_name = tempfile.mkstemp(
@@ -133,7 +191,7 @@ class ChatStore:
         tmp_path = Path(tmp_name)
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(payload, handle, ensure_ascii=False, indent=2)
+                json.dump(_sanitize_json_text(payload), handle, ensure_ascii=False, indent=2)
                 handle.flush()
                 os.fsync(handle.fileno())
             self._replace_atomic_file(tmp_path, path)
@@ -244,11 +302,75 @@ class ChatStore:
             return copy.deepcopy(conv)
 
     def get_conversation(self, conversation_id):
+        conversation_id = str(conversation_id or "")
         self._refresh_if_storage_changed()
-        conv = self._conversations.get(conversation_id)
+        indexed_conv = self._conversations.get(conversation_id)
+        file_conv = self._load_conversation_file(conversation_id)
+        if file_conv is not None:
+            conv = self._freshest_conversation(indexed_conv, file_conv)
+            with self._lock:
+                missing_from_index = conversation_id not in self._conversations
+                self._conversations[conversation_id] = conv
+                if missing_from_index:
+                    try:
+                        self._save_conversation_index()
+                    except OSError:
+                        pass
+            return copy.deepcopy(conv)
+        conv = indexed_conv
         if conv is None:
-            return None
+            conv = self._recover_conversation_from_file(conversation_id)
+            if conv is None:
+                return None
         return copy.deepcopy(conv)
+
+    def get_conversation_window(self, conversation_id, message_limit=None, message_offset=None):
+        conversation_id = str(conversation_id or "")
+        indexed_conv = self._conversations.get(conversation_id)
+        file_conv = self._load_conversation_file(conversation_id)
+        if file_conv is not None:
+            conv = self._freshest_conversation(indexed_conv, file_conv)
+            with self._lock:
+                self._conversations[conversation_id] = conv
+        else:
+            self._refresh_if_storage_changed()
+            indexed_conv = self._conversations.get(conversation_id)
+            conv = indexed_conv
+            if conv is None:
+                conv = self._recover_conversation_from_file(conversation_id)
+                if conv is None:
+                    return None, None
+        messages = conv.get("messages", [])
+        if not isinstance(messages, list):
+            messages = []
+        total = len(messages)
+        if message_limit is None:
+            start = 0
+            end = total
+            resolved_limit = total
+        else:
+            resolved_limit = max(0, int(message_limit))
+            if message_offset is None:
+                start = max(0, total - resolved_limit)
+            else:
+                start = max(0, min(total, int(message_offset)))
+            end = max(start, min(total, start + resolved_limit))
+        conv_copy = {
+            key: copy.deepcopy(value)
+            for key, value in conv.items()
+            if key != "messages"
+        }
+        conv_copy["messages"] = [copy.deepcopy(message) for message in messages[start:end]]
+        window = {
+            "offset": start,
+            "limit": resolved_limit,
+            "returned": len(conv_copy["messages"]),
+            "total": total,
+            "has_more_before": start > 0,
+            "has_more_after": end < total,
+            "order": "chronological",
+        }
+        return conv_copy, window
 
     def list_conversations(
         self,
@@ -390,8 +512,12 @@ class ChatStore:
                 msg["parent_id"] = conv["current_node_id"]
             if "children_ids" not in msg:
                 msg["children_ids"] = []
-            if "sequence_number" not in msg or msg["sequence_number"] is None:
-                msg["sequence_number"] = len(conv["messages"]) + 1
+            next_sequence = self._next_append_sequence_number(conv["messages"])
+            requested_sequence = self._coerce_positive_int(msg.get("sequence_number"))
+            if requested_sequence != next_sequence:
+                msg["sequence_number"] = next_sequence
+            else:
+                msg["sequence_number"] = requested_sequence
             if "created_at" not in msg or msg["created_at"] is None:
                 msg["created_at"] = _now_ms()
             if "raw_text" not in msg or msg["raw_text"] is None:
@@ -844,6 +970,49 @@ class ChatStore:
             conversation.get("title") or "New Conversation",
             conversation.get("id") or conversation_id,
         )
+        ChatStore._normalize_message_sequence_numbers(conversation["messages"])
+
+    @staticmethod
+    def _coerce_positive_int(value):
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+
+    @staticmethod
+    def _next_append_sequence_number(messages):
+        if not isinstance(messages, list):
+            return 1
+        max_sequence = 0
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            sequence = ChatStore._coerce_positive_int(message.get("sequence_number"))
+            if sequence is not None:
+                max_sequence = max(max_sequence, sequence)
+        return max(len(messages), max_sequence) + 1
+
+    @staticmethod
+    def _normalize_message_sequence_numbers(messages):
+        if not isinstance(messages, list):
+            return
+        expected = 1
+        needs_repair = False
+        for message in messages:
+            if not isinstance(message, dict):
+                expected += 1
+                continue
+            sequence = ChatStore._coerce_positive_int(message.get("sequence_number"))
+            if sequence != expected:
+                needs_repair = True
+                break
+            expected += 1
+        if not needs_repair:
+            return
+        for index, message in enumerate(messages, start=1):
+            if isinstance(message, dict):
+                message["sequence_number"] = index
 
     @staticmethod
     def _set_metadata_icon(metadata, title, conversation_id):
@@ -912,6 +1081,18 @@ class ChatStore:
                 pinned_at = updated_at
             return (1, pinned_at, updated_at)
         return (0, updated_at, updated_at)
+
+    @staticmethod
+    def _freshest_conversation(indexed_conversation, file_conversation):
+        if not isinstance(indexed_conversation, dict):
+            return file_conversation
+        if not isinstance(file_conversation, dict):
+            return indexed_conversation
+        indexed_updated_at = ChatStore._sort_timestamp(indexed_conversation.get("updated_at"))
+        file_updated_at = ChatStore._sort_timestamp(file_conversation.get("updated_at"))
+        if indexed_updated_at > file_updated_at:
+            return indexed_conversation
+        return file_conversation
 
     @staticmethod
     def _sort_timestamp(value):
@@ -1082,7 +1263,7 @@ class ChatStore:
             tool_dir = self.conversation_workspace_dir(conversation_id) / "tools"
             tool_dir.mkdir(parents=True, exist_ok=True)
             path = tool_dir / "{}-tool_logs.json".format(self._safe_filename(str(msg.get("id") or "message")))
-            path.write_text(json.dumps(msg["tool_logs"], ensure_ascii=False, indent=2), encoding="utf-8")
+            path.write_text(json.dumps(_sanitize_json_text(msg["tool_logs"]), ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _sanitize_inline_thought_messages(self, conversation):
         for msg in conversation.get("messages", []) if isinstance(conversation.get("messages"), list) else []:

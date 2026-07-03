@@ -1285,6 +1285,14 @@ def test_registry_chat_stream_route_is_adapted_to_chat_stream_turn_flow():
             {"_method": "GET"},
         ),
         (
+            "GET",
+            "/api/company/acme/status",
+            "blocks.company.status",
+            {"company_id": "acme"},
+            {"company_id": "company_id"},
+            {"_method": "GET"},
+        ),
+        (
             "PUT",
             "/api/agent/companies/acme/agents/bot",
             "blocks.company.agents",
@@ -1398,6 +1406,7 @@ def test_fallback_specs_list_company_p2p_compact_and_workspace_routes():
         ("POST", "/api/agent/companies", "blocks.company.create"),
         ("GET", "/api/company", "blocks.company.list"),
         ("POST", "/api/company/bootstrap", "blocks.company.bootstrap"),
+        ("GET", "/api/company/{company_id}/status", "blocks.company.status"),
         ("GET", "/api/agent/companies/{company_id}/status", "blocks.company.status"),
         ("PUT", "/api/agent/companies/{company_id}/agents/{agent_id}", "blocks.company.agents"),
         (

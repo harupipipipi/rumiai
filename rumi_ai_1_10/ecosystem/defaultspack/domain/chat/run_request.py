@@ -125,7 +125,58 @@ _CODING_PR_TOOL_IDS = [
     "coding_git_diff",
     "coding_git_commit",
     "coding_git_push",
+    "coding_github_pr_create",
 ]
+
+
+def _is_provider_qualified_model(value: Any) -> bool:
+    text = str(value or "").strip()
+    return bool(text and "/" in text and not text.startswith("modelpack/"))
+
+
+def _apply_provider_surface_defaults(
+    provider_capabilities: dict[str, Any],
+    model_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    if model_capabilities:
+        return provider_capabilities
+    api_surface = (
+        provider_capabilities.get("api_surface")
+        if isinstance(provider_capabilities.get("api_surface"), dict)
+        else {}
+    )
+    updated = dict(provider_capabilities)
+    if api_surface.get("supports_tool_call_shape") and not updated.get("supports_tool_calling"):
+        updated["supports_tool_calling"] = True
+    if (
+        api_surface.get("supports_parallel_tool_call_shape")
+        and not updated.get("supports_parallel_tool_calls")
+    ):
+        updated["supports_parallel_tool_calls"] = True
+    return updated
+
+
+def _runtime_model_capabilities(
+    model_capabilities: dict[str, Any],
+    provider_capabilities: dict[str, Any],
+) -> dict[str, Any]:
+    if model_capabilities:
+        return model_capabilities
+    runtime_caps: dict[str, Any] = {}
+    for key in (
+        "supports_tool_calling",
+        "supports_vision",
+        "supports_image_input",
+        "supports_thinking",
+        "supports_fast",
+    ):
+        if provider_capabilities.get(key):
+            runtime_caps[key] = provider_capabilities.get(key)
+    if provider_capabilities.get("supports_reasoning"):
+        runtime_caps["supports_thinking"] = True
+    return runtime_caps
+
+
 _AUTHORITY_FOLLOWUP_PERMISSION_IDS = frozenset(
     {"model.invoke", "api_key.use", "network.egress"}
 )
@@ -228,14 +279,16 @@ def prepare_chat_run(
     chat_references = _chat_references(store, conversation_id, metadata)
     metadata = dict(metadata) if isinstance(metadata, dict) else {}
     metadata.setdefault("chat_references", chat_references)
-    user_message = store.add_message(
-        conversation_id,
-        {
-            "role": message.get("role", "user"),
-            "content": content,
-            "metadata": metadata or None,
-        },
-    )
+    user_message_dict = {
+        "role": message.get("role", "user"),
+        "content": content,
+        "metadata": metadata or None,
+    }
+    if "parent_id" in message:
+        parent_id = str(message.get("parent_id") or "").strip()
+        if parent_id:
+            user_message_dict["parent_id"] = parent_id
+    user_message = store.add_message(conversation_id, user_message_dict)
     if user_message is None:
         raise RuntimeError("Failed to add user message")
 
@@ -511,6 +564,8 @@ def prepare_chat_run(
         _append_system_context_message(standard_messages, tool_hint_prompt)
     _ensure_must_use_has_eligible_tools(tool_selection, raw_tools)
     modalities = detect_modalities(content, metadata)
+    route_preferred_model = model
+    route_preferred_capabilities = get_model_capabilities(route_preferred_model) or {}
     routing_decision = route_model_request(
         ModelRoutingRequest(
             conversation_id=conversation_id,
@@ -541,27 +596,46 @@ def prepare_chat_run(
             settings=model_settings,
         )
     )
-    model = routing_decision.selected_model
+    force_preferred_model = bool(requested_model) or (
+        _is_provider_qualified_model(route_preferred_model)
+        and not route_preferred_capabilities
+    )
+    if force_preferred_model:
+        model = route_preferred_model
+        if routing_decision.selected_model != model:
+            routing_decision.selected_model = model
+            if "explicit_model_override" not in routing_decision.reason_codes:
+                routing_decision.reason_codes.append("explicit_model_override")
+            routing_decision.explanation = f"{model} selected because it was explicitly requested."
+    else:
+        model = routing_decision.selected_model
     selected_capabilities = get_model_capabilities(model) or {}
-    provider_capabilities = get_model_provider_capabilities(
-        model,
-        {
+    provider_model_metadata = None
+    if selected_capabilities:
+        provider_model_metadata = {
             "id": model,
             "provider_id": model.split("/", 1)[0] if "/" in model else "",
             "capabilities": selected_capabilities,
             "metadata": {"capabilities": selected_capabilities},
             "supports_thinking": bool(selected_capabilities.get("supports_thinking")),
-        },
+        }
+    provider_capabilities = _apply_provider_surface_defaults(
+        get_model_provider_capabilities(model, provider_model_metadata),
+        selected_capabilities,
     )
     if params.get("thinking_level") not in (None, "", "none") and not selected_capabilities.get(
         "supports_thinking"
     ):
         params["thinking_level"] = "none"
     policy = policy_from_context(request_context)
+    runtime_model_capabilities = _runtime_model_capabilities(
+        selected_capabilities,
+        provider_capabilities,
+    )
     runtime_snapshot = build_runtime_capability_snapshot(
         user_text=user_text,
         modalities=modalities,
-        model_capabilities=selected_capabilities,
+        model_capabilities=runtime_model_capabilities,
         context=request_context,
         policy=policy,
     )
@@ -596,7 +670,7 @@ def prepare_chat_run(
         store.update_message(conversation_id, user_message["id"], {"metadata": metadata})
     if (
         provider_tools
-        and not selected_capabilities.get("supports_tool_calling")
+        and not runtime_model_capabilities.get("supports_tool_calling")
         and not request_context.get("user_requested_computer_use")
     ):
         unavailable_tools = [
