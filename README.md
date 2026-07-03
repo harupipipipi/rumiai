@@ -30,7 +30,7 @@ python -m rumi_ai --health
 python -m rumi_ai
 ```
 
-After starting, open http://localhost:8080/panel/ in your browser to access the control panel.
+After starting, open http://localhost:8765/panel/ in your browser to access the control panel.
 
 ## Read This When...
 
@@ -194,14 +194,14 @@ source .venv/bin/activate
 pip install -r rumi_ai_1_10/requirements.txt
 ```
 
-#### 2. Port 8080 already in use
+#### 2. Port 8765 already in use
 
 **Problem**: `python -m rumi_ai` fails with "Address already in use".
 
-**Solution**: Kill the process using port 8080.
+**Solution**: Kill the process using port 8765.
 ```bash
-# Find process using port 8080
-lsof -i :8080
+# Find process using port 8765
+lsof -i :8765
 
 # Kill the process
 kill -9 <PID>

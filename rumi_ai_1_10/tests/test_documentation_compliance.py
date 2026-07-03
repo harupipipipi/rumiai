@@ -49,6 +49,13 @@ class TestDocumentationCompliance:
         assert "## Read This When..." in readme_content, \
             "README.md should contain a table of contents"
 
+    def test_readme_quick_start_uses_kernel_panel_port(self, readme_content: str):
+        """Test that Quick Start points at the kernel panel port."""
+        assert "http://localhost:8765/panel/" in readme_content, \
+            "README Quick Start should use the kernel panel port"
+        assert "http://localhost:8080/panel/" not in readme_content, \
+            "README Quick Start should not use the setup web port for the panel"
+
     def test_readme_links_are_valid(self, readme_content: str):
         """Test that internal links in README are valid."""
         # Extract markdown links
