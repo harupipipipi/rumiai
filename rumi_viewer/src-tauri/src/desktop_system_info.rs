@@ -73,13 +73,13 @@ pub fn collect_desktop_system_info(host_broker: HostBrokerStatus) -> DesktopSyst
     DesktopSystemInfo {
         source: "viewer_tauri".to_string(),
         reliable: true,
-        app_name: "Rumi AI".to_string(),
+        app_name: "Tobkiri Launcher".to_string(),
         display_version: display_version_from_package_version(&viewer_version),
         viewer_version,
         build_channel: "beta".to_string(),
         platform: std::env::consts::OS.to_string(),
         platform_release: platform_release(),
-        permission_subject: "Rumi Viewer".to_string(),
+        permission_subject: "Tobkiri Launcher".to_string(),
         host_broker,
         host_permissions: collect_host_permissions(&permissions),
         permissions,
@@ -440,7 +440,7 @@ mod tests {
             "beta 1.2.3"
         );
         assert!(!info.viewer_version.is_empty());
-        assert_eq!(info.permission_subject, "Rumi Viewer");
+        assert_eq!(info.permission_subject, "Tobkiri Launcher");
         assert_eq!(info.source, "viewer_tauri");
         assert!(info.reliable);
         assert!(info

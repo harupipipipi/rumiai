@@ -1,4 +1,4 @@
-//! Rumi Viewer — Tauri application library.
+//! Tobkiri Launcher — Tauri application library.
 //!
 //! V2: Full implementation with setup hook, commands, tray menu, and navigation guard.
 
@@ -1183,7 +1183,7 @@ fn restore_primary_window(app: &AppHandle, refresh_panel_session: bool) -> Resul
     );
 
     let Some(label) = target else {
-        return Err("no Rumi window is available".into());
+        return Err("no Tobkiri Launcher window is available".into());
     };
 
     if refresh_panel_session {
@@ -1220,7 +1220,7 @@ pub(crate) fn send_app_to_background(app: &AppHandle) -> Result<(), String> {
     }
 
     if !found_window {
-        warn!("Background request ignored because no Rumi window is available");
+        warn!("Background request ignored because no Tobkiri Launcher window is available");
     }
 
     Ok(())
@@ -1386,7 +1386,7 @@ fn run_delayed_update_check() {
             );
         }
         Ok(None) => {
-            info!("Rumi AI is up to date.");
+            info!("Tobkiri Launcher is up to date.");
         }
         Err(e) => {
             error!("Startup update check failed (non-fatal): {e}");
@@ -1516,7 +1516,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Err(error) = show_primary_window(app) {
-                error!("Failed to focus existing Rumi window after duplicate launch: {error}");
+                error!("Failed to focus existing Tobkiri Launcher window after duplicate launch: {error}");
             }
         }))
         .plugin(

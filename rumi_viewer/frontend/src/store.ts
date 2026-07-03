@@ -579,7 +579,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await apiApplyUpdate(target);
       await get().loadUpdates();
       const suffix = result.restart_required
-        ? ' Restart Rumi AI to finish.'
+        ? ' Restart Tobkiri Launcher to finish.'
         : result.routes_reload_recommended
           ? ' Restart the Kernel to reload routes.'
           : '';

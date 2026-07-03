@@ -4,6 +4,7 @@ import { fetchBackgroundControlStatus, fetchDesktopSystemInfo, isDesktopShellAva
 import type { BackgroundControlStatus, DesktopPermissionStatus, DesktopSystemInfo } from '@/src/lib/apiTypes';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
+import { LAUNCHER_DISPLAY_NAME, LAUNCHER_VERSION_LABEL } from '@/src/lib/launcherBrand';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/src/components/ui/Card';
 import { Button } from '@/src/components/ui/Button';
 import { Input } from '@/src/components/ui/Input';
@@ -63,7 +64,7 @@ export function Settings() {
   const loadDesktopInfo = async () => {
     if (!desktopShellAvailable) {
       setDesktopInfo(null);
-      setDesktopInfoError('macOS permission status is only available inside Rumi Viewer.');
+      setDesktopInfoError(`macOS permission status is only available inside ${LAUNCHER_DISPLAY_NAME}.`);
       return;
     }
     setDesktopInfoBusy(true);
@@ -72,7 +73,7 @@ export function Settings() {
       const info = await fetchDesktopSystemInfo();
       if (!info) {
         setDesktopInfo(null);
-        setDesktopInfoError('Rumi Viewer permission bridge is unavailable. Reopen this page from Rumi Viewer and try again.');
+        setDesktopInfoError(`${LAUNCHER_DISPLAY_NAME} permission bridge is unavailable. Reopen this page from ${LAUNCHER_DISPLAY_NAME} and try again.`);
         return;
       }
       setDesktopInfo(info);
@@ -106,7 +107,7 @@ export function Settings() {
       await sendToBackground();
       setBackgroundStatus(await fetchBackgroundControlStatus());
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Failed to send Rumi to background';
+      const message = error instanceof Error ? error.message : `Failed to send ${LAUNCHER_DISPLAY_NAME} to background`;
       addToast(message, 'error');
     } finally {
       setBackgroundBusy(false);
@@ -162,7 +163,7 @@ export function Settings() {
   };
 
   const themes: Theme[] = ['Rumi', 'Minimal', 'Standard', 'Rounded'];
-  const updateName = (target: UpdateTarget) => target === 'rumiai' ? 'Rumi AI' : 'defaultspack';
+  const updateName = (target: UpdateTarget) => target === 'rumiai' ? LAUNCHER_DISPLAY_NAME : 'defaultspack';
   const permissionRows = desktopInfo?.permissions ?? [];
 
   const handleApplyUpdate = async (target: UpdateTarget) => {
@@ -427,7 +428,7 @@ export function Settings() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   {[
                     ['App Version', desktopInfo?.display_version ?? version.app],
-                    ['Viewer Version', desktopInfo?.viewer_version ?? 'unknown'],
+                    [LAUNCHER_VERSION_LABEL, desktopInfo?.viewer_version ?? 'unknown'],
                     ['Kernel Version', version.kernel],
                     ['Python Version', version.python],
                     ['Launcher Version', version.launcher],
@@ -501,7 +502,7 @@ export function Settings() {
                 <CardHeader className="flex-row items-center justify-between space-y-0">
                   <div>
                     <CardTitle>macOS Permissions</CardTitle>
-                    <CardDescription>Rumi Viewer is the macOS permission host for Computer Use and screen capture.</CardDescription>
+                    <CardDescription>{LAUNCHER_DISPLAY_NAME} is the macOS permission host for Computer Use and screen capture.</CardDescription>
                   </div>
                   <Button variant="outline" size="sm" onClick={loadDesktopInfo} disabled={desktopInfoBusy} loading={desktopInfoBusy}>
                     <RefreshCw className="h-3.5 w-3.5" />
@@ -510,9 +511,9 @@ export function Settings() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="rounded-lg border border-border bg-bg-main/50 p-4">
-                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? 'Rumi Viewer'}</p>
+                    <p className="text-sm font-medium text-text-main">macOS権限ホスト: {desktopInfo?.permission_subject ?? LAUNCHER_DISPLAY_NAME}</p>
                     <p className="mt-2 text-xs leading-5 text-text-muted">
-                      Rumiの画面確認・クリック・キーボード操作は、Rumi Viewerに許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをViewer経由で要求します。
+                      Rumiの画面確認・クリック・キーボード操作は、{LAUNCHER_DISPLAY_NAME}に許可された権限を使って実行されます。DefaultspackやCLIは、許可された操作だけをLauncher経由で要求します。
                     </p>
                     <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
                       <span className="rounded-full border border-border px-2.5 py-1">画面を見る</span>
@@ -543,7 +544,7 @@ export function Settings() {
                   </div>
                   {desktopInfoBusy && permissionRows.length === 0 && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Reading macOS permission status from Rumi Viewer...
+                      Reading macOS permission status from {LAUNCHER_DISPLAY_NAME}...
                     </p>
                   )}
                   {desktopInfoError && permissionRows.length === 0 && (
@@ -553,12 +554,12 @@ export function Settings() {
                   )}
                   {!desktopInfoBusy && !desktopInfoError && desktopInfo && permissionRows.length === 0 && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Rumi Viewer returned no macOS permission rows. Use Refresh after changing System Settings.
+                      {LAUNCHER_DISPLAY_NAME} returned no macOS permission rows. Use Refresh after changing System Settings.
                     </p>
                   )}
                   {!desktopInfoBusy && !desktopInfoError && !desktopInfo && (
                     <p className="rounded-lg border border-border bg-bg-main/50 px-4 py-3 text-sm text-text-muted">
-                      Click Refresh to read macOS permission status from Rumi Viewer.
+                      Click Refresh to read macOS permission status from {LAUNCHER_DISPLAY_NAME}.
                     </p>
                   )}
                 </CardContent>

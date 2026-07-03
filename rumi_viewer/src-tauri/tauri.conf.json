@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Rumi AI",
+  "productName": "Tobkiri Launcher",
   "version": "1.0.0-beta.1",
   "identifier": "dev.rumiai.app",
   "build": {
@@ -19,7 +19,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "Rumi AI",
+        "title": "Tobkiri Launcher",
         "width": 1280,
         "height": 800,
         "minWidth": 800,

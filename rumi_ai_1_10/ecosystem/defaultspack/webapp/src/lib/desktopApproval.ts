@@ -96,7 +96,7 @@ export async function openHostPermissionsWindow(permissionId: string): Promise<b
 export async function getAuthorityApprovalContext(requestId: string): Promise<AuthorityApprovalContext> {
   const invoke = await loadTauriInvoke();
   if (!invoke) {
-    throw new Error("承認コンテキストは Rumi Viewer の専用ウィンドウでのみ利用できます。");
+    throw new Error("承認コンテキストは Tobkiri Launcher の専用ウィンドウでのみ利用できます。");
   }
   return invoke<AuthorityApprovalContext>("authority_approval_context", { requestId });
 }

@@ -3,6 +3,7 @@ import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { panelRoutes } from '@/src/lib/routes';
+import { LAUNCHER_DISPLAY_NAME } from '@/src/lib/launcherBrand';
 import { BrainCircuit, Folder, FolderCog, LayoutGrid, Network, Settings, PanelLeft, Home, GitBranch, Share2, Route } from 'lucide-react';
 
 type NavGroup = {
@@ -72,7 +73,7 @@ export function Sidebar() {
           )}
           aria-hidden={!isSidebarOpen}
         >
-          Rumi AI
+          {LAUNCHER_DISPLAY_NAME}
         </span>
         <button
           onClick={() => setSidebarOpen(!isSidebarOpen)}

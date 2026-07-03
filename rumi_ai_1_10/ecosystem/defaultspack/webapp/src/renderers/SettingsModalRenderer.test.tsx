@@ -810,13 +810,13 @@ test("settings system info renders viewer version and macOS permissions", () => 
       desktopSystemInfo: {
         source: "viewer_tauri",
         reliable: true,
-        app_name: "Rumi AI",
+        app_name: "Tobkiri Launcher",
         display_version: "beta 1.0.0",
         viewer_version: "1.0.0-beta.1",
         build_channel: "beta",
         platform: "macos",
         platform_release: "15.0",
-        permission_subject: "Rumi Viewer",
+        permission_subject: "Tobkiri Launcher",
         host_broker: {
           enabled: true,
           available: true,
@@ -841,7 +841,7 @@ test("settings system info renders viewer version and macOS permissions", () => 
 
   assert.match(html, /beta 1\.0\.0/);
   assert.match(html, /1\.0\.0-beta\.1/);
-  assert.match(html, /macOSの承認対象は Rumi Viewer です/);
+  assert.match(html, /macOSの承認対象は Tobkiri Launcher です/);
   assert.match(html, /macOS Permissions/);
   assert.match(html, /Screen Recording/);
   assert.match(html, /Missing/);
@@ -867,13 +867,13 @@ test("settings system info does not show missing permissions when viewer state i
       desktopSystemInfo: {
         source: "fallback",
         reliable: false,
-        app_name: "Rumi AI",
+        app_name: "Tobkiri Launcher",
         display_version: "",
         viewer_version: "",
         build_channel: "beta",
         platform: "darwin",
         platform_release: "15.0",
-        permission_subject: "Rumi Viewer",
+        permission_subject: "Tobkiri Launcher",
         host_broker: {
           enabled: false,
           available: false,
@@ -882,11 +882,11 @@ test("settings system info does not show missing permissions when viewer state i
         permissions: [
           {
             id: "viewer_host",
-            label: "Rumi Viewer",
+            label: "Tobkiri Launcher",
             status: "missing",
             granted: false,
             detail: "Fallback row should not be rendered.",
-            settings_hint: "Open Rumi Viewer.",
+            settings_hint: "Open Tobkiri Launcher.",
           },
         ],
       },
@@ -896,7 +896,7 @@ test("settings system info does not show missing permissions when viewer state i
     }),
   );
 
-  assert.match(html, /Viewer permission status is unverified/);
+  assert.match(html, /Launcher permission status is unverified/);
   assert.doesNotMatch(html, /macOS Permissions/);
   assert.doesNotMatch(html, /Missing/);
   assert.doesNotMatch(html, /Fallback row should not be rendered/);
@@ -927,7 +927,7 @@ test("settings system info shows browser context message when info is null", () 
   );
 
   assert.match(html, /権限状態を取得できませんでした/);
-  assert.match(html, /Rumi Viewerを起動し/);
+  assert.match(html, /Tobkiri Launcherを起動し/);
   assert.doesNotMatch(html, /Rumi Defaultspack\.app/);
 });
 

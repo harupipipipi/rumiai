@@ -134,13 +134,13 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
   if (!info) {
     return (
       <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4 text-sm leading-6 text-zinc-400">
-        Rumi Viewer の権限状態を取得できませんでした。Rumi Viewerを起動し、Accessibility / Screen Recording / Input Monitoring を許可してください。
+        Tobkiri Launcher の権限状態を取得できませんでした。Tobkiri Launcherを起動し、Accessibility / Screen Recording / Input Monitoring を許可してください。
       </div>
     );
   }
   const versionRows = [
     ["App", info.display_version],
-    ["Viewer", info.viewer_version],
+    ["Launcher", info.viewer_version],
     ["Channel", info.build_channel],
     ["Platform", [info.platform, info.platform_release].filter(Boolean).join(" ")],
   ];
@@ -159,8 +159,8 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
         <div>
           <h4 className="text-sm font-medium text-zinc-100">Permission Host</h4>
           <p className="mt-1 text-xs leading-5 text-zinc-500">
-            macOSの承認対象は {info.permission_subject || "Rumi Viewer"} です。
-            DefaultspackはRumi Viewer経由で、許可された操作だけを実行します。
+            macOSの承認対象は {info.permission_subject || "Tobkiri Launcher"} です。
+            DefaultspackはTobkiri Launcher経由で、許可された操作だけを実行します。
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-[11px] text-zinc-400">
@@ -171,7 +171,7 @@ function SystemInfoPanel({ info }: { info?: DesktopSystemInfo | null }) {
       </section>
       {unverified ? (
         <section className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm leading-6 text-amber-100">
-          Viewer permission status is unverified. Open Rumi Viewer or reconnect Viewer broker.
+          Launcher permission status is unverified. Open Tobkiri Launcher or reconnect the launcher broker.
         </section>
       ) : (
       <section className="space-y-3">

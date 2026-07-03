@@ -97,7 +97,7 @@ async function returnToFingerRecordingAfterApproval() {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
-    // Fall back below when the approval page is not inside Rumi Viewer.
+    // Fall back below when the approval page is not inside Tobkiri Launcher.
   }
   window.close();
   window.setTimeout(() => {
@@ -110,7 +110,7 @@ async function closeAuthorityApprovalWindow() {
   try {
     if (await closeCurrentWindow()) return;
   } catch {
-    // Fall back below when the approval page is not inside Rumi Viewer.
+    // Fall back below when the approval page is not inside Tobkiri Launcher.
   }
   window.close();
 }
@@ -141,7 +141,7 @@ function authorityHostExecutionSummary(value: unknown): Record<string, unknown> 
 function authorityApprovalErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || "");
   if (message.includes("AUTHORITY_BROWSER_TEST_DISABLED")) {
-    return "このDefaultspackはブラウザ承認QAが無効な状態で起動しています。Rumi Viewerの別ウィンドウで承認するか、ブラウザQA用tokenを付けてViewer/Defaultspackを起動し直してください。";
+    return "このDefaultspackはブラウザ承認QAが無効な状態で起動しています。Tobkiri Launcherの別ウィンドウで承認するか、ブラウザQA用tokenを付けてTobkiri Launcher/Defaultspackを起動し直してください。";
   }
   if (message.includes("AUTHORITY_BROWSER_TOKEN_REQUIRED")) {
     return "ブラウザで承認するには browser_approval_token が必要です。指で録音ウィンドウの承認設定にtokenを保存してから開き直してください。";
@@ -150,7 +150,7 @@ function authorityApprovalErrorMessage(error: unknown): string {
     return "browser_approval_token がこの起動と一致していません。正しいtokenで承認ページを開き直してください。";
   }
   if (message.includes("AUTHORITY_UI_OPERATOR_UNAVAILABLE")) {
-    return "承認操作に必要なRumi Viewerの署名secretがありません。Rumi Viewerから起動した承認ウィンドウで承認するか、ブラウザQA用に同じ署名secretを渡して起動し直してください。";
+    return "承認操作に必要なTobkiri Launcherの署名secretがありません。Tobkiri Launcherから起動した承認ウィンドウで承認するか、ブラウザQA用に同じ署名secretを渡して起動し直してください。";
   }
   return message || "authority 承認に失敗しました。";
 }
@@ -751,7 +751,7 @@ export function AuthorityApprovalWindow() {
               ) : !displayedSettledStatus ? (
                 <div className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-400">
                   {request.status === "pending" && !approvalContextAvailable
-                    ? "承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。ブラウザでは承認テストトークンがないため読み取り専用です。"
+                    ? "承認操作は Tobkiri Launcher の専用ウィンドウでのみ実行できます。ブラウザでは承認テストトークンがないため読み取り専用です。"
                     : `このリクエストは ${request.status} のため、この画面では操作できません。`}
                 </div>
               ) : null}
@@ -901,11 +901,11 @@ function AmbientPackAuthorityApprovalWindow() {
     try {
       const opened = await openFingerRecordingWindow();
       if (!opened) {
-        setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
+        setMessage("Tobkiri Launcherから開くと、指で録音は別ウィンドウで表示されます。");
       }
     } catch (openError) {
       console.info("[ambient] ambient trigger window unavailable", openError);
-      setMessage("Rumi Viewerから開くと、指で録音は別ウィンドウで表示されます。");
+      setMessage("Tobkiri Launcherから開くと、指で録音は別ウィンドウで表示されます。");
     } finally {
       window.setTimeout(() => setAction(null), 300);
     }

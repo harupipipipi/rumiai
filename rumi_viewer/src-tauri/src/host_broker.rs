@@ -35,7 +35,7 @@ const HOST_INTENT_EXECUTE_PATH: &str = "/api/host/intent/execute";
 const HOST_STREAM_START_PATH: &str = "/api/host/stream/start";
 const HOST_STREAM_STOP_PATH: &str = "/api/host/stream/stop";
 const HOST_STREAM_EVENTS_PREFIX: &str = "/api/host/stream/events/";
-const PERMISSION_SUBJECT: &str = "Rumi Viewer";
+const PERMISSION_SUBJECT: &str = "Tobkiri Launcher";
 const MAX_CONCURRENT_REQUESTS: usize = 16;
 const MAX_HEADER_BYTES: usize = 1024 * 1024;
 const MAX_BODY_BYTES: usize = 1024 * 1024;
@@ -716,7 +716,7 @@ fn execute_approved_host_intent(
         _ => Err(HostBrokerError {
             code: "HOST_OPERATION_NOT_IMPLEMENTED".to_string(),
             message: format!(
-                "Host operation '{}' is approved but this Viewer build has no runner for it.",
+                "Host operation '{}' is approved but this Tobkiri Launcher build has no runner for it.",
                 intent.operation
             ),
         }),
@@ -832,7 +832,7 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
                 result: None,
                 error: Some(HostBrokerError {
                     code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
-                    message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+                    message: "This Tobkiri Launcher build cannot start host media streams because no capture backend is registered.".to_string(),
                 }),
                 audit_id,
             },
@@ -858,7 +858,7 @@ fn execute_host_stream_start(shared: &HostBrokerShared, request: HostBrokerInten
             result: None,
             error: Some(HostBrokerError {
                 code: "HOST_STREAM_BACKEND_UNAVAILABLE".to_string(),
-                message: "This Viewer build cannot start host media streams because no capture backend is registered.".to_string(),
+                message: "This Tobkiri Launcher build cannot start host media streams because no capture backend is registered.".to_string(),
             }),
             audit_id,
         },
@@ -1253,7 +1253,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 result: Some(approval_required_payload(&function_id, &helper_args)),
                 error: Some(HostBrokerError {
                     code: "APPROVAL_REQUIRED".to_string(),
-                    message: "This Viewer-controlled computer action requires an approval token."
+                    message: "This launcher-controlled computer action requires an approval token."
                         .to_string(),
                 }),
                 audit_id,
@@ -1338,7 +1338,7 @@ fn execute_computer_run(shared: &HostBrokerShared, request: HostBrokerComputerRu
                 .get("error")
                 .and_then(Value::as_str)
                 .unwrap_or(if payload_requires_approval {
-                    "This Viewer-controlled computer action requires approval."
+                    "This launcher-controlled computer action requires approval."
                 } else {
                     "Viewer host helper failed"
                 })
@@ -2144,7 +2144,7 @@ mod tests {
             assert_eq!(
                 definition.get("stream_allowed").and_then(Value::as_bool),
                 Some(true),
-                "{operation} must be stream_allowed before Viewer broker advertises it"
+                "{operation} must be stream_allowed before the launcher broker advertises it"
             );
         }
         for operation in registry.keys() {

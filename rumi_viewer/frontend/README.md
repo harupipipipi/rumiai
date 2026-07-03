@@ -1,9 +1,9 @@
-# Rumi Viewer Frontend
+# Tobkiri Launcher Frontend
 
-Rumi AI のコントロールパネル用フロントエンドアプリケーション。
+Tobkiri Launcher のコントロールパネル用フロントエンドアプリケーション。
 このディレクトリが `/panel/` UI の canonical source です。
 
-`npm run build` は Vite の成果物を `../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web` にコピーします。viewer と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の viewer 専用画面で、panel frontend とは別です。
+`npm run build` は Vite の成果物を `../../rumi_ai_1_10/core_runtime/core_pack/core_control_panel/web` にコピーします。launcher と browser はどちらも kernel が配信する同じ `/panel/` artifact を使用します。Tauri の `splash` は kernel 起動前の launcher 専用画面で、panel frontend とは別です。
 
 ## 技術スタック
 
@@ -69,4 +69,4 @@ src/
 - `rumi_graph` メタデータとして YAML 内へ editor 状態を保持
 - `basepack` を flow メタデータとして保持
 
-`rumi_graph` はランタイム互換を壊さないための editor 向けメタデータです。既存ランタイムが読める `steps` も同時に出力しつつ、viewer ではポート/接続情報を復元できます。
+`rumi_graph` はランタイム互換を壊さないための editor 向けメタデータです。既存ランタイムが読める `steps` も同時に出力しつつ、launcher ではポート/接続情報を復元できます。

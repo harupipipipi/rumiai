@@ -1107,7 +1107,7 @@ export function AmbientTriggerPanel({
     }
     setRumiApprovalOpen(false);
     setManualRumiFallbackOpen(true);
-    setMessage("Rumi Viewerの承認ウィンドウを開けませんでした。Viewerから開き直して許可してください。");
+    setMessage("Tobkiri Launcherの承認ウィンドウを開けませんでした。Tobkiri Launcherから開き直して許可してください。");
   }
 
   async function openMiniAuthorityApproval(approval = miniAuthorityApproval, options?: { auto?: boolean }) {
@@ -1161,7 +1161,7 @@ export function AmbientTriggerPanel({
     } catch (error) {
       console.info("[ambient] authority approval window unavailable", error);
     }
-    setMiniChatError("承認ウィンドウを開けませんでした。Rumi Viewerから承認を開いてください。");
+    setMiniChatError("承認ウィンドウを開けませんでした。Tobkiri Launcherから承認を開いてください。");
   }
 
   function saveMiniBrowserApprovalToken() {
@@ -1244,7 +1244,7 @@ export function AmbientTriggerPanel({
     } catch (error) {
       console.info("[ambient] finger recording window unavailable", error);
     }
-    setMessage("Rumi Viewerから開くと、指録音は小さな別ウィンドウで表示されます。");
+    setMessage("Tobkiri Launcherから開くと、指録音は小さな別ウィンドウで表示されます。");
   }
 
   async function requestMediaPermissions() {
@@ -1562,7 +1562,7 @@ export function AmbientTriggerPanel({
     } catch (error) {
       console.info("[ambient] defaultspack main window unavailable", error);
     }
-    setMiniChatError("Defaultspack本体ウィンドウを開けませんでした。Rumi ViewerからDefaultspackを開いてください。");
+    setMiniChatError("Defaultspack本体ウィンドウを開けませんでした。Tobkiri LauncherからDefaultspackを開いてください。");
   }
 
   async function submitApprovalGesture(decision: "approve" | "reject", state: PinchState, mode: string) {
@@ -1865,7 +1865,7 @@ export function AmbientTriggerPanel({
       <button
         type="button"
         onClick={() => void openDefaultsConsoleWindow().then((opened) => {
-          if (!opened) setMessage("Rumi Viewerから開くと、詳細ログは別ウィンドウで表示されます。");
+          if (!opened) setMessage("Tobkiri Launcherから開くと、詳細ログは別ウィンドウで表示されます。");
         })}
         className="ambient-mini-button w-full"
       >
@@ -2158,7 +2158,7 @@ export function AmbientTriggerPanel({
                     <p className="mt-1 text-red-100/75">
                       {manualFallbackIsOsPermission
                         ? "Rumi側の許可は済んでいます。ブラウザまたはOS設定で、マイクとカメラをこのアプリに許可してください。"
-                        : "この画面ではRumi許可を保存できません。Rumi Viewerの承認ウィンドウから許可してから「再確認」を押してください。"}
+                        : "この画面ではRumi許可を保存できません。Tobkiri Launcherの承認ウィンドウから許可してから「再確認」を押してください。"}
                     </p>
                   </div>
                 </div>
@@ -2169,7 +2169,7 @@ export function AmbientTriggerPanel({
                       if (manualFallbackIsOsPermission) {
                         const opened = await openHostPermissionsPageWindow();
                         if (!opened) {
-                          setMessage("Rumi Viewerから開くと、権限一覧は別ウィンドウで表示されます。");
+                          setMessage("Tobkiri Launcherから開くと、権限一覧は別ウィンドウで表示されます。");
                         }
                         return;
                       }

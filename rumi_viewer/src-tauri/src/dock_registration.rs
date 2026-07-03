@@ -491,7 +491,7 @@ exec "$PACK_SHELL" run "defaultspack" \
 /// Generate a macOS .app bundle at `~/Applications/Rumi Defaultspack.app`.
 ///
 /// The generated .app launches defaultspack directly as a dedicated UI/launch
-/// surface. macOS Computer Use permissions are hosted by Rumi Viewer.
+/// surface. macOS Computer Use permissions are hosted by Tobkiri Launcher.
 fn create_macos_app_bundle(
     app_name: &str,
     pack_shell: &Path,
@@ -701,7 +701,7 @@ pub(crate) fn launch_defaultspack_desktop_impl(config: &AppConfig) -> AnyResult<
         .is_some_and(|surface| surface.trim().eq_ignore_ascii_case("browser"));
     if !(allow_browser_debug && requested_browser_surface) {
         bail!(
-            "external browser Defaultspack launch is disabled; use the Rumi Viewer window or set RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG=1 with RUMI_DEFAULTSPACK_SURFACE=browser for debug"
+            "external browser Defaultspack launch is disabled; use the Tobkiri Launcher window or set RUMI_DEFAULTSPACK_ALLOW_BROWSER_DEBUG=1 with RUMI_DEFAULTSPACK_SURFACE=browser for debug"
         );
     }
     let url = ensure_defaultspack_desktop_ready(config)?;
@@ -1311,7 +1311,7 @@ mod tests {
         assert!(script.contains("export RUMI_DEFAULTSPACK_SURFACE='webview'"));
         assert!(script.contains("export RUMI_DEFAULTSPACK_LOCAL_TOKEN"));
         assert!(!script.contains(".defaultspack_launch_request"));
-        assert!(!script.contains("open -a \"Rumi AI\""));
+        assert!(!script.contains("open -a \"Tobkiri Launcher\""));
     }
 
     #[test]
@@ -1363,7 +1363,7 @@ mod tests {
         assert!(!script.contains("--api-token"));
 
         assert!(!script.contains("SIGNAL_FILE"));
-        assert!(!script.contains("Rumi AI"));
+        assert!(!script.contains("Tobkiri Launcher"));
         assert!(!script.contains("defaultspack_launch_request"));
     }
 

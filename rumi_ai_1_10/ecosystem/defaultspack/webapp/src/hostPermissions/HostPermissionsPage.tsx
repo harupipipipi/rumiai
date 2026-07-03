@@ -38,7 +38,7 @@ export function HostPermissionsPage() {
 
   const rows = snapshot?.rows ?? [];
   const sourceLabel = snapshot?.info
-    ? `${snapshot.info.app_name || "Rumi Viewer"} · ${snapshot.info.source}`
+    ? `${snapshot.info.app_name || "Tobkiri Launcher"} · ${snapshot.info.source}`
     : "Desktop system info unavailable";
 
   return (
@@ -75,7 +75,7 @@ export function HostPermissionsPage() {
           {!tauriAvailable && (
             <div className="flex items-start gap-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs leading-5 text-amber-100">
               <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-              OS settings buttons are disabled because this page is not running inside the Rumi Viewer desktop bridge.
+              OS settings buttons are disabled because this page is not running inside the Tobkiri Launcher desktop bridge.
             </div>
           )}
 
@@ -109,14 +109,14 @@ export function HostPermissionsPage() {
                     opening={openingPermissionId === row.id}
                     onOpenSettings={async () => {
                       if (!tauriAvailable) {
-                        setMessage("Open OS Settings is available only in Rumi Viewer.");
+                        setMessage("Open OS Settings is available only in Tobkiri Launcher.");
                         return;
                       }
                       setOpeningPermissionId(row.id);
                       setMessage(null);
                       try {
                         const opened = await openHostPermissionSettings(row.id);
-                        setMessage(opened ? `${row.label} settings opened.` : "Open OS Settings is available only in Rumi Viewer.");
+                        setMessage(opened ? `${row.label} settings opened.` : "Open OS Settings is available only in Tobkiri Launcher.");
                       } catch (error) {
                         setMessage(error instanceof Error ? error.message : "OS settings could not be opened.");
                       } finally {
@@ -206,7 +206,7 @@ function HostPermissionListRow({
           onClick={onOpenSettings}
           disabled={!tauriAvailable || opening}
           className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-2.5 text-xs font-semibold text-zinc-300 transition-colors hover:border-zinc-700 hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-          title={tauriAvailable ? `Open OS settings for ${row.label}` : "Requires Rumi Viewer desktop bridge"}
+          title={tauriAvailable ? `Open OS settings for ${row.label}` : "Requires Tobkiri Launcher desktop bridge"}
         >
           {opening ? <Loader2 size={13} className="animate-spin" /> : <ExternalLink size={13} />}
           {tauriAvailable ? "Open" : "Desktop only"}

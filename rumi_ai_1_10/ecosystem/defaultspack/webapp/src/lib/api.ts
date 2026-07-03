@@ -2174,7 +2174,7 @@ function truncateApiErrorDetail(value: string, limit = 700): string {
 
 function defaultspackApiCodeHint(code: string | undefined): string | null {
   if (code === "AUTHORITY_BROWSER_TEST_DISABLED") {
-    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Rumi Viewerの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
+    return "ブラウザ承認QAは、このDefaultspack起動では有効化されていません。Tobkiri Launcherの承認ウィンドウで承認するか、ブラウザQA用tokenを付けて起動してください。";
   }
   if (code === "AUTHORITY_BROWSER_TOKEN_REQUIRED") {
     return "ブラウザで承認するには、承認ページURLまたは設定に browser_approval_token が必要です。";
@@ -2183,7 +2183,7 @@ function defaultspackApiCodeHint(code: string | undefined): string | null {
     return "browser_approval_token がこのDefaultspack起動と一致していません。正しいtokenで開き直してください。";
   }
   if (code === "AUTHORITY_UI_OPERATOR_UNAVAILABLE") {
-    return "承認操作の署名secretがこのDefaultspack起動にありません。Rumi Viewerから起動し直すか、ブラウザQAでは Viewer と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
+    return "承認操作の署名secretがこのDefaultspack起動にありません。Tobkiri Launcherから起動し直すか、ブラウザQAでは Tobkiri Launcher と同じ RUMI_PANEL_BOOTSTRAP_SECRET を渡してください。";
   }
   return null;
 }

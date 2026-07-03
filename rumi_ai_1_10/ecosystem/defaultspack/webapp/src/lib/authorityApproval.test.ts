@@ -503,7 +503,7 @@ test("authority approval browser route is read-only without URL token but can fe
   assert.match(source, /const browserApprovalAvailable = Boolean\(!nativeApprovalAvailable && browserApprovalToken\)/);
   assert.match(source, /request\.status === "pending" && approvalContextAvailable && !displayedSettledStatus/);
   assert.match(source, /getBrowserAuthorityApprovalContext\(targetRequestId, token\)/);
-  assert.match(source, /承認操作は Rumi Viewer の専用ウィンドウでのみ実行できます。/);
+  assert.match(source, /承認操作は Tobkiri Launcher の専用ウィンドウでのみ実行できます。/);
   assert.match(source, /ブラウザでは承認テストトークンがないため読み取り専用です。/);
   assert.match(source, /displayedSettledStatus && \(/);
   assert.match(source, /このリクエストは処理済みです。追加の操作は不要です。/);
@@ -532,7 +532,7 @@ test("authority approval window explains disabled browser QA approval", () => {
   assert.match(source, /AUTHORITY_BROWSER_TEST_DISABLED/);
   assert.match(source, /AUTHORITY_UI_OPERATOR_UNAVAILABLE/);
   assert.match(source, /このDefaultspackはブラウザ承認QAが無効な状態で起動しています。/);
-  assert.match(source, /承認操作に必要なRumi Viewerの署名secretがありません。/);
+  assert.match(source, /承認操作に必要なTobkiri Launcherの署名secretがありません。/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(approvalError\)\)/);
   assert.match(source, /setError\(authorityApprovalErrorMessage\(rejectionError\)\)/);
 });
