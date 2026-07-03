@@ -5,6 +5,7 @@ from __future__ import annotations
 from .models import AuthorityDecision, AuthorityRequest, AuthorityResource
 from .principal import build_principal_id
 from .service import AuthorityService
+from .test_harness import authority_test_mode_status, settle_authority_test_request
 
 
 def get_authority_service() -> AuthorityService:
@@ -19,5 +20,7 @@ __all__ = [
     "AuthorityResource",
     "AuthorityService",
     "build_principal_id",
+    "authority_test_mode_status",
     "get_authority_service",
+    "settle_authority_test_request",
 ]

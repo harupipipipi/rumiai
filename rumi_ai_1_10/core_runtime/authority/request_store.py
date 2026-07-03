@@ -281,6 +281,27 @@ class AuthorityRequestStore:
             self._audit_best_effort("authority_request_status", {"request_id": request_id, "status": status})
             return AuthorityRequest.from_dict(data)
 
+    def expire_pending_request(self, request_id: str, *, reason: str = "expired") -> dict[str, Any]:
+        with self._lock:
+            path = self._request_path(request_id)
+            data = self._read_json(path)
+            if not data:
+                return {"settled": False, "request": None, "reason": "not_found"}
+            request = AuthorityRequest.from_dict(data)
+            if request.status != "pending":
+                return {"settled": False, "request": request, "reason": "not_pending"}
+            data["status"] = "expired"
+            self._write_json(path, data)
+            self._audit_best_effort(
+                "authority_request_status",
+                {"request_id": request_id, "status": "expired", "reason": reason},
+            )
+            return {
+                "settled": True,
+                "request": AuthorityRequest.from_dict(data),
+                "reason": reason,
+            }
+
     def settle_pending_request(
         self,
         request_id: str,

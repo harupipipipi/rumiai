@@ -1123,6 +1123,72 @@ class DefaultsHttpServer:
         except Exception as exc:
             return error("authority service unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
 
+    def _handle_authority_test_settle(self, request_data, path_params):
+        del path_params
+        headers = request_data.get("_headers") if isinstance(request_data.get("_headers"), dict) else {}
+        provided_token = (
+            _header_value(headers, "X-Rumi-Authority-Test-Token").strip()
+            or str(request_data.get("authority_test_token") or request_data.get("test_token") or "").strip()
+        )
+        try:
+            from core_runtime.authority.test_harness import (
+                authority_test_mode_status,
+                settle_authority_test_request,
+                validate_authority_test_token,
+            )
+
+            mode_status = authority_test_mode_status()
+            if not mode_status.enabled:
+                return self._authority_http_error(mode_status.to_error(), "AUTHORITY_TEST_DISABLED")
+            token_check = validate_authority_test_token(provided_token)
+            if not token_check.get("success"):
+                return self._authority_http_error(token_check, "AUTHORITY_TEST_TOKEN_INVALID")
+
+            request_id = str(
+                request_data.get("request_id")
+                or request_data.get("approval_request_id")
+                or ""
+            ).strip()
+            rule = request_data.get("settlement") if isinstance(request_data.get("settlement"), dict) else None
+            if rule is None:
+                rule = {
+                    key: request_data.get(key)
+                    for key in (
+                        "rule_id",
+                        "id",
+                        "scenario_id",
+                        "request_id",
+                        "permission_id",
+                        "principal_id",
+                        "resource",
+                        "decision",
+                        "settlement",
+                        "action",
+                        "scope",
+                        "config",
+                        "expires_in_seconds",
+                        "related_permissions",
+                        "reason",
+                        "persist",
+                    )
+                    if key in request_data
+                }
+            from core_runtime.authority import get_authority_service
+
+            result = settle_authority_test_request(
+                get_authority_service(),
+                request_id,
+                policy=request_data.get("policy") if isinstance(request_data.get("policy"), dict) else None,
+                policy_path=request_data.get("policy_path"),
+                rule=rule,
+                scenario_id=str(request_data.get("scenario_id") or ""),
+            )
+        except Exception as exc:
+            return error("authority test harness unavailable: " + str(exc), "AUTHORITY_UNAVAILABLE")
+        if not result.get("success"):
+            return self._authority_http_error(result, "AUTHORITY_TEST_SETTLE_FAILED")
+        return ok(result)
+
     def _handle_authority_browser_ui_operator(self, request_data, path_params):
         del path_params
         expected = str(os.environ.get("RUMI_AUTHORITY_BROWSER_TEST_TOKEN") or "").strip()
