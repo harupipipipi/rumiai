@@ -485,6 +485,13 @@ function recordArray(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
+function treeRecords(value: unknown): Record<string, unknown>[] {
+  if (Array.isArray(value)) return value.flatMap(treeRecords);
+  if (!isRecord(value)) return [];
+  const children = treeRecords(value.children);
+  return [value, ...children];
+}
+
 function firstString(...values: unknown[]): string {
   for (const value of values) {
     const text = typeof value === "string" ? value.trim() : "";
@@ -522,7 +529,7 @@ function itemKind(raw: Record<string, unknown>, mode: SubagentTreeMode): Subagen
 }
 
 function normalizeTreeItems(value: unknown, mode: SubagentTreeMode): SubagentTreeItem[] {
-  return recordArray(value).map((raw, index) => {
+  return treeRecords(value).map((raw, index) => {
     const path = firstString(raw.path, raw.file_path, raw.relative_path);
     const label = firstString(raw.label, raw.name, raw.title, path ? basename(path) : "", `node-${index + 1}`);
     const nodeId = firstString(raw.node_id, raw.nodeId, raw.id, path, label);
@@ -542,12 +549,13 @@ function normalizeTreeItems(value: unknown, mode: SubagentTreeMode): SubagentTre
 
 export function normalizeSubagentTreeResponse(payload: unknown): SubagentTreeState {
   const data = isRecord(payload) ? payload : {};
+  const teamWorkspace = isRecord(data.team_workspace) ? data.team_workspace : {};
   const files = normalizeTreeItems(
-    data.files ?? data.file_tree ?? data.tree ?? data.nodes ?? data.items,
+    data.files ?? data.file_tree ?? data.tree ?? data.nodes ?? data.items ?? teamWorkspace.root,
     "files",
   );
   const history = normalizeTreeItems(
-    data.history ?? data.history_tree ?? data.events ?? data.conversations,
+    data.history ?? data.history_tree ?? data.events ?? data.conversations ?? teamWorkspace.history ?? teamWorkspace.history_tree ?? teamWorkspace.root,
     "history",
   );
   return {

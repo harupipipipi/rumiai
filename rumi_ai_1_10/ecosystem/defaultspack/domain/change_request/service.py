@@ -549,7 +549,7 @@ class ChangeRequestService:
             "totals": latest.get("totals") or {"files": 0, "additions": 0, "deletions": 0},
             "riskTags": latest.get("riskTags") or [],
             "file_stats": latest.get("file_stats") or [],
-            "latest_snapshot": public_snapshot(latest, record) if latest else {},
+            "latest_snapshot": public_snapshot(latest, record, include_patch=False) if latest else {},
             "check_summary": check_summary(record.get("checks") if isinstance(record.get("checks"), list) else []),
             "unresolved_count": int(record.get("unresolved_count") or 0),
             "unresolved_comment_count": int(record.get("unresolved_comment_count") or 0),
@@ -736,8 +736,15 @@ def safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     return safe
 
 
-def public_snapshot(snapshot: dict[str, Any], record: dict[str, Any] | None = None) -> dict[str, Any]:
+def public_snapshot(
+    snapshot: dict[str, Any],
+    record: dict[str, Any] | None = None,
+    *,
+    include_patch: bool = True,
+) -> dict[str, Any]:
     public = copy.deepcopy(snapshot)
+    if not include_patch:
+        public.pop("normalized_patch", None)
     public.pop("workspace_root", None)
     public.pop("git_root", None)
     workspace_hash = workspace_hash_for((record or {}).get("workspace_root"))

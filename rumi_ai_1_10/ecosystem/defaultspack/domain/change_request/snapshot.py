@@ -210,8 +210,12 @@ class ChangeRequestSnapshotter:
     def _synthetic_untracked_diff(self, entry: StatusEntry) -> dict[str, Any]:
         path = (self.git_root / entry.git_path).resolve(strict=False)
         digest = _file_sha256(path)
-        data = path.read_bytes()
-        binary = _looks_binary(data) or len(data) > MAX_SYNTHETIC_TEXT_BYTES
+        file_size = path.stat().st_size
+        data = b""
+        binary = file_size > MAX_SYNTHETIC_TEXT_BYTES
+        if not binary:
+            data = path.read_bytes()
+            binary = _looks_binary(data)
         if binary:
             patch = (
                 f"diff --git a/{entry.path} b/{entry.path}\n"

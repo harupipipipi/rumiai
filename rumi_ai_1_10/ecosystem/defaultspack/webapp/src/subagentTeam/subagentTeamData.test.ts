@@ -193,6 +193,40 @@ test("API file tree success uses API nodes instead of static fallback nodes", ()
   assert.equal(labels.includes("decision-log.md"), false);
 });
 
+test("API file tree reads backend team workspace virtual history", () => {
+  const state = normalizeSubagentTreeResponse({
+    workspace_id: "ws-api",
+    team_workspace: {
+      root: {
+        id: "team-workspace",
+        name: "Team Workspace",
+        kind: "folder",
+        path: "team-workspace",
+        children: [
+          {
+            id: "channel:ship-room",
+            name: "ship-room",
+            kind: "folder",
+            path: "team-workspace/channels/ship-room",
+            children: [
+              {
+                id: "conversation:ship-room",
+                name: "conversation.md",
+                kind: "file",
+                path: "team-workspace/channels/ship-room/conversation.md",
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  const labels = subagentTreeItemsForMode(state, "history").map((item) => item.label);
+
+  assert.equal(state.source, "api");
+  assert.deepEqual(labels, ["Team Workspace", "ship-room", "conversation.md"]);
+});
+
 test("open node response normalizes into file preview and conversation history", () => {
   const fileItem = subagentTreeItemsForMode(
     normalizeSubagentTreeResponse({ files: [{ node_id: "notes", path: "notes.md", is_dir: false }] }),

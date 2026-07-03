@@ -396,9 +396,38 @@ def test_service_payloads_hide_absolute_roots_and_drop_patch_metadata(tmp_path, 
     assert listed[0]["latest_snapshot"]["workspace_root"] == "."
     assert listed[0]["latest_snapshot"]["git_root"] == "."
     assert listed[0]["latest_snapshot"]["file_stats"]
-    assert "normalized_patch" in listed[0]["latest_snapshot"]
+    assert "normalized_patch" not in listed[0]["latest_snapshot"]
+    assert "normalized_patch" in fetched["latest_snapshot"]
     assert "leaked_path" not in (patched.get("metadata") or {})
     assert "arbitrary" not in (patched.get("metadata") or {})
+
+
+def test_large_untracked_files_are_summarized_without_reading_body(tmp_path, monkeypatch):
+    workspace = tmp_path / "reviewed-repo"
+    workspace.mkdir()
+    _init_git_repo(workspace)
+    (workspace / "tracked.txt").write_text("clean\n", encoding="utf-8")
+    _git_commit_all(workspace)
+    large_path = workspace / "large.bin"
+    large_path.write_bytes(b"x" * (1024 * 1024 + 1))
+
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(path: Path) -> bytes:
+        if path == large_path:
+            raise AssertionError("large untracked files must not be read into memory")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    service = _make_store(tmp_path, monkeypatch)
+    created = _create_change_request(service, workspace)
+    patch = _diff_for_path(created, "large.bin")
+
+    stat = next(item for item in _file_entries(created) if item.get("path") == "large.bin")
+    assert stat["binary"] is True
+    assert stat["additions"] == 0
+    assert "Binary files /dev/null and b/large.bin differ" in patch
 
 
 def test_rename_snapshot_preserves_previous_path_for_reviewed_commit_paths(tmp_path, monkeypatch):
