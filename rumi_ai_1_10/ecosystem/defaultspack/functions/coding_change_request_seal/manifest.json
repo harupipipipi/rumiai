@@ -1,0 +1,44 @@
+{
+  "function_id": "coding_change_request_seal",
+  "description": "Recalculate the Rumi Review Seal.",
+  "tags": [
+    "coding",
+    "change_request"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.coding.change_request_seal",
+    "defaultspack.coding.change_request_seal",
+    "defaults.coding.change.request.seal",
+    "defaultspack.coding.change.request.seal"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.change_request.seal",
+      "default_args": {
+        "_method": "GET"
+      }
+    }
+  }
+}

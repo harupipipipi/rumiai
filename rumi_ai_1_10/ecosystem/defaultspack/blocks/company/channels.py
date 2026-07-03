@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.company.store import CompanyStore
 
-from ._helpers import company_id_from, invalid, missing_company, require_dict
+from ._helpers import company_id_from, invalid, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -27,6 +27,9 @@ def run(input_data, context):
                 return error("channel not found: " + str(channel_id), "NOT_FOUND")
             return ok(channel)
         if action in {"upsert", "create", "update"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             channel = input_data.get("channel")
             if channel is None:
                 channel = {key: value for key, value in input_data.items() if key not in {"company_id", "action"}}
@@ -37,6 +40,9 @@ def run(input_data, context):
                 return missing_company(company_id)
             return ok(updated)
         if action in {"delete", "remove"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             channel_id = input_data.get("channel_id") or input_data.get("id")
             if not channel_id:
                 return invalid("channel_id is required")

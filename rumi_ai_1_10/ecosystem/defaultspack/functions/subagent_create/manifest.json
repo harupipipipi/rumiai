@@ -1,0 +1,45 @@
+{
+  "function_id": "subagent_create",
+  "description": "Ask Creator to create a subagent.",
+  "tags": [
+    "subagent_team",
+    "creator"
+  ],
+  "risk": "medium",
+  "requires": [
+    "subagent.create"
+  ],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.subagent.create",
+    "defaultspack.subagent.create",
+    "subagent.create"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.creator",
+      "default_args": {
+        "action": "subagent_create"
+      }
+    }
+  }
+}
