@@ -192,6 +192,56 @@ def test_bridge_preserves_authority_context_without_extra_nested_data():
     }
 
 
+def test_bridge_sanitizes_authority_approvals_list_without_raising():
+    from domain.function_runtime.bridge import invoke_function
+
+    executor = MagicMock()
+    executor.execute.return_value = SimpleNamespace(
+        success=True,
+        output={"status": "ok", "data": {}},
+        error=None,
+        error_type=None,
+    )
+
+    with patch("core_runtime.di_container.get_container", return_value=_FakeContainer(executor)):
+        result = invoke_function(
+            "defaultspack:chat_send",
+            {"conversation_id": "c1"},
+            {
+                "request_id": "req-approvals",
+                "authority": {
+                    "approvals": [
+                        {
+                            "permission_id": "terminal.execute",
+                            "request_id": "auth_1",
+                            "approval_token": "token-secret",
+                            "extra": {"drop": True},
+                        },
+                        {"permission_id": "file.write", "token": "legacy-token"},
+                        {"extra": {"drop": True}},
+                        "drop-me",
+                    ],
+                },
+            },
+        )
+
+    assert result == {"status": "ok", "data": {}}
+    _principal_id, request = executor.execute.call_args.args
+    assert request["context"] == {
+        "request_id": "req-approvals",
+        "authority": {
+            "approvals": [
+                {
+                    "permission_id": "terminal.execute",
+                    "request_id": "auth_1",
+                    "approval_token": "token-secret",
+                },
+                {"permission_id": "file.write", "token": "legacy-token"},
+            ]
+        },
+    }
+
+
 def test_high_risk_defaultspack_function_rejects_unapproved_external_caller():
     from core_runtime.capability_executor import CapabilityExecutor
     from core_runtime.function_registry import FunctionRegistry

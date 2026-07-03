@@ -76,9 +76,9 @@ def _sanitized_authority_context(raw: Any) -> dict[str, Any]:
     approvals = raw.get("approvals")
     if isinstance(approvals, list):
         nested_list = [
-            sanitized_approval(item)
+            _sanitized_authority_approval(item)
             for item in approvals
-            if isinstance(item, dict) and sanitized_approval(item)
+            if isinstance(item, dict) and _sanitized_authority_approval(item)
         ]
         if nested_list:
             sanitized["approvals"] = nested_list
