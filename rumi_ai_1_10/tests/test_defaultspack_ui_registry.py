@@ -784,6 +784,47 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertTrue(reloaded["preview"]["auto_open"])
         self.assertEqual(reloaded["preview"]["max_items"], 5)
 
+    def test_lightweight_settings_do_not_hydrate_model_catalog(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            registry = FrontendRegistry(pack_root=pack_root)
+            with patch.object(
+                FrontendRegistry,
+                "_selectable_model_profiles",
+                side_effect=AssertionError("bootstrap settings must not build model profiles"),
+            ):
+                settings = registry.get_settings(lightweight=True)
+
+        self.assertIn("sections", settings)
+        self.assertIn("values", settings)
+        self.assertIn("models", settings["values"])
+
+    def test_selectable_model_profiles_are_cached_across_bootstrap_instances(self):
+        from domain.frontend.registry import FrontendRegistry
+        from ecosystem.defaultspack.backend.ai_client import provider_catalog
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            FrontendRegistry._selectable_model_profiles_cache.clear()
+            profiles = [
+                {
+                    "profile_id": "stub/default",
+                    "display_name": "Stub Default",
+                    "provider_id": "stub",
+                    "model_id": "default",
+                    "type": "chat",
+                    "availability": {"configured": True, "local": True},
+                }
+            ]
+            with patch.object(provider_catalog, "list_profile_catalog", return_value=profiles) as mocked:
+                first = FrontendRegistry(pack_root=pack_root)._selectable_model_profiles()
+                second = FrontendRegistry(pack_root=pack_root)._selectable_model_profiles()
+
+        self.assertEqual(first, second)
+        self.assertEqual(mocked.call_count, 1)
+
     def test_computer_use_haze_settings_are_exposed_and_sanitized(self):
         from domain.frontend.registry import FrontendRegistry
 

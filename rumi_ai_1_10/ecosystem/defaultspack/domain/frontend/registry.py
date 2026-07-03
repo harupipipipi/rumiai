@@ -4,6 +4,8 @@ import base64
 import importlib
 import json
 import re
+import threading
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -41,13 +43,17 @@ from transport.registry import (
 class FrontendRegistry:
     """Registry for frontend catalog, settings, and chat preview metadata."""
 
+    _selectable_model_profiles_lock = threading.Lock()
+    _selectable_model_profiles_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+    _selectable_model_profiles_cache_ttl_seconds = 30.0
+
     def __init__(self, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
         self._extensions_dir = self._pack_root / "user_data" / "shared" / "frontend_extensions"
         self._shell_path = self._pack_root / "user_data" / "shared" / "frontend_shell.json"
         self._settings_path = self._pack_root / "user_data" / "shared" / "frontend_settings.json"
 
-    def build_catalog(self, profile_id: str | None = None) -> dict[str, Any]:
+    def build_catalog(self, profile_id: str | None = None, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         extensions = self._load_extensions()
@@ -70,8 +76,14 @@ class FrontendRegistry:
         ]
         sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
         settings_sections = self._merge_settings_sections(
-            self._settings_sections(ui_surfaces, extensions, template_catalog=template_catalog),
+            self._settings_sections(
+                ui_surfaces,
+                extensions,
+                template_catalog=template_catalog,
+                lightweight=lightweight,
+            ),
             template_catalog.get("settings_sections", []),
+            hydrate_dynamic=not lightweight,
         )
         settings_sections = self._filter_frontend_items(settings_sections, selected_frontend_ids)
         chat_renderers = [
@@ -96,7 +108,7 @@ class FrontendRegistry:
             "chat_rendering": {
                 "renderers": chat_renderers,
             },
-            "skills": self._skill_items(),
+            "skills": [] if lightweight else self._skill_items(),
             "routes": self._route_metadata(),
             "templates": template_catalog.get("templates", []),
             "field_renderers": template_catalog.get("field_renderers", []),
@@ -119,14 +131,20 @@ class FrontendRegistry:
             "diagnostics": self._diagnostics(shell, parts, component_bindings),
         }
 
-    def get_settings(self) -> dict[str, Any]:
+    def get_settings(self, *, lightweight: bool = False) -> dict[str, Any]:
         self._load_diagnostics: list[dict[str, Any]] = []
         template_catalog = self._template_catalog_metadata()
         ui_surfaces = self._load_ui_surfaces()
         return {
             "sections": self._merge_settings_sections(
-                self._settings_sections(ui_surfaces, self._load_extensions(), template_catalog=template_catalog),
+                self._settings_sections(
+                    ui_surfaces,
+                    self._load_extensions(),
+                    template_catalog=template_catalog,
+                    lightweight=lightweight,
+                ),
                 template_catalog.get("settings_sections", []),
+                hydrate_dynamic=not lightweight,
             ),
             "values": self._read_settings(),
         }
@@ -752,6 +770,7 @@ class FrontendRegistry:
         extensions: list[dict[str, Any]],
         *,
         template_catalog: dict[str, Any] | None = None,
+        lightweight: bool = False,
     ) -> list[dict[str, Any]]:
         external_template_catalog = self._external_io_template_catalog(template_catalog)
         input_templates = external_template_catalog.get("input") if isinstance(external_template_catalog.get("input"), list) else []
@@ -1020,7 +1039,7 @@ class FrontendRegistry:
                         "label": "Preferred Model",
                         "type": "select",
                         "default": "stub/default",
-                        "options": self._model_options(),
+                        "options": self._model_options(lightweight=lightweight),
                         "help": "新しい会話と composer の既定モデルです。",
                     },
                     {
@@ -1072,8 +1091,8 @@ class FrontendRegistry:
                         "label": "Model API Variants",
                         "type": "model_api_routes",
                         "default": "",
-                        "options": self._model_route_options(),
-                        "api_keys": provider_key_status(pack_root=self._pack_root),
+                        "options": self._model_route_options(lightweight=lightweight),
+                        "api_keys": [] if lightweight else provider_key_status(pack_root=self._pack_root),
                         "help": "モデルごとに使う API key を選びます。複数選んだら、各 API key ごとに別 model variant として composer に並びます。",
                     },
                     {
@@ -2297,6 +2316,8 @@ class FrontendRegistry:
         self,
         base_sections: list[dict[str, Any]],
         extra_sections: list[dict[str, Any]],
+        *,
+        hydrate_dynamic: bool = True,
     ) -> list[dict[str, Any]]:
         try:
             merge_settings_sections = importlib.import_module("domain.templates.projectors").merge_settings_sections
@@ -2318,6 +2339,8 @@ class FrontendRegistry:
                 str(diagnostic.get("message") or ""),
                 str(diagnostic.get("source") or diagnostic.get("source_path") or "template_catalog"),
             )
+        if not hydrate_dynamic:
+            return sections
         return self._hydrate_dynamic_settings_fields(sections)
 
     @staticmethod
@@ -2749,7 +2772,9 @@ class FrontendRegistry:
             },
         }
 
-    def _model_options(self) -> list[dict[str, str]]:
+    def _model_options(self, *, lightweight: bool = False) -> list[dict[str, str]]:
+        if lightweight:
+            return [{"value": "stub/default", "label": "Stub Default"}]
         profiles = self._selectable_model_profiles()
         return [
             {
@@ -2759,7 +2784,17 @@ class FrontendRegistry:
             for profile in profiles
         ] or [{"value": "stub/default", "label": "Stub Default"}]
 
-    def _model_route_options(self) -> list[dict[str, Any]]:
+    def _model_route_options(self, *, lightweight: bool = False) -> list[dict[str, Any]]:
+        if lightweight:
+            return [
+                {
+                    "value": "stub/default",
+                    "label": "Stub Default",
+                    "provider_id": "stub",
+                    "model_id": "default",
+                    "local": True,
+                }
+            ]
         profiles = self._selectable_model_profiles()
         options: list[dict[str, Any]] = []
         for profile in profiles:
@@ -2800,6 +2835,13 @@ class FrontendRegistry:
         return options or [{"value": "stub/default", "label": "Stub Default", "provider_id": "stub", "model_id": "default", "local": True}]
 
     def _selectable_model_profiles(self) -> list[dict[str, Any]]:
+        cache_key = str(self._pack_root.resolve())
+        now = time.monotonic()
+        with self._selectable_model_profiles_lock:
+            cached = self._selectable_model_profiles_cache.get(cache_key)
+            if cached is not None and now - cached[0] < self._selectable_model_profiles_cache_ttl_seconds:
+                return deepcopy(cached[1])
+
         try:
             from ecosystem.defaultspack.backend.ai_client.provider_catalog import list_profile_catalog
         except ModuleNotFoundError:
@@ -2808,24 +2850,36 @@ class FrontendRegistry:
             except ModuleNotFoundError:
                 list_profile_catalog = None
 
-        if list_profile_catalog is not None:
-            profiles = list_profile_catalog()
-        else:
-            profiles = [
-                {
-                    "profile_id": model["id"],
-                    "display_name": model.get("name") or model["id"],
-                    "provider_id": model.get("provider_id") or model.get("provider"),
-                    "model_id": model.get("model_id") or str(model.get("id", "")).split("/", 1)[-1],
-                    "type": model.get("type", "chat"),
-                    "availability": model.get("availability", {}),
-                }
-                for model in self._list_provider_models()
-            ]
+        with self._selectable_model_profiles_lock:
+            now = time.monotonic()
+            cached = self._selectable_model_profiles_cache.get(cache_key)
+            if cached is not None and now - cached[0] < self._selectable_model_profiles_cache_ttl_seconds:
+                return deepcopy(cached[1])
+            if list_profile_catalog is not None:
+                try:
+                    profiles = list_profile_catalog()
+                except Exception:
+                    profiles = self._fallback_selectable_model_profiles()
+            else:
+                profiles = self._fallback_selectable_model_profiles()
 
-        filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
-        filtered.sort(key=self._model_profile_sort_key)
-        return filtered
+            filtered = [profile for profile in profiles if self._is_user_selectable_profile(profile)]
+            filtered.sort(key=self._model_profile_sort_key)
+            self._selectable_model_profiles_cache[cache_key] = (time.monotonic(), deepcopy(filtered))
+            return deepcopy(filtered)
+
+    def _fallback_selectable_model_profiles(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "profile_id": model["id"],
+                "display_name": model.get("name") or model["id"],
+                "provider_id": model.get("provider_id") or model.get("provider"),
+                "model_id": model.get("model_id") or str(model.get("id", "")).split("/", 1)[-1],
+                "type": model.get("type", "chat"),
+                "availability": model.get("availability", {}),
+            }
+            for model in self._list_provider_models()
+        ]
 
     def _is_user_selectable_profile(self, profile: dict[str, Any]) -> bool:
         provider_id = str(profile.get("provider_id") or profile.get("provider") or "").strip()
