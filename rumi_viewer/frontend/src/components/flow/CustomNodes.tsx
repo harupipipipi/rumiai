@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Play, Settings2, Square, CheckCircle2, XCircle, Loader2, Waypoints } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
@@ -68,10 +68,43 @@ function localizeNodeKind(value: string | undefined, t: ReturnType<typeof useT>)
   return value;
 }
 
+function contractSummary(contracts: string[]): string {
+  if (contracts.length === 0) {
+    return '';
+  }
+  const [first, ...rest] = contracts;
+  return rest.length > 0 ? `${first} +${rest.length}` : first;
+}
+
+function portDisclosureLabel(port: FlowPort, label: string): string {
+  const details = [label];
+  if (port.id && port.id !== label) {
+    details.push(`id: ${port.id}`);
+  }
+  if (port.contracts.length > 0) {
+    details.push(`contracts: ${port.contracts.join(', ')}`);
+  }
+  if (port.description) {
+    details.push(port.description);
+  }
+  return details.join('\n');
+}
+
+function nodeDisclosureLabel(parts: Array<string | undefined>): string {
+  return parts.filter((part): part is string => Boolean(part?.trim())).join('\n');
+}
+
+type FlowNodeStyle = CSSProperties & {
+  '--flow-node-min-height'?: string;
+};
+
 function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) {
   const t = useT();
   const position = side === 'left' ? Position.Left : Position.Right;
   const type = side === 'left' ? 'target' : 'source';
+  const label = localizePortLabel(port, t);
+  const contracts = contractSummary(port.contracts);
+  const disclosureLabel = portDisclosureLabel(port, label);
 
   return (
     <div className={cn('flow-port-item', side === 'left' ? 'flow-port-item-left' : 'flow-port-item-right')}>
@@ -83,8 +116,22 @@ function PortHandle({ port, side }: { port: FlowPort; side: 'left' | 'right' }) 
           className="flow-port-handle !border-2 !shadow-none"
         />
       )}
-      <div className="flow-port-tag">
-        <span className="truncate">{localizePortLabel(port, t)}</span>
+      <div
+        className="flow-port-tag"
+        title={disclosureLabel}
+        aria-label={disclosureLabel}
+        data-flow-port-label={label}
+      >
+        <span className="flow-port-label">{label}</span>
+        {contracts ? (
+          <span
+            className="flow-port-contract"
+            title={port.contracts.join(', ')}
+            aria-label={`contracts: ${port.contracts.join(', ')}`}
+          >
+            {contracts}
+          </span>
+        ) : null}
       </div>
       {side === 'right' && (
         <Handle
@@ -131,19 +178,29 @@ function NodeShell({
 }) {
   const inputPorts = ports.filter((port) => port.direction === 'input');
   const outputPorts = ports.filter((port) => port.direction === 'output');
+  const portRows = Math.max(inputPorts.length, outputPorts.length);
+  const style: FlowNodeStyle = {
+    '--flow-node-min-height': `${Math.max(156, 112 + portRows * 42)}px`,
+  };
+  const disclosureLabel = nodeDisclosureLabel([title, subtitle, tokenTitle, tokenSubtitle]);
 
   return (
     <div
       className={cn(
-        'flow-node-shell min-w-[240px] transition-transform duration-150',
+        'flow-node-shell transition-transform duration-150',
         selected && 'is-selected scale-[1.01]',
         statusAccent(status),
       )}
+      style={style}
+      role="group"
+      aria-label={disclosureLabel}
+      title={disclosureLabel}
+      data-flow-node-label={title}
     >
-      <div className="flow-node-cap">
-        <div className="flex items-center gap-2 truncate">
+      <div className="flow-node-cap" title={title} aria-label={title}>
+        <div className="flow-node-cap-content">
           {icon}
-          <span className="truncate">{title}</span>
+          <span className="flow-node-cap-label">{title}</span>
         </div>
       </div>
 
@@ -153,10 +210,10 @@ function NodeShell({
 
         <div className="flow-node-body">
           <div className="flow-node-core">
-            {subtitle ? <div className="flow-node-subtitle">{subtitle}</div> : null}
-            <div className="flow-node-token">
-              <div className="flow-node-token-title">{tokenTitle}</div>
-              {tokenSubtitle ? <div className="flow-node-token-subtext">{tokenSubtitle}</div> : null}
+            {subtitle ? <div className="flow-node-subtitle" title={subtitle} aria-label={subtitle}>{subtitle}</div> : null}
+            <div className="flow-node-token" title={nodeDisclosureLabel([tokenTitle, tokenSubtitle])} aria-label={nodeDisclosureLabel([tokenTitle, tokenSubtitle])}>
+              <div className="flow-node-token-title" title={tokenTitle} aria-label={tokenTitle}>{tokenTitle}</div>
+              {tokenSubtitle ? <div className="flow-node-token-subtext" title={tokenSubtitle} aria-label={tokenSubtitle}>{tokenSubtitle}</div> : null}
             </div>
           </div>
         </div>
