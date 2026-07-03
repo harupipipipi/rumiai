@@ -10,7 +10,8 @@
     "clean": "node scripts/clean.mjs",
     "lint": "tsc --noEmit",
     "audit": "npm audit --audit-level=high",
-    "test": "node --import tsx --test src/lib/*.test.ts src/pages/*.test.tsx scripts/*.test.mjs"
+    "test": "node --import tsx --test src/lib/*.test.ts src/pages/*.test.tsx scripts/*.test.mjs",
+    "tauri": "cd .. && npm exec --prefix frontend -- tauri"
   },
   "dependencies": {
     "@codemirror/lang-yaml": "^6.1.2",
@@ -32,6 +33,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "2.10.1",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.14.0",
     "@types/react": "^19.2.14",
