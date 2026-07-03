@@ -581,7 +581,7 @@ function getAllGroupDragIds(groups: ChatGroup[]): string[] {
 }
 
 export type CompactHistoryRailItem =
-  | { type: "group"; id: string; title: string; depth: number; isCollapsed: boolean; total: number }
+  | { type: "group"; id: string; title: string; depth: number; isCollapsed: boolean; total: number; group: ChatGroup }
   | { type: "chat"; id: string; title: string; depth: number; chat: ChatItem };
 
 export function buildCompactHistoryRailItems(groups: ChatGroup[]): CompactHistoryRailItem[] {
@@ -598,6 +598,7 @@ export function buildCompactHistoryRailItems(groups: ChatGroup[]): CompactHistor
       depth,
       isCollapsed: Boolean(group.isCollapsed),
       total: countChats(group),
+      group,
     });
     if (group.isCollapsed) return;
     for (const chat of group.chats) visitChat(chat, depth + 1);
@@ -1197,6 +1198,7 @@ interface HistoryBoardProps {
   isCalendarActive?: boolean;
   onKanbanOpen?: () => void;
   onGroupKanbanOpen?: (group: ChatGroup) => void;
+  onGroupSelect?: (group: ChatGroup) => void;
   isKanbanActive?: boolean;
   onDesktopsOpen?: () => void;
   isDesktopsActive?: boolean;
@@ -1407,6 +1409,7 @@ export function HistoryBoard({
   isCalendarActive = false,
   onKanbanOpen,
   onGroupKanbanOpen,
+  onGroupSelect,
   isKanbanActive = false,
   onDesktopsOpen,
   isDesktopsActive = false,
@@ -1641,6 +1644,7 @@ export function HistoryBoard({
   };
 
   const handleGroupHeaderClick = (group: ChatGroup) => {
+    onGroupSelect?.(group);
     if (searchQuery.trim() && onGroupKanbanOpen) {
       onGroupKanbanOpen(group);
       return;
@@ -2020,7 +2024,7 @@ export function HistoryBoard({
                 <button
                   key={`group-${item.id}`}
                   type="button"
-                  onClick={() => handleToggleCollapse(item.id)}
+                  onClick={() => handleGroupHeaderClick(item.group)}
                   className={cn(
                     "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center rounded-md text-zinc-500 transition-colors hover:bg-zinc-800/70 hover:text-zinc-100",
                     item.isCollapsed && "bg-zinc-900/80 text-zinc-400"

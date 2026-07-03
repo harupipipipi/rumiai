@@ -10,12 +10,13 @@ from typing import Any
 
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
-for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
+_RUMI_ROOT = _PACK_ROOT.parent.parent
+for _path in reversed((str(_RUMI_ROOT), str(_DEFAULTSPACK_ROOT), str(_PACK_ROOT))):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from blocks._common import ok, error
-from domain.tool_policy.internal_context import internal_tool_decision_allows
+from ecosystem.defaultspack.blocks._common import ok, error
+from ecosystem.defaultspack.domain.tool_policy.internal_context import internal_tool_decision_allows
 
 
 SAFE_MUTATION_PREFIXES = {
@@ -78,7 +79,7 @@ def run(arguments: dict[str, Any], context: dict[str, Any] | None = None):
         return error(
             "local API returned HTTP " + str(exc.code),
             "HTTP_ERROR",
-            {"status_code": exc.code, "response": parsed},
+            details={"status_code": exc.code, "response": parsed},
         )
     except Exception as exc:
         return error("local API request failed: " + str(exc), "REQUEST_FAILED")

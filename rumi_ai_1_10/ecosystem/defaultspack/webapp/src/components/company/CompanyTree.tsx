@@ -81,7 +81,7 @@ export function CompanyTree({
         })}
         {companies.length === 0 && (
           <div className="rounded-md border border-zinc-800/70 bg-zinc-950/40 px-2 py-2 text-[11px] text-zinc-500">
-            {emptyMessage}
+            {busy ? "Loading employee group..." : emptyMessage}
           </div>
         )}
       </div>
