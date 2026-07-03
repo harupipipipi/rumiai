@@ -90,7 +90,7 @@ function createFallbackDocument(fallback?: Partial<FlowDocumentMeta>): ParsedFlo
 function createNodesFromSimpleDocument(doc: FlowDocument, meta: FlowDocumentMeta): ParsedFlowDocument {
   const graph = createDefaultFlowGraph(meta.basePack);
   const nodes: AppNode[] = [
-    createStartNode({ x: 140, y: 140 }, meta.basePack) as AppNode,
+    createStartNode({ x: 120, y: 140 }, meta.basePack) as AppNode,
   ];
   const edges: Edge[] = [];
 
@@ -111,7 +111,7 @@ function createNodesFromSimpleDocument(doc: FlowDocument, meta: FlowDocumentMeta
     const node: AppNode = {
       id: nodeId,
       type: 'step',
-      position: { x: 420, y: currentY + index * 150 },
+      position: { x: 580, y: currentY + index * 150 },
       data: {
         id: step.id || `step_${index}`,
         type: step.type || 'action',
@@ -137,7 +137,7 @@ function createNodesFromSimpleDocument(doc: FlowDocument, meta: FlowDocumentMeta
     previous = node;
   });
 
-  const endNode = createEndNode({ x: 860, y: Math.max(180, currentY + (doc.steps?.length ?? 0) * 150) }) as AppNode;
+  const endNode = createEndNode({ x: 1040, y: Math.max(180, currentY + (doc.steps?.length ?? 0) * 150) }) as AppNode;
   nodes.push(endNode);
   const endInput = clonePorts((endNode.data as { ports?: FlowPort[] }).ports).find((port) => port.direction === 'input');
   const previousOutput = clonePorts((previous.data as { ports?: FlowPort[] }).ports).find((port) => port.direction === 'output');

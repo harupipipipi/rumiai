@@ -428,6 +428,9 @@
 
   .flow-node-shell {
     position: relative;
+    box-sizing: border-box;
+    width: clamp(340px, 30vw, 420px);
+    min-width: 340px;
     padding-top: 0.9rem;
     color: var(--flow-node-text);
     filter: drop-shadow(0 14px 22px var(--flow-node-shadow));
@@ -435,7 +438,7 @@
 
   .flow-node-card {
     position: relative;
-    overflow: hidden;
+    overflow: visible;
     border: 1.5px solid var(--flow-node-border);
     border-radius: 1.4rem;
     background: var(--flow-node-fill);
@@ -480,20 +483,44 @@
     font-size: 0.78rem;
     font-weight: 700;
     box-shadow: 0 10px 20px rgba(0, 0, 0, 0.18);
-    pointer-events: none;
     user-select: none;
   }
 
+  .flow-node-cap-content {
+    display: inline-flex;
+    min-width: 0;
+    max-width: 100%;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .flow-node-cap-content svg {
+    flex: 0 0 auto;
+  }
+
+  .flow-node-cap-label {
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-height: 1.15;
+    white-space: normal;
+  }
+
   .flow-node-body {
-    min-height: 138px;
-    padding: 2.2rem 4.75rem 1.3rem;
     display: flex;
+    min-height: var(--flow-node-min-height, 156px);
     align-items: center;
     justify-content: center;
+    padding: 2.55rem 7.5rem 1.45rem;
   }
 
   .flow-node-core {
     display: flex;
+    width: 100%;
+    min-width: 0;
     max-width: 100%;
     flex-direction: column;
     align-items: center;
@@ -507,12 +534,15 @@
     color: var(--flow-node-muted);
     text-transform: uppercase;
     letter-spacing: 0.12em;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .flow-node-token {
     display: inline-flex;
-    min-width: 96px;
-    max-width: 150px;
+    width: 100%;
+    min-width: 112px;
+    max-width: min(100%, 17rem);
     flex-direction: column;
     align-items: center;
     gap: 0.2rem;
@@ -524,62 +554,103 @@
   }
 
   .flow-node-token-title {
+    display: -webkit-box;
     max-width: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
     font-size: 0.95rem;
     font-weight: 700;
+    line-height: 1.2;
     color: var(--flow-node-text);
+    white-space: normal;
   }
 
   .flow-node-token-subtext {
+    display: -webkit-box;
     max-width: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
     font-size: 0.72rem;
+    line-height: 1.22;
     color: var(--flow-node-muted);
+    white-space: normal;
   }
 
   .flow-port-stack {
     position: absolute;
-    top: 50%;
+    top: 2.9rem;
+    bottom: 1rem;
     z-index: 3;
     display: flex;
+    max-width: 5.9rem;
     flex-direction: column;
-    gap: 0.7rem;
-    transform: translateY(-50%);
+    justify-content: center;
+    gap: 0.55rem;
   }
 
   .flow-port-stack-left {
-    left: 0.85rem;
+    left: 0.7rem;
     align-items: flex-start;
   }
 
   .flow-port-stack-right {
-    right: 0.85rem;
+    right: 0.7rem;
     align-items: flex-end;
   }
 
   .flow-port-item {
     position: relative;
     display: flex;
+    min-width: 0;
+    max-width: 100%;
     align-items: center;
   }
 
   .flow-port-tag {
-    max-width: 84px;
+    display: flex;
+    min-width: 4.9rem;
+    max-width: 5.9rem;
+    min-height: 2.25rem;
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.16rem;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     border: 1px solid color-mix(in srgb, var(--flow-port-border) 62%, transparent);
     border-radius: 0.65rem;
     background: color-mix(in srgb, var(--flow-port-fill) 92%, var(--flow-node-fill) 8%);
-    padding: 0.32rem 0.55rem;
+    padding: 0.34rem 0.55rem;
     font-size: 0.68rem;
     font-weight: 600;
+    line-height: 1.12;
     color: var(--flow-node-muted);
+    white-space: normal;
+  }
+
+  .flow-port-label {
+    display: -webkit-box;
+    max-width: 100%;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  .flow-port-contract {
+    display: -webkit-box;
+    max-width: 100%;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    font-weight: 500;
+    line-height: 1.1;
+    opacity: 0.78;
   }
 
   .flow-port-handle {
