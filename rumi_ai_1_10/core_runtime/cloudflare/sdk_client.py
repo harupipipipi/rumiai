@@ -684,8 +684,12 @@ class CloudflareSDKAdapter:
             )
             result = _unwrap_cloudflare_response(response)
             return _serialize_collection(result) if collection else _serialize_resource(result)
-        except CloudflareSDKOperationError:
-            raise
+        except CloudflareSDKOperationError as exc:
+            raise CloudflareSDKOperationError(
+                _scrub_secret(str(exc), self._api_token),
+                error_type=exc.error_type,
+                status_code=exc.status_code,
+            ) from None
         except Exception as exc:
             raise CloudflareSDKOperationError(
                 _scrub_secret(str(exc), self._api_token),

@@ -631,6 +631,36 @@ def test_cloudflare_sdk_adapter_redacts_token_from_errors(monkeypatch):
     assert error["message"] == "permission denied for [redacted]"
 
 
+def test_cloudflare_sdk_adapter_redacts_token_from_rest_error(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def rest_fetcher(_method: str, _path: str, _payload: dict[str, object] | None, _headers: dict[str, str]):
+        raise sdk_client.CloudflareSDKOperationError(
+            "permission denied for cloudflare-secret-token",
+            error_type="CloudflareAPIError",
+            status_code=403,
+        )
+
+    adapter = sdk_client.CloudflareSDKAdapter(
+        api_token="cloudflare-secret-token",
+        account_id="account-id",
+        rest_fetcher=rest_fetcher,
+    )
+    try:
+        adapter.list_workers()
+    except sdk_client.CloudflareSDKOperationError as exc:
+        error = exc.to_dict()
+    else:
+        raise AssertionError("Cloudflare REST errors should be wrapped")
+
+    assert "cloudflare-secret-token" not in str(error)
+    assert error["message"] == "permission denied for [redacted]"
+    assert error["error_type"] == "CloudflareAPIError"
+    assert error["status_code"] == 403
+
+
 def test_cloudflare_sdk_adapter_uses_rest_fallback_when_sdk_missing(monkeypatch):
     from core_runtime.cloudflare import sdk_client
 
