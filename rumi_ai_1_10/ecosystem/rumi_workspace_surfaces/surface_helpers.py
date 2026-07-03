@@ -93,45 +93,73 @@ def _asset_from_attached(item: Any, index: int) -> dict[str, Any] | None:
 def _normalize_asset(item: Any, index: int) -> dict[str, Any]:
     if not isinstance(item, dict):
         item = {}
-    return {
-        "id": _clean_text(item.get("id"), f"asset-{index}"),
-        "name": _clean_text(item.get("name"), f"Asset {index}"),
-        "kind": _clean_text(item.get("kind"), "video"),
-        "mime_type": _clean_text(item.get("mime_type"), "video/mp4"),
-        "source": _clean_text(item.get("source"), f"asset-{index}"),
-        "duration": _number(item.get("duration"), 5.0, 0.25),
-    }
+    kind = _clean_text(item.get("kind") or item.get("type"), "video")
+    default_mime = "image/png" if kind == "image" else "audio/mpeg" if kind == "audio" else "video/mp4"
+    placement = item.get("placement") if isinstance(item.get("placement"), dict) else {}
+    placement_duration = None
+    if placement:
+        placement_duration = _number(placement.get("end"), 0.0, 0.0) - _number(placement.get("start"), 0.0, 0.0)
+    normalized = deepcopy(item)
+    normalized.update(
+        {
+            "id": _clean_text(item.get("id"), f"asset-{index}"),
+            "name": _clean_text(item.get("name") or item.get("id"), f"Asset {index}"),
+            "kind": kind,
+            "mime_type": _clean_text(item.get("mime_type"), default_mime),
+            "source": _clean_text(item.get("source") or item.get("path") or item.get("id"), f"asset-{index}"),
+            "duration": _number(item.get("duration"), placement_duration or 5.0, 0.25),
+        }
+    )
+    return normalized
 
 
 def _normalize_clip(item: Any, index: int, start: float) -> dict[str, Any]:
     if not isinstance(item, dict):
         item = {}
-    duration = _number(item.get("duration") or item.get("out"), 5.0, 0.25)
+    clip_start = _number(item.get("start"), start, 0.0)
+    end = _number(item.get("end"), clip_start, clip_start) if "end" in item else None
+    duration_fallback = max(0.25, round(float(end) - clip_start, 3)) if end is not None else 5.0
+    duration = _number(item.get("duration") or item.get("out"), duration_fallback, 0.25)
     clip_in = _number(item.get("in"), 0.0, 0.0)
     clip_out = _number(item.get("out"), clip_in + duration, clip_in + 0.25)
     duration = _number(clip_out - clip_in if "out" in item else duration, duration, 0.25)
-    return {
+    normalized = deepcopy(item)
+    normalized.update(
+        {
         "id": _clean_text(item.get("id"), f"clip-{index}"),
-        "name": _clean_text(item.get("name") or item.get("label"), f"Clip {index}"),
-        "asset_id": _clean_text(item.get("asset_id"), f"asset-{index}"),
+        "name": _clean_text(item.get("name") or item.get("label") or item.get("source"), f"Clip {index}"),
+        "asset_id": _clean_text(item.get("asset_id") or item.get("source"), f"asset-{index}"),
         "track": _clean_text(item.get("track"), "video"),
-        "start": _number(item.get("start"), start, 0.0),
+        "start": clip_start,
         "duration": duration,
         "in": clip_in,
         "out": _number(clip_in + duration, clip_in + duration, clip_in + 0.25),
         "color": _clean_text(item.get("color"), MOVIE_CLIP_COLORS[(index - 1) % len(MOVIE_CLIP_COLORS)]),
-    }
+        }
+    )
+    normalized.setdefault("source", item.get("source"))
+    normalized["end"] = _number(float(normalized["start"]) + duration, float(normalized["start"]) + duration, float(normalized["start"]) + 0.25)
+    return normalized
 
 
 def _normalize_caption(item: Any, index: int) -> dict[str, Any]:
     if not isinstance(item, dict):
         item = {}
-    return {
+    start = _number(item.get("start"), max(0.0, (index - 1) * 4.0), 0.0)
+    end = _number(item.get("end"), start, start) if "end" in item else None
+    duration_fallback = max(0.25, round(float(end) - start, 3)) if end is not None else 3.5
+    duration = _number(item.get("duration"), duration_fallback, 0.25)
+    normalized = deepcopy(item)
+    normalized.update(
+        {
         "id": _clean_text(item.get("id"), f"caption-{index}"),
         "text": _clean_text(item.get("text"), "Caption line"),
-        "start": _number(item.get("start"), max(0.0, (index - 1) * 4.0), 0.0),
-        "duration": _number(item.get("duration"), 3.5, 0.25),
-    }
+        "start": start,
+        "duration": duration,
+        }
+    )
+    normalized["end"] = _number(float(start) + duration, float(start) + duration, float(start) + 0.25)
+    return normalized
 
 
 def _resequence_project(project: dict[str, Any]) -> dict[str, Any]:
@@ -140,6 +168,7 @@ def _resequence_project(project: dict[str, Any]) -> dict[str, Any]:
     for index, clip in enumerate(project.get("clips") if isinstance(project.get("clips"), list) else [], start=1):
         normalized = _normalize_clip(clip, index, cursor)
         normalized["start"] = cursor
+        normalized["end"] = _number(cursor + float(normalized["duration"]), cursor + float(normalized["duration"]), cursor + 0.25)
         cursor = round(cursor + normalized["duration"], 3)
         clips.append(normalized)
     project["clips"] = clips

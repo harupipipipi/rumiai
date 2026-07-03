@@ -203,6 +203,74 @@ def test_movie_caption_update_replaces_existing_caption_by_id():
     assert captions[0]["duration"] == 2.25
 
 
+def test_movie_surface_preserves_mimo_timeline_metadata():
+    from surface_helpers import movie_export_project, movie_render_project, movie_save_project, open_surface
+
+    mimo_project = {
+        "title": "Mimo creative demo",
+        "fps": 30,
+        "duration_seconds": 16,
+        "assets": [
+            {
+                "id": "logo",
+                "type": "image",
+                "placement": {"x": 0.05, "y": 0.05, "w": 0.2, "h": 0.1, "start": 0.0, "end": 16.0},
+            },
+            {
+                "id": "demo_img",
+                "type": "image",
+                "placement": {"x": 0.3, "y": 0.3, "w": 0.4, "h": 0.4, "start": 5.0, "end": 10.0},
+            },
+        ],
+        "clips": [
+            {"id": "intro_clip", "start": 0.0, "end": 4.0, "source": "intro_video.mp4"},
+            {"id": "workflow_clip", "start": 4.0, "end": 8.0, "source": "workflow_demo.mp4"},
+            {"id": "editing_clip", "start": 8.0, "end": 12.0, "source": "editing_demo.mp4"},
+            {"id": "outro_clip", "start": 12.0, "end": 16.0, "source": "outro_video.mp4"},
+        ],
+        "captions": [
+            {"text": "ようこそ、Rumi AIへ", "start": 0.5, "end": 2.0},
+            {"text": "編集を完了", "start": 14.5, "end": 16.0},
+        ],
+        "motion_keyframes": [
+            {"target": "logo", "time": 0.0, "frame": 0, "props": {"opacity": 0.0}},
+            {"target": "logo", "time": 1.0, "frame": 30, "props": {"opacity": 1.0}},
+        ],
+        "cuts": [
+            {"time": 4.0, "type": "hard cut", "duration": 0.0},
+            {"time": 8.0, "type": "fade", "duration": 0.5},
+        ],
+    }
+
+    opened = open_surface(
+        "movie",
+        {"text": "Mimo creative demo", "movie_project": mimo_project, "resource_id": "movie:mimo-demo"},
+        {},
+    )
+
+    project = opened["data"]["surface"]["payload"]["movie_project"]
+    assert project["fps"] == 30
+    assert project["duration_seconds"] == 16
+    assert project["timeline"]["duration"] == 16.0
+    assert project["assets"][0]["kind"] == "image"
+    assert project["assets"][0]["placement"]["end"] == 16.0
+    assert project["clips"][0]["source"] == "intro_video.mp4"
+    assert project["clips"][0]["duration"] == 4.0
+    assert project["clips"][-1]["end"] == 16.0
+    assert project["captions"][0]["duration"] == 1.5
+    assert project["captions"][0]["end"] == 2.0
+    assert project["cuts"] == mimo_project["cuts"]
+    assert project["motion_keyframes"] == mimo_project["motion_keyframes"]
+
+    saved = movie_save_project({"project": project}, {})
+    exported = movie_export_project({"project": saved["data"]["project"]}, {})
+    rendered = movie_render_project({"project": saved["data"]["project"]}, {})
+    exported_project = exported["data"]["project"]
+    assert exported_project["assets"][1]["placement"]["start"] == 5.0
+    assert exported_project["motion_keyframes"][1]["frame"] == 30
+    assert rendered["data"]["project"]["cuts"][1]["type"] == "fade"
+
+
 def test_movie_split_rejects_short_clips_and_preserves_duration_sum():
     from surface_helpers import movie_split_clip, open_surface
 

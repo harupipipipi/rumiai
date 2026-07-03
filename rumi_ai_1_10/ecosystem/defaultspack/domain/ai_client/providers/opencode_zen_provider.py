@@ -1,24 +1,22 @@
 from __future__ import annotations
 
-import os
-import ssl
+import json
 from typing import Any, Dict, List
 
-from .anthropic_provider import AnthropicProvider
+from .openai_compatible_provider import OpenAICompatibleProvider
 
 
 _OPENCODE_ZEN_MODEL_SPECS: List[Dict[str, Any]] = [
     {
-        "model_id": "minimax-m3-free",
-        "display_name": "MiniMax M3 Free via OpenCode Zen",
+        "model_id": "mimo-v2.5-free",
+        "display_name": "MiMo V2.5 Free via OpenCode Zen",
         "priority": 1,
         "defaults": {"chat": True, "coding": True, "reasoning": True},
-        "context_window": 200000,
-        "max_tokens": 32000,
-        "min_output_tokens": 96,
-        "transport": "anthropic_messages",
-        "endpoint_path": "/v1/messages",
-        "source": "opencode_zen_minimax_m3_free",
+        "context_window": 131072,
+        "max_tokens": 32768,
+        "transport": "openai_chat_completions",
+        "endpoint_path": "/v1/chat/completions",
+        "source": "opencode_zen_mimo_v2_5_free",
     },
 ]
 
@@ -41,36 +39,65 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
             "chat": True,
             "streaming": True,
             "tool_calls": False,
-            "vision": True,
+            "vision": False,
             "reasoning": True,
         },
         "context_window": spec["context_window"],
         "max_context_tokens": spec["context_window"],
         "max_tokens": spec["max_tokens"],
+        "supports_thinking": True,
+        "thinking_levels": ["low", "medium", "high"],
+        "default_thinking_level": "medium",
         "metadata": {
             "transport": spec["transport"],
+            "api_compatibility": spec["transport"],
             "endpoint_path": spec["endpoint_path"],
             "source": spec["source"],
             "pricing": "free_promotion_or_account_policy",
-            "min_output_tokens": spec["min_output_tokens"],
-            "token_floor_reason": "MiniMax M3 can emit reasoning before final text; short caps may return thinking-only output.",
+            "capabilities": {
+                "tool_calls": False,
+                "tool_calling": False,
+                "thinking": True,
+                "reasoning": True,
+                "vision": False,
+            },
         },
     }
 
 
-class OpencodeZenProvider(AnthropicProvider):
-    """OpenCode Zen Anthropic-compatible provider for curated Zen models."""
+class OpencodeZenProvider(OpenAICompatibleProvider):
+    """OpenCode Zen free OpenAI-compatible provider."""
 
     provider_name = "opencode-zen"
     display_name = "OpenCode Zen"
     DEFAULT_BASE_URL = "https://opencode.ai/zen"
-    MODEL_IDS = {"minimax-m3-free"}
+    BASE_URL = DEFAULT_BASE_URL
+    MODEL_IDS = {"mimo-v2.5-free"}
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_ZEN_MODEL_SPECS]
+    _CHAT_COMPLETIONS_PATH = "/v1/chat/completions"
+    _CHAT_PARAM_KEYS = {
+        "temperature",
+        "max_tokens",
+        "max_completion_tokens",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "stop",
+        "response_format",
+        "reasoning_effort",
+        "stream_options",
+    }
 
     def __init__(self) -> None:
-        self._api_key = os.environ.get("OPENCODE_ZEN_API_KEY", "")
-        self._ssl_ctx = ssl.create_default_context()
-        self.BASE_URL = os.environ.get("OPENCODE_ZEN_BASE_URL", self.DEFAULT_BASE_URL).rstrip("/")
+        super().__init__(
+            provider_id="opencode-zen",
+            display_name="OpenCode Zen",
+            api_key_env="OPENCODE_ZEN_API_KEY",
+            base_url_env="OPENCODE_ZEN_BASE_URL",
+            default_base_url=self.DEFAULT_BASE_URL,
+            credential_required=True,
+            known_models=self.KNOWN_MODELS,
+        )
 
     @classmethod
     def _normalize_model_id(cls, model: str) -> str:
@@ -92,35 +119,110 @@ class OpencodeZenProvider(AnthropicProvider):
             )
         return model_id
 
-    def _headers(self) -> Dict[str, str]:
-        return {
-            "Authorization": "Bearer " + self._api_key,
-            "x-api-key": self._api_key,
-            "anthropic-version": self.API_VERSION,
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "User-Agent": "RumiAI/1.0",
+    @staticmethod
+    def _translate_params(params):
+        raw = dict(params or {})
+        translated = {
+            key: raw[key]
+            for key in OpencodeZenProvider._CHAT_PARAM_KEYS
+            if key in raw
         }
-
-    def list_models(self) -> List[Dict[str, Any]]:
-        return [dict(model) for model in self.KNOWN_MODELS]
+        for key in ("request_timeout", "timeout"):
+            if key in raw:
+                translated[key] = raw[key]
+        return translated
 
     @staticmethod
-    def _params_with_token_floor(params: Dict[str, Any] | None) -> Dict[str, Any]:
-        next_params = dict(params or {})
-        try:
-            requested = int(next_params.get("max_tokens", 4096) or 4096)
-        except (TypeError, ValueError):
-            requested = 4096
-        next_params["max_tokens"] = max(requested, 96)
-        return next_params
+    def _copy_chat_params(body, params):
+        for key in OpencodeZenProvider._CHAT_PARAM_KEYS:
+            if key in params:
+                body[key] = params[key]
+
+    @staticmethod
+    def _message_text(message: Dict[str, Any]) -> str:
+        content = message.get("content", "")
+        if isinstance(content, str):
+            return content
+        if content in (None, ""):
+            return ""
+        if isinstance(content, list):
+            chunks: List[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    if part.get("type") == "text":
+                        chunks.append(str(part.get("text", "")))
+                    elif isinstance(part.get("content"), str):
+                        chunks.append(part["content"])
+                elif part is not None:
+                    chunks.append(str(part))
+            return "".join(chunks)
+        return str(content)
+
+    def parse_response(self, raw):
+        choices = raw.get("choices")
+        choice = choices[0] if isinstance(choices, list) and choices and isinstance(choices[0], dict) else {}
+        message = choice.get("message", {}) if isinstance(choice.get("message"), dict) else {}
+        normalized = dict(raw)
+        normalized["choices"] = [
+            {
+                **choice,
+                "message": {
+                    **message,
+                    "content": self._message_text(message),
+                },
+            }
+        ]
+        return super().parse_response(normalized)
 
     def complete(self, model, messages, tools, params):
         del tools
         model_id = self._assert_supported_model(model)
-        return super().complete(model_id, messages, [], self._params_with_token_floor(params))
+        params = self._translate_params(params)
+        body = {"model": model_id, "messages": self.build_request(messages)}
+        self._copy_chat_params(body, params)
+        raw = self._request_json(self._CHAT_COMPLETIONS_PATH, body, **self._request_timeout_kwargs(params))
+        return self.parse_response(raw)
 
     def stream(self, model, messages, tools, params):
         del tools
         model_id = self._assert_supported_model(model)
-        yield from super().stream(model_id, messages, [], self._params_with_token_floor(params))
+        params = self._translate_params(params)
+        body = {"model": model_id, "messages": self.build_request(messages)}
+        self._copy_chat_params(body, params)
+        body.setdefault("stream_options", {"include_usage": True})
+        resp = self._request_stream(self._CHAT_COMPLETIONS_PATH, body, **self._request_timeout_kwargs(params))
+        yield from self._stream_from_response(resp)
+
+    def _stream_from_response(self, resp):
+        tool_call_state = {}
+        try:
+            for payload in self._parse_sse_lines(resp):
+                try:
+                    obj = json.loads(payload)
+                except json.JSONDecodeError:
+                    continue
+                choices = obj.get("choices", [])
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
+                text = delta.get("content")
+                if text:
+                    yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
+                reasoning_text = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking")
+                if reasoning_text:
+                    yield {"type": "reasoning_delta", "delta": {"type": "text", "text": str(reasoning_text)}}
+                yield from self._stream_tool_call_events(delta, tool_call_state)
+                finish = choices[0].get("finish_reason")
+                if finish:
+                    usage_raw = obj.get("usage") or {}
+                    yield {
+                        "type": "stream_end",
+                        "finish_reason": finish,
+                        "usage": {
+                            "input_tokens": usage_raw.get("prompt_tokens", 0),
+                            "output_tokens": usage_raw.get("completion_tokens", 0),
+                            "total_tokens": usage_raw.get("total_tokens", 0),
+                        },
+                    }
+        finally:
+            resp.close()
