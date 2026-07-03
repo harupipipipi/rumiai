@@ -1,5 +1,6 @@
 import { useAppStore } from '@/src/store';
 import { cn } from '@/src/lib/utils';
+import { viewerLayers } from '@/src/lib/layers';
 import { CheckCircle2, XCircle } from 'lucide-react';
 
 export function ToastContainer() {
@@ -7,7 +8,7 @@ export function ToastContainer() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 flex flex-col gap-2"
+      className={cn("fixed bottom-4 right-4 flex flex-col gap-2", viewerLayers.toast)}
       aria-live="polite"
       aria-atomic="false"
       role="status"
