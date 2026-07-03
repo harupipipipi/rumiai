@@ -51,6 +51,7 @@ For the repo-wide glossary and migration guidance, see
 | Media | [media.md](media.md) |
 | AI providers | [ai-providers.md](ai-providers.md) |
 | AI client | [ai_client.md](ai_client.md) |
+| Authority test harness | [authority_test_harness.md](authority_test_harness.md) |
 
 ## Integration And Extension
 

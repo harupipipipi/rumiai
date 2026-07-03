@@ -1782,6 +1782,9 @@ _FALLBACK_HTTP_ROUTE_SPECS = [
         "POST", "/api/authority/test/request", handler_name="_handle_authority_test_request"
     ),
     HttpRouteSpec(
+        "POST", "/api/authority/test/settle", handler_name="_handle_authority_test_settle"
+    ),
+    HttpRouteSpec(
         "POST",
         "/api/authority/requests/{request_id}/approve",
         handler_name="_handle_authority_approve",
