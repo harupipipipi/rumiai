@@ -3,7 +3,7 @@ from domain.company.mimo_sync import sync_mimo_company_workspace
 from domain.company.runtime_store import CompanyRuntimeStore
 from domain.company.store import CompanyStore
 
-from ._helpers import company_id_from, invalid, missing_company, require_dict
+from ._helpers import company_id_from, invalid, missing_company, require_dict, subagent_team_write_denied
 
 
 MIMO_CODING_COMPANY_ID = "mimo-coding-company"
@@ -91,6 +91,9 @@ def run(input_data, context):
                 channel = _runtime_channel(channel_id)
             return ok(_with_runtime_counts(company_id, channel, runtime_store))
         if action in {"upsert", "create", "update"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             channel = input_data.get("channel")
             if channel is None:
                 channel = {key: value for key, value in input_data.items() if key not in {"company_id", "action"}}
@@ -101,6 +104,9 @@ def run(input_data, context):
                 return missing_company(company_id)
             return ok(updated)
         if action in {"delete", "remove"}:
+            blocked = subagent_team_write_denied(company_id)
+            if blocked is not None:
+                return blocked
             channel_id = input_data.get("channel_id") or input_data.get("id")
             if not channel_id:
                 return invalid("channel_id is required")

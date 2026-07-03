@@ -776,6 +776,137 @@ export type CompanyInboxItem = {
   updated_at?: string;
 };
 
+export type SubagentTeamFileTreeEntry = {
+  id?: string;
+  node_id?: string;
+  nodeId?: string;
+  name?: string;
+  label?: string;
+  title?: string;
+  path?: string;
+  file_path?: string;
+  relative_path?: string;
+  is_dir?: boolean;
+  is_directory?: boolean;
+  kind?: string;
+  type?: string;
+  depth?: number;
+  size?: number;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamFileTreeResponse = {
+  workspace_id?: string;
+  workspaceId?: string;
+  workspace_hash?: string;
+  root?: string;
+  directory?: string;
+  files?: SubagentTeamFileTreeEntry[];
+  file_tree?: SubagentTeamFileTreeEntry[];
+  tree?: SubagentTeamFileTreeEntry[];
+  nodes?: SubagentTeamFileTreeEntry[];
+  items?: SubagentTeamFileTreeEntry[];
+  history?: SubagentTeamFileTreeEntry[];
+  history_tree?: SubagentTeamFileTreeEntry[];
+  events?: SubagentTeamFileTreeEntry[];
+  clipped?: boolean;
+  status?: Record<string, unknown>;
+  policy?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamFileTreeOpenResponse = {
+  id?: string;
+  node_id?: string;
+  nodeId?: string;
+  title?: string;
+  label?: string;
+  name?: string;
+  path?: string;
+  file_path?: string;
+  content?: string;
+  file_content?: string;
+  text?: string;
+  preview?: string;
+  body?: string;
+  markdown?: string;
+  messages?: Array<Record<string, unknown>>;
+  history?: Array<Record<string, unknown>>;
+  conversation?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamRichSettings = {
+  rich_enabled?: boolean;
+  enabled?: boolean;
+  max_subagents?: number;
+  maxSubagents?: number;
+  active_subagents?: number;
+  activeSubagents?: number;
+  current_subagents?: number;
+  currentSubagents?: number;
+  can_user_toggle?: boolean;
+  canUserToggle?: boolean;
+  can_creator_enable_rich?: boolean;
+  canCreatorEnableRich?: boolean;
+  creator_can_enable_rich?: boolean;
+  reason?: string;
+  status?: string;
+  policy?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamRichSettingsResponse = SubagentTeamRichSettings & {
+  settings?: SubagentTeamRichSettings;
+  rich?: SubagentTeamRichSettings;
+};
+
+export type SubagentTeamCreatorSettings = {
+  enabled?: boolean;
+  model?: string;
+  lifecycle_only?: boolean;
+  lifecycleOnly?: boolean;
+  can_manage_agents?: boolean;
+  canManageAgents?: boolean;
+  can_enable_rich?: boolean;
+  canEnableRich?: boolean;
+  rich_gate_message?: string;
+  richGateMessage?: string;
+  status?: string;
+  policy?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamCreatorSettingsResponse = SubagentTeamCreatorSettings & {
+  settings?: SubagentTeamCreatorSettings;
+  creator?: SubagentTeamCreatorSettings;
+};
+
+export type SubagentTeamCreatorTestResponse = {
+  ok?: boolean;
+  status?: string;
+  message?: string;
+  summary?: string;
+  result?: Record<string, unknown> | string;
+  [key: string]: unknown;
+};
+
+export type SubagentTeamDecisionPreviewResponse = {
+  task?: Partial<CompanyTask>;
+  decision?: Record<string, unknown>;
+  approval?: Record<string, unknown>;
+  preview?: Record<string, unknown>;
+  status?: string;
+  title?: string;
+  summary?: string;
+  target_agent_ids?: string[];
+  [key: string]: unknown;
+};
+
 export type CompanyInboundRoute = {
   id: string;
   provider?: string;
@@ -3579,6 +3710,175 @@ export const api = {
   listCompanyInboundRoutes(companyId: string) {
     return request<{ routes: CompanyInboundRoute[]; total: number }>(
       withQuery(`/api/company/${encodeURIComponent(companyId)}/inbound-routes`, { company_id: companyId }),
+      { cache: "no-store" },
+    );
+  },
+
+  bootstrapSubagentTeamWorkspace(metadata?: Record<string, unknown>, options?: { conversationId?: string | null; scope?: "conversation" | "default" }) {
+    return request<{ bootstrapped: boolean; company: CompanyRecord }>("/api/subagent-team/bootstrap", {
+      method: "POST",
+      body: JSON.stringify({
+        ...(metadata ? { metadata } : {}),
+        ...(options?.conversationId ? { conversation_id: options.conversationId } : {}),
+        ...(options?.scope ? { scope: options.scope } : {}),
+      }),
+    });
+  },
+
+  updateSubagentTeamWorkspaceMetadata(options: {
+    companyId?: string | null;
+    conversationId?: string | null;
+    metadata: Record<string, unknown>;
+  }) {
+    return request<CompanyRecord>("/api/subagent-team/workspace/metadata", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: options.companyId,
+        conversation_id: options.conversationId,
+        metadata: options.metadata,
+      }),
+    });
+  },
+
+  sendSubagentTeamMessage(payload: {
+    companyId?: string | null;
+    conversationId?: string | null;
+    content: string;
+    channel_id?: string;
+    sender_id?: string;
+    mentions?: string[];
+    task_ids?: string[];
+    client_message_id?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<CompanyMessage>("/api/subagent-team/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: payload.companyId,
+        conversation_id: payload.conversationId,
+        content: payload.content,
+        channel_id: payload.channel_id,
+        sender_id: payload.sender_id,
+        mentions: payload.mentions,
+        task_ids: payload.task_ids,
+        client_message_id: payload.client_message_id,
+        metadata: payload.metadata,
+      }),
+    });
+  },
+
+  getSubagentTeamRichSettings(options?: { companyId?: string | null; conversationId?: string | null }) {
+    return request<SubagentTeamRichSettingsResponse>(
+      withQuery("/api/subagent-team/rich", {
+        company_id: options?.companyId,
+        conversation_id: options?.conversationId,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  updateSubagentTeamRichSettings(payload: Partial<SubagentTeamRichSettings> & {
+    companyId?: string | null;
+    conversationId?: string | null;
+  }) {
+    const { companyId, conversationId, ...settings } = payload;
+    return request<SubagentTeamRichSettingsResponse>("/api/subagent-team/rich", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: companyId,
+        conversation_id: conversationId,
+        ...settings,
+      }),
+    });
+  },
+
+  getSubagentTeamCreatorSettings(options?: { companyId?: string | null; conversationId?: string | null }) {
+    return request<SubagentTeamCreatorSettingsResponse>(
+      withQuery("/api/subagent-team/creator/settings", {
+        company_id: options?.companyId,
+        conversation_id: options?.conversationId,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  updateSubagentTeamCreatorSettings(payload: Partial<SubagentTeamCreatorSettings> & {
+    companyId?: string | null;
+    conversationId?: string | null;
+  }) {
+    const { companyId, conversationId, ...settings } = payload;
+    return request<SubagentTeamCreatorSettingsResponse>("/api/subagent-team/creator/settings", {
+      method: "PATCH",
+      body: JSON.stringify({
+        company_id: companyId,
+        conversation_id: conversationId,
+        settings,
+      }),
+    });
+  },
+
+  testSubagentTeamCreator(payload?: {
+    companyId?: string | null;
+    conversationId?: string | null;
+    prompt?: string;
+    channel_id?: string;
+    agent_id?: string;
+    metadata?: Record<string, unknown>;
+  }) {
+    return request<SubagentTeamCreatorTestResponse>("/api/subagent-team/creator/test", {
+      method: "POST",
+      body: JSON.stringify({
+        company_id: payload?.companyId,
+        conversation_id: payload?.conversationId,
+        prompt: payload?.prompt,
+        channel_id: payload?.channel_id,
+        agent_id: payload?.agent_id,
+        metadata: payload?.metadata,
+      }),
+    });
+  },
+
+  getSubagentTeamCreatorDecisionPreview(options?: { companyId?: string | null; conversationId?: string | null; channelId?: string | null }) {
+    return request<SubagentTeamDecisionPreviewResponse>(
+      withQuery("/api/subagent-team/creator/decision-preview", {
+        company_id: options?.companyId,
+        conversation_id: options?.conversationId,
+        channel_id: options?.channelId,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  getSubagentTeamFileTree(options?: {
+    companyId?: string | null;
+    conversationId?: string | null;
+    directory?: string;
+    limit?: number;
+    includeGit?: boolean;
+  }) {
+    return request<SubagentTeamFileTreeResponse>(
+      withQuery("/api/subagent-team/file-tree", {
+        company_id: options?.companyId,
+        conversation_id: options?.conversationId,
+        directory: options?.directory,
+        limit: options?.limit,
+        include_git: options?.includeGit,
+      }),
+      { cache: "no-store" },
+    );
+  },
+
+  openSubagentTeamFileTreeNode(options: {
+    nodeId: string;
+    companyId?: string | null;
+    conversationId?: string | null;
+  }) {
+    return request<SubagentTeamFileTreeOpenResponse>(
+      withQuery("/api/subagent-team/file-tree/open", {
+        node_id: options.nodeId,
+        company_id: options.companyId,
+        conversation_id: options.conversationId,
+      }),
       { cache: "no-store" },
     );
   },

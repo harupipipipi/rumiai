@@ -1,7 +1,7 @@
 from blocks._common import ok, error
 from domain.company.service import CompanyService
 
-from ._helpers import company_id_from, invalid, missing_company, require_dict
+from ._helpers import company_id_from, invalid, missing_company, require_dict, subagent_team_write_denied
 
 
 def run(input_data, context):
@@ -11,6 +11,9 @@ def run(input_data, context):
     task_id = input_data.get("task_id") or input_data.get("id")
     if not company_id:
         return invalid("company_id is required")
+    blocked = subagent_team_write_denied(company_id)
+    if blocked is not None:
+        return blocked
     if not task_id:
         return invalid("task_id is required")
     try:

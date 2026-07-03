@@ -77,11 +77,13 @@ class CompanyService:
             **(metadata or {}),
         }
         company_id = str(existing.get("id") if existing else _conversation_company_id(conversation_id))
+        guard_settings = _subagent_team_company_guard_settings() if _is_subagent_team_company_metadata(merged_metadata) else None
         if existing:
             return self.store.ensure_company(
                 company_id=company_id,
                 name=str(existing.get("name") or "Executive Team"),
                 description=str(existing.get("description") or "Employee group delegated from the current chat."),
+                settings=guard_settings,
                 agents=None,
                 metadata=merged_metadata,
                 conversation_group_id=str(
@@ -94,6 +96,7 @@ class CompanyService:
             company_id=company_id,
             name=str((metadata or {}).get("name") or "Executive Team"),
             description="Employee group delegated from the current chat.",
+            settings=guard_settings,
             agents=_default_agents_for_model(employee_model),
             metadata=merged_metadata,
             conversation_group_id=(metadata or {}).get("conversation_group_id") or "company:" + company_id,
@@ -278,3 +281,25 @@ def _default_agents_for_model(model: str) -> list[dict[str, Any]]:
     for agent in agents:
         agent["model"] = model
     return agents
+
+
+def _subagent_team_company_guard_settings() -> dict[str, Any]:
+    return {
+        "subagent_team": {
+            "company_api_write_guard": True,
+            "guard_owner": "subagent_team_workspace",
+            "managed_workspace": True,
+        }
+    }
+
+
+def _is_subagent_team_company_metadata(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    return (
+        bool(metadata.get("subagent_team"))
+        or bool(metadata.get("subagent_team_workspace"))
+        or str(metadata.get("surface") or "") == "subagent_team_workspace"
+        or str(metadata.get("workspace_kind") or "") == "subagent_team"
+        or str(metadata.get("frontend_surface") or "") == "subagent_team_workspace"
+    )
