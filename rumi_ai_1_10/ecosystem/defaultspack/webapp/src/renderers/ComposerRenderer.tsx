@@ -106,6 +106,7 @@ type SpeechRecognitionLike = {
   interimResults: boolean;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onend: (() => void) | null;
+  onerror?: ((event: { error?: string; message?: string }) => void) | null;
   start: () => void;
   stop: () => void;
 };
@@ -1469,6 +1470,7 @@ export function ComposerRenderer({
   const [selectedModelCandidateIndex, setSelectedModelCandidateIndex] = useState(0);
   const [composerPopoverStyle, setComposerPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [isVoiceListening, setIsVoiceListening] = useState(false);
+  const [voiceInputStatusMessage, setVoiceInputStatusMessage] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -2054,13 +2056,17 @@ export function ComposerRenderer({
     if (isVoiceListening) {
       recognitionRef.current?.stop();
       setIsVoiceListening(false);
+      setVoiceInputStatusMessage("音声入力を停止しました。");
       return;
     }
     const recognitionCtor = (window as unknown as {
       SpeechRecognition?: new () => SpeechRecognitionLike;
       webkitSpeechRecognition?: new () => SpeechRecognitionLike;
     }).SpeechRecognition ?? (window as unknown as { webkitSpeechRecognition?: new () => SpeechRecognitionLike }).webkitSpeechRecognition;
-    if (!recognitionCtor) return;
+    if (!recognitionCtor) {
+      setVoiceInputStatusMessage("このブラウザでは音声入力を利用できません。テキスト入力を使ってください。");
+      return;
+    }
     const recognition = new recognitionCtor();
     recognition.lang = "ja-JP";
     recognition.continuous = false;
@@ -2083,11 +2089,29 @@ export function ComposerRenderer({
     recognition.onend = () => {
       recognitionRef.current = null;
       setIsVoiceListening(false);
+      setVoiceInputStatusMessage((current) => current === "音声入力を聞き取り中です。もう一度押すと停止します。" ? "音声入力を終了しました。" : current);
       window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
+    };
+    recognition.onerror = (event) => {
+      recognitionRef.current = null;
+      setIsVoiceListening(false);
+      const error = String(event?.error || event?.message || "").toLowerCase();
+      setVoiceInputStatusMessage(
+        error.includes("not-allowed") || error.includes("permission")
+          ? "マイク権限を確認してください。許可後にもう一度音声入力を押してください。"
+          : "音声入力を開始できませんでした。テキスト入力を使ってください。",
+      );
     };
     recognitionRef.current = recognition;
     setIsVoiceListening(true);
-    recognition.start();
+    setVoiceInputStatusMessage("音声入力を聞き取り中です。もう一度押すと停止します。");
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setIsVoiceListening(false);
+      setVoiceInputStatusMessage("音声入力を開始できませんでした。テキスト入力を使ってください。");
+    }
   }, [input, isGenerating, isVoiceListening, onInputChange, templateAllowsVoiceInput, voiceInputEnabled, voiceInputUseAi]);
 
   const handleKeyDown = useCallback(
@@ -2228,16 +2252,18 @@ export function ComposerRenderer({
       mobile: "hide",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
-	        <button
-	          type="button"
-	          tabIndex={chromeButtonTabIndex}
-	          disabled={isGenerating || !voiceInputEnabled || !templateAllowsVoiceInput}
-	          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
-	          onClick={toggleVoiceInput}
-	          className={`${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
-	            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
-	          }`}
-	        >
+        <button
+          type="button"
+          tabIndex={chromeButtonTabIndex}
+          disabled={isGenerating || !voiceInputEnabled || !templateAllowsVoiceInput}
+          aria-pressed={isVoiceListening}
+          aria-describedby={voiceInputStatusMessage ? "composer-voice-input-status" : undefined}
+          title={isVoiceListening ? "音声入力を停止" : voiceInputUseAi ? "音声入力（AI文字起こし）" : "音声入力"}
+          onClick={toggleVoiceInput}
+          className={`${isNewConversation ? "h-7 w-7" : "h-8 w-8"} flex flex-shrink-0 items-center justify-center rounded-lg transition-colors disabled:opacity-50 ${
+            isVoiceListening ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25" : "text-zinc-400 hover:text-zinc-100 hover:bg-zinc-700/60"
+          }`}
+        >
           <WarmActionIcon kind="mic" size="md" />
         </button>
       ),
@@ -2899,6 +2925,11 @@ export function ComposerRenderer({
                     </div>
                   )}
                 </div>
+                {voiceInputStatusMessage && (
+                  <p id="composer-voice-input-status" role="status" className="px-1 text-[11px] text-zinc-400">
+                    {voiceInputStatusMessage}
+                  </p>
+                )}
               </div>
             </div>
           ) : (
@@ -3010,6 +3041,12 @@ export function ComposerRenderer({
                 ))}
               </div>
             </div>
+          )}
+
+          {!isNewConversation && voiceInputStatusMessage && (
+            <p id="composer-voice-input-status" role="status" className="px-5 pb-2 pt-0 text-[11px] text-zinc-400 max-[640px]:px-3">
+              {voiceInputStatusMessage}
+            </p>
           )}
 
           {mode === "coding" && codingContext && (
