@@ -439,6 +439,17 @@ function actionIcon(action: SidebarAction) {
   return ACTION_ICONS[key] ?? <Play size={13} />;
 }
 
+export function sidebarActionDisabledReason(action: SidebarAction, activeConversationId?: string | null): string {
+  if (activeConversationId) return "";
+  if (action.id === "conversation.export") {
+    return "エクスポートする会話がありません。会話を保存してから実行してください。";
+  }
+  if (action.id === "conversation.share") {
+    return "共有する会話がありません。会話を保存してから実行してください。";
+  }
+  return "";
+}
+
 function iconForItem(item: SidebarItem) {
   const declaredIcon = item.ui?.item_icon || item.ui?.group_icon;
   if (declaredIcon && ITEM_ICONS[declaredIcon]) return ITEM_ICONS[declaredIcon];
@@ -579,11 +590,13 @@ function FieldControl({
 function SidebarPanel({
   item,
   settingsValues,
+  activeConversationId,
   onSettingChange,
   onPanelAction,
 }: {
   item: SidebarItem;
   settingsValues: Record<string, Record<string, unknown>>;
+  activeConversationId?: string | null;
   onSettingChange: (sectionId: string, fieldId: string, value: unknown) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
@@ -665,17 +678,31 @@ function SidebarPanel({
         <div>
           <h4 className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5">Actions</h4>
           <div className="grid grid-cols-1 gap-1">
-            {actions.map((action) => (
-              <button
-                key={action.id}
-                onClick={() => onPanelAction?.(item, action)}
-                className="h-7 px-2 rounded border border-zinc-800/70 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-800/70 hover:text-zinc-100 transition-colors flex items-center gap-1.5 text-[11px] text-left"
-                title={action.label}
-              >
-                <span className="text-zinc-500 flex-shrink-0">{actionIcon(action)}</span>
-                <span className="truncate">{action.label}</span>
-              </button>
-            ))}
+            {actions.map((action) => {
+              const disabledReason = sidebarActionDisabledReason(action, activeConversationId);
+              const disabled = Boolean(disabledReason);
+              return (
+                <button
+                  key={action.id}
+                  disabled={disabled}
+                  aria-disabled={disabled}
+                  onClick={() => {
+                    if (disabled) return;
+                    onPanelAction?.(item, action);
+                  }}
+                  className={cn(
+                    "h-7 px-2 rounded border transition-colors flex items-center gap-1.5 text-[11px] text-left",
+                    disabled
+                      ? "cursor-not-allowed border-zinc-900/80 bg-zinc-950/50 text-zinc-600"
+                      : "border-zinc-800/70 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-800/70 hover:text-zinc-100",
+                  )}
+                  title={disabledReason || action.label}
+                >
+                  <span className={cn("flex-shrink-0", disabled ? "text-zinc-700" : "text-zinc-500")}>{actionIcon(action)}</span>
+                  <span className="truncate">{action.label}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1833,7 +1860,13 @@ export function RightSidebar({
                 </div>
               </div>
             ) : activeItem ? (
-              <SidebarPanel item={activeItem} settingsValues={settingsValues} onSettingChange={onSettingChange} onPanelAction={onPanelAction} />
+              <SidebarPanel
+                item={activeItem}
+                settingsValues={settingsValues}
+                activeConversationId={activeConversationId}
+                onSettingChange={onSettingChange}
+                onPanelAction={onPanelAction}
+              />
                         ) : (
                           <div className="space-y-3">
                             <div className="px-1">
