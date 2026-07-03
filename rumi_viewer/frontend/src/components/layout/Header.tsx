@@ -1,10 +1,12 @@
-import { useLocation } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Link, useLocation } from 'react-router-dom';
+import { Loader2, Menu } from 'lucide-react';
 import { useAppStore } from '@/src/store';
 import { useT } from '@/src/lib/i18n';
 import { cn } from '@/src/lib/utils';
 import { describeRuntimeBadge } from '@/src/lib/runtimeHealth';
-import { panelRoutes } from '@/src/lib/routes';
+import { panelRouteMeta, panelRouteTitleKey, panelRoutes, viewerNavGroups } from '@/src/lib/routes';
+import { Avatar } from '@/src/components/ui/Avatar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/src/components/ui/Popover';
 
 export function Header() {
   const t = useT();
@@ -24,18 +26,7 @@ export function Header() {
     lastRuntimeHealthyAt,
   });
 
-  const getPageTitle = () => {
-    if (location.pathname === panelRoutes.home) return t('nav.home');
-    if (location.pathname === panelRoutes.packs || location.pathname.startsWith(panelRoutes.packs)) return t('nav.packs');
-    if (location.pathname === panelRoutes.flows) return t('nav.flows');
-    if (location.pathname === panelRoutes.nodes) return t('nav.nodes');
-    if (location.pathname === panelRoutes.graphEditor) return 'Graphs';
-    if (location.pathname === panelRoutes.profileGraph) return 'Profile Graph';
-    if (location.pathname === panelRoutes.apiMap) return 'API Map';
-    if (location.pathname === panelRoutes.profileWorkspace) return 'Profile Workspace';
-    if (location.pathname === panelRoutes.settings) return t('nav.settings');
-    return '';
-  };
+  const pageTitle = t(panelRouteTitleKey(location.pathname));
 
   const runtimePill = (() => {
     if (runtimeStatus === 'error') {
@@ -62,9 +53,46 @@ export function Header() {
   return (
     <header className={`z-40 flex shrink-0 items-center justify-between border-b border-border bg-bg-header transition-colors duration-[var(--transition-base)] ${isFlows ? 'h-12 px-4' : 'h-14 px-6'}`}>
       <div className="flex min-w-0 items-center gap-3">
+        <div className="md:hidden">
+          <Popover>
+            <PopoverTrigger className="rounded-md p-2 text-text-muted transition hover:bg-bg-hover hover:text-text-main" aria-label={t('nav.open_menu')} aria-haspopup="dialog">
+              <Menu className="h-4 w-4" />
+            </PopoverTrigger>
+            <PopoverContent align="left" className="w-64" role="presentation">
+              <nav aria-label={t('nav.mobile_navigation')} className="max-h-[70vh] overflow-y-auto p-1">
+                {viewerNavGroups.map((group) => (
+                  <div key={group.id} className="py-1">
+                    <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-text-muted/70">
+                      {t(group.labelKey)}
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      {group.routes.map((route) => {
+                        const meta = panelRouteMeta[route];
+                        const isActive = location.pathname === meta.path || (meta.path !== panelRoutes.home && location.pathname.startsWith(meta.path));
+                        return (
+                          <Link
+                            key={route}
+                            to={meta.path}
+                            aria-current={isActive ? 'page' : undefined}
+                            className={cn(
+                              "rounded-md px-3 py-2 text-sm transition-colors",
+                              isActive ? "bg-accent/8 text-accent" : "text-text-muted hover:bg-bg-hover hover:text-text-main",
+                            )}
+                          >
+                            {t(meta.navKey || meta.titleKey)}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </nav>
+            </PopoverContent>
+          </Popover>
+        </div>
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-sm font-medium text-text-main">{getPageTitle()}</h1>
+            <h1 className="truncate text-sm font-medium text-text-main">{pageTitle}</h1>
             <span
               className={`hidden rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] sm:inline-flex ${
                 runtimeBadge.tone === 'success'
@@ -99,18 +127,12 @@ export function Header() {
           <span>{runtimePill.label}</span>
         </div>
         <span className="text-xs text-text-muted hidden sm:block">{profile.username}</span>
-        {profile.avatar ? (
-          <img
-            src={profile.avatar}
-            alt={`${profile.username} avatar`}
-            className="h-7 w-7 rounded-full object-cover border border-border"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <div className="h-7 w-7 rounded-full bg-accent/20 flex items-center justify-center text-accent text-xs font-semibold">
-            {profile.username.charAt(0).toUpperCase()}
-          </div>
-        )}
+        <Avatar
+          src={profile.avatar}
+          username={profile.username}
+          alt={`${profile.username} avatar`}
+          className="h-7 w-7 text-xs"
+        />
       </div>
     </header>
   );
