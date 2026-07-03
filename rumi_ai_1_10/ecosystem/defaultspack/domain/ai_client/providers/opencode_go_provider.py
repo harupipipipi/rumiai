@@ -89,15 +89,18 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
     },
     {
         "model_id": "mimo-v2.5-free",
-        "display_name": "MiMo V2.5 Free alias via OpenCode Go",
+        "display_name": "MiMo V2.5 Free compatibility alias via OpenCode Go",
         "priority": 14,
         "defaults": {"chat": True},
         "transport": "openai_chat_completions",
         "endpoint_path": "/chat/completions",
-        "source": "opencode_go_alias",
+        "source": "opencode_go_compatibility_alias",
         "alias_of": "opencode-go/mimo-v2.5",
-        "free_tier": True,
         "openai_model": "mimo-v2.5",
+        "compatibility_note": (
+            "Legacy id maps to OpenCode Go mimo-v2.5; "
+            "the real free model is opencode-zen/mimo-v2.5-free."
+        ),
     },
     {
         "model_id": "minimax-m3",
@@ -183,6 +186,8 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("alias_of", "openai_model"):
         if spec.get(key):
             metadata[key] = spec[key]
+    if spec.get("compatibility_note"):
+        metadata["compatibility_note"] = spec["compatibility_note"]
     if "free_tier" in spec:
         metadata["free_tier"] = bool(spec["free_tier"])
     if tool_calls:
