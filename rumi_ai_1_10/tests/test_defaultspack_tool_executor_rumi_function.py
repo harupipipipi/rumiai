@@ -1435,3 +1435,27 @@ def test_rumi_api_request_action_allows_internal_approved_context(monkeypatch):
 
     assert result == {"status": "ok", "data": {"ok": True}}
     assert seen == {"method": "GET", "path": "/api/health", "body": None}
+
+
+def test_rumi_api_request_action_preserves_unicode_path_and_body(monkeypatch):
+    from rumi_ai_1_10.ecosystem.rumi_default_tools_pack.domain.tool import rumi_api
+
+    seen = {}
+
+    def fake_request(method, path, body):
+        seen["method"] = method
+        seen["path"] = path
+        seen["body"] = body
+        return {"path": path, "body": body}
+
+    monkeypatch.setattr(rumi_api, "_request", fake_request)
+
+    unicode_path = "/api/chat/conversations/ユーザー/繝なし"
+    unicode_body = {"workspace_path": "/tmp/ドキュメント/rumi_api 繝なし"}
+    result = rumi_api.run(
+        {"action": "request", "method": "GET", "path": unicode_path, "body": unicode_body},
+        {"_tool_server_approved": True, "principal_id": "defaultspack"},
+    )
+
+    assert result == {"status": "ok", "data": {"path": unicode_path, "body": unicode_body}}
+    assert seen == {"method": "GET", "path": unicode_path, "body": unicode_body}

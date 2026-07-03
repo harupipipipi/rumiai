@@ -2658,11 +2658,19 @@ class CapabilityExecutor:
             )
 
     def _run_runner_on_host(self, *, payload, cwd, timeout, start_time, failure_prefix):
+        env = os.environ.copy()
+        env.update({
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
+        })
         proc = subprocess.run(
             self._runner_command(),
             input=payload,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
             timeout=timeout,
             cwd=cwd,
         )
