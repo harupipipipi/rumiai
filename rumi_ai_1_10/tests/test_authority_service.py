@@ -514,6 +514,99 @@ def test_authority_batch_consume_one_shots_is_atomic(tmp_path, monkeypatch):
     assert model_still_valid.reason == "One-shot approval verified"
 
 
+def test_authority_qa_harness_requires_explicit_test_mode(tmp_path, monkeypatch):
+    service, _, _ = _service(tmp_path, monkeypatch)
+    monkeypatch.delenv("RUMI_AUTHORITY_TEST_MODE", raising=False)
+
+    from core_runtime.authority.test_harness import AuthorityQAHarness, AuthorityQAModeError
+
+    with pytest.raises(AuthorityQAModeError):
+        AuthorityQAHarness(service)
+
+    monkeypatch.setenv("RUMI_AUTHORITY_TEST_MODE", "1")
+    monkeypatch.setenv("RUMI_RUNTIME_PROFILE", "production")
+    with pytest.raises(AuthorityQAModeError):
+        AuthorityQAHarness(service)
+
+    monkeypatch.delenv("RUMI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setenv("RUMI_ENVIRONMENT", "production")
+    with pytest.raises(AuthorityQAModeError):
+        AuthorityQAHarness(service)
+
+
+def test_authority_qa_harness_approves_once_through_normal_settlement(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    monkeypatch.setenv("RUMI_AUTHORITY_TEST_MODE", "1")
+    monkeypatch.delenv("RUMI_RUNTIME_PROFILE", raising=False)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+
+    from core_runtime.authority.test_harness import AuthorityQAHarness
+
+    approval = AuthorityQAHarness(service).approve_once(decision.request_id)
+    first = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+    second = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+        request_id=decision.request_id,
+        approval_token=approval["token"],
+    )
+
+    assert approval["success"] is True
+    assert store.get_request(decision.request_id).status == "approved"
+    assert first.allowed is True
+    assert second.allowed is False
+
+
+def test_authority_qa_harness_scenario_can_auto_deny_and_expire(tmp_path, monkeypatch):
+    service, _, store = _service(tmp_path, monkeypatch)
+    monkeypatch.setenv("RUMI_AUTHORITY_TEST_MODE", "1")
+    monkeypatch.delenv("RUMI_RUNTIME_PROFILE", raising=False)
+    resource = {"kind": "model", "provider_id": "openai", "api_id": "work", "model_id": "gpt-5.4"}
+    decision = service.check(
+        principal_id="profile:work",
+        permission_id="model.invoke",
+        resource=resource,
+        profile_id="work",
+    )
+
+    from core_runtime.authority.test_harness import AuthorityQAHarness, AuthorityQAScenario
+
+    harness = AuthorityQAHarness(
+        service,
+        scenario=AuthorityQAScenario(auto_deny_permissions=frozenset({"model.invoke"})),
+    )
+    settled = harness.settle_pending()
+
+    assert settled[0]["success"] is True
+    assert store.get_request(decision.request_id).status == "denied"
+
+    second = service.check(
+        principal_id="profile:work",
+        permission_id="api_key.use",
+        resource={**resource, "kind": "api_key"},
+        profile_id="work",
+    )
+    expired = harness.expire(second.request_id)
+
+    assert expired["success"] is True
+    assert store.get_request(second.request_id).status == "expired"
+
+
 def test_authority_batch_consume_rolls_back_when_later_token_write_fails(tmp_path, monkeypatch):
     service, _, store = _service(tmp_path, monkeypatch)
     model_resource = {
