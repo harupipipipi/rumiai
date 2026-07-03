@@ -10,11 +10,13 @@ import type {
   CompanyRecord,
   CompanyRunLink,
   CompanyTask,
+  Conversation,
   P2PIdentity,
   P2PPeer,
   P2PStatusResponse,
 } from "../../lib/api";
 import { arrayFromRecord, companyResources } from "../../features/company/resources/companyResources";
+import { AgentStudioPanel } from "./AgentStudioPanel";
 import { CompanyAgentList } from "./CompanyAgentList";
 import { CompanyChannelView } from "./CompanyChannelView";
 import { CompanyInboundRoutesPanel } from "./CompanyInboundRoutesPanel";
@@ -23,12 +25,16 @@ import { CompanySettingsPanel } from "./CompanySettingsPanel";
 import { CompanyTaskBoard } from "./CompanyTaskBoard";
 import { CompanyTree } from "./CompanyTree";
 
-type CompanyTab = "tasks" | "channels" | "agents" | "routes" | "settings" | "p2p";
+type CompanyTab = "tasks" | "channels" | "agents" | "profiles" | "teams" | "fusion" | "selection" | "routes" | "settings" | "p2p";
 
 const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }> = [
   { id: "tasks", label: "Tasks", icon: ClipboardList },
   { id: "channels", label: "Channels", icon: MessageSquare },
-  { id: "agents", label: "Employees", icon: Bot },
+  { id: "agents", label: "Members", icon: Bot },
+  { id: "profiles", label: "Profiles", icon: Bot },
+  { id: "teams", label: "Teams", icon: Bot },
+  { id: "fusion", label: "Fusion", icon: Bot },
+  { id: "selection", label: "Selection", icon: ClipboardList },
   { id: "routes", label: "Routes", icon: Route },
   { id: "settings", label: "Settings", icon: Settings },
   { id: "p2p", label: "P2P", icon: Share2 },
@@ -37,6 +43,7 @@ const TABS: Array<{ id: CompanyTab; label: string; icon: typeof ClipboardList }>
 const PRIMARY_TAB_IDS = new Set<CompanyTab>(["tasks", "channels", "agents"]);
 const PRIMARY_TABS = TABS.filter((tab) => PRIMARY_TAB_IDS.has(tab.id));
 const OVERFLOW_TABS = TABS.filter((tab) => !PRIMARY_TAB_IDS.has(tab.id));
+const AGENT_STUDIO_TAB_IDS = new Set<CompanyTab>(["profiles", "teams", "fusion", "selection"]);
 
 function textValue(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
@@ -68,9 +75,11 @@ function researchTaskDescription(query: string, sources: Array<Record<string, un
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
+  onConversationUpdate,
 }: {
   activeConversationId?: string | null;
   activeConversationTitle?: string | null;
+  onConversationUpdate?: (conversation: Conversation) => void;
 }) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
   const [activeCompanyId, setActiveCompanyId] = useState<string | null>(null);
@@ -86,7 +95,7 @@ export function CompanyWorkspacePanel({
   const [p2pIdentity, setP2PIdentity] = useState<P2PIdentity | null>(null);
   const [peers, setPeers] = useState<P2PPeer[]>([]);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<CompanyTab>("tasks");
+  const [activeTab, setActiveTab] = useState<CompanyTab>(activeConversationId ? "tasks" : "profiles");
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -194,6 +203,11 @@ export function CompanyWorkspacePanel({
     void loadCompany();
   }, [activeConversationId]);
 
+  useEffect(() => {
+    if (activeConversationId || activeCompanyId || activeTab !== "tasks") return;
+    setActiveTab("profiles");
+  }, [activeCompanyId, activeConversationId, activeTab]);
+
   const activeCompany = company ?? effectiveCompanies.find((item) => item.id === activeCompanyId) ?? null;
 
   const run = async (work: () => Promise<unknown>) => {
@@ -215,8 +229,8 @@ export function CompanyWorkspacePanel({
   };
 
   const renderTab = () => {
-    if (!activeCompanyId && activeTab !== "p2p") {
-      return <div className="p-3 text-[12px] text-zinc-500">Start or send a chat message to create its employee group.</div>;
+    if (!activeCompanyId && activeTab !== "p2p" && !AGENT_STUDIO_TAB_IDS.has(activeTab)) {
+      return <div className="p-3 text-[12px] text-zinc-500">Start or send a chat message to create its workroom.</div>;
     }
     switch (activeTab) {
       case "channels":
@@ -241,6 +255,38 @@ export function CompanyWorkspacePanel({
             inboxItems={inboxItems}
             busy={busy}
             onUpsertAgent={(agent) => activeCompanyId && void run(() => companyResources.upsertCompanyAgent(activeCompanyId, agent))}
+          />
+        );
+      case "profiles":
+        return (
+          <AgentStudioPanel
+            section="profiles"
+            conversationId={activeConversationId}
+            onConversationUpdate={onConversationUpdate}
+          />
+        );
+      case "teams":
+        return (
+          <AgentStudioPanel
+            section="teams"
+            conversationId={activeConversationId}
+            onConversationUpdate={onConversationUpdate}
+          />
+        );
+      case "fusion":
+        return (
+          <AgentStudioPanel
+            section="fusion"
+            conversationId={activeConversationId}
+            onConversationUpdate={onConversationUpdate}
+          />
+        );
+      case "selection":
+        return (
+          <AgentStudioPanel
+            section="selection"
+            conversationId={activeConversationId}
+            onConversationUpdate={onConversationUpdate}
           />
         );
       case "routes":
@@ -317,9 +363,9 @@ export function CompanyWorkspacePanel({
   return (
     <div className="relative flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
-        <p className="truncate text-[13px] font-medium text-zinc-100">Employees</p>
+        <p className="truncate text-[13px] font-medium text-zinc-100">Workroom</p>
         <p className="truncate text-[10px] text-zinc-600">
-          {activeConversationTitle || activeConversationId || activeCompany?.name || "start a chat to create employees"}
+          {activeConversationTitle || activeConversationId || activeCompany?.name || "start a chat to create a workroom"}
         </p>
       </div>
 
@@ -330,16 +376,16 @@ export function CompanyWorkspacePanel({
         </div>
       )}
 
-      <CompanyTree
+        <CompanyTree
         companies={effectiveCompanies}
         activeCompanyId={activeCompanyId}
         busy={busy}
-        emptyMessage={hasActiveConversation ? "No employee group loaded." : "Start or send a chat message to create its employee group."}
+        emptyMessage={hasActiveConversation ? "No workroom loaded." : "Start or send a chat message to create its workroom."}
         onSelect={(companyId) => void loadCompany(companyId)}
         onBootstrap={hasActiveConversation ? () => void run(() => companyResources.bootstrapCompanyWorkspace(
           {
             source: "webapp",
-            name: "Executive Team",
+            name: "Team Workroom",
             ...(activeConversationId ? { conversation_id: activeConversationId, scope: "conversation" } : {}),
           },
           activeConversationId ? { conversationId: activeConversationId, scope: "conversation" } : undefined,
@@ -373,7 +419,7 @@ export function CompanyWorkspacePanel({
       {isMoreMenuOpen && (
         <button
           type="button"
-          aria-label="Close employee workspace options"
+          aria-label="Close workroom options"
           className="fixed inset-0 rumi-layer-panel cursor-default bg-transparent"
           onClick={() => setIsMoreMenuOpen(false)}
         />
@@ -403,7 +449,7 @@ export function CompanyWorkspacePanel({
         )}
         <button
           type="button"
-          aria-label="Employee workspace options"
+          aria-label="Workroom options"
           aria-haspopup="menu"
           aria-expanded={isMoreMenuOpen}
           onClick={() => setIsMoreMenuOpen((open) => !open)}
@@ -412,7 +458,7 @@ export function CompanyWorkspacePanel({
               ? "border-zinc-600 bg-zinc-100 text-zinc-950"
               : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-700 hover:text-zinc-100"
           }`}
-          title="Employee workspace options"
+          title="Workroom options"
         >
           <Settings size={16} />
         </button>

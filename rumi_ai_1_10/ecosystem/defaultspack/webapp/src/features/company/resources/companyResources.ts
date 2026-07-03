@@ -3,6 +3,8 @@ import { api, arrayFromRecord } from "../../../lib/api";
 export const companyResources = {
   listCompanies: api.listCompanies,
   getCompanyStatus: api.getCompanyStatus,
+  getAgentStudio: api.getAgentStudio,
+  updateAgentStudio: api.updateAgentStudio,
   getP2PStatus: api.getP2PStatus,
   getP2PIdentity: api.getP2PIdentity,
   listP2PPeers: api.listP2PPeers,

@@ -1690,7 +1690,7 @@ export function RightSidebar({
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
               <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Workroom" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -2412,7 +2412,7 @@ export function RightSidebar({
                   ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
               )}
-              title="Employees"
+              title="Workroom"
             >
               <Building2 size={17} className="h-[17px] w-[17px] shrink-0" />
             </button>

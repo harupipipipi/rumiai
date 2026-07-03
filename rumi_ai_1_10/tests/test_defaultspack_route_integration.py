@@ -120,6 +120,25 @@ def test_tool_selection_resource_routes_have_authority_metadata():
     assert trace.resource_template == {"trace_id": "{path.trace_id}"}
 
 
+def test_agent_studio_legacy_routes_are_allowlisted():
+    from ecosystem.defaultspack.transport.registry import (
+        canonical_http_route_specs,
+        load_legacy_http_route_allowlist,
+    )
+
+    canonical = {
+        (spec.method, spec.pattern, spec.legacy_block_module): spec
+        for spec in canonical_http_route_specs()
+        if spec.pattern == "/api/agent-studio"
+    }
+    allowlist = load_legacy_http_route_allowlist()
+
+    assert ("GET", "/api/agent-studio", "blocks.agent_studio.registry") in canonical
+    assert ("POST", "/api/agent-studio", "blocks.agent_studio.registry") in canonical
+    assert ("GET", "/api/agent-studio", "blocks.agent_studio.registry") in allowlist
+    assert ("POST", "/api/agent-studio", "blocks.agent_studio.registry") in allowlist
+
+
 def test_flow_yaml_routes_are_the_canonical_chat_ingress():
     from ecosystem.defaultspack.transport.registry import (
         canonical_http_route_specs,

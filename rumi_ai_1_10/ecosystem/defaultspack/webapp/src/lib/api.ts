@@ -817,6 +817,154 @@ export type CompanyStatusResponse = {
   storage_file?: string;
 };
 
+export type AgentReviewGate = {
+  mode?: "off" | "warning" | "blocking" | string;
+  reviewer_profile_id?: string;
+  gated_commands?: string[];
+  note?: string;
+};
+
+export type AgentContextPolicy = {
+  mode?: "prompt_only" | "summary_clone" | "forked_clone" | "persistent_role" | "utility_call" | string;
+  writeback?: string;
+  share_history?: boolean;
+  share_workspace?: boolean;
+  persist_summary?: boolean;
+  fork_workspace?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type AgentModelSettings = {
+  primary_model_profile_id?: string;
+  delegated_model_profile_id?: string;
+  reviewer_model_profile_id?: string;
+  fusion_model_profile_id?: string;
+  selection_model_profile_id?: string;
+};
+
+export type AgentCommandPolicy = {
+  allowed_commands?: string[];
+  denied_commands?: string[];
+  human_only_commands?: string[];
+  allow_surfaces?: string[];
+  deny_surfaces?: string[];
+  restrict_to_allowlist?: boolean;
+};
+
+export type RegisteredAgentProfile = {
+  id: string;
+  profile_id: string;
+  display_name?: string;
+  description?: string;
+  runtime_profile_id?: string;
+  base_profile_id?: string;
+  source_type?: string;
+  builtin?: boolean;
+  status?: string;
+  aliases?: string[];
+  command_shortcuts?: string[];
+  tags?: string[];
+  surfaces?: string[];
+  compatibility_aliases?: string[];
+  enabled_capabilities?: string[];
+  prompt_set?: string;
+  policy?: Record<string, unknown>;
+  model_settings?: AgentModelSettings;
+  command_policy?: AgentCommandPolicy;
+  context_policy?: AgentContextPolicy;
+  review_gate?: AgentReviewGate;
+  selection?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentTeamDefinition = {
+  id: string;
+  team_id: string;
+  display_name?: string;
+  description?: string;
+  coordinator_profile_id?: string;
+  reviewer_profile_id?: string;
+  member_profile_ids?: string[];
+  dispatch_mode?: string;
+  model_settings?: AgentModelSettings;
+  command_policy?: AgentCommandPolicy;
+  context_policy?: AgentContextPolicy;
+  review_gate?: AgentReviewGate;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentFusionDefinition = {
+  id: string;
+  fusion_id: string;
+  display_name?: string;
+  description?: string;
+  participant_profile_ids?: string[];
+  synthesis_profile_id?: string;
+  max_participants?: number;
+  max_rounds?: number;
+  max_tool_calls?: number;
+  model_settings?: AgentModelSettings;
+  command_policy?: AgentCommandPolicy;
+  context_policy?: AgentContextPolicy;
+  review_gate?: AgentReviewGate;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentSelectionRule = {
+  id: string;
+  display_name?: string;
+  enabled?: boolean;
+  target_type?: "profile" | "team" | "fusion" | string;
+  target_id?: string;
+  match_terms?: string[];
+  prompt_contains?: string[];
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+};
+
+export type AgentStudioConversationState = {
+  surface?: "human" | "mode_agent" | "team_agent" | "fusion_agent" | string;
+  active_profile_id?: string;
+  active_team_id?: string;
+  active_fusion_id?: string;
+  runtime_profile_id?: string;
+  active_label?: string;
+  review_gate?: {
+    approved?: boolean;
+    approved_at?: string;
+    approved_by?: string;
+  };
+  team_member_profile_ids?: string[];
+  participant_profile_ids?: string[];
+  activated_at?: string;
+  activation_reason?: string;
+};
+
+export type AgentStudioManifest = {
+  storage_file?: string;
+  profiles: RegisteredAgentProfile[];
+  teams: AgentTeamDefinition[];
+  fusions: AgentFusionDefinition[];
+  selection_rules: AgentSelectionRule[];
+  settings: {
+    model_defaults?: AgentModelSettings;
+    terminology?: Record<string, string>;
+    selection_defaults?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  };
+  shortcut_index?: Record<string, string>;
+  compatibility_alias_index?: Record<string, string>;
+  summary?: Record<string, number>;
+};
+
 export type RemoteTaskCreateRequest = {
   input: string;
   title?: string;
@@ -1468,6 +1616,11 @@ export type ComposerCommandItem = {
   active?: boolean;
   args?: ComposerCommandArg[];
   execution: ComposerCommandExecution;
+  executor_policy?: {
+    human_only?: boolean;
+    allow_surfaces?: string[];
+    deny_surfaces?: string[];
+  };
   source?: string;
   template_id?: string;
   piece_id?: string;
@@ -3248,6 +3401,17 @@ export const api = {
     return request<MimoCodingCompanyStatus>("/api/agent/mimo-company/bootstrap", {
       method: "POST",
       body: JSON.stringify(options ?? {}),
+    });
+  },
+
+  getAgentStudio() {
+    return request<AgentStudioManifest>("/api/agent-studio", { cache: "no-store" });
+  },
+
+  updateAgentStudio(payload: Record<string, unknown>) {
+    return request<Record<string, unknown>>("/api/agent-studio", {
+      method: "POST",
+      body: JSON.stringify(payload),
     });
   },
 

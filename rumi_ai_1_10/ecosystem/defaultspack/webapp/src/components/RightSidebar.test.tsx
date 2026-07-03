@@ -51,7 +51,7 @@ test("right sidebar initially focuses the rail on tools", () => {
   assert.doesNotMatch(html, /title="Widget A"/);
 });
 
-test("right sidebar does not auto-open employees on initial render", () => {
+test("right sidebar does not auto-open the workroom on initial render", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {
       items: [],
@@ -61,14 +61,14 @@ test("right sidebar does not auto-open employees on initial render", () => {
       },
       settingsSections: [],
       selectedToolIds: [],
-      companyPanel: createElement("div", null, "Employee workspace content"),
+      companyPanel: createElement("div", null, "Workroom content"),
       onSettingChange: noop,
       onOpenSettings: noop,
     }),
   );
 
-  assert.match(html, /title="Employees"/);
-  assert.doesNotMatch(html, /Employee workspace content/);
+  assert.match(html, /title="Workroom"/);
+  assert.doesNotMatch(html, /Workroom content/);
 });
 
 test("right sidebar keeps initial tool groups compact", () => {

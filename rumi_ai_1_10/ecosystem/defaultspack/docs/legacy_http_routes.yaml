@@ -216,6 +216,20 @@ legacy_routes:
   owner: chat
   reason: tracked compatibility fallback during HTTP function migration
   remove_after: v2.4
+- method: GET
+  pattern: /api/agent-studio
+  legacy_block_module: blocks.agent_studio.registry
+  replacement_function_id: ''
+  owner: agent_studio
+  reason: tracked compatibility fallback for Agent Studio manifest and activation surface
+  remove_after: v2.4
+- method: POST
+  pattern: /api/agent-studio
+  legacy_block_module: blocks.agent_studio.registry
+  replacement_function_id: ''
+  owner: agent_studio
+  reason: tracked compatibility fallback for Agent Studio manifest and activation surface
+  remove_after: v2.4
 - method: POST
   pattern: /api/chat/conversations/{id}/auto-trim
   legacy_block_module: blocks.chat.auto_trim
