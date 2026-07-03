@@ -669,8 +669,8 @@ function SupervisorSnapshot({
   }
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[1.05fr_0.95fr_1fr]">
-      <article className="rounded-xl border border-border bg-bg-card p-5">
+    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)_minmax(0,1fr)]">
+      <article className="min-w-0 rounded-xl border border-border bg-bg-card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Route className="h-4 w-4 text-accent" />
@@ -699,7 +699,7 @@ function SupervisorSnapshot({
         </div>
       </article>
 
-      <article className="rounded-xl border border-border bg-bg-card p-5">
+      <article className="min-w-0 rounded-xl border border-border bg-bg-card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Cloud className="h-4 w-4 text-accent" />
@@ -717,7 +717,7 @@ function SupervisorSnapshot({
         </div>
       </article>
 
-      <article className="rounded-xl border border-border bg-bg-card p-5">
+      <article className="min-w-0 rounded-xl border border-border bg-bg-card p-5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2">
             <Monitor className="h-4 w-4 text-accent" />
