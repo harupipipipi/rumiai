@@ -10,6 +10,7 @@ import {
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
   frontendCommandArgs,
+  frontendModeForCommandAction,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
   parseSlashCommandInput,
@@ -323,6 +324,50 @@ test("slash command parsing can be disabled by template feature flags", () => {
 
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("chat slash command resolves to distinct chat mode instead of agent mode", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "chat",
+      name: "chat",
+      label: "Chat Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_chat" },
+    },
+    {
+      id: "agent",
+      name: "agent",
+      label: "Agent Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_agent" },
+    },
+    {
+      id: "coding",
+      name: "coding",
+      label: "Coding Mode",
+      category: "mode",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "frontend", action: "set_mode_coding" },
+    },
+  ];
+
+  const chat = parseSlashCommandInput("/chat", commands);
+  const agent = parseSlashCommandInput("/agent", commands);
+  const coding = parseSlashCommandInput("/coding", commands);
+  const actionFor = (command: ComposerCommandItem | undefined): string => (
+    command?.execution.type === "frontend" ? command.execution.action : ""
+  );
+
+  assert.equal(frontendModeForCommandAction(actionFor(chat?.command), "agent"), "chat");
+  assert.equal(frontendModeForCommandAction(actionFor(agent?.command), "chat"), "agent");
+  assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "chat"), "coding");
+  assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "coding"), "agent");
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {

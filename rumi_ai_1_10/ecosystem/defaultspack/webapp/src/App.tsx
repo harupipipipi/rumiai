@@ -2235,6 +2235,19 @@ export function parseCommandBoolean(value: unknown, fallback: boolean): boolean 
   return Boolean(value);
 }
 
+export function frontendModeForCommandAction(action: string, currentMode: AppMode): AppMode | null {
+  switch (action) {
+    case "set_mode_coding":
+      return currentMode === "coding" ? "agent" : "coding";
+    case "set_mode_chat":
+      return "chat";
+    case "set_mode_agent":
+      return "agent";
+    default:
+      return null;
+  }
+}
+
 export function frontendCommandArgs(
   parsedArgs: Record<string, unknown>,
   backendArgs: unknown,
@@ -2397,12 +2410,6 @@ function ChatApp() {
   const lastHealthyAtRef = useRef<number | null>(null);
   const consecutiveHealthFailuresRef = useRef(0);
   const authorityApprovalWindowRequestRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (mode === "chat") {
-      setMode("agent");
-    }
-  }, [mode, setMode]);
 
   const rawSidebarItems: SidebarItem[] = catalog?.sidebar.items ?? [];
   const chatItems = buildChatItems(conversations);
@@ -3933,14 +3940,12 @@ function ChatApp() {
         }
         return;
       case "set_mode_coding":
-        handleModeChange(mode === "coding" ? "agent" : "coding");
-        return;
       case "set_mode_chat":
-        handleModeChange("agent");
+      case "set_mode_agent": {
+        const nextMode = frontendModeForCommandAction(action, mode);
+        if (nextMode) handleModeChange(nextMode);
         return;
-      case "set_mode_agent":
-        handleModeChange("agent");
-        return;
+      }
       case "toggle_yolo":
         setYoloMode((value) => parseCommandBoolean(args.enabled, !value));
         return;
