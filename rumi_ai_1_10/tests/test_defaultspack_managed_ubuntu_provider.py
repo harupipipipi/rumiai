@@ -409,6 +409,8 @@ def test_managed_ubuntu_desktop_create_skips_guest_occupied_displays(monkeypatch
     assert instance.opaque_state["display"] == ":100"
     assert started.state == "ready"
     assert "Xvfb :100" in desktop_script
+    assert "\\$DISPLAY_ID" not in desktop_script
+    assert "\\${DISPLAY_ID#:}" not in desktop_script
     assert ":100" in fake.guest_displays_in_use
 
 
@@ -443,6 +445,8 @@ def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch
     assert fake.command_containing("--import", DEFAULT_WSL_RUNTIME_NAME, str(install_dir), str(rootfs), "--version", "2")
     assert fake.command_containing("-d", DEFAULT_WSL_RUNTIME_NAME, "--", "echo", "hello")[-2:] == ["echo", "hello"]
     assert started.opaque_state["guest_workspace"].startswith("/workspace/windows_wsl-")
+    install_script = next(script for script in fake.guest_scripts if "$RUMI_SUDO apt-get install -y xvfb" in script)
+    assert "\\$RUMI_SUDO" not in install_script
 
 
 def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkeypatch) -> None:

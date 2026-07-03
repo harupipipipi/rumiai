@@ -125,10 +125,6 @@ def _wsl_distribution_names(output: str) -> tuple[str, ...]:
     return tuple(line.strip() for line in normalized.splitlines() if line.strip())
 
 
-def _escape_wsl_bash_command(script: str) -> str:
-    return str(script or "").replace("$", r"\$")
-
-
 class ManagedUbuntuProvider:
     """Command-backed managed Ubuntu runtime used by Lima and WSL providers."""
 
@@ -842,7 +838,7 @@ class WindowsWslProvider(ManagedUbuntuProvider):
     ) -> GuestCommandResult:
         return self._guest_command(
             command_path,
-            ("bash", "-lc", _escape_wsl_bash_command(script)),
+            ("bash", "-lc", str(script or "")),
             input_text=input_text,
             timeout=timeout,
             check=check,

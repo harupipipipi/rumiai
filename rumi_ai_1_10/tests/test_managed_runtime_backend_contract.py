@@ -2233,7 +2233,7 @@ def test_windows_wsl_provider_detects_utf16_like_distribution_names(monkeypatch)
     assert "command -v Xvfb" in dependency_checks[0][-1]
 
 
-def test_windows_wsl_guest_shell_escapes_dollar_expansion_and_preserves_stdin() -> None:
+def test_windows_wsl_guest_shell_preserves_guest_dollar_expansion_and_stdin() -> None:
     from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
         GuestCommandResult,
         WindowsWslProvider,
@@ -2265,10 +2265,11 @@ def test_windows_wsl_guest_shell_escapes_dollar_expansion_and_preserves_stdin() 
         "--",
         "bash",
         "-lc",
-        'DISPLAY_ID=":98"\nprintf "%s" "\\$DISPLAY_ID"',
+        'DISPLAY_ID=":98"\nprintf "%s" "$DISPLAY_ID"',
     )
     assert captured["input_text"] == "payload"
     assert captured["timeout"] == 5
+    assert "\\$DISPLAY_ID" not in captured["command"][-1]
 
 
 def test_managed_ubuntu_desktop_start_script_prepares_x11_socket_dir_and_checks_processes() -> None:
