@@ -24,8 +24,9 @@ test("approval queue renders cockpit approval decisions", () => {
   );
 
   assert.match(html, /terminal\.exec/);
-  assert.match(html, /Approve/);
-  assert.match(html, /Deny/);
+  assert.match(html, />Approve</);
+  assert.match(html, />Deny</);
+  assert.match(html, /aria-label="Deny terminal\.exec approval"/);
 });
 
 test("diff panel renders status and diff content", () => {

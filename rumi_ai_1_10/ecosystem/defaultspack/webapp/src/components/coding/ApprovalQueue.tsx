@@ -110,24 +110,28 @@ export function ApprovalQueue({
               <span className="flex-shrink-0 text-[10px] text-zinc-600">{formatApprovalTime(request.created_at)}</span>
             </div>
             {request.status === "pending" ? (
-              <div className="mt-2 flex items-center justify-end gap-1">
+              <div className="mt-2 grid grid-cols-2 gap-1.5">
                 <button
                   type="button"
                   disabled={busyId === request.request_id}
                   onClick={() => void decide(request.request_id, "deny")}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"
-                  title="Deny"
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-md border border-red-500/30 px-2 text-[11px] font-semibold text-red-200 hover:bg-red-500/10 disabled:opacity-40"
+                  title="Deny approval"
+                  aria-label={`Deny ${request.operation} approval`}
                 >
                   <X size={13} />
+                  Deny
                 </button>
                 <button
                   type="button"
                   disabled={busyId === request.request_id}
                   onClick={() => void decide(request.request_id, "approve")}
-                  className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100 text-zinc-950 hover:bg-white disabled:opacity-40"
+                  className="flex h-8 items-center justify-center gap-1.5 rounded-md bg-zinc-100 px-2 text-[11px] font-semibold text-zinc-950 hover:bg-white disabled:opacity-40"
                   title="Approve"
+                  aria-label={`Approve ${request.operation} approval`}
                 >
                   <Check size={13} />
+                  Approve
                 </button>
               </div>
             ) : (

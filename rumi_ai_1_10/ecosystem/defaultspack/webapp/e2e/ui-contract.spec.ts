@@ -10,6 +10,8 @@ const historyChatDropMime = "application/rumi-history-chat";
 type ApiMockOptions = {
   onStreamRequest?: (payload: Record<string, unknown>) => void;
   streamEvents?: (message: Record<string, unknown>) => Record<string, unknown>[];
+  codingApprovals?: Array<Record<string, unknown>>;
+  onCodingApprovalDeny?: (payload: Record<string, unknown>) => void;
 };
 
 function ok(data: unknown) {
@@ -449,6 +451,7 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
   let currentSettingsValues = JSON.parse(JSON.stringify(settingsValues)) as typeof settingsValues;
   let conversationToolPreferences: Record<string, unknown> = {};
+  const codingApprovalRequests = JSON.parse(JSON.stringify(options.codingApprovals ?? [])) as Array<Record<string, unknown>>;
   const mcpServers = [
     { server_id: "filesystem", name: "Filesystem MCP", transport: "stdio", connected: true, permissions: { approved: true }, tools: ["mcp_fs_read_file"] },
   ];
@@ -679,15 +682,43 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
 
     if (path === "/api/coding/approvals/approve" && method === "POST") {
       const payload = request.postDataJSON() as Record<string, unknown>;
+      const requestId = String(payload.approval_request_id ?? "");
+      for (const item of codingApprovalRequests) {
+        if (item.request_id === requestId) item.status = "approved";
+      }
       return fulfill(route, {
-        request_id: payload.approval_request_id,
+        request_id: requestId,
+        status: "approved",
         approved: true,
         token: "approved-mcp-token",
       });
     }
 
+    if (path === "/api/coding/approvals/deny" && method === "POST") {
+      const payload = request.postDataJSON() as Record<string, unknown>;
+      options.onCodingApprovalDeny?.(payload);
+      const requestId = String(payload.approval_request_id ?? "");
+      for (const item of codingApprovalRequests) {
+        if (item.request_id === requestId) item.status = "denied";
+      }
+      return fulfill(route, {
+        request_id: requestId,
+        status: "denied",
+        approved: false,
+        reason: String(payload.reason ?? ""),
+      });
+    }
+
     if (path === "/api/coding/approvals") {
-      return fulfill(route, { requests: [], pending: [], count: 0 });
+      const status = url.searchParams.get("status");
+      const requests = status
+        ? codingApprovalRequests.filter((item) => item.status === status)
+        : codingApprovalRequests;
+      return fulfill(route, {
+        requests,
+        pending: codingApprovalRequests.filter((item) => item.status === "pending"),
+        count: requests.length,
+      });
     }
 
     if (path === "/api/coding/checkpoints") {
@@ -782,8 +813,8 @@ async function openDefaultspack(page: Page, path = "/chat", options: ApiMockOpti
   await expect(page.getByText("Preview Calendar Chat").first()).toBeVisible();
 }
 
-async function openCodingWidget(page: Page) {
-  await openDefaultspack(page, "/chat");
+async function openCodingWidget(page: Page, options: ApiMockOptions = {}) {
+  await openDefaultspack(page, "/chat", options);
   await page.locator("textarea.rumi-composer-textarea").fill("/coding");
   await page.keyboard.press("Enter");
   await expect(page).toHaveURL(/\/coding(?:\?|$)/);
@@ -1268,6 +1299,41 @@ test("mocked coding cockpit renders MCP server state", async ({ page }) => {
   const mcpServers = page.getByLabel("MCP servers");
   await expect(mcpServers).toContainText("Filesystem MCP");
   await expect(mcpServers).toContainText("approved");
+});
+
+test("mocked coding cockpit exposes visible deny action and cancels approval", async ({ page }) => {
+  const denyRequests: Array<Record<string, unknown>> = [];
+  await openCodingWidget(page, {
+    codingApprovals: [
+      {
+        request_id: "apr-deny-smoke",
+        operation: "terminal.exec",
+        risk_level: "high",
+        status: "pending",
+        created_at: now,
+        expires_at: now + 60_000,
+        display_summary: "terminal.exec: git push origin master",
+      },
+    ],
+    onCodingApprovalDeny: (payload) => {
+      denyRequests.push(payload);
+    },
+  });
+
+  const queue = page.getByLabel("Approval queue");
+  await expect(queue).toContainText("terminal.exec");
+  await expect(queue).toContainText("terminal.exec: git push origin master");
+  const denyButton = queue.getByRole("button", { name: "Deny terminal.exec approval" });
+  await expect(denyButton).toBeVisible();
+  await denyButton.click();
+
+  await expect.poll(() => denyRequests.length).toBe(1);
+  expect(denyRequests[0]).toMatchObject({
+    approval_request_id: "apr-deny-smoke",
+    reason: "Denied from coding cockpit",
+  });
+  await expect(queue).toContainText("denied");
+  await expect(queue.getByRole("button", { name: "Approve terminal.exec approval" })).toHaveCount(0);
 });
 
 test("mocked coding cockpit registers approves and connects an MCP server", async ({ page }) => {
