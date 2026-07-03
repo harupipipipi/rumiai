@@ -51,8 +51,8 @@ ANTHROPIC_MESSAGES_MODELS = [
     "qwen3.7-max",
     "qwen3.6-plus",
 ]
-TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-free"}
-REASONING_EFFORT_MODELS = {"mimo-v2.5-pro", "mimo-v2.5", "mimo-v2.5-free"}
+TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5-pro", "mimo-v2.5"}
+REASONING_EFFORT_MODELS = {"mimo-v2.5-pro", "mimo-v2.5"}
 LIVE_SMOKE_MODEL = os.environ.get("RUMI_OPENCODE_GO_LIVE_MODEL", "minimax-m3")
 
 
@@ -155,10 +155,11 @@ def test_opencode_go_catalog_includes_all_models():
     assert "mimo-v2.5-free" not in provider["default_model_for"].values()
     assert mimo_free["metadata"]["transport"] == "openai_chat_completions"
     assert mimo_free["metadata"]["endpoint_path"] == "/chat/completions"
-    assert mimo_free["metadata"]["source"] == "opencode_go_alias"
+    assert mimo_free["metadata"]["source"] == "opencode_go_compatibility_alias"
     assert mimo_free["metadata"]["alias_of"] == "opencode-go/mimo-v2.5"
-    assert mimo_free["metadata"]["free_tier"] is True
     assert mimo_free["metadata"]["openai_model"] == "mimo-v2.5"
+    assert "opencode-zen/mimo-v2.5-free" in mimo_free["metadata"]["compatibility_note"]
+    assert "free_tier" not in mimo_free["metadata"]
     assert mimo_free["metadata"]["capabilities"]["tool_calls"] is True
     assert mimo_free["metadata"]["capabilities"]["reasoning"] is True
     assert mimo_free["metadata"]["reasoning_effort_verified"] is True
@@ -287,7 +288,7 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
-def test_opencode_go_mimo_free_alias_resolves_to_mimo_base(monkeypatch):
+def test_opencode_go_mimo_free_runtime_model_maps_to_go_compat_alias(monkeypatch):
     provider = _provider(monkeypatch)
     captured = {}
 
