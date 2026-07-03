@@ -449,6 +449,33 @@ def test_windows_wsl_provider_ensure_imports_rumi_owned_distribution(monkeypatch
     assert "\\$RUMI_SUDO" not in install_script
 
 
+def test_windows_wsl_guest_shell_preserves_guest_variable_expansion(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+    script = (
+        "set -e\n"
+        "$RUMI_SUDO apt-get update\n"
+        'DISPLAY_NUM="${DISPLAY_ID#:}"\n'
+        'echo "$DISPLAY_ID" "$CLIENT_DISPLAY" "$@"\n'
+    )
+
+    provider._guest_shell("C:/Windows/System32/wsl.exe", script)
+
+    command = fake.command_containing("-d", DEFAULT_WSL_RUNTIME_NAME, "--", "bash", "-lc")
+    assert command[-1] == script
+    assert fake.guest_scripts[-1] == script
+    assert "$RUMI_SUDO apt-get update" in script
+    assert "${DISPLAY_ID#:}" in script
+    assert "$CLIENT_DISPLAY" in script
+    assert "$@" in script
+    assert "\\$RUMI_SUDO" not in script
+    assert "\\$DISPLAY_ID" not in script
+    assert "\\${DISPLAY_ID#:}" not in script
+    assert "\\$CLIENT_DISPLAY" not in script
+    assert "\\$@" not in script
+
+
 def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
