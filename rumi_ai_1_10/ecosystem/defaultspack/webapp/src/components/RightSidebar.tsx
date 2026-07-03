@@ -148,6 +148,10 @@ function clampPanelWidth(value: unknown): number {
   return Math.max(220, Math.min(520, numeric));
 }
 
+function requestedPanelIdFromActiveItemId(activeItemId?: string | null): string | null {
+  return activeItemId?.split(":").slice(0, -1).join(":") || activeItemId || null;
+}
+
 function readStoredPanelWidth(): number {
   try {
     const raw = localStorage.getItem(PANEL_WIDTH_STORAGE_KEY);
@@ -973,7 +977,7 @@ export function RightSidebar({
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
-  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<string | null>(() => requestedPanelIdFromActiveItemId(activeItemId));
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("tool");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
@@ -1094,7 +1098,7 @@ export function RightSidebar({
   );
 
   useEffect(() => {
-    const requestedId = activeItemId?.split(":").slice(0, -1).join(":") || activeItemId;
+    const requestedId = requestedPanelIdFromActiveItemId(activeItemId);
     const specialPanelIds = new Set([
       "__tool_manager__",
       "__tool_filter_log__",
@@ -1747,6 +1751,22 @@ export function RightSidebar({
 
           {activeItem?.category === "tool" && (
             <div className="border-b border-zinc-800/40 px-2.5 py-2">
+              {activeItem.tool_info?.requires_approval && (
+                <div
+                  data-testid="tool-detail-needs-approval"
+                  className="mb-2 rounded-md border border-sky-500/30 bg-sky-500/10 px-2 py-1.5 text-sky-100"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center gap-1.5 text-[10px] leading-4">
+                    <ShieldAlert size={12} className="flex-shrink-0 text-sky-200" />
+                    <span className="font-semibold">Needs approval</span>
+                    {activeItem.tool_info.approval_policy && (
+                      <span className="min-w-0 break-words text-sky-200/80">
+                        Approval policy: {activeItem.tool_info.approval_policy}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div className="mb-2 flex flex-wrap gap-1">
                 {(tagMap.get(activeItem.id) ?? []).map((tag) => {
                   const custom = (customTagMap[activeItem.id] ?? []).includes(tag);
