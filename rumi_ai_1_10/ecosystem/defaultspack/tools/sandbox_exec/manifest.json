@@ -28,7 +28,11 @@
     "schema": {
       "parameters": {
         "type": "object",
-        "additionalProperties": true,
+        "additionalProperties": false,
+        "anyOf": [
+          {"required": ["argv"]},
+          {"required": ["command"]}
+        ],
         "properties": {
           "argv": {
             "type": "array",
@@ -38,6 +42,14 @@
             "description": "Preferred command argument vector. Public callers must use argv arrays, not shell strings."
           },
           "command": {
+            "oneOf": [
+              {"type": "string", "minLength": 1},
+              {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1
+              }
+            ],
             "description": "Legacy compatibility input. Strings are parsed without shell syntax; arrays are treated as argv."
           },
           "cwd": {
