@@ -75,83 +75,126 @@ def _validate_with_jsonschema(data: dict, schema: dict) -> List[str]:
 
 def _validate_basic(data: dict, schema: dict) -> List[str]:
     """基本的な検証（jsonschemaがない場合のフォールバック）"""
-    errors = []
-    
-    # 必須フィールドのチェック
-    required = schema.get("required", [])
-    for field in required:
-        if field not in data:
-            errors.append(f"必須フィールド '{field}' がありません")
-    
-    # プロパティの型チェック
-    properties = schema.get("properties", {})
-    for field, value in data.items():
-        if field in properties:
-            prop_schema = properties[field]
-            expected_type = prop_schema.get("type")
-            
-            if expected_type:
-                # 型の配列対応（["string", "null"]など）
-                if isinstance(expected_type, list):
-                    type_names = expected_type
-                else:
-                    type_names = [expected_type]
-                
-                type_map = {
-                    "string": str,
-                    "integer": int,
-                    "number": (int, float),
-                    "boolean": bool,
-                    "array": list,
-                    "object": dict,
-                    "null": type(None)
-                }
-                
-                valid_types = tuple(
-                    type_map.get(t, object) for t in type_names if t in type_map
+    return _validate_basic_value(data, schema, root_schema=schema, path="")
+
+
+def _validate_basic_value(value: Any, schema: dict, *, root_schema: dict, path: str) -> List[str]:
+    schema = _resolve_ref(schema, root_schema)
+    errors: List[str] = []
+
+    if "const" in schema and value != schema["const"]:
+        return [f"{path or '/'}: 値が const {schema['const']!r} と一致しません"]
+    if "enum" in schema and value not in schema["enum"]:
+        return [f"{path or '/'}: 値が enum {schema['enum']} に含まれません"]
+
+    expected_type = schema.get("type")
+    if expected_type and not _basic_type_matches(value, expected_type):
+        return [
+            f"{path or '/'}: 型が不正です: 期待={expected_type}, 実際={type(value).__name__}"
+        ]
+
+    for conditional in schema.get("allOf", []) or []:
+        conditional = _resolve_ref(conditional, root_schema)
+        if "if" in conditional and "then" in conditional:
+            if not _validate_basic_value(value, conditional["if"], root_schema=root_schema, path=path):
+                errors.extend(
+                    _validate_basic_value(value, conditional["then"], root_schema=root_schema, path=path)
                 )
-                
-                if valid_types and not isinstance(value, valid_types):
-                    errors.append(
-                        f"フィールド '{field}' の型が不正です: "
-                        f"期待={type_names}, 実際={type(value).__name__}"
-                    )
+        else:
+            errors.extend(_validate_basic_value(value, conditional, root_schema=root_schema, path=path))
 
-            # PC-6 fix: pattern チェック（jsonschema 未インストール時の補完）
-            pattern = prop_schema.get("pattern")
-            if pattern and isinstance(value, str):
-                try:
-                    if not re.match(pattern, value):
-                        errors.append(
-                            f"フィールド '{field}' の値 '{value}' がパターン '{pattern}' に一致しません"
-                        )
-                except re.error:
-                    pass  # 不正な正規表現は無視
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list) and any_of:
+        if all(_validate_basic_value(value, candidate, root_schema=root_schema, path=path) for candidate in any_of):
+            errors.append(f"{path or '/'}: anyOf のいずれの条件にも一致しません")
 
-            # PC-6 fix: minLength チェック
-            min_length = prop_schema.get("minLength")
-            if min_length is not None and isinstance(value, str):
-                if len(value) < min_length:
-                    errors.append(
-                        f"フィールド '{field}' の長さが最小長 {min_length} 未満です"
-                    )
+    if isinstance(value, dict):
+        required = schema.get("required", [])
+        for field in required:
+            if field not in value:
+                errors.append(f"{path or '/'}: 必須フィールド '{field}' がありません")
 
-            # PC-6 fix: maxLength チェック
-            max_length = prop_schema.get("maxLength")
-            if max_length is not None and isinstance(value, str):
-                if len(value) > max_length:
-                    errors.append(
-                        f"フィールド '{field}' の長さが最大長 {max_length} を超えています"
+        properties = schema.get("properties", {})
+        for field, item in value.items():
+            item_path = f"{path}/{field}" if path else f"/{field}"
+            if field in properties:
+                errors.extend(
+                    _validate_basic_value(item, properties[field], root_schema=root_schema, path=item_path)
+                )
+
+        if schema.get("additionalProperties") is False:
+            allowed_props = set(properties.keys())
+            for field in value.keys():
+                if field not in allowed_props:
+                    errors.append(f"{path or '/'}: 不明なフィールド '{field}'")
+
+    if isinstance(value, list):
+        min_items = schema.get("minItems")
+        if min_items is not None and len(value) < int(min_items):
+            errors.append(f"{path or '/'}: 配列の要素数が minItems {min_items} 未満です")
+        item_schema = schema.get("items")
+        if isinstance(item_schema, dict):
+            for index, item in enumerate(value):
+                errors.extend(
+                    _validate_basic_value(
+                        item,
+                        item_schema,
+                        root_schema=root_schema,
+                        path=f"{path}/{index}" if path else f"/{index}",
                     )
-    
-    # additionalPropertiesのチェック
-    if schema.get("additionalProperties") is False:
-        allowed_props = set(properties.keys())
-        for field in data.keys():
-            if field not in allowed_props:
-                errors.append(f"不明なフィールド '{field}'")
-    
+                )
+
+    pattern = schema.get("pattern")
+    if pattern and isinstance(value, str):
+        try:
+            if not re.match(pattern, value):
+                errors.append(f"{path or '/'}: 値 '{value}' がパターン '{pattern}' に一致しません")
+        except re.error:
+            pass
+
+    min_length = schema.get("minLength")
+    if min_length is not None and isinstance(value, str) and len(value) < int(min_length):
+        errors.append(f"{path or '/'}: 文字列長が minLength {min_length} 未満です")
+
+    max_length = schema.get("maxLength")
+    if max_length is not None and isinstance(value, str) and len(value) > int(max_length):
+        errors.append(f"{path or '/'}: 文字列長が maxLength {max_length} を超えています")
+
     return errors
+
+
+def _resolve_ref(schema: dict, root_schema: dict) -> dict:
+    ref = schema.get("$ref") if isinstance(schema, dict) else ""
+    if not ref:
+        return schema
+    if not str(ref).startswith("#/"):
+        return schema
+    current: Any = root_schema
+    for part in str(ref)[2:].split("/"):
+        if not isinstance(current, dict):
+            return schema
+        current = current.get(part)
+    return current if isinstance(current, dict) else schema
+
+
+def _basic_type_matches(value: Any, expected_type: Any) -> bool:
+    type_names = expected_type if isinstance(expected_type, list) else [expected_type]
+    for type_name in type_names:
+        if type_name == "string" and isinstance(value, str):
+            return True
+        if type_name == "integer" and isinstance(value, int) and not isinstance(value, bool):
+            return True
+        if type_name == "number" and isinstance(value, (int, float)) and not isinstance(value, bool):
+            return True
+        if type_name == "boolean" and isinstance(value, bool):
+            return True
+        if type_name == "array" and isinstance(value, list):
+            return True
+        if type_name == "object" and isinstance(value, dict):
+            return True
+        if type_name == "null" and value is None:
+            return True
+    return False
 
 
 def validate(
