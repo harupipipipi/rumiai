@@ -54,16 +54,37 @@ _SAFE_GET_FALLBACK_BLOCKS = {
     "blocks.tool.list",
     "blocks.ui.catalog",
     "blocks.ui.commands",
+    "blocks.ui.conversation_preview",
     "blocks.ui.settings",
 }
 
 _LONG_RUNNING_FALLBACK_BLOCKS = {
     "blocks.ambient.event_submit",
+    "blocks.agent.run_subagent",
+    "blocks.agent.scheduler.trigger",
     "blocks.chat.send",
     "blocks.integrations.line",
     "blocks.webhooks.inbound",
 }
 _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS = 300.0
+_SCHEDULE_TRIGGER_FALLBACK_TIMEOUT_SECONDS = 1800.0
+
+_GRANT_DENIED_DIRECT_FALLBACK_BLOCKS = {
+    "blocks.agent.run_subagent",
+}
+
+_DIRECT_HTTP_COMPATIBILITY_BLOCKS = {
+    "blocks.agent.run_subagent",
+}
+
+_IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
+    "blocks.sandbox.api",
+}
+
+_DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.conversation_preview",
+    "blocks.ui.settings",
+}
 
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
@@ -304,7 +325,35 @@ class DefaultsHttpServer:
             m = compiled.match(path)
             if m is not None:
                 return handler, m.groupdict(), source, path_inject, pattern
+        if self._is_root_shell_chunk_compat_route(method, path):
+            return self._handle_static_file, {"path": str(path or "").lstrip("/")}, "fallback", {}, ""
+        if self._is_spa_shell_fallback_route(method, path):
+            return self._handle_static, {}, "fallback", {}, ""
         return None, None, None, None, None
+
+    @staticmethod
+    def _is_root_shell_chunk_compat_route(method, path):
+        if str(method or "").upper() != "GET":
+            return False
+        request_path = str(path or "")
+        if "/" in request_path.lstrip("/"):
+            return False
+        return re.fullmatch(r"/shell-[A-Za-z0-9._-]+\.js", request_path) is not None
+
+    @staticmethod
+    def _is_spa_shell_fallback_route(method, path):
+        if str(method or "").upper() != "GET":
+            return False
+        request_path = str(path or "")
+        if not request_path.startswith("/"):
+            return False
+        if request_path == "/" or request_path.startswith(("/api", "/static/")):
+            return False
+        leaf = request_path.rsplit("/", 1)[-1]
+        if "." in leaf:
+            return False
+        first_segment = request_path.strip("/").split("/", 1)[0]
+        return first_segment in {"chat", "coding", "desktops", "prompts", "defaultspack", "pack"}
 
     def _active_profile_policy(self):
         try:
@@ -388,6 +437,18 @@ class DefaultsHttpServer:
         _apply_authenticated_principal_context(context, payload)
         _apply_ambient_browser_qa_context(context, payload)
         _apply_defaultspack_local_ui_context(context, payload)
+        if module_name in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
+        if module_name in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
+        if (
+            module_name in _DIRECT_SAFE_GET_FALLBACK_BLOCKS
+            and self._safe_get_fallback_allowed(module_name, payload)
+        ):
+            context["_defaultspack_http_route_adapter"] = True
+            return invoke_block(module_name, payload, context)
         # Standalone live-server scripts start transport with no kernel facade.
         # In that mode, capability bridge resolution can block while trying to
         # discover runtime services that do not exist. Call the block directly.
@@ -404,6 +465,7 @@ class DefaultsHttpServer:
                 context["_defaultspack_http_route_adapter"] = True
                 qualified_name = f"defaultspack:{function_id}"
                 timeout_seconds = self._fallback_function_timeout_seconds(module_name, payload)
+                payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
                 result = invoke_function(
                     qualified_name,
                     payload,
@@ -433,6 +495,10 @@ class DefaultsHttpServer:
                         pass
                     else:
                         return result
+                elif error_code == "TIMEOUT" and module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
+                    pass
+                elif error_code == "GRANT_DENIED" and module_name in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS:
+                    pass
                 elif error_code not in {
                     "FUNCTION_REGISTRY_UNAVAILABLE",
                     "FUNCTION_NOT_FOUND",
@@ -510,6 +576,19 @@ class DefaultsHttpServer:
                 context.get("source"),
                 context.get("approval_id"),
             )
+        if fallback_block_module and hasattr(self, "facade") and self.facade is None:
+            return self._invoke_fallback_block(
+                fallback_block_module,
+                request_data,
+                path_params,
+                inject,
+            )
+        if fallback_block_module in _IN_PROCESS_HTTP_FALLBACK_BLOCKS:
+            return invoke_block(fallback_block_module, payload, context)
+        if fallback_block_module in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:
+            return invoke_block(fallback_block_module, payload, context)
+        if fallback_block_module and self._safe_get_fallback_allowed(fallback_block_module, payload):
+            return invoke_block(fallback_block_module, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
 
@@ -517,6 +596,7 @@ class DefaultsHttpServer:
                 fallback_block_module,
                 payload,
             )
+            payload = self._payload_with_fallback_timeout(payload, timeout_seconds)
             result = invoke_function(
                 function_name,
                 payload,
@@ -544,7 +624,18 @@ class DefaultsHttpServer:
                 "CAPABILITY_RUNTIME_UNAVAILABLE",
                 "CAPABILITY_EXECUTION_FAILED",
             }:
-                return result
+                if (
+                    error_code == "TIMEOUT"
+                    and fallback_block_module in _LONG_RUNNING_FALLBACK_BLOCKS
+                ):
+                    return invoke_block(fallback_block_module, payload, context)
+                elif (
+                    error_code == "GRANT_DENIED"
+                    and fallback_block_module in _GRANT_DENIED_DIRECT_FALLBACK_BLOCKS
+                ):
+                    return invoke_block(fallback_block_module, payload, context)
+                else:
+                    return result
         except Exception as exc:
             if not fallback_block_module:
                 return error(str(exc), "FUNCTION_ROUTE_FAILED")
@@ -602,8 +693,20 @@ class DefaultsHttpServer:
             except ValueError:
                 pass
         if module_name in _LONG_RUNNING_FALLBACK_BLOCKS:
+            if module_name == "blocks.agent.scheduler.trigger":
+                return _SCHEDULE_TRIGGER_FALLBACK_TIMEOUT_SECONDS
             return _LONG_RUNNING_FALLBACK_TIMEOUT_SECONDS
         return None
+
+    @staticmethod
+    def _payload_with_fallback_timeout(payload, timeout_seconds):
+        if timeout_seconds is None:
+            return payload
+        if not isinstance(payload, dict) or "timeout_seconds" in payload:
+            return payload
+        enriched = dict(payload)
+        enriched["timeout_seconds"] = timeout_seconds
+        return enriched
 
     def _dev_auto_approve_pack(self, pack_id):
         rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
@@ -1360,12 +1463,24 @@ _AMBIENT_BROWSER_QA_CONTEXT_FLAG = "_ambient_browser_qa_pre_auth_approved"
 _LOCAL_UI_APPROVAL_CONTEXT_FLAG = "_defaultspack_local_ui_pre_auth_approved"
 _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ai/provider-key": {"POST"},
+    "/api/agent/subagent": {"POST"},
     "/api/connections/codex": {"POST"},
     "/api/connections/import": {"POST"},
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
+    "/api/runtime/ensure": {"POST"},
+    "/api/runtime/update": {"POST"},
+    "/api/runtime/uninstall": {"POST"},
+    "/api/desktops": {"POST"},
     "/api/onboarding/apply": {"POST"},
 }
+_LOCAL_UI_APPROVAL_METHOD_PATTERNS = (
+    (re.compile(r"^/api/runtime/operations/[^/]+/cancel$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+$"), {"DELETE"}),
+    (re.compile(r"^/api/desktops/[^/]+/(?:start|restart|stop|input|ai-input|rules)$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/access-requests/[^/]+/grant$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/control/(?:acquire|renew|release)$"), {"POST"}),
+)
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -1545,8 +1660,13 @@ def _browser_qa_token_from_payload(payload):
 
 
 def _local_ui_approval_route_authorized(method, path, headers, request_data=None):
-    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(str(path or ""), set())
-    if str(method or "").upper() not in allowed_methods:
+    normalized_method = str(method or "").upper()
+    normalized_path = str(path or "")
+    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(normalized_path, set())
+    if normalized_method not in allowed_methods and not any(
+        normalized_method in pattern_methods and pattern.match(normalized_path)
+        for pattern, pattern_methods in _LOCAL_UI_APPROVAL_METHOD_PATTERNS
+    ):
         return False
     return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
 
@@ -1592,6 +1712,36 @@ def _apply_defaultspack_local_ui_context(context, payload):
     context["_tool_server_approved"] = True
     context["source"] = "defaultspack_local_ui"
     context["approval_id"] = "defaultspack_local_ui"
+    _apply_mimo_company_profile_authority_context(context, payload)
+
+
+def _apply_mimo_company_profile_authority_context(context, payload):
+    if not isinstance(context, dict) or not isinstance(payload, dict):
+        return
+    if context.get("_tool_server_approved") is not True:
+        return
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
+    tool_policy = payload.get("tool_policy") if isinstance(payload.get("tool_policy"), dict) else {}
+    profile_id = str(
+        payload.get("profile_id")
+        or metadata.get("profile_id")
+        or params.get("profile_id")
+        or tool_policy.get("profile_id")
+        or ""
+    ).strip()
+    company_id = str(
+        payload.get("company_id")
+        or metadata.get("company_id")
+        or params.get("company_id")
+        or ""
+    ).strip()
+    if profile_id != "defaultspack.mimo_coding_company" or company_id != "mimo-coding-company":
+        return
+    principal_id = "profile:" + profile_id
+    context["profile_id"] = profile_id
+    context["authority_principal_id"] = principal_id
+    context["principal_id"] = principal_id
 
 
 def _apply_authenticated_principal_context(context, payload):

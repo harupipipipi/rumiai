@@ -76,12 +76,18 @@ def ir_to_stored_messages(ir: RumiChatIR) -> list[dict[str, Any]]:
     return messages
 
 
-def ir_to_legacy_standard_messages(ir: RumiChatIR) -> list[dict[str, Any]]:
+def _legacy_metadata(message: RumiIRMessage, include_metadata: bool) -> dict[str, Any]:
+    if not include_metadata or not isinstance(message.metadata, dict) or not message.metadata:
+        return {}
+    return {"metadata": dict(message.metadata)}
+
+
+def ir_to_legacy_standard_messages(ir: RumiChatIR, *, include_metadata: bool = False) -> list[dict[str, Any]]:
     standard: list[dict[str, Any]] = []
     for message in normalize_ir(ir).messages:
         role = message.role or "user"
         if message.extra.get("source_content_kind") == "string" and len(message.content) == 1:
-            standard.append({"role": role, "content": message.content[0].text})
+            standard.append({"role": role, "content": message.content[0].text, **_legacy_metadata(message, include_metadata)})
             continue
         text_parts: list[Any] = []
         tool_calls: list[dict[str, Any]] = []
@@ -127,10 +133,11 @@ def ir_to_legacy_standard_messages(ir: RumiChatIR) -> list[dict[str, Any]]:
                         "tool_call_id": tool_result.get("tool_call_id", ""),
                         **({"name": tool_result.get("name", "")} if tool_result.get("name") else {}),
                         "content": tool_result.get("content", ""),
+                        **_legacy_metadata(message, include_metadata),
                     }
                 )
             continue
-        entry: dict[str, Any] = {"role": role}
+        entry: dict[str, Any] = {"role": role, **_legacy_metadata(message, include_metadata)}
         if tool_calls:
             string_parts = [part for part in text_parts if isinstance(part, str) and part]
             entry["content"] = "\n".join(string_parts) if string_parts else None
@@ -154,6 +161,7 @@ def ir_to_legacy_standard_messages(ir: RumiChatIR) -> list[dict[str, Any]]:
                         "tool_call_id": tool_result.get("tool_call_id", ""),
                         **({"name": tool_result.get("name", "")} if tool_result.get("name") else {}),
                         "content": tool_result.get("content", ""),
+                        **_legacy_metadata(message, include_metadata),
                     }
                 )
             continue
@@ -193,14 +201,20 @@ def legacy_standard_messages_to_ir(messages: list[dict[str, Any]], conversation_
                     "content": message.get("content", ""),
                 }
             ]
-        stored.append(
-            {
-                "id": str(message.get("id") or f"provider-message-{index + 1}"),
-                "conversation_id": conversation_id,
-                "role": role,
-                "content": blocks,
-            }
-        )
+        metadata = dict(message.get("metadata") or {}) if isinstance(message.get("metadata"), dict) else {}
+        for fallback_key in ("raw_text", "text", "prompt", "message"):
+            fallback_value = message.get(fallback_key)
+            if isinstance(fallback_value, str) and fallback_value.strip():
+                metadata.setdefault(fallback_key, fallback_value)
+        stored_message = {
+            "id": str(message.get("id") or f"provider-message-{index + 1}"),
+            "conversation_id": conversation_id,
+            "role": role,
+            "content": blocks,
+        }
+        if metadata:
+            stored_message["metadata"] = metadata
+        stored.append(stored_message)
     return stored_messages_to_ir(conversation_id, stored)
 
 

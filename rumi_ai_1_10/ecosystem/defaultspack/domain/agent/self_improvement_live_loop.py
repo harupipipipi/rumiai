@@ -18,7 +18,7 @@ _DEFAULTSPACK_ROOT = str(Path(__file__).resolve().parents[2])
 if _DEFAULTSPACK_ROOT not in sys.path:
     sys.path.insert(0, _DEFAULTSPACK_ROOT)
 
-from domain.agent.self_improvement_runtime import create_mimo_profile  # noqa: E402
+from domain.agent.self_improvement_runtime import MIMO_ROLE_MAP, create_mimo_profile  # noqa: E402
 from domain.ai_client.providers.xiaomi_mimo_token_plan_provider import (  # noqa: E402
     XiaomiMimoTokenPlanSgpProvider,
 )
@@ -101,6 +101,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         },
     },
 ]
+
+DEFAULT_MIMO_MAIN_MODEL = MIMO_ROLE_MAP["main"]
+DEFAULT_MIMO_VISION_MODEL = MIMO_ROLE_MAP["vision"]
 
 
 def _adapt_tools() -> list[dict[str, Any]]:
@@ -216,7 +219,7 @@ def run_live_improvement(
     task_id: str = "live_01",
     task_title: str = "Live self-improvement: find and fix one small issue",
     max_tool_calls: int = 15,
-    model: str = "mimo-v2.5-pro",
+    model: str = DEFAULT_MIMO_MAIN_MODEL,
     state_path: str | Path | None = None,
 ) -> dict[str, Any]:
     """Run one live self-improvement cycle with MiMo v2.5 Pro.
@@ -254,7 +257,8 @@ def run_live_improvement(
     last_test_exit_code = -1
     error_message = ""
 
-    api_model = model.split("/", 1)[1] if "/" in model else model
+    selected_model = str(model or DEFAULT_MIMO_MAIN_MODEL)
+    api_model = selected_model.split("/", 1)[1] if "/" in selected_model else selected_model
     full_model = f"{provider.provider_id}/{api_model}"
 
     try:
@@ -438,7 +442,7 @@ def run_vision_qa(
     image_path: str | Path | None = None,
     image_data_url: str | None = None,
     question: str = "Describe this UI screenshot. Identify any layout issues, overlapping elements, or visual bugs.",
-    model: str = "mimo-v2-omni",
+    model: str = DEFAULT_MIMO_VISION_MODEL,
 ) -> dict[str, Any]:
     """Run MiMo Omni vision QA on an image.
 
@@ -450,7 +454,8 @@ def run_vision_qa(
     if not provider._api_key:
         return {"success": False, "error": "MIMO_API_KEY not set"}
 
-    api_model = model.split("/", 1)[1] if "/" in model else model
+    selected_model = str(model or DEFAULT_MIMO_VISION_MODEL)
+    api_model = selected_model.split("/", 1)[1] if "/" in selected_model else selected_model
 
     if image_path and not image_data_url:
         raw = Path(image_path).read_bytes()
@@ -494,7 +499,7 @@ if __name__ == "__main__":
     parser.add_argument("--task-id", default="live_01", help="Task ID")
     parser.add_argument("--task-title", default="Live self-improvement: find and fix one small issue")
     parser.add_argument("--max-tool-calls", type=int, default=15)
-    parser.add_argument("--model", default="mimo-v2.5-pro")
+    parser.add_argument("--model", default=DEFAULT_MIMO_MAIN_MODEL)
     parser.add_argument("--multi", type=int, default=0, help="Run N tasks (0=single)")
     args = parser.parse_args()
 

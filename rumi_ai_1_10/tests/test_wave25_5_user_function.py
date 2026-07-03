@@ -23,6 +23,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 import tempfile
 import shutil
 import re
+import subprocess
 
 # Ensure project root is in path
 _project_root = Path(__file__).resolve().parent.parent
@@ -524,6 +525,90 @@ class TestGenerateFunctionRunnerScript(unittest.TestCase):
         self.assertIn("run", script)
         self.assertIn("context", script)
         self.assertIn("args", script)
+
+
+class TestFunctionRunnerSubprocessEncoding(unittest.TestCase):
+    """Regression coverage for Windows non-ASCII workspace paths."""
+
+    def test_run_runner_on_host_uses_utf8_text_encoding(self):
+        executor = CapabilityExecutor()
+        mock_proc = _make_subprocess_result(returncode=0, stdout='{"result": "ok"}')
+        payload = (
+            '{"module_path": '
+            '"C:\\\\Users\\\\ai\\\\OneDrive\\\\\\u30c9\\u30ad\\u30e5\\u30e1\\u30f3\\u30c8\\\\handler.py"}'
+        )
+
+        with patch(f"{_CE_MODULE}.subprocess.run", return_value=mock_proc) as mock_run:
+            resp = executor._run_runner_on_host(
+                payload=payload,
+                cwd=".",
+                timeout=5,
+                start_time=time.time(),
+                failure_prefix="Handler execution failed",
+            )
+
+        self.assertTrue(resp.success)
+        self.assertEqual(mock_run.call_args.kwargs["encoding"], "utf-8")
+        self.assertEqual(mock_run.call_args.kwargs["errors"], "replace")
+        env = mock_run.call_args.kwargs["env"]
+        self.assertEqual(env["PYTHONIOENCODING"], "utf-8")
+        self.assertEqual(env["PYTHONUTF8"], "1")
+
+    def test_function_runner_reads_utf8_stdin_when_process_locale_is_cp932(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            function_dir = Path(temp_dir) / "ドキュメント"
+            function_dir.mkdir()
+            main_py = function_dir / "main.py"
+            main_py.write_text(
+                "def run(context, args):\n"
+                "    return {'ok': True, 'name': context.get('name')}\n",
+                encoding="utf-8",
+            )
+            payload = json.dumps(
+                {
+                    "module_path": str(main_py),
+                    "callable_name": "run",
+                    "context": {"name": "ミモ"},
+                    "args": {},
+                },
+                ensure_ascii=False,
+            )
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "cp932"
+            env["PYTHONUTF8"] = "0"
+
+            proc = subprocess.run(
+                [sys.executable, str(FUNCTION_RUNNER_PATH)],
+                input=payload,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+                cwd=str(function_dir),
+                env=env,
+            )
+
+        self.assertEqual(proc.returncode, 0, proc.stderr or proc.stdout)
+        self.assertEqual(json.loads(proc.stdout), {"ok": True, "name": "ミモ"})
+
+    def test_nonzero_runner_response_uses_stdout_json_error_when_stderr_is_empty(self):
+        executor = CapabilityExecutor()
+        proc = _make_subprocess_result(
+            returncode=1,
+            stdout='{"error": "utf-8 decode failed", "error_type": "UnicodeDecodeError"}',
+            stderr="",
+        )
+
+        resp = executor._response_from_completed_process(
+            proc,
+            time.time(),
+            "Handler execution failed",
+        )
+
+        self.assertFalse(resp.success)
+        self.assertEqual(resp.error_type, "function_execution_error")
+        self.assertIn("utf-8 decode failed", resp.error)
 
 
 class TestGetFunctionTimeout(unittest.TestCase):

@@ -348,6 +348,47 @@ def test_agent_delegate_action_starts_agent_with_tools_params_capabilities(monke
     assert seen["input_data"]["params"] == {"mode": "review"}
 
 
+def test_agent_delegate_provider_error_returns_visible_safe_failure(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    secret = "sk-test-secret"
+
+    def fake_execute(input_data, context):
+        return {
+            "status": "ok",
+            "data": {
+                "execution_id": "agent-provider-fail",
+                "status": "error",
+                "result": {
+                    "execution_id": "agent-provider-fail",
+                    "status": "error",
+                    "error": "provider error: API key " + secret,
+                },
+            },
+        }
+
+    monkeypatch.setattr("blocks.agent.execute.run", fake_execute)
+
+    result = dispatch_input(
+        {
+            "input": "",
+            "delivery": {"action_id": "agent.delegate"},
+            "params": {"delegate": {"task": "check the docs"}},
+        },
+        {},
+    )
+
+    assert result["status"] == "error"
+    assert result["code"] == "DELEGATE_PROVIDER_ERROR"
+    assert result["assistant_text"]
+    assert result["error"] == result["assistant_text"]
+    assert result["delegate"]["execution_id"] == "agent-provider-fail"
+    assert result["delegate"]["status"] == "error"
+    assert result["result"]["error_redacted"] is True
+    serialized = json.dumps(result, ensure_ascii=False)
+    assert secret not in serialized
+    assert "API key" not in serialized
+
+
 def test_agent_delegate_real_execute_receives_required_capabilities_and_context(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
 
