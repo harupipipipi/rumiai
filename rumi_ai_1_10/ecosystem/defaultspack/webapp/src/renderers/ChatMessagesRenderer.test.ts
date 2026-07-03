@@ -371,6 +371,33 @@ test("compact log preview keeps head and tail while normalizing escaped newlines
   assert.equal(preview.text.includes("\\nline-"), false);
 });
 
+test("structured message blocks render with horizontal scroll instead of forced wrapping", () => {
+  const code = `const fixture = "${"/Users/haru/project/".repeat(16)}";`;
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "assistant-code",
+      content: [{ type: "code", text: code }],
+      rawText: "",
+      metadata: { thinkingLabel: "completed" },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(
+    html,
+    /<pre class="max-w-full overflow-x-auto overflow-y-auto whitespace-pre rounded-lg bg-zinc-900 p-3 font-mono text-\[12px\] text-zinc-200">/,
+  );
+});
+
 test("image blocks stay out of chat unless explicitly marked for display", () => {
   assert.equal(shouldRenderImageBlockInChat({ type: "image_url", url: "data:image/png;base64,abc" }), false);
   assert.equal(shouldRenderImageBlockInChat({ type: "image_url", url: "data:image/png;base64,abc", presentation: "chat" }), true);
