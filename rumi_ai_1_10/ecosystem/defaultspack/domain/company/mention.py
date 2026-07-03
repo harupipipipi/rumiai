@@ -46,6 +46,8 @@ class CompanyMentionService:
         unresolved: list[str] = []
         seen_agents: set[str] = set()
         for mention in mentions:
+            if mention in {"team", "channel"}:
+                continue
             if mention == "all":
                 for agent in agents.values():
                     agent_id = agent.get("agent_id")
@@ -89,6 +91,17 @@ class CompanyMentionService:
         )
 
     def _find_agent(self, agents: dict[str, dict[str, Any]], key: str) -> dict[str, Any] | None:
+        for agent in agents.values():
+            metadata = agent.get("metadata") if isinstance(agent.get("metadata"), dict) else {}
+            team = metadata.get("subagent_team") if isinstance(metadata.get("subagent_team"), dict) else {}
+            aliases = [str(alias).lower() for alias in agent.get("aliases", [])]
+            if key in {
+                str(metadata.get("short_id") or "").lower(),
+                str(team.get("short_id") or "").lower(),
+                str(team.get("legacy_short_id") or "").lower(),
+                *aliases,
+            }:
+                return agent
         for agent in agents.values():
             aliases = [str(alias).lower() for alias in agent.get("aliases", [])]
             if key in {

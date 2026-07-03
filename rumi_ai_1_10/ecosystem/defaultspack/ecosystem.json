@@ -23,6 +23,7 @@
       "research",
       "project",
       "kanban",
+      "change_request",
       "compact",
       "context",
       "scheduler",
@@ -382,6 +383,27 @@
         ]
       }
     },
+    "change_request": {
+      "type": "change_request",
+      "id": "change_request",
+      "path": "blocks/change_request",
+      "connectivity": {
+        "provides": [
+          "defaults.change_request.list",
+          "defaultspack.change_request.list",
+          "defaults.change_request.create",
+          "defaultspack.change_request.create",
+          "defaults.change_request.get",
+          "defaultspack.change_request.get",
+          "defaults.change_request.update",
+          "defaultspack.change_request.update",
+          "defaults.change_request.refresh",
+          "defaultspack.change_request.refresh",
+          "defaults.change_request.export_patch",
+          "defaultspack.change_request.export_patch"
+        ]
+      }
+    },
     "research": {
       "type": "research",
       "id": "research",
@@ -603,6 +625,7 @@
     "research:research",
     "artifact:artifact",
     "kanban:kanban",
+    "change_request:change_request",
     "artifact:share",
     "prompt:prompt",
     "context:context",

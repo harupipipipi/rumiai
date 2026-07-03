@@ -1,0 +1,43 @@
+{
+  "function_id": "channel_check",
+  "description": "Check channel membership, PM gate, rich policy, and task completion contract.",
+  "tags": [
+    "subagent_team",
+    "channel"
+  ],
+  "risk": "low",
+  "requires": [],
+  "caller_requires": [],
+  "host_execution": false,
+  "calling_convention": "subprocess",
+  "entrypoint": "main.py:run",
+  "vocab_aliases": [
+    "defaults.channel.check",
+    "defaultspack.channel.check",
+    "channel.check"
+  ],
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": true
+  },
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "status": {
+        "type": "string"
+      },
+      "data": {},
+      "error": {
+        "type": "object"
+      }
+    }
+  },
+  "extensions": {
+    "defaultspack": {
+      "block_module": "blocks.subagent_team.channel_check",
+      "default_args": {
+        "action": "channel_check"
+      }
+    }
+  }
+}
