@@ -23,6 +23,7 @@ ALL_MODELS = [
     "deepseek-v4-flash",
     "mimo-v2.5-pro",
     "mimo-v2.5",
+    "mimo-v2.5-free",
     "minimax-m3",
     "qwen3.7-plus",
     "qwen3.7-max",
@@ -148,8 +149,20 @@ def test_opencode_go_catalog_includes_all_models():
     assert qwen36["metadata"]["transport"] == "anthropic_messages"
     assert qwen36["metadata"]["endpoint_path"] == "/messages"
 
-    assert "opencode-go/mimo-v2.5-free" not in models
+    mimo_free = models["opencode-go/mimo-v2.5-free"]
+    assert mimo_free["model_id"] == "mimo-v2.5-free"
+    assert mimo_free["defaults"] == {"chat": True}
     assert "mimo-v2.5-free" not in provider["default_model_for"].values()
+    assert mimo_free["metadata"]["transport"] == "openai_chat_completions"
+    assert mimo_free["metadata"]["endpoint_path"] == "/chat/completions"
+    assert mimo_free["metadata"]["source"] == "opencode_go_compatibility_alias"
+    assert mimo_free["metadata"]["alias_of"] == "opencode-go/mimo-v2.5"
+    assert mimo_free["metadata"]["openai_model"] == "mimo-v2.5"
+    assert "opencode-zen/mimo-v2.5-free" in mimo_free["metadata"]["compatibility_note"]
+    assert "free_tier" not in mimo_free["metadata"]
+    assert mimo_free["metadata"]["capabilities"]["tool_calls"] is True
+    assert mimo_free["metadata"]["capabilities"]["reasoning"] is True
+    assert mimo_free["metadata"]["reasoning_effort_verified"] is True
 
     for model_id in TOOL_CALL_MODELS:
         model_entry = models[f"opencode-go/{model_id}"]
@@ -275,18 +288,39 @@ def test_opencode_go_uses_chat_completions_for_openai_compatible_models(monkeypa
     assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
-def test_opencode_go_rejects_mimo_free_before_any_go_request(monkeypatch):
+def test_opencode_go_mimo_free_runtime_model_maps_to_go_compat_alias(monkeypatch):
     provider = _provider(monkeypatch)
+    captured = {}
 
-    with patch.object(provider, "_request_json") as request_json:
-        with pytest.raises(RuntimeError, match="unsupported model"):
-            provider.complete(
-                "opencode-go/mimo-v2.5-free",
-                [{"role": "user", "content": "Say OK"}],
-                [{"type": "function", "function": {"name": "noop"}}],
-                {"max_tokens": 8},
-            )
-    request_json.assert_not_called()
+    def fake_request_json(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return {
+            "id": "chatcmpl_test",
+            "model": "mimo-v2.5",
+            "choices": [{"message": {"content": "OK"}, "finish_reason": "stop"}],
+            "usage": {},
+        }
+
+    with patch.object(provider, "_request_json", side_effect=fake_request_json):
+        result = provider.complete(
+            "opencode-go/mimo-v2.5-free",
+            [{"role": "user", "content": "Say OK"}],
+            [{"type": "function", "function": {"name": "noop"}}],
+            {
+                "max_tokens": 8,
+                "reasoning_effort": "high",
+                "tool_choice": "auto",
+            },
+        )
+
+    assert captured["path"] == "/chat/completions"
+    assert captured["body"]["model"] == "mimo-v2.5"
+    assert captured["body"]["tools"] == [{"type": "function", "function": {"name": "noop"}}]
+    assert captured["body"]["tool_choice"] == "auto"
+    assert captured["body"]["reasoning_effort"] == "high"
+    assert result["content"] == [{"type": "text", "text": "OK"}]
 
 
 def test_opencode_go_kimi_preserves_native_thinking_without_tools(monkeypatch):
