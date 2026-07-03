@@ -88,6 +88,18 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
     {
+        "model_id": "mimo-v2.5-free",
+        "display_name": "MiMo V2.5 Free alias via OpenCode Go",
+        "priority": 14,
+        "defaults": {"chat": True},
+        "transport": "openai_chat_completions",
+        "endpoint_path": "/chat/completions",
+        "source": "opencode_go_alias",
+        "alias_of": "opencode-go/mimo-v2.5",
+        "free_tier": True,
+        "openai_model": "mimo-v2.5",
+    },
+    {
         "model_id": "minimax-m3",
         "display_name": "MiniMax M3 via OpenCode Go",
         "priority": 8,
@@ -145,6 +157,7 @@ _OPENCODE_GO_MODEL_SPECS: List[Dict[str, Any]] = [
         "source": "opencode_go_docs",
     },
 ]
+_OPENCODE_GO_MODEL_ALIASES = {"mimo-v2.5-free": "mimo-v2.5"}
 _OPENCODE_GO_TOOL_CALL_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
 _OPENCODE_GO_REASONING_MODELS = {"kimi-k2.6", "mimo-v2.5", "mimo-v2.5-pro"}
 _OPENCODE_GO_REASONING_EFFORT_MODELS = {"mimo-v2.5", "mimo-v2.5-pro"}
@@ -154,15 +167,24 @@ _OPENCODE_GO_OPENAI_VISION_MODELS = {"kimi-k2.6"}
 
 
 def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
+    model_id = spec["model_id"]
+    runtime_model_id = str(
+        spec.get("openai_model") or _OPENCODE_GO_MODEL_ALIASES.get(model_id) or model_id
+    )
     defaults = dict(spec.get("defaults", {}))
-    tool_calls = bool(spec.get("tool_calls", spec["model_id"] in _OPENCODE_GO_TOOL_CALL_MODELS))
-    reasoning = bool(spec.get("reasoning", spec["model_id"] in _OPENCODE_GO_REASONING_MODELS))
-    verified_reasoning_effort = spec["model_id"] in _OPENCODE_GO_REASONING_EFFORT_MODELS
+    tool_calls = bool(spec.get("tool_calls", runtime_model_id in _OPENCODE_GO_TOOL_CALL_MODELS))
+    reasoning = bool(spec.get("reasoning", runtime_model_id in _OPENCODE_GO_REASONING_MODELS))
+    verified_reasoning_effort = runtime_model_id in _OPENCODE_GO_REASONING_EFFORT_MODELS
     metadata = {
         "transport": spec["transport"],
         "endpoint_path": spec["endpoint_path"],
         "source": spec["source"],
     }
+    for key in ("alias_of", "openai_model"):
+        if spec.get(key):
+            metadata[key] = spec[key]
+    if "free_tier" in spec:
+        metadata["free_tier"] = bool(spec["free_tier"])
     if tool_calls:
         metadata["tool_calls_verified"] = True
     if verified_reasoning_effort:
@@ -176,12 +198,12 @@ def _known_model_entry(spec: Dict[str, Any]) -> Dict[str, Any]:
         if spec.get(key):
             metadata[key] = True
     return {
-        "id": "opencode-go/{}".format(spec["model_id"]),
+        "id": "opencode-go/{}".format(model_id),
         "category": "llm_model",
         "version": "1",
         "provider": "opencode-go",
         "provider_id": "opencode-go",
-        "model_id": spec["model_id"],
+        "model_id": model_id,
         "name": spec["display_name"],
         "display_name": spec["display_name"],
         "type": "chat",
@@ -220,6 +242,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "mimo-v2.5-pro",
         "mimo-v2.5",
     }
+    MODEL_ALIASES = dict(_OPENCODE_GO_MODEL_ALIASES)
     ANTHROPIC_MESSAGES_MODELS = {
         "minimax-m3",
         "minimax-m2.7",
@@ -228,7 +251,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         "qwen3.7-max",
         "qwen3.6-plus",
     }
-    MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS
+    MODEL_IDS = OPENAI_CHAT_MODELS | ANTHROPIC_MESSAGES_MODELS | set(MODEL_ALIASES)
     TOOL_CALL_MODELS = set(_OPENCODE_GO_TOOL_CALL_MODELS)
     KNOWN_MODELS = [_known_model_entry(spec) for spec in _OPENCODE_GO_MODEL_SPECS]
     _OPENAI_CHAT_PARAM_KEYS = {
@@ -271,7 +294,7 @@ class OpencodeGoProvider(OpenAICompatibleProvider):
         model_id = str(model or "").strip()
         if model_id.startswith("opencode-go/"):
             model_id = model_id.split("/", 1)[1]
-        return model_id
+        return cls.MODEL_ALIASES.get(model_id, model_id)
 
     @classmethod
     def _assert_supported_model(cls, model: str) -> str:
