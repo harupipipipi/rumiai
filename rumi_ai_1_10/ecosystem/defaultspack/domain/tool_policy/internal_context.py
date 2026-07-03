@@ -6,6 +6,7 @@ from typing import Any
 SENSITIVE_TOOL_CONTEXT_KEYS = {
     "approval_granted",
     "_agent_approval_granted",
+    "_trusted_profile_policy_internal",
     "tool_policy_decision",
     "_tool_permission_decision",
     "_tool_permission_internal",
@@ -38,6 +39,7 @@ UNTRUSTED_TOOL_CONTEXT_KEYS = SENSITIVE_TOOL_CONTEXT_KEYS | {
 
 _INTERNAL_TOOL_PERMISSION = object()
 _TOOL_SERVER_APPROVAL_INTERNAL = object()
+_TRUSTED_PROFILE_POLICY_INTERNAL = object()
 
 
 def sanitize_tool_context(context: dict[str, Any] | None) -> dict[str, Any]:
@@ -52,6 +54,19 @@ def sanitize_untrusted_tool_context(context: dict[str, Any] | None) -> dict[str,
     for key in UNTRUSTED_TOOL_CONTEXT_KEYS:
         clean.pop(key, None)
     return clean
+
+
+def mark_trusted_profile_policy_context(context: dict[str, Any]) -> dict[str, Any]:
+    """Mark server-owned profile policy as trusted for the tool orchestrator."""
+    context["_trusted_profile_policy_internal"] = _TRUSTED_PROFILE_POLICY_INTERNAL
+    return context
+
+
+def profile_policy_context_is_trusted(context: dict[str, Any] | None) -> bool:
+    """Return whether profile policy came from a server-internal caller."""
+    if not isinstance(context, dict):
+        return False
+    return context.get("_trusted_profile_policy_internal") is _TRUSTED_PROFILE_POLICY_INTERNAL
 
 
 def seal_tool_context(context: dict[str, Any] | None, decision: dict[str, Any]) -> dict[str, Any]:

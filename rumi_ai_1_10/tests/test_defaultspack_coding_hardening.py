@@ -43,6 +43,54 @@ def _git_commit_all(path: Path, message: str = "initial") -> None:
     subprocess.run(["git", "commit", "-m", message], cwd=path, check=True, capture_output=True, text=True)
 
 
+def _approved_context() -> dict[str, object]:
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    return mark_tool_server_approval_context({})
+
+
+def test_coding_approval_rejects_forged_server_context():
+    from blocks.coding._approval import is_server_approved
+
+    forged_context = {
+        "_tool_server_approved": True,
+        "_tool_server_approval_token_valid": True,
+        "_tool_server_approval_internal": "client-forged",
+    }
+
+    assert is_server_approved(
+        forged_context,
+        "file.write",
+        {"workspace_root": "/tmp/workspace", "path": "notes.txt", "content": "after\n"},
+    ) is False
+
+
+def test_coding_approval_accepts_internal_server_context():
+    from blocks.coding._approval import is_server_approved
+
+    assert is_server_approved(
+        _approved_context(),
+        "file.write",
+        {"workspace_root": "/tmp/workspace", "path": "notes.txt", "content": "after\n"},
+    ) is True
+
+
+def test_coding_approval_accepts_valid_signed_token():
+    from blocks.coding._approval import is_server_approved
+    from domain.safety import approval
+
+    approval.reset_approval_state_for_tests()
+    args = {"workspace_root": "/tmp/workspace", "path": "notes.txt", "content": "after\n"}
+    request = approval.create_approval_request("file.write", "high", args)
+    decision = approval.approve(request["request_id"])
+
+    assert is_server_approved(
+        {},
+        "file.write",
+        {**args, "approval_token": decision["token"]},
+    ) is True
+
+
 def test_restore_snapshot_rejects_path_traversal_snapshot_id(tmp_path):
     from domain.coding.file_ops import FileOps
 
@@ -163,7 +211,7 @@ def test_mutating_file_blocks_return_reversible_checkpoints(tmp_path):
 
     write = file_write_run(
         {"workspace_root": str(tmp_path), "path": "notes.txt", "content": "after\n"},
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
 
     assert write["status"] == "ok"
@@ -173,7 +221,7 @@ def test_mutating_file_blocks_return_reversible_checkpoints(tmp_path):
 
     delete = file_delete_run(
         {"workspace_root": str(tmp_path), "path": "notes.txt"},
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
 
     assert delete["status"] == "ok"
@@ -235,7 +283,7 @@ def test_coding_checkpoint_functions_are_dispatchable(tmp_path, monkeypatch):
     result = run_defaultspack_function(
         "coding_checkpoint_create",
         {"workspace_id": "trusted", "paths": ["missing.txt"]},
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
     listed = run_defaultspack_function(
         "coding_checkpoint_list",
@@ -250,7 +298,7 @@ def test_coding_checkpoint_functions_are_dispatchable(tmp_path, monkeypatch):
             "snapshot_id": result["data"]["checkpoint"]["snapshot_id"],
             "paths": ["missing.txt"],
         },
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
 
     assert result["status"] == "ok"
@@ -296,7 +344,7 @@ def test_file_function_dispatch_covers_snapshot_diff_patch_restore(tmp_path, mon
     patch = run_defaultspack_function(
         "coding_file_patch",
         {"workspace_id": "trusted", "path": "doc.txt", "old": "before", "new": "after"},
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
     patched_content = (tmp_path / "doc.txt").read_text(encoding="utf-8")
     restored = run_defaultspack_function(
@@ -306,7 +354,7 @@ def test_file_function_dispatch_covers_snapshot_diff_patch_restore(tmp_path, mon
             "snapshot_id": snapshot["data"]["snapshot_id"],
             "paths": ["doc.txt"],
         },
-        {"_tool_server_approved": True},
+        _approved_context(),
     )
 
     assert snapshot["status"] == "ok"
