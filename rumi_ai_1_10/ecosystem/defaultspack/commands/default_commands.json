@@ -120,6 +120,64 @@
     "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
   },
   {
+    "id": "mini",
+    "name": "mini",
+    "aliases": ["mini-coding", "mini_coding"],
+    "label": "Mini Coding Agent",
+    "description": "Activate the Mini Coding Agent profile for lighter coding tasks.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "design",
+    "name": "design",
+    "label": "Design Agent",
+    "description": "Activate the Design Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "frontend",
+    "name": "frontend",
+    "aliases": ["frontend-only", "frontend_only"],
+    "label": "Frontend Agent",
+    "description": "Activate the Frontend Only Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "research",
+    "name": "research",
+    "label": "Research Agent",
+    "description": "Activate the Research Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
+    "id": "reviewer",
+    "name": "reviewer",
+    "aliases": ["review"],
+    "label": "Reviewer Agent",
+    "description": "Activate the Reviewer Agent profile.",
+    "category": "mode",
+    "visibility": "default",
+    "risk": "low",
+    "modes": ["chat", "coding", "agent"],
+    "execution": { "type": "frontend", "action": "activate_registered_profile_shortcut" }
+  },
+  {
     "id": "chat",
     "name": "chat",
     "label": "Chat Mode",

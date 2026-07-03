@@ -29,7 +29,7 @@ import { PromptStudio } from "./pages/PromptStudio";
 import type { ChatGroup, ChatItem, HistoryBoardNewTaskOptions } from "./components/HistoryBoard";
 import type { ToolPreviewItem, ToolPreviewMode } from "./components/ToolPreview";
 import { buildToolPreviewDisplayItems, hasCanvasItems } from "./components/ToolPreview";
-import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type AgentStudioManifest, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
+import { ChatStreamInterruptedError, api, composerCommandResultMessage, defaultspackApiFetch, defaultspackUrlWithLocalAuth, mergeComposerCommands, type AgentStudioConversationState, type AgentStudioManifest, type ChatActivityEvent, type ChatContentBlock, type ChatMessage, type ChatStreamEvent, type ChatToolStreamEvent, type CodingWorkspaceRecord, type ComposerCommandExecuteResult, type ComposerCommandItem, type ComposerCommandMode, type ComposerWidgetAction, type Conversation, type ConversationSearchResult, type ConversationSteerItem, type KanbanBoardScope, type MimoCodingCompanyStatus, type ModelCommandCandidate, type ModelProfile, type OperationsCompanyStatus, type PromptUsageSummary, type SettingsSection, type SidebarAction, type SidebarItem, type ToolSelectionRequest, type ToolTarget, type UICatalog } from "./lib/api";
 import type { ActionApprovalMode } from "./features/tools/ActionApprovalControl";
 import type { ConversationToolPreferences } from "./features/tools/types";
 import { useToolSelectionController } from "./features/tools/useToolSelectionController";
@@ -3946,7 +3946,7 @@ function ChatApp() {
               : null;
             if (updatedConversation) {
               applyConversationUpdate(updatedConversation, { attachToActiveTab: true });
-              if (profileId === "builtin.coding") {
+              if (profileId === "builtin.coding" || profileId === "builtin.mini_coding") {
                 handleModeChange("coding");
               } else {
                 handleModeChange("agent");
@@ -5580,9 +5580,19 @@ function ChatApp() {
     : typeof activeConversationMetadata.companyId === "string"
       ? activeConversationMetadata.companyId
       : null;
-  const activeConversationAgentStudioState: Record<string, unknown> = activeConversationMetadata.agent_studio && typeof activeConversationMetadata.agent_studio === "object"
-    ? activeConversationMetadata.agent_studio as Record<string, unknown>
+  const activeConversationAgentStudioState: AgentStudioConversationState = activeConversationMetadata.agent_studio && typeof activeConversationMetadata.agent_studio === "object"
+    ? activeConversationMetadata.agent_studio as AgentStudioConversationState
     : {};
+  const activeConversationReviewGate = activeConversationAgentStudioState.review_gate && typeof activeConversationAgentStudioState.review_gate === "object"
+    ? activeConversationAgentStudioState.review_gate
+    : {};
+  const workroomConversationAgentStudioState: AgentStudioConversationState | null = (
+    activeWorkspaceTab?.kind === "workroom"
+    && activeWorkspaceTab.conversationId
+    && activeWorkspaceTab.conversationId !== activeConversationId
+  )
+    ? null
+    : activeConversationAgentStudioState;
   const handleCalendarModeToggle = () => {
     const existingCalendarTab = workspaceTabs.find((tab) => tab.kind === "calendar");
     if (existingCalendarTab) {
@@ -5814,6 +5824,10 @@ function ChatApp() {
                 showPreview={effectiveShowPreview}
                 canShowPreview={showRegion("activity_preview") && canShowCanvas}
                 canOpenSettings={showRegion("settings_modal")}
+                agentLabel={String(activeConversationAgentStudioState.active_label ?? activeConversationAgentStudioState.active_profile_id ?? "").trim() || undefined}
+                agentSurface={String(activeConversationAgentStudioState.surface ?? "").trim() || undefined}
+                activationReason={String(activeConversationAgentStudioState.activation_reason ?? "").trim() || undefined}
+                reviewGateApproved={activeConversationReviewGate.approved === true}
                 onTogglePreview={() => {
                   if (canShowCanvas) setShowPreview((value) => !value);
                 }}
@@ -5863,6 +5877,7 @@ function ChatApp() {
                     activeConversationTitle={activeWorkspaceTab?.kind === "workroom"
                       ? (activeWorkspaceTab.conversationId === activeConversationId ? activeChatTitle : activeWorkspaceTab.title.replace(/^Workroom:\s*/, ""))
                       : activeChatTitle}
+                    agentStudioState={workroomConversationAgentStudioState}
                     onConversationUpdate={(conversation) => applyConversationUpdate(conversation, { attachToActiveTab: true })}
                   />
                 </div>
@@ -6124,7 +6139,7 @@ function ChatApp() {
             settingsValues={settingsValues}
             settingsSections={settingsSections}
             selectedToolIds={selectedToolIds}
-            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} onConversationUpdate={(conversation) => applyConversationUpdate(conversation, { attachToActiveTab: false })} />}
+            companyPanel={<CompanyWorkspacePanel activeConversationId={activeConversationId} activeConversationTitle={activeChatTitle} agentStudioState={activeConversationAgentStudioState} onConversationUpdate={(conversation) => applyConversationUpdate(conversation, { attachToActiveTab: false })} />}
             codingPanel={codingSidebarPanel}
             keyboardButtonNavigation={keyboardButtonNavigation}
             selectedProfile={activeProfile}

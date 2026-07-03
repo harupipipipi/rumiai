@@ -4,6 +4,11 @@ Rumi no longer treats "subagent" as a primary architecture concept.
 
 For user-facing wording, prefer:
 
+- `workroom` for the tab-level Rumi-native management surface
+- `agent profile` for a registered reusable agent definition shared across Mode, Fusion, and Team orchestration
+- `mode agent` for one visible agent that switches between registered profiles
+- `fusion agent` for multi-profile synthesis/orchestration
+- `team agent` for a coordinated team built from registered profiles
 - `team workspace` for the long-running multi-agent workspace surface
 - `team` for the cooperating set of agents inside that workspace
 - `delegation` for sending bounded work to another agent
@@ -24,6 +29,7 @@ The canonical runtime contract is:
 
 `subagent` remains as a compatibility name and user-facing alias for older
 routes, functions, tools, labels, and docs that still refer to delegated work.
+It should not replace `agent profile` as the primary concept in Agent Studio.
 
 ## Current Boundary
 

@@ -2,6 +2,7 @@ import { AlertTriangle, Bot, ClipboardList, MessageSquare, Route, Settings, Shar
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import type {
+  AgentStudioConversationState,
   CompanyAgent,
   CompanyChannel,
   CompanyInboxItem,
@@ -75,10 +76,12 @@ function researchTaskDescription(query: string, sources: Array<Record<string, un
 export function CompanyWorkspacePanel({
   activeConversationId = null,
   activeConversationTitle = null,
+  agentStudioState = null,
   onConversationUpdate,
 }: {
   activeConversationId?: string | null;
   activeConversationTitle?: string | null;
+  agentStudioState?: AgentStudioConversationState | null;
   onConversationUpdate?: (conversation: Conversation) => void;
 }) {
   const [companies, setCompanies] = useState<CompanyRecord[]>([]);
@@ -262,6 +265,7 @@ export function CompanyWorkspacePanel({
           <AgentStudioPanel
             section="profiles"
             conversationId={activeConversationId}
+            conversationState={agentStudioState}
             onConversationUpdate={onConversationUpdate}
           />
         );
@@ -270,6 +274,7 @@ export function CompanyWorkspacePanel({
           <AgentStudioPanel
             section="teams"
             conversationId={activeConversationId}
+            conversationState={agentStudioState}
             onConversationUpdate={onConversationUpdate}
           />
         );
@@ -278,6 +283,7 @@ export function CompanyWorkspacePanel({
           <AgentStudioPanel
             section="fusion"
             conversationId={activeConversationId}
+            conversationState={agentStudioState}
             onConversationUpdate={onConversationUpdate}
           />
         );
@@ -286,6 +292,7 @@ export function CompanyWorkspacePanel({
           <AgentStudioPanel
             section="selection"
             conversationId={activeConversationId}
+            conversationState={agentStudioState}
             onConversationUpdate={onConversationUpdate}
           />
         );

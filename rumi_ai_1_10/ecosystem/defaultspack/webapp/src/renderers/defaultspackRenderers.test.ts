@@ -32,6 +32,28 @@ test("defaultspack renderer registry exposes render modules", () => {
   assert.equal(typeof defaultspackRenderers.settingsModal, "function");
 });
 
+test("chat header renders active agent status chips", () => {
+  const html = renderToStaticMarkup(
+    createElement(defaultspackRenderers.chatHeader, {
+      title: "Feature Chat",
+      showPreview: false,
+      canShowPreview: false,
+      canOpenSettings: true,
+      agentLabel: "Mini Coding Agent Profile",
+      agentSurface: "mode_agent",
+      activationReason: "manual_profile_switch",
+      reviewGateApproved: false,
+      onTogglePreview: () => {},
+      onOpenSettings: () => {},
+    }),
+  );
+
+  assert.match(html, /Feature Chat/);
+  assert.match(html, /Mode Agent: Mini Coding Agent Profile/);
+  assert.match(html, /Review gate pending/);
+  assert.match(html, /manual profile switch/);
+});
+
 test("defaultspack renderer resolver keeps builtin fallback for untrusted modules", () => {
   const resolved = resolveDefaultspackRenderers({
     shell: {

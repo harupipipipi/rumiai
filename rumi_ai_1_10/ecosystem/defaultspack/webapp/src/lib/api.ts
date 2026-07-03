@@ -930,6 +930,21 @@ export type AgentSelectionRule = {
   updated_at?: string;
 };
 
+export type AgentStudioActivityEntry = {
+  id?: string;
+  type?: string;
+  message?: string;
+  surface?: string;
+  target_id?: string;
+  label?: string;
+  reason?: string;
+  reason_code?: string;
+  command?: string;
+  approved?: boolean;
+  approved_by?: string;
+  created_at?: string;
+};
+
 export type AgentStudioConversationState = {
   surface?: "human" | "mode_agent" | "team_agent" | "fusion_agent" | string;
   active_profile_id?: string;
@@ -946,6 +961,7 @@ export type AgentStudioConversationState = {
   participant_profile_ids?: string[];
   activated_at?: string;
   activation_reason?: string;
+  activity_log?: AgentStudioActivityEntry[];
 };
 
 export type AgentStudioManifest = {

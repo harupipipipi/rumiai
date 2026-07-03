@@ -13,6 +13,7 @@ from .models import (
     CONVERSATION_SURFACES,
     DEFAULT_HUMAN_ONLY_COMMANDS,
     dict_value,
+    list_strings,
     localized_text,
     normalize_bundle,
     normalize_command_policy,
@@ -26,6 +27,7 @@ from .models import (
     normalize_team_definition,
     profile_to_company_agent,
     runtime_profile_id_from,
+    safe_id,
     text_value,
     timestamp,
 )
@@ -45,6 +47,20 @@ BUILTIN_REGISTERED_PROFILE_SPECS: list[dict[str, Any]] = [
         "review_gate": {"mode": "blocking", "reviewer_profile_id": "builtin.review"},
     },
     {
+        "id": "builtin.mini_coding",
+        "display_name": "Mini Coding Agent Profile",
+        "description": "A lower-cost coding profile for small fixes, quick iterations, and focused patches.",
+        "base_profile_id": "defaultspack.coding",
+        "aliases": ["mini", "mini-coding", "mini-coder"],
+        "command_shortcuts": ["mini"],
+        "tags": ["coding", "budget"],
+        "model_settings": {
+            "primary_model_profile_id": "openrouter/cohere/north-mini-code:free",
+            "delegated_model_profile_id": "openrouter/cohere/north-mini-code:free",
+        },
+        "review_gate": {"mode": "blocking", "reviewer_profile_id": "builtin.review"},
+    },
+    {
         "id": "builtin.design",
         "display_name": "Design Agent Profile",
         "description": "Frontend and UX profile for intentional layouts and visual polish.",
@@ -52,6 +68,16 @@ BUILTIN_REGISTERED_PROFILE_SPECS: list[dict[str, Any]] = [
         "aliases": ["design", "ui", "ux"],
         "command_shortcuts": ["design"],
         "tags": ["frontend", "design"],
+    },
+    {
+        "id": "builtin.frontend",
+        "display_name": "Frontend Only Agent Profile",
+        "description": "UI-focused profile for frontend-only changes, responsive QA, and visual cleanup.",
+        "base_profile_id": "rumi_frontend_design.frontend_design_reviewer",
+        "aliases": ["frontend", "frontend-only"],
+        "command_shortcuts": ["frontend"],
+        "tags": ["frontend", "ui", "design"],
+        "review_gate": {"mode": "blocking", "reviewer_profile_id": "builtin.review"},
     },
     {
         "id": "builtin.research",
@@ -363,30 +389,35 @@ class AgentStudioService:
         return result
 
     def upsert_profile(self, record: dict[str, Any]) -> dict[str, Any]:
+        self._validate_profile_record(record)
         return self.store.upsert_profile(record)
 
     def delete_profile(self, profile_id: str) -> bool:
         return self.store.delete_profile(profile_id)
 
     def upsert_team(self, record: dict[str, Any]) -> dict[str, Any]:
+        self._validate_team_record(record)
         return self.store.upsert_team(record)
 
     def delete_team(self, team_id: str) -> bool:
         return self.store.delete_team(team_id)
 
     def upsert_fusion(self, record: dict[str, Any]) -> dict[str, Any]:
+        self._validate_fusion_record(record)
         return self.store.upsert_fusion(record)
 
     def delete_fusion(self, fusion_id: str) -> bool:
         return self.store.delete_fusion(fusion_id)
 
     def replace_selection_rules(self, rules: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._validate_selection_rules(rules)
         return self.store.replace_selection_rules(rules)
 
     def update_settings(self, updates: dict[str, Any]) -> dict[str, Any]:
         return self.store.update_settings(updates)
 
     def import_bundle(self, payload: dict[str, Any], *, merge: bool = False) -> dict[str, Any]:
+        self._validate_bundle(payload)
         imported = normalize_bundle(payload)
         if not merge:
             return self.store.replace(imported)
@@ -438,14 +469,9 @@ class AgentStudioService:
         if profile is None:
             raise ValueError("unknown registered profile: " + str(profile_id))
         runtime_profile_id = runtime_profile_id_from(profile)
-        metadata_patch = {
-            "profile_id": runtime_profile_id or text_value(profile.get("id")),
-            "agent_profile_id": text_value(profile.get("id")),
-            "agent_context_policy": normalize_context_policy(profile.get("context_policy")),
-            "agent_review_gate": normalize_review_gate(profile.get("review_gate")),
-            "agent_model_settings": normalize_model_settings(profile.get("model_settings")),
-            "agent_command_policy": normalize_command_policy(profile.get("command_policy")),
-            "agent_studio": {
+        agent_state = self._agent_studio_state_patch(
+            conversation_id,
+            {
                 "surface": surface if surface in CONVERSATION_SURFACES else "mode_agent",
                 "active_profile_id": text_value(profile.get("id")),
                 "active_team_id": "",
@@ -460,6 +486,23 @@ class AgentStudioService:
                 "activated_at": timestamp(),
                 "activation_reason": reason,
             },
+            activity_entry=self._activity_entry(
+                event_type="activation",
+                message=f"Mode Agent switched to {text_value(profile.get('display_name')) or text_value(profile.get('id'))}.",
+                surface=surface if surface in CONVERSATION_SURFACES else "mode_agent",
+                target_id=text_value(profile.get("id")),
+                label=text_value(profile.get("display_name")),
+                reason=reason,
+            ),
+        )
+        metadata_patch = {
+            "profile_id": runtime_profile_id or text_value(profile.get("id")),
+            "agent_profile_id": text_value(profile.get("id")),
+            "agent_context_policy": normalize_context_policy(profile.get("context_policy")),
+            "agent_review_gate": normalize_review_gate(profile.get("review_gate")),
+            "agent_model_settings": normalize_model_settings(profile.get("model_settings")),
+            "agent_command_policy": normalize_command_policy(profile.get("command_policy")),
+            "agent_studio": agent_state,
         }
         updates: dict[str, Any] = {"metadata": self._conversation_metadata_patch(conversation_id, metadata_patch)}
         primary_model = text_value(
@@ -486,16 +529,9 @@ class AgentStudioService:
         )["company"]
         coordinator = self._team_coordinator_profile(team)
         runtime_profile_id = runtime_profile_id_from(coordinator) if coordinator else ""
-        metadata_patch = {
-            "profile_id": runtime_profile_id,
-            "agent_profile_id": text_value(coordinator.get("id") if coordinator else ""),
-            "company_id": text_value(company.get("id")),
-            "team_id": text_value(team.get("id")),
-            "agent_context_policy": self._effective_context_policy(surface="team_agent", team=team),
-            "agent_review_gate": self._effective_review_gate(surface="team_agent", team=team),
-            "agent_model_settings": self._effective_model_settings(surface="team_agent", team=team),
-            "agent_command_policy": self._effective_command_policy(surface="team_agent", team=team),
-            "agent_studio": {
+        agent_state = self._agent_studio_state_patch(
+            conversation_id,
+            {
                 "surface": "team_agent",
                 "active_profile_id": text_value(coordinator.get("id") if coordinator else ""),
                 "active_team_id": text_value(team.get("id")),
@@ -511,6 +547,25 @@ class AgentStudioService:
                 "activated_at": timestamp(),
                 "activation_reason": reason,
             },
+            activity_entry=self._activity_entry(
+                event_type="activation",
+                message=f"Team Agent switched to {text_value(team.get('display_name')) or text_value(team.get('id'))}.",
+                surface="team_agent",
+                target_id=text_value(team.get("id")),
+                label=text_value(team.get("display_name")),
+                reason=reason,
+            ),
+        )
+        metadata_patch = {
+            "profile_id": runtime_profile_id,
+            "agent_profile_id": text_value(coordinator.get("id") if coordinator else ""),
+            "company_id": text_value(company.get("id")),
+            "team_id": text_value(team.get("id")),
+            "agent_context_policy": self._effective_context_policy(surface="team_agent", team=team),
+            "agent_review_gate": self._effective_review_gate(surface="team_agent", team=team),
+            "agent_model_settings": self._effective_model_settings(surface="team_agent", team=team),
+            "agent_command_policy": self._effective_command_policy(surface="team_agent", team=team),
+            "agent_studio": agent_state,
         }
         updates: dict[str, Any] = {"metadata": self._conversation_metadata_patch(conversation_id, metadata_patch)}
         primary_model = text_value(
@@ -537,16 +592,9 @@ class AgentStudioService:
         )["company"]
         synthesis = self.resolve_profile(text_value(fusion.get("synthesis_profile_id")) or "")
         runtime_profile_id = runtime_profile_id_from(synthesis or {})
-        metadata_patch = {
-            "profile_id": runtime_profile_id,
-            "agent_profile_id": text_value(synthesis.get("id") if synthesis else ""),
-            "company_id": text_value(company.get("id")),
-            "fusion_id": text_value(fusion.get("id")),
-            "agent_context_policy": self._effective_context_policy(surface="fusion_agent", fusion=fusion),
-            "agent_review_gate": self._effective_review_gate(surface="fusion_agent", fusion=fusion),
-            "agent_model_settings": self._effective_model_settings(surface="fusion_agent", fusion=fusion),
-            "agent_command_policy": self._effective_command_policy(surface="fusion_agent", fusion=fusion),
-            "agent_studio": {
+        agent_state = self._agent_studio_state_patch(
+            conversation_id,
+            {
                 "surface": "fusion_agent",
                 "active_profile_id": text_value(synthesis.get("id") if synthesis else ""),
                 "active_team_id": "",
@@ -562,6 +610,25 @@ class AgentStudioService:
                 "activated_at": timestamp(),
                 "activation_reason": reason,
             },
+            activity_entry=self._activity_entry(
+                event_type="activation",
+                message=f"Fusion Agent switched to {text_value(fusion.get('display_name')) or text_value(fusion.get('id'))}.",
+                surface="fusion_agent",
+                target_id=text_value(fusion.get("id")),
+                label=text_value(fusion.get("display_name")),
+                reason=reason,
+            ),
+        )
+        metadata_patch = {
+            "profile_id": runtime_profile_id,
+            "agent_profile_id": text_value(synthesis.get("id") if synthesis else ""),
+            "company_id": text_value(company.get("id")),
+            "fusion_id": text_value(fusion.get("id")),
+            "agent_context_policy": self._effective_context_policy(surface="fusion_agent", fusion=fusion),
+            "agent_review_gate": self._effective_review_gate(surface="fusion_agent", fusion=fusion),
+            "agent_model_settings": self._effective_model_settings(surface="fusion_agent", fusion=fusion),
+            "agent_command_policy": self._effective_command_policy(surface="fusion_agent", fusion=fusion),
+            "agent_studio": agent_state,
         }
         updates: dict[str, Any] = {"metadata": self._conversation_metadata_patch(conversation_id, metadata_patch)}
         primary_model = text_value(
@@ -590,6 +657,20 @@ class AgentStudioService:
             }
         )
         state["review_gate"] = review_gate
+        self._append_activity_entry(
+            state,
+            self._activity_entry(
+                event_type="review_gate",
+                message=(
+                    f"Review gate approved by {text_value(approved_by) or 'user'}."
+                    if approved
+                    else "Review gate approval was cleared."
+                ),
+                surface=text_value(state.get("surface")) or "human",
+                approved=approved,
+                approved_by=text_value(approved_by),
+            ),
+        )
         metadata["agent_studio"] = state
         conversation = self._update_conversation(conversation_id, {"metadata": metadata})
         return {"conversation": conversation, "review_gate": review_gate}
@@ -724,48 +805,60 @@ class AgentStudioService:
         if name in set(DEFAULT_HUMAN_ONLY_COMMANDS) or name in set(policy.get("human_only_commands", [])):
             human_only = True
         if human_only and surface != "human":
-            return {
+            decision = {
                 "allowed": False,
                 "code": "HUMAN_ONLY_COMMAND",
                 "message": f"/{name} is human-only while {surface} is active.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         allow_surfaces = set(resolved_executor_policy.get("allow_surfaces") or policy.get("allow_surfaces") or [])
         if allow_surfaces and surface not in allow_surfaces:
-            return {
+            decision = {
                 "allowed": False,
                 "code": "COMMAND_SURFACE_BLOCKED",
                 "message": f"/{name} is not available while {surface} is active.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         deny_surfaces = set(resolved_executor_policy.get("deny_surfaces") or policy.get("deny_surfaces") or [])
         if surface in deny_surfaces:
-            return {
+            decision = {
                 "allowed": False,
                 "code": "COMMAND_SURFACE_BLOCKED",
                 "message": f"/{name} is not available while {surface} is active.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         if name in set(policy.get("denied_commands", [])):
-            return {
+            decision = {
                 "allowed": False,
                 "code": "COMMAND_DENIED_BY_PROFILE",
                 "message": f"/{name} is blocked by the active agent profile policy.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         if policy.get("restrict_to_allowlist") and name not in set(policy.get("allowed_commands", [])):
-            return {
+            decision = {
                 "allowed": False,
                 "code": "COMMAND_NOT_ALLOWED",
                 "message": f"/{name} is outside the active agent allowlist.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         if (
             review_gate.get("mode") == "blocking"
             and name in set(review_gate.get("gated_commands", []))
             and not bool(dict_value(state.get("review_gate")).get("approved"))
         ):
             reviewer = text_value(review_gate.get("reviewer_profile_id")) or "reviewer"
-            return {
+            decision = {
                 "allowed": False,
                 "code": "REVIEW_GATE_BLOCKED",
                 "message": f"/{name} is blocked until {reviewer} passes the review gate.",
             }
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+            return decision
         warning = None
         if (
             review_gate.get("mode") == "warning"
@@ -774,15 +867,19 @@ class AgentStudioService:
         ):
             reviewer = text_value(review_gate.get("reviewer_profile_id")) or "reviewer"
             warning = f"/{name} should wait for {reviewer} to pass the review gate."
-        return {"allowed": True, "warning": warning, "surface": surface}
+        decision = {"allowed": True, "warning": warning, "surface": surface}
+        if warning:
+            self._record_command_activity(conversation_id, state, name, surface, decision)
+        return decision
 
     def selection_state_for_conversation(self, conversation_id: str) -> dict[str, Any]:
         metadata = self._conversation_metadata(conversation_id)
         state = dict_value(metadata.get("agent_studio"))
         if not state:
-            return {"surface": "human", "review_gate": {"approved": True}}
+            return {"surface": "human", "review_gate": {"approved": True}, "activity_log": []}
         state.setdefault("surface", "human")
         state.setdefault("review_gate", {"approved": False})
+        state.setdefault("activity_log", [])
         return state
 
     def _team_coordinator_profile(self, team: dict[str, Any]) -> dict[str, Any] | None:
@@ -894,6 +991,312 @@ class AgentStudioService:
         if conversation is None:
             raise ValueError("conversation not found: " + str(conversation_id))
         return dict_value(conversation.get("metadata"))
+
+    def _validate_bundle(self, payload: dict[str, Any]) -> None:
+        profile_records = self._bundle_records(payload.get("profiles"), label="profiles")
+        normalized_profile_ids: list[str] = []
+        for record in profile_records:
+            self._validate_profile_record(record)
+            normalized_profile_ids.append(normalize_registered_profile(record).get("id", ""))
+        self._ensure_unique_ids("profiles", normalized_profile_ids)
+        known_profile_ids = {
+            *[item for item in normalized_profile_ids if item],
+            *[text_value(profile.get("id")) for profile in self.list_profiles()],
+        }
+
+        team_records = self._bundle_records(payload.get("teams"), label="teams")
+        normalized_team_ids: list[str] = []
+        for record in team_records:
+            self._validate_team_record(record, imported_profile_ids=known_profile_ids)
+            normalized_team_ids.append(normalize_team_definition(record).get("id", ""))
+        self._ensure_unique_ids("teams", normalized_team_ids)
+        known_team_ids = {
+            *[item for item in normalized_team_ids if item],
+            *[text_value(team.get("id")) for team in self.list_teams()],
+        }
+
+        fusion_records = self._bundle_records(payload.get("fusions"), label="fusions")
+        normalized_fusion_ids: list[str] = []
+        for record in fusion_records:
+            self._validate_fusion_record(record, imported_profile_ids=known_profile_ids)
+            normalized_fusion_ids.append(normalize_fusion_definition(record).get("id", ""))
+        self._ensure_unique_ids("fusions", normalized_fusion_ids)
+        known_fusion_ids = {
+            *[item for item in normalized_fusion_ids if item],
+            *[text_value(fusion.get("id")) for fusion in self.list_fusions()],
+        }
+
+        selection_rules = payload.get("selection_rules")
+        if selection_rules is not None:
+            if not isinstance(selection_rules, list):
+                raise ValueError("selection_rules must be a list")
+            for index, rule in enumerate(selection_rules):
+                if not isinstance(rule, dict):
+                    raise ValueError(f"selection_rules[{index}] must be an object")
+            self._validate_selection_rules(
+                [rule for rule in selection_rules if isinstance(rule, dict)],
+                imported_profile_ids=known_profile_ids,
+                imported_team_ids=known_team_ids,
+                imported_fusion_ids=known_fusion_ids,
+            )
+
+    def _validate_profile_record(self, record: dict[str, Any]) -> None:
+        raw_id = text_value(
+            record.get("id")
+            or record.get("profile_id")
+            or record.get("registered_profile_id")
+            or record.get("name")
+        )
+        if not raw_id:
+            raise ValueError("profile.id is required")
+        runtime_id = runtime_profile_id_from(record)
+        if not runtime_id:
+            raise ValueError(
+                f"profile '{raw_id}' requires base_profile_id or runtime_profile_id"
+            )
+
+    def _validate_team_record(
+        self,
+        record: dict[str, Any],
+        *,
+        imported_profile_ids: set[str] | None = None,
+    ) -> None:
+        raw_id = text_value(record.get("id") or record.get("team_id") or record.get("name"))
+        if not raw_id:
+            raise ValueError("team.id is required")
+        team = normalize_team_definition(record)
+        if not team.get("member_profile_ids"):
+            raise ValueError(f"team '{raw_id}' requires at least one member_profile_ids entry")
+        coordinator = text_value(team.get("coordinator_profile_id"))
+        if coordinator:
+            self._validate_profile_reference(
+                coordinator,
+                field_name="coordinator_profile_id",
+                owner_label=f"team '{raw_id}'",
+                imported_profile_ids=imported_profile_ids,
+            )
+        reviewer = text_value(team.get("reviewer_profile_id"))
+        if reviewer:
+            self._validate_profile_reference(
+                reviewer,
+                field_name="reviewer_profile_id",
+                owner_label=f"team '{raw_id}'",
+                imported_profile_ids=imported_profile_ids,
+            )
+        for member_id in team.get("member_profile_ids", []):
+            self._validate_profile_reference(
+                member_id,
+                field_name="member_profile_ids",
+                owner_label=f"team '{raw_id}'",
+                imported_profile_ids=imported_profile_ids,
+            )
+
+    def _validate_fusion_record(
+        self,
+        record: dict[str, Any],
+        *,
+        imported_profile_ids: set[str] | None = None,
+    ) -> None:
+        raw_id = text_value(record.get("id") or record.get("fusion_id") or record.get("name"))
+        if not raw_id:
+            raise ValueError("fusion.id is required")
+        fusion = normalize_fusion_definition(record)
+        participants = fusion.get("participant_profile_ids", [])
+        if len(participants) < 2:
+            raise ValueError(
+                f"fusion '{raw_id}' requires at least two participant_profile_ids entries"
+            )
+        for participant_id in participants:
+            self._validate_profile_reference(
+                participant_id,
+                field_name="participant_profile_ids",
+                owner_label=f"fusion '{raw_id}'",
+                imported_profile_ids=imported_profile_ids,
+            )
+        synthesis = text_value(fusion.get("synthesis_profile_id"))
+        if synthesis:
+            self._validate_profile_reference(
+                synthesis,
+                field_name="synthesis_profile_id",
+                owner_label=f"fusion '{raw_id}'",
+                imported_profile_ids=imported_profile_ids,
+            )
+
+    def _validate_selection_rules(
+        self,
+        rules: list[dict[str, Any]],
+        *,
+        imported_profile_ids: set[str] | None = None,
+        imported_team_ids: set[str] | None = None,
+        imported_fusion_ids: set[str] | None = None,
+    ) -> None:
+        for rule in rules:
+            target_id = text_value(
+                rule.get("target_id")
+                or rule.get("profile_id")
+                or rule.get("team_id")
+                or rule.get("fusion_id")
+            )
+            if not target_id:
+                raise ValueError("selection rule target_id is required")
+            normalized = normalize_selection_rule(rule)
+            if not normalized.get("match_terms") and not normalized.get("prompt_contains"):
+                raise ValueError(
+                    f"selection rule '{text_value(normalized.get('id')) or target_id}' requires match_terms or prompt_contains"
+                )
+            target_type = text_value(normalized.get("target_type") or "profile")
+            if target_type == "profile":
+                self._validate_profile_reference(
+                    target_id,
+                    field_name="target_id",
+                    owner_label=f"selection rule '{text_value(normalized.get('id')) or target_id}'",
+                    imported_profile_ids=imported_profile_ids,
+                )
+            elif target_type == "team":
+                if target_id not in (imported_team_ids or set()) and self.resolve_team(target_id) is None:
+                    raise ValueError(
+                        f"selection rule '{text_value(normalized.get('id')) or target_id}' references unknown team '{target_id}'"
+                    )
+            elif target_type == "fusion":
+                if target_id not in (imported_fusion_ids or set()) and self.resolve_fusion(target_id) is None:
+                    raise ValueError(
+                        f"selection rule '{text_value(normalized.get('id')) or target_id}' references unknown fusion '{target_id}'"
+                    )
+
+    def _validate_profile_reference(
+        self,
+        profile_id: str,
+        *,
+        field_name: str,
+        owner_label: str,
+        imported_profile_ids: set[str] | None = None,
+    ) -> None:
+        cleaned = text_value(profile_id)
+        if not cleaned:
+            raise ValueError(f"{owner_label} requires {field_name}")
+        if cleaned in (imported_profile_ids or set()):
+            return
+        if self.resolve_profile(cleaned) is not None:
+            return
+        raise ValueError(f"{owner_label} references unknown profile '{cleaned}' in {field_name}")
+
+    @staticmethod
+    def _bundle_records(value: Any, *, label: str) -> list[dict[str, Any]]:
+        if value is None:
+            return []
+        if isinstance(value, dict):
+            raw_items = list(value.values())
+        elif isinstance(value, list):
+            raw_items = value
+        else:
+            raise ValueError(f"{label} must be a list or object")
+        records: list[dict[str, Any]] = []
+        for index, item in enumerate(raw_items):
+            if not isinstance(item, dict):
+                raise ValueError(f"{label}[{index}] must be an object")
+            records.append(item)
+        return records
+
+    @staticmethod
+    def _ensure_unique_ids(label: str, ids: list[str]) -> None:
+        duplicates = sorted({
+            item
+            for item in ids
+            if item and ids.count(item) > 1
+        })
+        if duplicates:
+            raise ValueError(f"duplicate {label} ids are not allowed: {', '.join(duplicates)}")
+
+    def _agent_studio_state_patch(
+        self,
+        conversation_id: str,
+        patch: dict[str, Any],
+        *,
+        activity_entry: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        state = dict_value(self._conversation_metadata(conversation_id).get("agent_studio"))
+        for key, value in patch.items():
+            state[key] = copy.deepcopy(value)
+        state.setdefault("activity_log", [])
+        if activity_entry:
+            self._append_activity_entry(state, activity_entry)
+        return state
+
+    def _record_command_activity(
+        self,
+        conversation_id: str | None,
+        state: dict[str, Any],
+        name: str,
+        surface: str,
+        decision: dict[str, Any],
+    ) -> None:
+        cleaned_conversation_id = text_value(conversation_id)
+        if not cleaned_conversation_id:
+            return
+        entry_type = "command_denied" if decision.get("allowed") is False else "command_warning"
+        message = text_value(decision.get("message") or decision.get("warning"))
+        if not message:
+            return
+        metadata = self._conversation_metadata(cleaned_conversation_id)
+        current_state = dict_value(metadata.get("agent_studio")) or dict_value(state)
+        self._append_activity_entry(
+            current_state,
+            self._activity_entry(
+                event_type=entry_type,
+                message=message,
+                surface=surface,
+                command=name,
+                reason_code=text_value(decision.get("code")),
+            ),
+        )
+        metadata["agent_studio"] = current_state
+        self._update_conversation(cleaned_conversation_id, {"metadata": metadata})
+
+    @staticmethod
+    def _activity_entry(
+        *,
+        event_type: str,
+        message: str,
+        surface: str = "",
+        target_id: str = "",
+        label: str = "",
+        reason: str = "",
+        reason_code: str = "",
+        command: str = "",
+        approved: bool | None = None,
+        approved_by: str = "",
+    ) -> dict[str, Any]:
+        event_id = safe_id(
+            "agent-studio-event",
+            f"{event_type}-{surface}-{target_id or command}-{timestamp()}",
+        )
+        entry = {
+            "id": event_id,
+            "type": text_value(event_type) or "event",
+            "message": text_value(message),
+            "surface": text_value(surface),
+            "target_id": text_value(target_id),
+            "label": text_value(label),
+            "reason": text_value(reason),
+            "reason_code": text_value(reason_code),
+            "command": text_value(command),
+            "created_at": timestamp(),
+        }
+        if approved is not None:
+            entry["approved"] = bool(approved)
+        if approved_by:
+            entry["approved_by"] = text_value(approved_by)
+        return entry
+
+    @staticmethod
+    def _append_activity_entry(state: dict[str, Any], entry: dict[str, Any]) -> None:
+        activity_log = [
+            dict_value(item)
+            for item in (state.get("activity_log") or [])
+            if isinstance(item, dict)
+        ]
+        activity_log.append(dict_value(entry))
+        state["activity_log"] = activity_log[-25:]
 
     def _conversation_metadata_patch(
         self,

@@ -2,6 +2,8 @@ import { CheckCircle2, Download, Layers3, Sparkles, Upload, Users2 } from "lucid
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  type AgentStudioActivityEntry,
+  type AgentStudioConversationState,
   type AgentFusionDefinition,
   type AgentSelectionRule,
   type AgentStudioManifest,
@@ -41,13 +43,37 @@ function matchesSelectionRule(rule: AgentSelectionRule, prompt: string): boolean
   return terms.some((item) => item && text.includes(item));
 }
 
+function surfaceLabel(value: unknown): string {
+  switch (textValue(value)) {
+    case "mode_agent":
+      return "Mode Agent";
+    case "team_agent":
+      return "Team Agent";
+    case "fusion_agent":
+      return "Fusion Agent";
+    default:
+      return "Human";
+  }
+}
+
+function activityEntries(value: unknown): AgentStudioActivityEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is AgentStudioActivityEntry => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    .slice()
+    .reverse()
+    .slice(0, 6);
+}
+
 export function AgentStudioPanel({
   section,
   conversationId = null,
+  conversationState = null,
   onConversationUpdate,
 }: {
   section: AgentStudioSection;
   conversationId?: string | null;
+  conversationState?: AgentStudioConversationState | null;
   onConversationUpdate?: (conversation: Conversation) => void;
 }) {
   const [manifest, setManifest] = useState<AgentStudioManifest | null>(null);
@@ -77,16 +103,14 @@ export function AgentStudioPanel({
     void loadManifest();
   }, []);
 
-  const activeConversationState = useMemo(() => {
-    const metadata = conversationId && manifest ? null : null;
-    return metadata;
-  }, [conversationId, manifest]);
-  void activeConversationState;
-
   const profiles = manifest?.profiles ?? [];
   const teams = manifest?.teams ?? [];
   const fusions = manifest?.fusions ?? [];
   const rules = manifest?.selection_rules ?? [];
+  const recentActivity = useMemo(() => activityEntries(conversationState?.activity_log), [conversationState]);
+  const activeLabel = textValue(conversationState?.active_label) || textValue(conversationState?.active_profile_id) || textValue(conversationState?.active_team_id) || textValue(conversationState?.active_fusion_id);
+  const activeSurface = textValue(conversationState?.surface) || "human";
+  const reviewApproved = conversationState?.review_gate?.approved === true;
 
   const performAction = async (payload: Record<string, unknown>, successMessage?: string) => {
     setBusy(true);
@@ -133,6 +157,46 @@ export function AgentStudioPanel({
   };
 
   const matchedRule = useMemo(() => rules.find((rule) => matchesSelectionRule(rule, playgroundInput)) ?? null, [playgroundInput, rules]);
+  const conversationStatus = conversationId ? (
+    <div className="mx-2 mt-2 rounded-xl border border-zinc-800/70 bg-zinc-950/50 p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full border border-sky-400/20 bg-sky-400/10 px-2 py-0.5 text-[10px] font-medium text-sky-100">
+          {surfaceLabel(activeSurface)}
+        </span>
+        <span className="rounded-full border border-zinc-800 bg-zinc-900/70 px-2 py-0.5 text-[10px] text-zinc-300">
+          {activeLabel || "No active registered profile yet"}
+        </span>
+        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
+          reviewApproved
+            ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-100"
+            : "border-amber-500/20 bg-amber-500/10 text-amber-100"
+        }`}>
+          {reviewApproved ? "Review gate passed" : "Review gate pending"}
+        </span>
+      </div>
+      {textValue(conversationState?.activation_reason) && (
+        <p className="mt-2 text-[11px] text-zinc-400">
+          Switch reason: <span className="font-mono text-zinc-300">{textValue(conversationState?.activation_reason)}</span>
+        </p>
+      )}
+      {recentActivity.length > 0 && (
+        <div className="mt-3 space-y-2">
+          <div className="text-[11px] font-medium text-zinc-200">Recent Agent Activity</div>
+          {recentActivity.map((entry, index) => (
+            <div key={entry.id ?? `${entry.type ?? "activity"}-${index}`} className="rounded-lg border border-zinc-800 bg-black/20 px-2.5 py-2 text-[11px]">
+              <div className="flex flex-wrap items-center gap-2 text-zinc-500">
+                <span className="rounded border border-zinc-800 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.08em]">{entry.type ?? "event"}</span>
+                {textValue(entry.command) && <span className="font-mono text-[10px] text-zinc-400">/{textValue(entry.command)}</span>}
+                {textValue(entry.reason_code) && <span className="font-mono text-[10px] text-zinc-500">{textValue(entry.reason_code)}</span>}
+                {textValue(entry.created_at) && <span className="text-[10px]">{textValue(entry.created_at)}</span>}
+              </div>
+              <div className="mt-1 text-zinc-200">{textValue(entry.message) || "Activity recorded."}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   const profileSection = (
     <div className="space-y-3 p-2">
@@ -416,6 +480,7 @@ export function AgentStudioPanel({
 
   return (
     <section className="min-h-0">
+      {conversationStatus}
       {error && (
         <div className="mx-2 mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200">
           {error}

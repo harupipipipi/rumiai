@@ -44,6 +44,7 @@ def test_agent_studio_profile_activation_enforces_human_only_and_review_gate(tmp
     assert updated["metadata"]["agent_studio"]["surface"] == "mode_agent"
     assert updated["metadata"]["agent_studio"]["active_profile_id"] == "builtin.coding"
     assert updated["metadata"]["agent_studio"]["review_gate"]["approved"] is False
+    assert updated["metadata"]["agent_studio"]["activity_log"][0]["type"] == "activation"
 
     yolo_guard = service.command_guard("yolo", conversation_id=conversation["id"])
     commit_guard = service.command_guard("commit", conversation_id=conversation["id"])
@@ -55,9 +56,15 @@ def test_agent_studio_profile_activation_enforces_human_only_and_review_gate(tmp
 
     service.mark_review_gate_for_conversation(conversation["id"], approved=True, approved_by="test-reviewer")
     approved_commit_guard = service.command_guard("commit", conversation_id=conversation["id"])
+    refreshed = store.get_conversation(conversation["id"])
+    activity_log = refreshed["metadata"]["agent_studio"]["activity_log"]
+    activity_types = {entry["type"] for entry in activity_log}
+    denial_codes = {entry.get("reason_code") for entry in activity_log if entry.get("type") == "command_denied"}
 
     assert approved_commit_guard["allowed"] is True
     assert approved_commit_guard.get("warning") in {None, ""}
+    assert {"activation", "command_denied", "review_gate"} <= activity_types
+    assert {"HUMAN_ONLY_COMMAND", "REVIEW_GATE_BLOCKED"} <= denial_codes
 
 
 def test_agent_studio_team_and_fusion_activation_materialize_workroom_members(tmp_path, monkeypatch):
@@ -90,3 +97,89 @@ def test_agent_studio_team_and_fusion_activation_materialize_workroom_members(tm
     assert fusion_result["conversation"]["metadata"]["fusion_id"] == "builtin.delivery_fusion"
     assert fusion_company["metadata"]["fusion_id"] == "builtin.delivery_fusion"
     assert {"builtin_coding", "builtin_research", "builtin_review"}.issubset(fusion_company["agents"].keys())
+
+
+def test_agent_studio_import_export_round_trip_preserves_list_exports(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    service = AgentStudioService()
+    service.upsert_profile(
+        {
+            "id": "custom.frontend.qa",
+            "display_name": "Frontend QA",
+            "base_profile_id": "rumi_frontend_design.frontend_design_reviewer",
+            "aliases": ["frontend-qa"],
+        }
+    )
+    service.upsert_team(
+        {
+            "id": "custom.frontend.team",
+            "display_name": "Frontend Team",
+            "coordinator_profile_id": "custom.frontend.qa",
+            "member_profile_ids": ["custom.frontend.qa", "builtin.review"],
+        }
+    )
+    service.upsert_fusion(
+        {
+            "id": "custom.frontend.fusion",
+            "display_name": "Frontend Fusion",
+            "participant_profile_ids": ["custom.frontend.qa", "builtin.review"],
+            "synthesis_profile_id": "builtin.review",
+        }
+    )
+
+    exported = service.export_bundle()
+    service.store.replace({})
+    imported = service.import_bundle(exported)
+
+    assert imported["profiles"]["custom.frontend.qa"]["id"] == "custom.frontend.qa"
+    assert imported["teams"]["custom.frontend.team"]["id"] == "custom.frontend.team"
+    assert imported["fusions"]["custom.frontend.fusion"]["id"] == "custom.frontend.fusion"
+    assert service.resolve_profile("custom.frontend.qa") is not None
+    assert service.resolve_team("custom.frontend.team") is not None
+    assert service.resolve_fusion("custom.frontend.fusion") is not None
+
+
+def test_agent_studio_import_bundle_validation_rejects_unknown_member_profiles(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    service = AgentStudioService()
+
+    try:
+        service.import_bundle(
+            {
+                "teams": [
+                    {
+                        "id": "broken.team",
+                        "member_profile_ids": ["missing.profile"],
+                    }
+                ]
+            }
+        )
+    except ValueError as exc:
+        assert "unknown profile" in str(exc)
+    else:
+        raise AssertionError("expected invalid bundle import to raise ValueError")
+
+
+def test_agent_studio_builtin_frontend_and_mini_profiles_are_resolvable(tmp_path, monkeypatch):
+    from domain.agent_studio.service import AgentStudioService
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_STUDIO_PATH", str(tmp_path / "agent_studio.json"))
+    _reset_agent_studio_state()
+
+    service = AgentStudioService()
+
+    frontend = service.resolve_profile("frontend")
+    mini = service.resolve_profile("mini")
+
+    assert frontend is not None
+    assert frontend["id"] == "builtin.frontend"
+    assert mini is not None
+    assert mini["id"] == "builtin.mini_coding"

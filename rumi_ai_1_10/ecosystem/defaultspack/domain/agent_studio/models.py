@@ -59,6 +59,16 @@ def dict_value(value: Any) -> dict[str, Any]:
     return copy.deepcopy(value) if isinstance(value, dict) else {}
 
 
+def record_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        values = value.values()
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = []
+    return [copy.deepcopy(item) for item in values if isinstance(item, dict)]
+
+
 def localized_text(value: Any, fallback: str = "") -> str:
     if isinstance(value, dict):
         for key in ("ja", "en", "label", "title", "text"):
@@ -349,21 +359,21 @@ def normalize_bundle(value: Any) -> dict[str, Any]:
         item["id"]: item
         for item in (
             normalize_registered_profile(profile)
-            for profile in dict_value(data.get("profiles")).values()
+            for profile in record_list(data.get("profiles"))
         )
     }
     teams = {
         item["id"]: item
         for item in (
             normalize_team_definition(team)
-            for team in dict_value(data.get("teams")).values()
+            for team in record_list(data.get("teams"))
         )
     }
     fusions = {
         item["id"]: item
         for item in (
             normalize_fusion_definition(fusion)
-            for fusion in dict_value(data.get("fusions")).values()
+            for fusion in record_list(data.get("fusions"))
         )
     }
     rules = [normalize_selection_rule(rule) for rule in data.get("selection_rules", []) if isinstance(rule, dict)]
