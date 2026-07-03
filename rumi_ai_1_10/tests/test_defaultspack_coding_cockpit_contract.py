@@ -47,6 +47,7 @@ def test_coding_cockpit_functions_are_registered_in_manifest_factory():
             "coding_approval_list",
             "coding_approval_approve",
             "coding_approval_deny",
+            "coding_github_pr_create",
             "coding_github_pr_read",
             "coding_github_issue_read",
             "coding_github_ci_status",
@@ -58,6 +59,7 @@ def test_coding_cockpit_functions_are_registered_in_manifest_factory():
         }
 
         assert required <= set(FUNCTION_SPECS_BY_ID)
+        assert FUNCTION_SPECS_BY_ID["coding_github_pr_create"].risk == "high"
         assert FUNCTION_SPECS_BY_ID["coding_github_pr_read"].risk == "medium"
         assert FUNCTION_SPECS_BY_ID["coding_agent_session_create"].block_module == "blocks.agent.coding_session_create"
 

@@ -51,6 +51,17 @@ def test_desktop_create_manifest_exposes_runtime_context_fields() -> None:
     assert properties["provisioning"]["properties"]["mcp_servers"]["items"]["type"] == "string"
 
 
+def test_desktop_input_manifest_explains_text_requires_action() -> None:
+    parameters = _tool_parameters("desktop_input")
+    properties = parameters["properties"]
+
+    assert "action" in parameters["required"]
+    assert "type_text" in properties["action"]["description"]
+    assert "Do not send text without action" in properties["action"]["description"]
+    assert "action is type_text" in properties["text"]["description"]
+    assert "action is key" in properties["key"]["description"]
+
+
 def test_desktop_rules_manifest_exposes_request_required_access() -> None:
     properties = _tool_parameters("desktop_rules_update")["properties"]
     access = properties["access"]["properties"]

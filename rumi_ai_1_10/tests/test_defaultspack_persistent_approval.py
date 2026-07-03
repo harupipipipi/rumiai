@@ -58,6 +58,78 @@ def test_approval_requests_survive_process_restart(tmp_path, monkeypatch):
     assert listed[0]["operation"] == "terminal.exec"
 
 
+def test_approval_state_conversation_mirror_retries_transient_replace_failure(tmp_path, monkeypatch):
+    import domain.safety.approval_state_json as state_json
+
+    target = tmp_path / "chat" / "conversations" / "conv-audit" / "approval_state.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"schema_version": 1, "requests": []}', encoding="utf-8")
+    original_replace = state_json.os.replace
+    attempts = []
+
+    def flaky_replace(source, destination):
+        source_path = Path(source)
+        if (
+            Path(destination) == target
+            and source_path.name.startswith(".approval_state.json.")
+            and len(attempts) < 2
+        ):
+            attempts.append(source_path.name)
+            raise PermissionError(13, "Access is denied")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(state_json.os, "replace", flaky_replace)
+    monkeypatch.setattr(state_json.time, "sleep", lambda _seconds: None)
+
+    state_json._atomic_write_json(
+        target,
+        {
+            "schema_version": 1,
+            "updated_at": 123,
+            "requests": [{"request_id": "apr_retry"}],
+        },
+    )
+
+    assert len(attempts) == 2
+    assert json.loads(target.read_text(encoding="utf-8"))["requests"] == [{"request_id": "apr_retry"}]
+    assert list(target.parent.glob(".approval_state.json.*.tmp")) == []
+
+
+def test_approval_state_replace_failure_is_sanitized_and_cleans_temp(tmp_path, monkeypatch):
+    import pytest
+    import domain.safety.approval_state_json as state_json
+
+    target = tmp_path / "chat" / "conversations" / "conv-audit" / "approval_state.json"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"schema_version": 1, "requests": [{"request_id": "old"}]}', encoding="utf-8")
+    sleep_calls = []
+
+    def locked_replace(source, destination):
+        raise PermissionError(13, "Access is denied", str(source), str(destination))
+
+    monkeypatch.setattr(state_json.os, "replace", locked_replace)
+    monkeypatch.setattr(state_json.time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    with pytest.raises(PermissionError) as exc_info:
+        state_json._atomic_write_json(
+            target,
+            {
+                "schema_version": 1,
+                "updated_at": 123,
+                "requests": [{"request_id": "apr_secret", "details": {"token": "secret-token"}}],
+            },
+        )
+
+    message = str(exc_info.value)
+    assert message == "approval state file is temporarily locked; retry later"
+    assert "secret-token" not in message
+    assert str(target) not in message
+    assert exc_info.value.__suppress_context__ is True
+    assert len(sleep_calls) == state_json._REPLACE_RETRY_ATTEMPTS - 1
+    assert json.loads(target.read_text(encoding="utf-8"))["requests"] == [{"request_id": "old"}]
+    assert list(target.parent.glob(".approval_state.json.*.tmp")) == []
+
+
 def test_one_shot_token_replay_is_rejected_after_restart(tmp_path, monkeypatch):
     approval = _fresh_approval_module(monkeypatch, tmp_path / "approval.sqlite3")
     approval.reset_approval_state_for_tests()

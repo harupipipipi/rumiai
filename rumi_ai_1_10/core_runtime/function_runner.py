@@ -20,6 +20,20 @@ from pathlib import Path
 from typing import Any, Dict
 
 
+def _configure_utf8_stdio() -> None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+_configure_utf8_stdio()
+
+
 def _emit_error(message: str, error_type: str) -> None:
     print(json.dumps({"error": message, "error_type": error_type}))
 
