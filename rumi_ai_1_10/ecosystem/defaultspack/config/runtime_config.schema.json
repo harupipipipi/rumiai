@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ecosystem.local/schema/defaultspack/runtime_config.schema.json",
+  "title": "Defaultspack Runtime Config",
+  "type": "object",
+  "properties": {
+    "context": {
+      "type": "object",
+      "properties": {
+        "compression": {
+          "type": "object",
+          "properties": {
+            "max_active_transcript_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum active transcript size in bytes."
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

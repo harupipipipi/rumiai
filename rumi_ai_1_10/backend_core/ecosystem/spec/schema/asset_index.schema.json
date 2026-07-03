@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://ecosystem.local/schema/asset_index.schema.json",
+  "title": "Pack Asset Index",
+  "description": "Canonical schema for wrapped asset_index.json/yaml files. ecosystem.metadata.asset_index stores the category map directly.",
+  "type": "object",
+  "required": ["asset_index"],
+  "properties": {
+    "asset_index": {
+      "type": "object",
+      "required": ["pack_id", "categories"],
+      "properties": {
+        "pack_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_-]*$"
+        },
+        "categories": {
+          "$ref": "#/definitions/asset_index_categories"
+        },
+        "generated_on": {
+          "type": "string"
+        },
+        "invariants": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "source": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "asset_index_categories": {
+      "type": "object",
+      "description": "Canonical asset index category map. Singular and plural category names are accepted as explicit aliases for existing packs.",
+      "propertyNames": {
+        "enum": [
+          "catalog",
+          "catalogs",
+          "checklist",
+          "checklists",
+          "coordination",
+          "docs",
+          "evidence",
+          "evidence_ledgers",
+          "example",
+          "examples",
+          "fixtures",
+          "frontend",
+          "glossary",
+          "index",
+          "ledger",
+          "ledgers",
+          "manifest",
+          "metadata",
+          "policies",
+          "policy",
+          "preset",
+          "presets",
+          "profile",
+          "profiles",
+          "prompt",
+          "prompts",
+          "readme",
+          "resource_templates",
+          "root",
+          "runbook",
+          "schema",
+          "schemas",
+          "spec",
+          "specs",
+          "template",
+          "templates",
+          "workflows"
+        ]
+      },
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

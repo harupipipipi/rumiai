@@ -10,7 +10,6 @@ test_runtime_config.py — 施策4: ecosystem.json runtime セクションのテ
 """
 
 import json
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -45,7 +44,15 @@ class TestRuntimeSchemaValidation(unittest.TestCase):
         """runtime.type の enum に期待される値が含まれている"""
         runtime_props = self.schema["properties"]["runtime"]["properties"]
         type_enum = runtime_props["type"]["enum"]
-        for expected in ["python_host", "python_docker", "binary", "command", "wasm"]:
+        for expected in [
+            "python_host",
+            "python_docker",
+            "binary",
+            "command",
+            "wasm",
+            "declarative_pack",
+            "declarative_setup_pack",
+        ]:
             self.assertIn(expected, type_enum, f"{expected} missing from runtime.type enum")
 
     def test_runtime_docker_property(self):

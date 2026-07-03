@@ -91,6 +91,33 @@ def test_openrouter_domain_catalog_matches_model_catalog_pack_models():
     assert domain_keys == catalog_keys
 
 
+def test_cerebras_defaultspack_catalog_stays_in_sync_with_model_catalog_pack():
+    from domain.ai_client.metadata_json import load_strict_metadata_json
+
+    domain_payload = load_strict_metadata_json(
+        DEFAULTSPACK_ROOT / "domain" / "providers" / "cerebras" / "models.json"
+    )
+    domain_models = {model["id"]: model for model in domain_payload["models"]}
+    catalog_dir = (
+        ROOT
+        / "ecosystem"
+        / "rumi_model_catalog_pack"
+        / "extensions"
+        / "llm"
+        / "providers"
+        / "cerebras"
+        / "models"
+    )
+    catalog_models = {
+        payload["id"]: payload
+        for payload in (
+            load_strict_metadata_json(path) for path in sorted(catalog_dir.glob("*.json"))
+        )
+    }
+
+    assert domain_models == catalog_models
+
+
 def test_model_catalog_validation_rejects_duplicate_ids_and_context_drift():
     from domain.ai_client.model_metadata_schema import (
         ModelMetadataSchemaError,

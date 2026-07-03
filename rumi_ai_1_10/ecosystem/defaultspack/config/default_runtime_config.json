@@ -19,7 +19,7 @@
       "model": null,
       "memory_flush": true,
       "truncate_after_compaction": true,
-      "max_active_transcript_bytes": "20mb"
+      "max_active_transcript_bytes": 20971520
     }
   },
   "memory": {
