@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +24,11 @@ MOVIE_OPERATION_FUNCTIONS = {
     "movie_export_project",
     "movie_render_project",
 }
+
+
+def _write_json(path: Path, payload) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def test_workspace_surface_commands_load_from_sibling_pack():
@@ -84,6 +90,127 @@ def test_workspace_surface_command_executes_as_owning_pack_and_returns_effects()
     assert args["conversation_id"] == "conv-1"
     assert invoke_function.call_args.kwargs["principal_id"] == "rumi_workspace_surfaces"
     assert Path(invoke_function.call_args.kwargs["function_pack_root"]).name == "rumi_workspace_surfaces"
+
+
+def test_deepthink_command_falls_back_to_builtin_when_function_missing(tmp_path):
+    from domain.frontend.command_registry import SlashCommandRegistry
+
+    pack_root = tmp_path / "defaultspack"
+    _write_json(
+        pack_root / "commands" / "default_commands.json",
+        [
+            {
+                "id": "deepthink",
+                "name": "deepthink",
+                "modes": ["chat"],
+                "risk": "medium",
+                "args": [{"name": "enabled", "type": "boolean", "required": False}],
+                "execution": {
+                    "type": "rumi_function",
+                    "qualified_name": "defaultspack:ai_set_deepthink_enabled",
+                },
+            }
+        ],
+    )
+
+    with patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+        invoke_function.return_value = {
+            "status": "error",
+            "error": {"code": "FUNCTION_NOT_FOUND", "message": "missing"},
+        }
+        result = SlashCommandRegistry(pack_root).execute(
+            {"command": "deepthink", "mode": "chat", "args": {"enabled": "on"}},
+            {},
+        )
+
+    assert result["status"] == "ok"
+    assert result["data"]["executed"] is True
+    assert result["data"]["result"]["enabled"] is True
+    assert result["data"]["message"]
+    invoke_function.assert_called_once()
+
+
+def test_function_returned_effects_are_not_templated(tmp_path):
+    from domain.frontend.command_registry import SlashCommandRegistry
+
+    pack_root = tmp_path / "defaultspack"
+    _write_json(
+        pack_root / "commands" / "default_commands.json",
+        [
+            {
+                "id": "effectful",
+                "name": "effectful",
+                "modes": ["chat"],
+                "args": [{"name": "text", "type": "string", "required": True}],
+                "execution": {
+                    "type": "rumi_function",
+                    "qualified_name": "defaultspack:ai_set_thinking_level",
+                    "effects": [
+                        {
+                            "type": "surface.open",
+                            "surface": {
+                                "id": "manifest:{command_id}:{result.value}:{arg.text}",
+                                "title": "{command_id}",
+                            },
+                        }
+                    ],
+                },
+            }
+        ],
+    )
+    returned_effect = {
+        "type": "surface.open",
+        "surface": {
+            "id": "{command_id}",
+            "title": "literal {command_id}",
+            "payload": {"text": "keep {command_id} untouched"},
+        },
+    }
+
+    with patch("domain.function_runtime.bridge.invoke_function") as invoke_function:
+        invoke_function.return_value = {
+            "status": "ok",
+            "data": {"value": "returned", "effects": [returned_effect]},
+        }
+        result = SlashCommandRegistry(pack_root).execute(
+            {"command": "effectful", "mode": "chat", "args": {"text": "hello"}},
+            {},
+        )
+
+    assert result["status"] == "ok"
+    effects = result["data"]["effects"]
+    assert effects[0]["surface"]["id"] == "manifest:effectful:returned:hello"
+    assert effects[0]["surface"]["title"] == "effectful"
+    assert effects[1] == returned_effect
+
+
+def test_command_registry_loads_command_manifests_from_env_extension_roots(
+    tmp_path,
+    monkeypatch,
+):
+    from domain.frontend.command_registry import SlashCommandRegistry
+
+    pack_root = tmp_path / "env_pack"
+    _write_json(pack_root / "ecosystem.json", {"pack_id": "env_pack"})
+    _write_json(
+        pack_root / "extensions" / "commands" / "env_command" / "manifest.json",
+        {
+            "id": "env-command",
+            "name": "env-command",
+            "modes": ["chat"],
+            "execution": {"type": "frontend", "action": "env_command"},
+        },
+    )
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_EXTENSION_ROOTS", str(pack_root))
+
+    commands = {
+        command["id"]: command
+        for command in SlashCommandRegistry(DEFAULTSPACK_ROOT).list_commands()
+    }
+
+    assert "env-command" in commands
+    assert commands["env-command"]["source_pack_id"] == "env_pack"
+    assert commands["env-command"]["trust_level"] == "activated_pack"
 
 
 class _RegistryContainer:
@@ -175,6 +302,48 @@ def test_movie_surface_payload_and_operations_are_editable():
     assert "timeline_edl" in exported["data"]["export"]
     rendered = movie_render_project({"project": saved["data"]["project"]}, {})
     assert rendered["data"]["render"]["status"] in {"ready", "disabled"}
+
+
+def test_movie_surface_uses_attached_files_when_project_is_missing():
+    from surface_helpers import open_surface
+
+    attached_files = [
+        {
+            "id": "selected-video",
+            "name": "selected-video.mp4",
+            "mime_type": "video/mp4",
+            "sourcePath": "/tmp/selected-video.mp4",
+            "duration": 8.5,
+        },
+        {
+            "id": "selected-audio",
+            "name": "selected-audio.wav",
+            "mime_type": "audio/wav",
+            "path": "/tmp/selected-audio.wav",
+            "duration": 12.0,
+        },
+    ]
+
+    opened = open_surface(
+        "movie",
+        {
+            "text": "Use the selected media",
+            "resource_id": "movie:selected-media",
+            "attached_files": attached_files,
+        },
+        {},
+    )
+
+    project = opened["data"]["surface"]["payload"]["movie_project"]
+    asset_ids = {asset["id"] for asset in project["assets"]}
+
+    assert [asset["id"] for asset in project["assets"]] == ["selected-video", "selected-audio"]
+    assert project["assets"][0]["kind"] == "video"
+    assert project["assets"][0]["source"] == "/tmp/selected-video.mp4"
+    assert project["assets"][1]["kind"] == "audio"
+    assert project["assets"][1]["source"] == "/tmp/selected-audio.wav"
+    assert all(not str(asset["source"]).startswith("generated:") for asset in project["assets"])
+    assert {clip["asset_id"] for clip in project["clips"]}.issubset(asset_ids)
 
 
 def test_movie_caption_update_replaces_existing_caption_by_id():

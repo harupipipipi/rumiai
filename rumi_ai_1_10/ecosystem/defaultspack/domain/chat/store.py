@@ -266,14 +266,24 @@ class ChatStore:
             metadata_dict.update(dict(metadata) if isinstance(metadata, dict) else {})
             metadata_dict["source_conversation_id"] = source_id
             metadata_dict["cloned_from_conversation_id"] = source_id
-            if system_prompt_override not in (None, ""):
-                metadata_dict["system_prompt_override"] = str(system_prompt_override)
+            override_text = str(system_prompt_override) if system_prompt_override is not None else ""
+            if override_text.strip():
+                metadata_dict["system_prompt_override"] = override_text
             cloned = copy.deepcopy(source)
             cloned["id"] = cid
             cloned["title"] = str(title or source.get("title") or "Cloned Conversation")
             cloned["created_at"] = now
             cloned["updated_at"] = now
             cloned["model"] = str(model_override or source.get("model") or _default_conversation_model())
+            if override_text.strip():
+                cloned["system_prompt_override"] = override_text
+                materialized_prompt_id = self._materialize_system_prompt_override(
+                    cid,
+                    override_text,
+                    source_conversation_id=source_id,
+                )
+                cloned["system_prompt_id"] = materialized_prompt_id
+                metadata_dict["system_prompt_override_prompt_id"] = materialized_prompt_id
             cloned["parent_conversation_id"] = source_id
             cloned["child_conversation_ids"] = []
             cloned["conversation_kind"] = conversation_kind or "chat_clone"
@@ -865,6 +875,29 @@ class ChatStore:
     # Helpers
     # ----------------------------------------------------------
     @staticmethod
+    def _materialize_system_prompt_override(
+        conversation_id,
+        prompt_text,
+        *,
+        source_conversation_id=None,
+    ):
+        from domain.prompt.manager import get_manager
+
+        prompt = get_manager().create_prompt(
+            {
+                "name": "cloned_conversation_system_prompt_{}".format(str(conversation_id or "")),
+                "body": str(prompt_text),
+                "description": "System prompt override materialized for a cloned conversation.",
+                "metadata": {
+                    "source": "chat.clone_conversation",
+                    "conversation_id": str(conversation_id or ""),
+                    "source_conversation_id": str(source_conversation_id or ""),
+                },
+            }
+        )
+        return str(prompt.get("id") or "")
+
+    @staticmethod
     def _extract_raw_text(content_blocks):
         parts = []
         if not isinstance(content_blocks, list):
@@ -884,6 +917,7 @@ class ChatStore:
         conversation.setdefault("updated_at", conversation.get("created_at", _now_ms()))
         conversation.setdefault("model", _default_conversation_model())
         conversation.setdefault("system_prompt_id", None)
+        conversation.setdefault("system_prompt_override", None)
         conversation.setdefault("agent_id", None)
         conversation.setdefault("tags", [])
         conversation.setdefault("is_starred", False)

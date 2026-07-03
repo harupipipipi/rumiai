@@ -403,6 +403,23 @@ class SlashCommandRegistry:
         except Exception as exc:
             return error(f"rumi_function execution failed: {exc}", "EXECUTION_FAILED")
 
+        if self._should_use_builtin_rumi_function_fallback(result):
+            builtin_result = self._execute_builtin_rumi_function(qualified_name, function_args)
+            if builtin_result is not None:
+                return self._rumi_function_response(
+                    command, execution, args, payload, builtin_result
+                )
+
+        return self._rumi_function_response(command, execution, args, payload, result)
+
+    def _rumi_function_response(
+        self,
+        command: dict[str, Any],
+        execution: dict[str, Any],
+        args: dict[str, Any],
+        payload: dict[str, Any],
+        result: Any,
+    ) -> dict[str, Any]:
         if isinstance(result, dict) and result.get("status") == "error":
             return result
         result_data = result.get("data") if isinstance(result, dict) and result.get("status") == "ok" else result
@@ -415,6 +432,14 @@ class SlashCommandRegistry:
         if isinstance(result_data, dict) and str(result_data.get("message") or "").strip():
             response_payload["message"] = str(result_data.get("message") or "")
         return ok(response_payload)
+
+    @staticmethod
+    def _should_use_builtin_rumi_function_fallback(result: Any) -> bool:
+        if not isinstance(result, dict) or result.get("status") != "error":
+            return False
+        err = result.get("error")
+        code = str(err.get("code") if isinstance(err, dict) else "").strip().upper()
+        return code == "FUNCTION_NOT_FOUND"
 
     def _resolve_rumi_function_target(
         self, command: dict[str, Any], execution: dict[str, Any]
@@ -822,9 +847,20 @@ class SlashCommandRegistry:
 
     def _extension_roots(self) -> list[Path]:
         try:
-            from domain.extensions.runtime import build_extensions_roots
+            from domain.extensions.runtime import (
+                _extra_extension_roots_from_env,
+                build_extensions_roots,
+                get_extensions_roots,
+            )
 
-            roots = build_extensions_roots(self._pack_root)
+            default_pack_root = Path(__file__).resolve().parents[2]
+            if self._pack_root.resolve() == default_pack_root.resolve():
+                roots = get_extensions_roots()
+            else:
+                roots = build_extensions_roots(
+                    self._pack_root,
+                    extra_roots=_extra_extension_roots_from_env(),
+                )
         except Exception:
             roots = [self._pack_root / "extensions"]
         return [Path(root) for root in roots if Path(root).is_dir()]
@@ -1076,19 +1112,22 @@ class SlashCommandRegistry:
         payload: dict[str, Any],
         result_data: Any,
     ) -> list[dict[str, Any]]:
-        raw_effects: list[Any] = []
+        effects: list[dict[str, Any]] = []
+        values = self._effect_template_values(command, args, payload, result_data)
         for source in (execution.get("effects"), command.get("effects")):
             if isinstance(source, list):
-                raw_effects.extend(source)
+                for effect in source:
+                    if isinstance(effect, dict):
+                        materialized = self._materialize_effect_value(effect, values)
+                        if (
+                            isinstance(materialized, dict)
+                            and str(materialized.get("type") or "").strip()
+                        ):
+                            effects.append(materialized)
         if isinstance(result_data, dict) and isinstance(result_data.get("effects"), list):
-            raw_effects.extend(result_data.get("effects") or [])
-        values = self._effect_template_values(command, args, payload, result_data)
-        effects = []
-        for effect in raw_effects:
-            if isinstance(effect, dict):
-                materialized = self._materialize_effect_value(effect, values)
-                if isinstance(materialized, dict) and str(materialized.get("type") or "").strip():
-                    effects.append(materialized)
+            for effect in result_data.get("effects") or []:
+                if isinstance(effect, dict) and str(effect.get("type") or "").strip():
+                    effects.append(effect)
         return effects
 
     @staticmethod

@@ -379,6 +379,38 @@ class TestGoalMonitorStore(unittest.TestCase):
         self.assertEqual(updated["latest_verdict"]["reason"], "checker verified it")
         self.assertEqual(updated["last_checked_message_id"], "msg-1")
 
+    def test_list_runs_refreshes_subprocess_created_runs(self):
+        from domain.goal.store import GoalStore
+
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ",
+            {"RUMI_DEFAULTSPACK_GOAL_STORE_PATH": str(Path(tmpdir) / "goals.json")},
+        ):
+            GoalStore._instance = None
+            store = GoalStore()
+            run = store.create_run(conversation_id="conv-1", objective="Initial goal")
+            store_path = Path(tmpdir) / "goals.json"
+            data = json.loads(store_path.read_text(encoding="utf-8"))
+            external_run = {
+                "goal_run_id": "external-run",
+                "conversation_id": "conv-1",
+                "objective": "Created by subprocess",
+                "status": "running",
+                "checker_policy": {},
+                "last_checked_message_id": None,
+                "latest_verdict": None,
+                "created_at": int(run["created_at"]) + 1,
+                "updated_at": int(run["updated_at"]) + 1,
+                "metadata": {},
+                "event_log": [],
+            }
+            data["runs"][external_run["goal_run_id"]] = external_run
+            store_path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+            runs = store.list_runs(conversation_id="conv-1")
+
+        self.assertIn("external-run", {item["goal_run_id"] for item in runs})
+
 
 class TestGoalBlockLoop(unittest.TestCase):
     """The /goal block runs a worker + evaluator loop until the goal is achieved."""

@@ -221,10 +221,19 @@ def default_movie_project(text: str, attached_files: list[Any] | None = None, re
     return _resequence_project(project)
 
 
-def normalize_movie_project(raw: Any, fallback_text: str = "", resource_id: str = "") -> dict[str, Any]:
+def normalize_movie_project(
+    raw: Any,
+    fallback_text: str = "",
+    resource_id: str = "",
+    attached_files: list[Any] | None = None,
+) -> dict[str, Any]:
     if not isinstance(raw, dict):
-        return default_movie_project(fallback_text, resource_id=resource_id)
-    base = default_movie_project(_clean_text(raw.get("brief"), fallback_text), resource_id=resource_id)
+        return default_movie_project(fallback_text, attached_files=attached_files, resource_id=resource_id)
+    base = default_movie_project(
+        _clean_text(raw.get("brief"), fallback_text),
+        attached_files=attached_files,
+        resource_id=resource_id,
+    )
     project = deepcopy(raw)
     project.setdefault("project_id", resource_id or base["project_id"])
     project.setdefault("title", _first_title_line(project.get("brief") or fallback_text, base["title"]))
@@ -287,6 +296,7 @@ def open_surface(surface_id: str, args: dict[str, Any] | None, context: dict[str
             payload.get("movie_project") or payload.get("project"),
             initial_text,
             resource_id,
+            attached_files,
         )
         surface_payload["operations"] = list(MOVIE_OPERATIONS)
         surface_payload["tool_timeline"] = surface_payload["movie_project"]["timeline"]
@@ -318,7 +328,13 @@ def _movie_project_from_args(args: dict[str, Any] | None) -> dict[str, Any]:
     payload = dict(args or {})
     text = _clean_text(payload.get("text") or payload.get("brief"), "Movie brief")
     resource_id = _clean_text(payload.get("resource_id") or payload.get("project_id"), "movie:scratch")
-    return normalize_movie_project(payload.get("project") or payload.get("movie_project"), text, resource_id)
+    attached_files = payload.get("attached_files") if isinstance(payload.get("attached_files"), list) else None
+    return normalize_movie_project(
+        payload.get("project") or payload.get("movie_project"),
+        text,
+        resource_id,
+        attached_files,
+    )
 
 
 def _ok_operation(operation: str, project: dict[str, Any], **extra: Any) -> dict[str, Any]:

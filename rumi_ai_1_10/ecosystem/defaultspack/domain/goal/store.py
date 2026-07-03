@@ -33,9 +33,11 @@ class GoalStore:
             cls._instance.path = path
             cls._instance._lock = threading.RLock()
             cls._instance._data = cls._instance._load()
+            cls._instance._loaded_storage_signature = cls._instance._storage_signature()
         elif cls._instance.path != path:
             cls._instance.path = path
             cls._instance._data = cls._instance._load()
+            cls._instance._loaded_storage_signature = cls._instance._storage_signature()
         return cls._instance
 
     @staticmethod
@@ -87,12 +89,14 @@ class GoalStore:
             ],
         }
         with self._lock:
+            self._refresh_if_storage_changed()
             self._runs()[run["goal_run_id"]] = run
             self._save()
             return copy.deepcopy(run)
 
     def get_run(self, goal_run_id: str) -> dict[str, Any] | None:
         with self._lock:
+            self._refresh_if_storage_changed()
             run = self._runs().get(str(goal_run_id or "").strip())
             return copy.deepcopy(run) if isinstance(run, dict) else None
 
@@ -103,6 +107,7 @@ class GoalStore:
         statuses: set[str] | None = None,
     ) -> list[dict[str, Any]]:
         with self._lock:
+            self._refresh_if_storage_changed()
             runs = []
             for run in self._runs().values():
                 if not isinstance(run, dict):
@@ -122,6 +127,7 @@ class GoalStore:
         message_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
+            self._refresh_if_storage_changed()
             run = self._runs().get(str(goal_run_id or "").strip())
             if not isinstance(run, dict) or str(run.get("status") or "") not in RUNNING_STATUSES:
                 return None
@@ -146,6 +152,7 @@ class GoalStore:
         if not internal:
             raise PermissionError("only the isolated goal checker may write goal verdicts")
         with self._lock:
+            self._refresh_if_storage_changed()
             run = self._runs().get(str(goal_run_id or "").strip())
             if not isinstance(run, dict):
                 raise KeyError("goal run not found")
@@ -173,6 +180,7 @@ class GoalStore:
         message_id: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
+            self._refresh_if_storage_changed()
             run = self._runs().get(str(goal_run_id or "").strip())
             if not isinstance(run, dict) or str(run.get("status") or "") in TERMINAL_STATUSES:
                 return None
@@ -194,6 +202,20 @@ class GoalStore:
             runs = {}
             self._data["runs"] = runs
         return runs
+
+    def _storage_signature(self) -> tuple[int, int] | None:
+        try:
+            stat = self.path.stat()
+            return stat.st_mtime_ns, stat.st_size
+        except OSError:
+            return None
+
+    def _refresh_if_storage_changed(self) -> None:
+        current_signature = self._storage_signature()
+        if getattr(self, "_loaded_storage_signature", None) == current_signature:
+            return
+        self._data = self._load()
+        self._loaded_storage_signature = current_signature
 
     def _load(self) -> dict[str, Any]:
         try:
@@ -222,6 +244,7 @@ class GoalStore:
                 handle.flush()
                 os.fsync(handle.fileno())
             tmp_path.replace(self.path)
+            self._loaded_storage_signature = self._storage_signature()
         except BaseException:
             try:
                 tmp_path.unlink()
