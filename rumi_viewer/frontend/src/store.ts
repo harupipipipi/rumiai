@@ -36,8 +36,10 @@ import {
   normalizeTheme,
 } from './lib/appearance';
 import type { ColorMode, Theme } from './lib/appearance';
+import { AVATAR_OPTIONS, DEFAULT_AVATAR } from './lib/avatar';
 
 export type { ColorMode, Theme } from './lib/appearance';
+export { AVATAR_OPTIONS } from './lib/avatar';
 
 function readLocalStorage(key: string): string | null {
   try {
@@ -61,14 +63,6 @@ function writeLocalStorage(key: string, value: string): void {
   }
 }
 
-export const AVATAR_OPTIONS = [
-  'https://picsum.photos/seed/rumi-av1/128/128',
-  'https://picsum.photos/seed/rumi-av2/128/128',
-  'https://picsum.photos/seed/rumi-av3/128/128',
-  'https://picsum.photos/seed/rumi-av4/128/128',
-  'https://picsum.photos/seed/rumi-av5/128/128',
-];
-
 export interface Toast {
   id: string;
   message: string;
@@ -78,8 +72,9 @@ export interface Toast {
 export interface DialogConfig {
   title: string;
   message: string;
-  onConfirm: () => void;
+  onConfirm: () => void | Promise<void>;
   confirmText?: string;
+  confirmPendingText?: string;
   cancelText?: string;
 }
 
@@ -155,6 +150,7 @@ export interface UpdateInfo {
 }
 
 export type RuntimeStatus = 'starting' | 'panel_ready' | 'runtime_ready' | 'error';
+const SIDEBAR_STORAGE_KEY = 'rumi-viewer-sidebar-open';
 
 interface AppState {
   theme: Theme;
@@ -231,7 +227,7 @@ const defaultDashboard: DashboardData = {
 };
 
 const defaultProfile: Profile = {
-  avatar: AVATAR_OPTIONS[0],
+  avatar: DEFAULT_AVATAR,
   username: 'User',
   language: 'en',
   job: '',
@@ -287,8 +283,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ isSetupDone: done });
   },
 
-  isSidebarOpen: true,
-  setSidebarOpen: (open) => set({ isSidebarOpen: open }),
+  isSidebarOpen: readLocalStorage(SIDEBAR_STORAGE_KEY) !== 'false',
+  setSidebarOpen: (open) => {
+    writeLocalStorage(SIDEBAR_STORAGE_KEY, String(open));
+    set({ isSidebarOpen: open });
+  },
 
   toasts: [],
   addToast: (message, type) => {
