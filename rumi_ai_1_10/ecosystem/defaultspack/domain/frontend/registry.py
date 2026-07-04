@@ -38,6 +38,140 @@ from transport.registry import (
 )
 
 
+_V3_TOOL_SELECTION_STRATEGIES = {
+    "hybrid",
+    "vector",
+    "catalog_ai",
+    "all_with_hints",
+    "all_schemas",
+    "manual_only",
+}
+_LEGACY_SELECTION_STRATEGY_ALIASES = {"semantic": "vector", "lexical": "vector"}
+_V3_ACTION_DEFAULTS = {
+    "read": "auto",
+    "write": "confirm",
+    "send": "confirm",
+    "shell": "confirm",
+    "computer": "confirm",
+    "destructive": "confirm",
+}
+_LEGACY_ACTION_ALIASES = {
+    "search": "read",
+    "get": "read",
+    "list": "read",
+    "create": "write",
+    "update": "write",
+    "patch": "write",
+    "execute": "shell",
+    "exec": "shell",
+    "terminal": "shell",
+    "delete": "destructive",
+    "remove": "destructive",
+    "dangerous": "destructive",
+}
+
+
+def _canonical_tool_selection_strategy(value: Any, default: str = "hybrid") -> str:
+    strategy = str(value or "").strip().lower()
+    strategy = _LEGACY_SELECTION_STRATEGY_ALIASES.get(strategy, strategy)
+    return strategy if strategy in _V3_TOOL_SELECTION_STRATEGIES else default
+
+
+def _canonical_action_key(value: Any) -> str:
+    action = str(value or "").strip().lower()
+    return _LEGACY_ACTION_ALIASES.get(action, action)
+
+
+def _permission_value(value: Any, default: str) -> str:
+    permission = str(value or "").strip().lower()
+    return permission if permission in {"auto", "confirm", "block"} else default
+
+
+def _permission_value_for_action(source: dict[str, Any], action: str, default: str) -> str:
+    action = _canonical_action_key(action)
+    if action in source:
+        return _permission_value(source.get(action), default)
+    for legacy_action, canonical_action in _LEGACY_ACTION_ALIASES.items():
+        if canonical_action == action and legacy_action in source:
+            return _permission_value(source.get(legacy_action), default)
+    return default
+
+
+def _canonical_permission_defaults(*sources: Any) -> dict[str, str]:
+    merged: dict[str, Any] = {}
+    for source in sources:
+        if isinstance(source, dict):
+            merged.update(source)
+    result: dict[str, str] = {}
+    for action, default in _V3_ACTION_DEFAULTS.items():
+        value = _permission_value_for_action(merged, action, default)
+        if action == "destructive" and value == "auto":
+            value = "confirm"
+        result[action] = value
+    return result
+
+
+def _legacy_permission_source(source: Any) -> dict[str, Any]:
+    if not isinstance(source, dict):
+        return {}
+    result: dict[str, Any] = {}
+    for key, value in source.items():
+        canonical = _canonical_action_key(key)
+        if key != canonical or canonical not in _V3_ACTION_DEFAULTS:
+            result[key] = value
+            continue
+        default = _V3_ACTION_DEFAULTS[canonical]
+        if _permission_value(value, default) != default:
+            result[key] = value
+    return result
+
+
+def _legacy_permission_defaults(canonical: dict[str, str]) -> dict[str, str]:
+    return {
+        "read": canonical["read"],
+        "search": canonical["read"],
+        "create": canonical["write"],
+        "update": canonical["write"],
+        "send": canonical["send"],
+        "execute": canonical["shell"],
+        "computer": canonical["computer"],
+        "delete": canonical["destructive"],
+        "write": canonical["write"],
+        "shell": canonical["shell"],
+        "destructive": canonical["destructive"],
+    }
+
+
+def _canonical_permission_overrides(value: Any) -> dict[str, dict[str, str] | str]:
+    if not isinstance(value, dict):
+        return {}
+    sanitized: dict[str, dict[str, str] | str] = {}
+    for target_id, raw_override in value.items():
+        clean_target_id = str(target_id).strip()
+        if not clean_target_id:
+            continue
+        if isinstance(raw_override, str):
+            permission = _permission_value(raw_override, "")
+            if permission:
+                sanitized[clean_target_id] = permission
+            continue
+        if not isinstance(raw_override, dict):
+            continue
+        clean_override: dict[str, str] = {}
+        for raw_action, raw_value in raw_override.items():
+            action = _canonical_action_key(raw_action)
+            if action not in _V3_ACTION_DEFAULTS:
+                continue
+            permission = _permission_value(raw_value, "")
+            if action == "destructive" and permission == "auto":
+                permission = "confirm"
+            if permission:
+                clean_override[action] = permission
+        if clean_override:
+            sanitized[clean_target_id] = clean_override
+    return sanitized
+
+
 class FrontendRegistry:
     """Registry for frontend catalog, settings, and chat preview metadata."""
 
@@ -1568,11 +1702,11 @@ class FrontendRegistry:
                         "default": "hybrid",
                         "options": [
                             {"value": "hybrid", "label": "自動選定・高精度"},
-                            {"value": "semantic", "label": "意味検索"},
+                            {"value": "vector", "label": "意味検索"},
                             {"value": "catalog_ai", "label": "別AIに全体から選ばせる"},
                             {"value": "all_with_hints", "label": "全機能＋おすすめ"},
                             {"value": "all_schemas", "label": "全schemaを公開・デバッグ"},
-                            {"value": "lexical", "label": "軽量検索"},
+                            {"value": "manual_only", "label": "手動のみ"},
                         ],
                         "help": "通常は自動選定・高精度のままで構いません。",
                         "advanced": True,
@@ -1590,8 +1724,8 @@ class FrontendRegistry:
                         "default": False,
                     },
                     {
-                        "id": "semantic_backend",
-                        "label": "Semantic backend",
+                        "id": "vector_backend",
+                        "label": "Vector backend",
                         "type": "select",
                         "default": "auto",
                         "options": [
@@ -1619,12 +1753,12 @@ class FrontendRegistry:
                         "type": "number",
                         "default": 8,
                         "min": 1,
-                        "max": 24,
+                        "max": 16,
                         "advanced": True,
                     },
                     {
-                        "id": "semantic_candidate_limit",
-                        "label": "Semantic候補数",
+                        "id": "vector_candidate_limit",
+                        "label": "候補数",
                         "type": "number",
                         "default": 32,
                         "min": 8,
@@ -2624,37 +2758,45 @@ class FrontendRegistry:
                 "default_target": "",
                 "default_mode": "auto",
                 "selection_strategy": "hybrid",
+                "vector_backend": "auto",
                 "semantic_backend": "auto",
                 "embedding_model": "",
+                "vector_candidate_limit": 32,
                 "semantic_candidate_limit": 32,
                 "final_tool_limit": 8,
-                "catalog_ai_direct_limit": 80,
+                "catalog_ai_direct_limit": 100,
                 "selector_trace": "summary",
                 "show_selection_summary": True,
                 "show_selection_reasons": False,
                 "show_selected_tools_in_answer": True,
                 "expand_selection_reasoning": False,
+                "permission_defaults": {
+                    "read": "auto",
+                    "write": "confirm",
+                    "send": "confirm",
+                    "shell": "confirm",
+                    "computer": "confirm",
+                    "destructive": "confirm",
+                },
                 "standard_permissions": {
                     "read": "auto",
-                    "search": "auto",
-                    "create": "confirm",
-                    "update": "confirm",
+                    "write": "confirm",
                     "send": "confirm",
-                    "execute": "confirm",
+                    "shell": "confirm",
                     "computer": "confirm",
-                    "delete": "confirm",
+                    "destructive": "confirm",
                 },
                 "action_permissions": {
                     "read": "auto",
-                    "search": "auto",
-                    "create": "confirm",
-                    "update": "confirm",
+                    "write": "confirm",
                     "send": "confirm",
-                    "execute": "confirm",
+                    "shell": "confirm",
                     "computer": "confirm",
-                    "delete": "confirm",
+                    "destructive": "confirm",
                 },
+                "service_permissions": {},
                 "service_permission_overrides": {},
+                "tool_permissions": {},
                 "tool_permission_overrides": {},
                 "pinned_service_ids": [],
                 "keep_selected_tools_after_send": False,
@@ -3140,7 +3282,7 @@ class FrontendRegistry:
                     tools["default_mode"] = "auto"
             if "selection_strategy" not in tools:
                 if legacy_tool_assist_mode == "vector":
-                    tools["selection_strategy"] = "lexical"
+                    tools["selection_strategy"] = "vector"
                 elif legacy_tool_assist_mode == "all_schemas":
                     tools["selection_strategy"] = "all_schemas"
                 else:
@@ -3177,10 +3319,15 @@ class FrontendRegistry:
         )
         default_mode = str(tools.get("default_mode") or "auto").strip().lower()
         tools["default_mode"] = default_mode if default_mode in {"auto", "review", "manual", "none"} else "auto"
-        selection_strategy = str(tools.get("selection_strategy") or "hybrid").strip().lower()
-        tools["selection_strategy"] = selection_strategy if selection_strategy in {"hybrid", "semantic", "catalog_ai", "all_with_hints", "all_schemas", "lexical"} else "hybrid"
-        semantic_backend = str(tools.get("semantic_backend") or "auto").strip().lower()
-        tools["semantic_backend"] = semantic_backend if semantic_backend in {"auto", "embedding", "lexical"} else "auto"
+        tools["selection_strategy"] = _canonical_tool_selection_strategy(tools.get("selection_strategy"), "hybrid")
+        legacy_semantic_backend = str(tools.get("semantic_backend") or "").strip().lower()
+        configured_vector_backend = str(tools.get("vector_backend") or "").strip().lower()
+        if settings_version < 3 and legacy_semantic_backend and configured_vector_backend in {"", "auto"}:
+            vector_backend = legacy_semantic_backend
+        else:
+            vector_backend = configured_vector_backend or legacy_semantic_backend or "auto"
+        tools["vector_backend"] = vector_backend if vector_backend in {"auto", "embedding", "lexical"} else "auto"
+        tools["semantic_backend"] = tools["vector_backend"]
         selector_trace = str(tools.get("selector_trace") or "summary").strip().lower()
         tools["selector_trace"] = selector_trace if selector_trace in {"none", "summary", "full"} else "summary"
         tools["embedding_model"] = str(tools.get("embedding_model") or "").strip()
@@ -3202,56 +3349,37 @@ class FrontendRegistry:
         tools["show_selection_reasons"] = show_reasons
         tools["show_selected_tools_in_answer"] = show_summary
         tools["expand_selection_reasoning"] = show_reasons
-        standard_permissions = tools.get("standard_permissions")
-        if not isinstance(standard_permissions, dict):
-            standard_permissions = {}
-        action_permissions = tools.get("action_permissions")
-        if not isinstance(action_permissions, dict):
-            action_permissions = {}
-        for action, default in {
-            "read": "auto",
-            "search": "auto",
-            "create": "confirm",
-            "update": "confirm",
-            "send": "confirm",
-            "execute": "confirm",
-            "computer": "confirm",
-            "delete": "confirm",
-        }.items():
-            value = str(standard_permissions.get(action) or action_permissions.get(action) or default).strip().lower()
-            if action == "delete" and value == "auto":
-                value = "confirm"
-            value = value if value in {"auto", "confirm", "block"} else default
-            standard_permissions[action] = value
-            action_permissions[action] = value
-        tools["standard_permissions"] = standard_permissions
-        tools["action_permissions"] = action_permissions
-        service_permission_overrides = tools.get("service_permission_overrides")
-        if not isinstance(service_permission_overrides, dict):
-            service_permission_overrides = {}
-        sanitized_service_overrides: dict[str, dict[str, str] | str] = {}
-        for service_id, raw_override in service_permission_overrides.items():
-            clean_service_id = str(service_id).strip()
-            if not clean_service_id:
-                continue
-            if isinstance(raw_override, str):
-                value = raw_override.strip().lower()
-                if value in {"auto", "confirm", "block"}:
-                    sanitized_service_overrides[clean_service_id] = value
-                continue
-            if not isinstance(raw_override, dict):
-                continue
-            clean_override: dict[str, str] = {}
-            for action, raw_value in raw_override.items():
-                clean_action = str(action).strip()
-                value = str(raw_value or "").strip().lower()
-                if clean_action == "delete" and value == "auto":
-                    value = "confirm"
-                if clean_action and value in {"auto", "confirm", "block"}:
-                    clean_override[clean_action] = value
-            if clean_override:
-                sanitized_service_overrides[clean_service_id] = clean_override
-        tools["service_permission_overrides"] = sanitized_service_overrides
+        if settings_version < 3:
+            permission_defaults = _canonical_permission_defaults(
+                _legacy_permission_source(tools.get("standard_permissions")),
+                _legacy_permission_source(tools.get("action_permissions")),
+            )
+        else:
+            permission_defaults = _canonical_permission_defaults(
+                tools.get("permission_defaults"),
+                tools.get("standard_permissions"),
+                tools.get("action_permissions"),
+            )
+        tools["permission_defaults"] = permission_defaults
+        legacy_permissions = _legacy_permission_defaults(permission_defaults)
+        tools["standard_permissions"] = legacy_permissions
+        tools["action_permissions"] = legacy_permissions
+        service_permissions = _canonical_permission_overrides(
+            {
+                **(tools.get("service_permission_overrides") if isinstance(tools.get("service_permission_overrides"), dict) else {}),
+                **(tools.get("service_permissions") if isinstance(tools.get("service_permissions"), dict) else {}),
+            }
+        )
+        tool_permissions = _canonical_permission_overrides(
+            {
+                **(tools.get("tool_permission_overrides") if isinstance(tools.get("tool_permission_overrides"), dict) else {}),
+                **(tools.get("tool_permissions") if isinstance(tools.get("tool_permissions"), dict) else {}),
+            }
+        )
+        tools["service_permissions"] = service_permissions
+        tools["service_permission_overrides"] = service_permissions
+        tools["tool_permissions"] = tool_permissions
+        tools["tool_permission_overrides"] = tool_permissions
         pinned_service_ids = tools.get("pinned_service_ids")
         if not isinstance(pinned_service_ids, list):
             pinned_service_ids = []
@@ -3271,17 +3399,24 @@ class FrontendRegistry:
         except (TypeError, ValueError):
             tools["tool_assist_limit"] = 8
         try:
-            tools["semantic_candidate_limit"] = max(8, min(64, int(tools.get("semantic_candidate_limit", 32))))
+            legacy_semantic_candidate_limit = tools.get("semantic_candidate_limit")
+            configured_vector_candidate_limit = tools.get("vector_candidate_limit")
+            if settings_version < 3 and legacy_semantic_candidate_limit not in (None, "") and configured_vector_candidate_limit in (None, "", 32):
+                candidate_limit = legacy_semantic_candidate_limit
+            else:
+                candidate_limit = configured_vector_candidate_limit if configured_vector_candidate_limit not in (None, "") else legacy_semantic_candidate_limit
+            tools["vector_candidate_limit"] = max(8, min(64, int(candidate_limit if candidate_limit not in (None, "") else 32)))
         except (TypeError, ValueError):
-            tools["semantic_candidate_limit"] = 32
+            tools["vector_candidate_limit"] = 32
+        tools["semantic_candidate_limit"] = tools["vector_candidate_limit"]
         try:
-            tools["final_tool_limit"] = max(1, min(24, int(tools.get("final_tool_limit", tools.get("tool_assist_limit", 8)))))
+            tools["final_tool_limit"] = max(1, min(16, int(tools.get("final_tool_limit", tools.get("tool_assist_limit", 8)))))
         except (TypeError, ValueError):
             tools["final_tool_limit"] = 8
         try:
-            tools["catalog_ai_direct_limit"] = max(20, min(200, int(tools.get("catalog_ai_direct_limit", 80))))
+            tools["catalog_ai_direct_limit"] = max(20, min(200, int(tools.get("catalog_ai_direct_limit", 100))))
         except (TypeError, ValueError):
-            tools["catalog_ai_direct_limit"] = 80
+            tools["catalog_ai_direct_limit"] = 100
         legacy_default_target = self._legacy_default_target(refreshed)
         if "default_target" not in tools or (not str(tools.get("default_target") or "").strip() and legacy_default_target):
             tools["default_target"] = legacy_default_target

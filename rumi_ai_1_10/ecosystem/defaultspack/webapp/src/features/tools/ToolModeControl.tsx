@@ -1,4 +1,4 @@
-import { Ban, Check, ChevronDown, ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
+import { Ban, Check, ChevronDown, ShieldQuestion, SlidersHorizontal, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
@@ -17,10 +17,10 @@ const MODE_OPTIONS: Array<{
   description: string;
   icon: typeof Sparkles;
 }> = [
-  { mode: "auto", label: "機能 自動", shortLabel: "自動", title: "自動で選ぶ", description: "依頼に必要な機能だけをRumiが選びます", icon: Sparkles },
-  { mode: "review", label: "機能 確認", shortLabel: "確認", title: "使う前に確認", description: "候補を確認してから回答を開始します", icon: ShieldCheck },
-  { mode: "manual", label: "機能 手動", shortLabel: "手動", title: "自分で選ぶ", description: "選んだ機能だけを候補にします", icon: SlidersHorizontal },
-  { mode: "none", label: "機能 なし", shortLabel: "なし", title: "機能を使わない", description: "このメッセージでは外部機能を使いません", icon: Ban },
+  { mode: "auto", label: "機能: 自動", shortLabel: "自動", title: "自動で選ぶ", description: "依頼に必要な機能だけをRumiが選びます", icon: Sparkles },
+  { mode: "review", label: "機能: 確認", shortLabel: "確認", title: "使用前に確認", description: "選んだ機能を確認してから実行します", icon: ShieldQuestion },
+  { mode: "manual", label: "機能: 手動", shortLabel: "手動", title: "手動で選ぶ", description: "追加した機能だけを候補にします", icon: SlidersHorizontal },
+  { mode: "none", label: "機能: なし", shortLabel: "なし", title: "機能を使わない", description: "このメッセージでは外部機能を使いません", icon: Ban },
 ];
 
 export function ToolModeControl({
@@ -125,6 +125,10 @@ export function ToolModeControl({
         style={menuStyle ?? undefined}
         className="fixed rumi-layer-command-palette overflow-y-auto rounded-[1.35rem] border border-zinc-700/70 bg-[#2b2b2b] p-2 shadow-2xl shadow-black/40 max-[760px]:rounded-[1.6rem]"
       >
+        <div className="px-3 pb-2 pt-2">
+          <p className="text-sm font-semibold text-zinc-100">機能の使い方</p>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">Rumiがこの依頼で使える機能を決めます</p>
+        </div>
         {MODE_OPTIONS.map((option) => {
           const OptionIcon = option.icon;
           const selected = option.mode === mode;
@@ -155,6 +159,28 @@ export function ToolModeControl({
             </button>
           );
         })}
+        {mode === "manual" && manualCount === 0 && (
+          <p className="mx-2 mt-2 rounded-xl border border-zinc-700/70 bg-zinc-900/70 px-3 py-2 text-[11px] leading-5 text-zinc-400">
+            手動モードには機能が選ばれていません。このまま送ると機能なしで回答します。
+          </p>
+        )}
+        {mode === "none" && (
+          <p className="mx-2 mt-2 rounded-xl border border-zinc-700/70 bg-zinc-900/70 px-3 py-2 text-[11px] leading-5 text-zinc-400">
+            Web検索、ファイル、GitHubなどは使用しません。
+          </p>
+        )}
+        <div className="mt-2 border-t border-zinc-700/60 p-2">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onOpenPicker?.();
+            }}
+            className="h-9 w-full rounded-xl border border-zinc-700 px-3 text-xs font-medium text-zinc-200 hover:bg-zinc-800"
+          >
+            機能を選ぶ
+          </button>
+        </div>
       </div>
     </>,
     document.body,

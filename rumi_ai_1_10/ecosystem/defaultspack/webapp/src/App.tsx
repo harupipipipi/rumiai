@@ -5455,6 +5455,7 @@ function ChatApp() {
       droppedWidgets={activeDroppedWidgets}
       selectedToolIds={selectedToolIds}
       actionApprovalMode={actionApprovalMode}
+      toolSelectionMode={toolSelectionController.state.effectiveMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
       toolSelectionReview={toolSelectionController.state.pendingReview}
       keyboardButtonNavigation={keyboardButtonNavigation}
@@ -5466,6 +5467,7 @@ function ChatApp() {
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onActionApprovalModeChange={handleActionApprovalModeChange}
+      onToolSelectionModeChange={(nextMode) => toolSelectionController.setTurnMode(nextMode)}
       onToolSelectionTargetRemove={toolSelectionController.removeTarget}
       onToolSelectionReviewApprove={handleToolReviewApprove}
       onToolSelectionReviewEdit={handleToolReviewEdit}

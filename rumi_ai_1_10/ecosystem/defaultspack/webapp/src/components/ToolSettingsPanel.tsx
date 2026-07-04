@@ -61,7 +61,7 @@ export function ToolSettingsPanel({
     } else {
       next[toolId] = value;
     }
-    onSettingChange("tools", "tool_permission_overrides", next);
+    onSettingChange("tools", "tool_permissions", next);
   };
 
   return (

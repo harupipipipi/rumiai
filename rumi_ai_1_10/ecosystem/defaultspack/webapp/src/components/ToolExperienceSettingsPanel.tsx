@@ -18,34 +18,30 @@ const MODE_OPTIONS: Array<{ value: ToolSelectionMode; label: string; note: strin
 ];
 
 const STRATEGY_OPTIONS: Array<{ value: ToolSelectionStrategy; label: string; note: string; warning?: boolean }> = [
-  { value: "hybrid", label: "自動：ベクトルで絞って別のAIが決める", note: "普段はこのままで、速さと精度を両立します" },
-  { value: "semantic", label: "ベクトルで選ぶ", note: "本文との近さだけで候補を絞ります" },
+  { value: "hybrid", label: "Hybrid（おすすめ）", note: "意味検索で絞り込み、補助AIが最終選定します" },
+  { value: "vector", label: "意味検索のみ", note: "Embeddingまたはローカル語句順位で候補を絞ります" },
   { value: "catalog_ai", label: "別のAIがすべての機能から選ぶ", note: "機能カタログを補助AIに渡して選ばせます" },
   { value: "all_with_hints", label: "すべて読み込む＋おすすめを付ける", note: "全スキーマを渡し、推奨順と理由も添えます", warning: true },
   { value: "all_schemas", label: "すべて読み込む", note: "全ツールスキーマをそのまま渡します", warning: true },
-  { value: "lexical", label: "軽量キーワードで選ぶ", note: "埋め込みや補助AIを使わず、ローカルな語句一致で選びます" },
+  { value: "manual_only", label: "手動のみ", note: "明示した機能だけを候補にします" },
 ];
 
 const STANDARD_PERMISSION_ROWS: Array<{ keys: string[]; label: string; note: string; allowAuto?: boolean }> = [
-  { keys: ["read"], label: "読む", note: "ファイル、ブラウザ、外部サービスから情報を読む" },
-  { keys: ["search"], label: "検索する", note: "Web、リポジトリ、接続済みサービスから探す" },
-  { keys: ["create"], label: "作る", note: "ファイル、ドキュメント、チケットなどを新規作成する" },
-  { keys: ["update"], label: "更新する", note: "既存のファイル、ドキュメント、チケットなどを編集する" },
-  { keys: ["send"], label: "送信する", note: "メール、Slack、外部APIへ内容を送る" },
-  { keys: ["execute"], label: "実行する", note: "コマンド、コード、端末操作を実行する" },
-  { keys: ["computer"], label: "コンピュータ操作", note: "クリック、キーボード入力、画面操作を行う" },
-  { keys: ["delete"], label: "削除・push・reset", note: "破壊的または戻しにくい操作を行う", allowAuto: false },
+  { keys: ["read"], label: "情報を見る・検索する", note: "ファイル、Web、接続済みサービスから情報を読む" },
+  { keys: ["write"], label: "ファイルやデータを変更する", note: "ファイル、ドキュメント、チケットなどを作成・編集する" },
+  { keys: ["send"], label: "メール・投稿・メッセージを送る", note: "外部サービスへ内容を送信します" },
+  { keys: ["shell"], label: "Terminal・Shellを実行する", note: "コマンド、コード、端末操作を実行する" },
+  { keys: ["computer"], label: "ブラウザ・PCを操作する", note: "クリック、キーボード入力、画面操作を行う" },
+  { keys: ["destructive"], label: "削除・push・resetなど", note: "破壊的または戻しにくい操作を行う", allowAuto: false },
 ];
 
 const ACTION_LABELS: Record<string, string> = {
-  read: "読む",
-  search: "検索",
-  create: "作成",
-  update: "更新",
+  read: "情報を見る",
+  write: "変更する",
   send: "送信",
-  execute: "実行",
+  shell: "Shell",
   computer: "PC操作",
-  delete: "削除・push・reset",
+  destructive: "削除・push・reset",
 };
 
 const DECISION_LABELS: Record<PermissionDecision, string> = {
@@ -343,8 +339,8 @@ export function ToolExperienceSettingsPanel({
   const toolSettings = settingsValues.tools ?? {};
   const modelSettings = settingsValues.models ?? {};
   const utilityModels = recordValue(modelSettings.utility_models);
-  const standardPermissions = recordValue(toolSettings.standard_permissions);
-  const serviceOverrides = recordValue(toolSettings.service_permission_overrides);
+  const standardPermissions = recordValue(toolSettings.permission_defaults ?? toolSettings.standard_permissions);
+  const serviceOverrides = recordValue(toolSettings.service_permissions ?? toolSettings.service_permission_overrides);
   const strategy = stringValue(toolSettings.selection_strategy, "hybrid") as ToolSelectionStrategy;
   const defaultMode = stringValue(toolSettings.default_mode, "auto") as ToolSelectionMode;
 
@@ -407,11 +403,11 @@ export function ToolExperienceSettingsPanel({
     for (const key of keys) {
       next[key] = value;
     }
-    updateToolSetting("standard_permissions", next);
+    updateToolSetting("permission_defaults", next);
   };
   const updateServiceOverride = (serviceId: string, actionClass: string, value: PermissionDecision) => {
     const nextService = { ...recordValue(serviceOverrides[serviceId]), [actionClass]: value };
-    updateToolSetting("service_permission_overrides", { ...serviceOverrides, [serviceId]: nextService });
+    updateToolSetting("service_permissions", { ...serviceOverrides, [serviceId]: nextService });
   };
 
   const handleStrategySelect = (value: ToolSelectionStrategy) => {
@@ -522,7 +518,7 @@ export function ToolExperienceSettingsPanel({
                       <div className="text-sm text-zinc-300">{ACTION_LABELS[actionClass] ?? actionClass}</div>
                       <PermissionSegmented
                         value={permissionValue(recordValue(serviceOverrides[service.service_id])[actionClass] ?? standardPermissions[actionClass], "confirm")}
-                        allowAuto={actionClass !== "dangerous" && actionClass !== "delete"}
+                        allowAuto={actionClass !== "destructive"}
                         onChange={(next) => updateServiceOverride(service.service_id, actionClass, next)}
                       />
                     </div>
@@ -608,18 +604,18 @@ export function ToolExperienceSettingsPanel({
       <section className="grid gap-3 lg:grid-cols-3">
         <label className="rounded-lg border border-zinc-800 bg-zinc-950/35 p-4">
           <span className="block text-sm font-medium text-zinc-100">候補数</span>
-          <span className="mt-1 block text-xs text-zinc-500">semantic_candidate_limit</span>
-          <input type="number" min={8} max={64} value={numberValue(toolSettings.semantic_candidate_limit, 24, 8, 64)} onChange={(event) => updateToolSetting("semantic_candidate_limit", numberValue(event.target.value, 24, 8, 64))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
+          <span className="mt-1 block text-xs text-zinc-500">vector_candidate_limit</span>
+          <input type="number" min={8} max={64} value={numberValue(toolSettings.vector_candidate_limit ?? toolSettings.semantic_candidate_limit, 32, 8, 64)} onChange={(event) => updateToolSetting("vector_candidate_limit", numberValue(event.target.value, 32, 8, 64))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
         </label>
         <label className="rounded-lg border border-zinc-800 bg-zinc-950/35 p-4">
           <span className="block text-sm font-medium text-zinc-100">最終ツール数</span>
           <span className="mt-1 block text-xs text-zinc-500">final_tool_limit</span>
-          <input type="number" min={1} max={24} value={numberValue(toolSettings.final_tool_limit, 8, 1, 24)} onChange={(event) => updateToolSetting("final_tool_limit", numberValue(event.target.value, 8, 1, 24))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
+          <input type="number" min={1} max={16} value={numberValue(toolSettings.final_tool_limit, 8, 1, 16)} onChange={(event) => updateToolSetting("final_tool_limit", numberValue(event.target.value, 8, 1, 16))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
         </label>
         <label className="rounded-lg border border-zinc-800 bg-zinc-950/35 p-4">
           <span className="block text-sm font-medium text-zinc-100">全カタログ直読み上限</span>
           <span className="mt-1 block text-xs text-zinc-500">catalog_ai_direct_limit</span>
-          <input type="number" min={20} max={200} value={numberValue(toolSettings.catalog_ai_direct_limit, 80, 20, 200)} onChange={(event) => updateToolSetting("catalog_ai_direct_limit", numberValue(event.target.value, 80, 20, 200))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
+          <input type="number" min={20} max={200} value={numberValue(toolSettings.catalog_ai_direct_limit, 100, 20, 200)} onChange={(event) => updateToolSetting("catalog_ai_direct_limit", numberValue(event.target.value, 100, 20, 200))} className="mt-3 w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-600" />
         </label>
       </section>
       <div className="grid gap-4 xl:grid-cols-2">
@@ -688,7 +684,7 @@ export function ToolExperienceSettingsPanel({
             tools={tools}
             disabledToolIds={Array.isArray(toolSettings.disabled_tool_ids) ? toolSettings.disabled_tool_ids.map((item) => String(item)).filter(Boolean) : []}
             hiddenToolIds={Array.isArray(toolSettings.hidden_tool_ids) ? toolSettings.hidden_tool_ids.map((item) => String(item)).filter(Boolean) : []}
-            toolPermissionOverrides={recordValue(toolSettings.tool_permission_overrides)}
+            toolPermissionOverrides={recordValue(toolSettings.tool_permissions ?? toolSettings.tool_permission_overrides)}
             onSettingChange={onSettingChange}
           />
         </div>

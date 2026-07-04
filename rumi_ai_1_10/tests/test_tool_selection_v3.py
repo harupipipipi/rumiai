@@ -96,7 +96,7 @@ def test_block_permission_removes_candidate_but_confirm_remains_selectable():
         settings={
             "tools": {
                 "selection_strategy": "all_schemas",
-                "tool_permission_overrides": {"github.search_code": "block"},
+                "tool_permissions": {"github.search_code": "block"},
             }
         }
     )
@@ -164,6 +164,36 @@ def test_unknown_connection_status_fails_closed():
     )
 
     assert [tool["tool_id"] for tool in decision.selected_tools] == ["web_search"]
+
+
+def test_service_catalog_exposes_v3_service_and_action_metadata():
+    from domain.tool.service_catalog import ToolServiceCatalog
+
+    tools = [
+        {
+            "tool_id": "mcp__linear__delete_issue",
+            "name": "delete_issue",
+            "summary": "Delete a Linear issue.",
+            "metadata": {"server_id": "linear"},
+        },
+        {
+            "tool_id": "github_push_branch",
+            "name": "Push Branch",
+            "summary": "Push commits to GitHub.",
+            "metadata": {"service_id": "github"},
+        },
+    ]
+
+    catalog = ToolServiceCatalog(tools)
+    records = {record["tool_id"]: record for record in catalog.compact_records()}
+    services = {service["service_id"]: service for service in catalog.services()}
+
+    assert records["mcp__linear__delete_issue"]["service_id"] == "mcp:linear"
+    assert records["mcp__linear__delete_issue"]["action_class"] == "destructive"
+    assert records["github_push_branch"]["action_class"] == "destructive"
+    assert services["mcp:linear"]["source"] == "registry"
+    assert services["mcp:linear"]["tool_count"] == 1
+    assert services["mcp:linear"]["action_classes"] == ["destructive"]
 
 
 def test_conversation_preferences_apply_when_turn_has_no_override():

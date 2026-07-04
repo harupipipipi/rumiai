@@ -3,10 +3,51 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getRailFloatingMenuPosition, RightSidebar } from "./RightSidebar";
+import { getRailFloatingMenuPosition, RightSidebar, toolServiceCardsFromCatalog } from "./RightSidebar";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
+
+test("tool hub groups services from the backend catalog", () => {
+  const services = toolServiceCardsFromCatalog(
+    [
+      { id: "github_issue_search", label: "Issue Search", category: "tool" },
+      { id: "web_search", label: "Web Search", category: "tool" },
+    ],
+    {
+      count: 2,
+      services: [
+        {
+          service_id: "github",
+          label: "GitHub",
+          description: "Repository work",
+          tool_ids: ["github_issue_search"],
+          connection_status: "connected",
+          tool_count: 1,
+          action_classes: ["read", "write"],
+        },
+        {
+          service_id: "web",
+          label: "Web",
+          description: "Search the web",
+          tool_ids: ["web_search"],
+          connection_status: "connected",
+          tool_count: 1,
+          action_classes: ["read"],
+        },
+      ],
+      tools: [
+        { tool_id: "github_issue_search", service_id: "github", service_label: "GitHub", name: "Issue Search", action_class: "read" },
+        { tool_id: "web_search", service_id: "web", service_label: "Web", name: "Web Search", action_class: "read" },
+      ],
+    },
+  );
+
+  assert.equal(services[0].id, "github");
+  assert.equal(services[0].connectionStatus, "connected");
+  assert.deepEqual(services[0].actionClasses, ["read", "write"]);
+  assert.deepEqual(services[0].items.map((item) => item.id), ["github_issue_search"]);
+});
 
 test("left sidebar default does not render every tool detail panel", () => {
   const html = renderToStaticMarkup(

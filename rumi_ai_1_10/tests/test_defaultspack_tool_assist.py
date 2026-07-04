@@ -434,7 +434,7 @@ def test_run_request_tool_selection_auto_preserves_settings_driven_selection(mon
             return [{"tool_id": "web_search", "name": "Web Search", "summary": "Search the web"}]
 
     monkeypatch.setattr(run_request, "ToolRegistry", lambda: FakeRegistry())
-    monkeypatch.setattr(run_request, "_read_frontend_settings", lambda: {"tools": {"selection_strategy": "lexical"}})
+    monkeypatch.setattr(run_request, "_read_frontend_settings", lambda: {"tools": {"selection_strategy": "vector"}})
     monkeypatch.setattr(run_request, "resolve_runtime_profile_context", lambda context: context or {})
     monkeypatch.setattr(run_request, "filter_tool_definitions_for_runtime_profile", lambda tools, *_args, **_kwargs: tools)
     monkeypatch.setattr(run_request, "adapt_tool_definitions", lambda tools: tools)

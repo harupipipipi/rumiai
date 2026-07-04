@@ -68,8 +68,24 @@ SERVICE_SUMMARIES: dict[str, str] = {
     "other": "その他の機能を扱います",
 }
 
-ACTION_ORDER = ["read", "search", "create", "update", "send", "execute", "computer", "delete"]
+ACTION_ORDER = ["read", "write", "send", "shell", "computer", "destructive"]
 ACTION_RANK = {name: index for index, name in enumerate(ACTION_ORDER)}
+ACTION_ALIASES: dict[str, str] = {
+    "search": "read",
+    "get": "read",
+    "list": "read",
+    "status": "read",
+    "create": "write",
+    "update": "write",
+    "patch": "write",
+    "edit": "write",
+    "execute": "shell",
+    "exec": "shell",
+    "terminal": "shell",
+    "delete": "destructive",
+    "remove": "destructive",
+    "dangerous": "destructive",
+}
 
 
 @dataclass
@@ -77,18 +93,28 @@ class ToolService:
     service_id: str
     label: str
     summary: str
+    icon: str = "wrench"
+    aliases: list[str] = field(default_factory=list)
+    source: str = "registry"
     tools: list[dict[str, Any]] = field(default_factory=list)
 
     def compact(self) -> dict[str, Any]:
         permissions = _summarize_actions(self.tools)
         connection_status = _combined_connection_status(self.tools)
+        tool_ids = [_tool_id(tool) for tool in self.tools if _tool_id(tool)]
         return {
+            "id": self.service_id,
             "service_id": self.service_id,
             "label": self.label,
+            "description": self.summary,
             "summary": self.summary,
+            "icon": self.icon,
+            "aliases": list(self.aliases),
+            "tool_ids": tool_ids,
             "connection_status": connection_status,
             "tool_count": len(self.tools),
             "action_classes": permissions,
+            "source": self.source,
         }
 
 
@@ -116,7 +142,10 @@ class ToolServiceCatalog:
                 grouped[service_id] = ToolService(
                     service_id=service_id,
                     label=record["service_label"],
-                    summary=SERVICE_SUMMARIES.get(service_id, SERVICE_SUMMARIES["other"]),
+                    summary=record["service_description"],
+                    icon=record["service_icon"],
+                    aliases=list(record.get("service_aliases") or []),
+                    source=record["source"],
                 )
             grouped[service_id].tools.append({**tool, "_compact_record": record})
         return [grouped[key].compact() for key in sorted(grouped, key=_service_sort_key)]
@@ -140,10 +169,14 @@ class ToolServiceCatalog:
         service_id = infer_service_id(tool)
         action_class = infer_action_class(tool)
         metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+        service_label = infer_service_label(tool, service_id)
         return {
             "tool_id": tool_id,
             "service_id": service_id,
-            "service_label": SERVICE_LABELS.get(service_id, SERVICE_LABELS["other"]),
+            "service_label": service_label,
+            "service_description": infer_service_description(tool, service_id),
+            "service_icon": infer_service_icon(tool, service_id),
+            "service_aliases": infer_service_aliases(tool, service_id, service_label),
             "name": str(tool.get("display_name") or tool.get("name") or tool_id).strip() or tool_id,
             "summary": str(tool.get("summary") or tool.get("description") or "").strip(),
             "action_class": action_class,
@@ -152,6 +185,7 @@ class ToolServiceCatalog:
             "connection_status": infer_connection_status(tool),
             "minimum_permission": "confirm" if minimum_requires_confirm(tool) else "auto",
             "tags": _string_list(tool.get("tags")) + _string_list(metadata.get("tags")),
+            "source": str(metadata.get("source") or tool.get("source") or "registry").strip() or "registry",
         }
 
 
@@ -163,10 +197,10 @@ def infer_service_id(tool: dict[str, Any]) -> str:
     ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
     explicit = str(metadata.get("service_id") or ui.get("service_id") or "").strip().lower()
     if explicit:
-        return explicit if explicit in SERVICE_LABELS else "other"
+        return _normalize_service_id(explicit)
     mcp_name = str(metadata.get("server_id") or metadata.get("mcp_server_id") or "").strip()
     if tool_id.startswith("mcp__") or mcp_name:
-        return "mcp"
+        return f"mcp:{_normalize_service_id(mcp_name)}" if mcp_name else "mcp"
     haystack = " ".join([tool_id, name, category])
     rules: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("github", ("github", "pull_request", "pr_", "issue")),
@@ -191,12 +225,68 @@ def infer_service_id(tool: dict[str, Any]) -> str:
     return "other"
 
 
+def infer_service_label(tool: dict[str, Any], service_id: str | None = None) -> str:
+    service_id = service_id or infer_service_id(tool)
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
+    explicit = str(metadata.get("service_label") or ui.get("service_label") or "").strip()
+    if explicit:
+        return explicit
+    if service_id.startswith("mcp:"):
+        return f"MCP: {service_id.split(':', 1)[1]}"
+    return SERVICE_LABELS.get(service_id, _title_from_service_id(service_id))
+
+
+def infer_service_description(tool: dict[str, Any], service_id: str | None = None) -> str:
+    service_id = service_id or infer_service_id(tool)
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
+    explicit = str(metadata.get("service_description") or ui.get("service_description") or "").strip()
+    if explicit:
+        return explicit
+    if service_id.startswith("mcp:"):
+        return "MCP接続と外部サーバーToolを扱います"
+    return SERVICE_SUMMARIES.get(service_id, SERVICE_SUMMARIES["other"])
+
+
+def infer_service_icon(tool: dict[str, Any], service_id: str | None = None) -> str:
+    service_id = service_id or infer_service_id(tool)
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
+    explicit = str(metadata.get("service_icon") or ui.get("service_icon") or "").strip()
+    if explicit:
+        return explicit
+    return service_id.split(":", 1)[0] if service_id else "wrench"
+
+
+def infer_service_aliases(tool: dict[str, Any], service_id: str, service_label: str) -> list[str]:
+    metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+    ui = tool.get("ui") if isinstance(tool.get("ui"), dict) else {}
+    aliases = [
+        service_id,
+        service_label,
+        *_string_list(metadata.get("service_aliases")),
+        *_string_list(ui.get("service_aliases")),
+    ]
+    seen: set[str] = set()
+    result: list[str] = []
+    for alias in aliases:
+        normalized = str(alias or "").strip()
+        if not normalized or normalized.lower() in seen:
+            continue
+        seen.add(normalized.lower())
+        result.append(normalized)
+    return result
+
+
 def infer_action_class(tool: dict[str, Any]) -> str:
     tool_id = _tool_id(tool).lower()
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
     raw = str(tool.get("action_class") or metadata.get("action_class") or tool.get("action_type") or metadata.get("action_type") or "").strip().lower()
-    if raw in ACTION_RANK:
-        return raw
+    if raw:
+        canonical = ACTION_ALIASES.get(raw, raw)
+        if canonical in ACTION_RANK:
+            return canonical
     haystack = " ".join([
         tool_id,
         str(tool.get("name") or "").lower(),
@@ -204,20 +294,18 @@ def infer_action_class(tool: dict[str, Any]) -> str:
         " ".join(_string_list(tool.get("tags"))).lower(),
     ])
     rules: tuple[tuple[str, tuple[str, ...]], ...] = (
-        ("delete", ("delete", "remove", "cancel", "削除")),
+        ("destructive", ("delete", "remove", "clear", "reset", "push", "cancel", "削除")),
         ("computer", ("computer", "browser_computer", "mouse", "keyboard", "click")),
-        ("execute", ("exec", "terminal", "shell", "python", "node", "workflow_run", "job_create")),
-        ("send", ("send", "push", "publish", "external_send", "slack_send", "line_push", "discord_send", "gmail_draft")),
-        ("update", ("update", "patch", "write", "edit", "persist", "retry", "resume")),
-        ("create", ("create", "generate", "scaffold", "define")),
-        ("search", ("search", "rank", "query", "find")),
-        ("read", ("read", "list", "status", "export", "extract", "preview")),
+        ("shell", ("exec", "terminal", "shell", "python", "node", "command", "workflow_run", "job_create")),
+        ("send", ("send", "reply", "forward", "post", "publish", "external_send", "slack_send", "line_push", "discord_send", "gmail_draft")),
+        ("write", ("create", "generate", "scaffold", "define", "update", "patch", "write", "edit", "persist", "retry", "resume", "commit")),
+        ("read", ("read", "search", "list", "get", "status", "screenshot", "rank", "query", "find", "export", "extract", "preview")),
     )
     for action, tokens in rules:
         if any(token in haystack for token in tokens):
             return action
     if bool(tool.get("write_action") or metadata.get("write_action")):
-        return "update"
+        return "write"
     return "read"
 
 
@@ -257,7 +345,7 @@ def minimum_requires_confirm(tool: dict[str, Any]) -> bool:
         return True
     if str(tool.get("risk") or metadata.get("risk") or "").strip().lower() in {"high"}:
         return True
-    return infer_action_class(tool) in {"create", "update", "send", "execute", "computer", "delete"}
+    return infer_action_class(tool) in {"write", "send", "shell", "computer", "destructive"}
 
 
 def more_restrictive_permission(left: str, right: str) -> str:
@@ -280,6 +368,8 @@ def _string_list(value: Any) -> list[str]:
 
 
 def _service_sort_key(service_id: str) -> tuple[int, str]:
+    if service_id.startswith("mcp:"):
+        return (SERVICE_ORDER.index("mcp"), service_id)
     try:
         return (SERVICE_ORDER.index(service_id), service_id)
     except ValueError:
@@ -300,3 +390,15 @@ def _combined_connection_status(tools: list[dict[str, Any]]) -> str:
     if any(status == "error" for status in statuses):
         return "error"
     return "unavailable"
+
+
+def _normalize_service_id(value: str) -> str:
+    normalized = value.strip().lower().replace("_", "-")
+    normalized = re.sub(r"[^a-z0-9:-]+", "-", normalized)
+    normalized = re.sub(r"-+", "-", normalized).strip("-")
+    return normalized.replace("-", "_") or "other"
+
+
+def _title_from_service_id(service_id: str) -> str:
+    value = service_id.split(":", 1)[-1].replace("_", " ").replace("-", " ").strip()
+    return value.title() if value else SERVICE_LABELS["other"]

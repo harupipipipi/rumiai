@@ -40,6 +40,7 @@ import { RuntimeCapabilityBanner } from "../components/RuntimeCapabilityBanner";
 import { WarmActionIcon } from "../components/WarmActionIcon";
 import { chatComposerResources } from "../features/chat/resources/chatComposerResources";
 import { ActionApprovalControl } from "../features/tools/ActionApprovalControl";
+import { ToolModeControl } from "../features/tools/ToolModeControl";
 import { ToolOverrideChips } from "../features/tools/ToolOverrideChips";
 import { ToolSelectionReviewCard } from "../features/tools/ToolSelectionReviewCard";
 import { fileToAttachment } from "../lib/attachments";
@@ -1411,6 +1412,7 @@ export function ComposerRenderer({
   droppedWidgets = [],
   selectedToolIds = [],
   actionApprovalMode = "ask",
+  toolSelectionMode = "auto",
   toolSelectionTargets = [],
   toolSelectionReview = null,
   keyboardButtonNavigation = false,
@@ -1422,6 +1424,7 @@ export function ComposerRenderer({
   onOpenModelManager,
   onOpenToolSettings,
   onActionApprovalModeChange,
+  onToolSelectionModeChange,
   onToolSelectionTargetRemove,
   onToolSelectionReviewApprove,
   onToolSelectionReviewEdit,
@@ -2306,6 +2309,28 @@ export function ComposerRenderer({
         <span className="rounded-full border border-orange-500/30 px-2 py-0.5 text-[11px] text-orange-300">
           YOLO
         </span>
+      ),
+    },
+    {
+      id: "tool-mode-control",
+      slot: "leading",
+      homeSlot: "toolbar-leading",
+      order: 48,
+      width: { basis: "auto", min: "4.5rem", max: "9rem", shrink: 1 },
+      className: "rumi-composer-dock-control",
+      render: () => (
+        <ToolModeControl
+          mode={toolSelectionMode}
+          manualCount={selectedToolIds.length}
+          disabled={isGenerating}
+          surfaceClassName={COMPOSER_CONTROL_SURFACE_CLASSNAME}
+          tabIndex={chromeButtonTabIndex}
+          onModeChange={(nextMode) => onToolSelectionModeChange?.(nextMode)}
+          onOpenPicker={() => {
+            setOpenFolder("tools");
+            setMenuOpen(true);
+          }}
+        />
       ),
     },
     {
