@@ -9,6 +9,7 @@ import base64
 import hmac
 import json
 import logging
+import queue
 import re
 import signal
 import threading
@@ -82,9 +83,11 @@ _IN_PROCESS_HTTP_FALLBACK_BLOCKS = {
 }
 
 _DIRECT_SAFE_GET_FALLBACK_BLOCKS = {
+    "blocks.ui.catalog",
     "blocks.ui.conversation_preview",
     "blocks.ui.settings",
 }
+_DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS = 10.0
 
 _CHAT_TURN_HTTP_FALLBACKS = {
     ("POST", "/v1/chat/completions"): ("defaultspack.chat_turn", "blocks.chat.send"),
@@ -448,7 +451,7 @@ class DefaultsHttpServer:
             and self._safe_get_fallback_allowed(module_name, payload)
         ):
             context["_defaultspack_http_route_adapter"] = True
-            return invoke_block(module_name, payload, context)
+            return self._invoke_safe_get_fallback_block(module_name, payload, context)
         # Standalone live-server scripts start transport with no kernel facade.
         # In that mode, capability bridge resolution can block while trying to
         # discover runtime services that do not exist. Call the block directly.
@@ -588,7 +591,7 @@ class DefaultsHttpServer:
         if fallback_block_module in _DIRECT_HTTP_COMPATIBILITY_BLOCKS:
             return invoke_block(fallback_block_module, payload, context)
         if fallback_block_module and self._safe_get_fallback_allowed(fallback_block_module, payload):
-            return invoke_block(fallback_block_module, payload, context)
+            return self._invoke_safe_get_fallback_block(fallback_block_module, payload, context)
         try:
             from domain.function_runtime.bridge import invoke_function
 
@@ -707,6 +710,48 @@ class DefaultsHttpServer:
         enriched = dict(payload)
         enriched["timeout_seconds"] = timeout_seconds
         return enriched
+
+    @staticmethod
+    def _safe_get_fallback_timeout_seconds():
+        env_value = os.environ.get("RUMI_DEFAULTSPACK_SAFE_GET_TIMEOUT_SECONDS", "").strip()
+        if env_value:
+            try:
+                return max(0.1, float(env_value))
+            except ValueError:
+                pass
+        return _DIRECT_SAFE_GET_FALLBACK_TIMEOUT_SECONDS
+
+    def _invoke_safe_get_fallback_block(self, module_name, payload, context):
+        timeout_seconds = self._safe_get_fallback_timeout_seconds()
+        result_queue = queue.Queue(maxsize=1)
+
+        def _target():
+            try:
+                result_queue.put(("ok", invoke_block(module_name, payload, context)))
+            except Exception as exc:
+                result_queue.put(("error", exc))
+
+        worker = threading.Thread(
+            target=_target,
+            name=f"defaultspack-safe-get-{str(module_name).rsplit('.', 1)[-1]}",
+            daemon=True,
+        )
+        worker.start()
+        try:
+            status, result = result_queue.get(timeout=timeout_seconds)
+        except queue.Empty:
+            logger.warning(
+                "defaultspack safe GET fallback timed out: module=%s timeout_seconds=%s",
+                module_name,
+                timeout_seconds,
+            )
+            return error(
+                f"bootstrap API timed out after {timeout_seconds:.1f}s",
+                "BOOTSTRAP_API_TIMEOUT",
+            )
+        if status == "error":
+            return error(str(result), "BOOTSTRAP_API_FAILED")
+        return result
 
     def _dev_auto_approve_pack(self, pack_id):
         rumi_env = os.environ.get("RUMI_ENVIRONMENT", "").lower()
