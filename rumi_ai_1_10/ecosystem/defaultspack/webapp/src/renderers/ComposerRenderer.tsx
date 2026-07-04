@@ -1227,6 +1227,13 @@ export type ModelCandidateMenuKeyAction =
   | { handled: true; type: "select"; index: number }
   | { handled: true; type: "close" };
 
+export type AtMentionMenuKeyAction =
+  | { handled: false }
+  | { handled: true; type: "move"; nextIndex: number }
+  | { handled: true; type: "select"; index: number }
+  | { handled: true; type: "close" }
+  | { handled: true; type: "block" };
+
 export function nextModelCandidateIndex(currentIndex: number, candidateCount: number, direction: 1 | -1): number {
   if (candidateCount <= 0) return 0;
   return (currentIndex + direction + candidateCount) % candidateCount;
@@ -1252,6 +1259,29 @@ export function modelCandidateMenuKeyAction(
   }
   if (key === "Escape") {
     return { handled: true, type: "close" };
+  }
+  return { handled: false };
+}
+
+export function atMentionMenuKeyAction(
+  key: string,
+  _shiftKey: boolean,
+  currentIndex: number,
+  candidateCount: number,
+): AtMentionMenuKeyAction {
+  if (key === "Escape") return { handled: true, type: "close" };
+  if (key === "Tab" || key === "Enter") {
+    if (candidateCount <= 0) return { handled: true, type: "block" };
+    return { handled: true, type: "select", index: Math.min(Math.max(currentIndex, 0), candidateCount - 1) };
+  }
+  if (candidateCount <= 0) return { handled: false };
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    const direction = key === "ArrowUp" ? -1 : 1;
+    return {
+      handled: true,
+      type: "move",
+      nextIndex: nextModelCandidateIndex(currentIndex, candidateCount, direction),
+    };
   }
   return { handled: false };
 }
@@ -2098,20 +2128,21 @@ export function ComposerRenderer({
       }
 
       if (atMentionOpen) {
-        if (event.key === "Escape") {
+        const action = atMentionMenuKeyAction(
+          event.key,
+          event.shiftKey,
+          selectedAtMentionIndex,
+          atMentionCandidates.length,
+        );
+        if (action.handled) {
           event.preventDefault();
-          setAtMentionOpen(false);
-          return;
-        }
-        if (atMentionCandidates.length > 0 && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
-          event.preventDefault();
-          const direction = event.key === "ArrowUp" ? -1 : 1;
-          setSelectedAtMentionIndex((current) => nextModelCandidateIndex(current, atMentionCandidates.length, direction));
-          return;
-        }
-        if (atMentionCandidates.length > 0 && (event.key === "Tab" || event.key === "Enter")) {
-          event.preventDefault();
-          handleAtMentionSelect(atMentionCandidates[Math.min(selectedAtMentionIndex, atMentionCandidates.length - 1)]);
+          if (action.type === "move") {
+            setSelectedAtMentionIndex(action.nextIndex);
+          } else if (action.type === "select") {
+            handleAtMentionSelect(atMentionCandidates[action.index]);
+          } else if (action.type === "close") {
+            setAtMentionOpen(false);
+          }
           return;
         }
       }
