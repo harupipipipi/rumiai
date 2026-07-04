@@ -13,6 +13,7 @@ import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { buildBuiltinPlacementManifests, filterPlacementCandidates, normalizePinnedPlacements, togglePinnedPlacement, type PlacementManifest } from "../lib/placement";
 import { selectedApisForModel, toggleModelApiRoute, updateModelApiRouteText } from "../lib/modelApiRoutes";
 import { settingsFieldSearchText } from "../lib/settingsSearch";
+import { resolveSettingsState } from "../lib/settingsState";
 import { settingsApiResources } from "../features/settings/resources/settingsApiResources";
 import { availabilityCopy, type ModelAvailabilityAfterKeySave } from "../features/settings/resources/useModelAvailability";
 import { ContinuitySettingsField } from "../features/continuity/ContinuitySettingsField";
@@ -3101,14 +3102,18 @@ export function SettingsModalRenderer({
   catalog,
   health,
   previewsCount,
-  settingsSections,
-  settingsValues,
+  settingsSections: providedSettingsSections,
+  settingsValues: providedSettingsValues,
   desktopSystemInfo,
   locale = "ja",
   onClose,
   onOpenSection,
   onSettingChange,
 }: SettingsModalRendererProps) {
+  const { sections: settingsSections, values: settingsValues } = useMemo(
+    () => resolveSettingsState({ sections: providedSettingsSections, values: providedSettingsValues }, catalog),
+    [catalog, providedSettingsSections, providedSettingsValues],
+  );
   const kernelBaseUrl = typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:8765` : "http://127.0.0.1:8765";
   const cloudflarePagesUrl = String(settingsValues.apps?.cloudflare_pages_url ?? "").trim();
   const [activeSectionId, setActiveSectionId] = useState<ControlCenterSection["id"]>(

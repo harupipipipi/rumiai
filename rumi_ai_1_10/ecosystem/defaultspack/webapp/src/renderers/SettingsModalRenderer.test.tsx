@@ -15,7 +15,7 @@ import {
 import { allowCleartextMobileQr } from "../lib/mobileCleartextQr";
 import { apiKeySetupTargetFieldId } from "./settings/renderers/settingsFieldRendererUtils";
 import type { TemplateSettingsField } from "./template/settingsFieldMetadata";
-import type { SettingsSection } from "../lib/api";
+import type { SettingsSection, UICatalog } from "../lib/api";
 
 function makeModelOption(index: number) {
   return {
@@ -24,6 +24,45 @@ function makeModelOption(index: number) {
     provider_id: "demo",
     provider_display_name: "Demo Provider",
     model_id: `model-${index}`,
+  };
+}
+
+function coreSettingsSections(): SettingsSection[] {
+  return [
+    {
+      id: "models",
+      label: "Models",
+      description: "Model settings",
+      fields: [{ id: "preferred_model", label: "Preferred Model", type: "text", default: "local/default" }],
+    },
+    {
+      id: "apis",
+      label: "API Tokens",
+      description: "Provider tokens",
+      fields: [{ id: "api_keys", label: "API Tokens", type: "readonly", default: "configured" }],
+    },
+    {
+      id: "tools",
+      label: "Tools",
+      description: "Tool defaults",
+      fields: [{ id: "default_tool_mode", label: "Tool Mode", type: "select", options: [{ value: "auto", label: "Auto" }] }],
+    },
+    {
+      id: "general",
+      label: "General",
+      description: "General settings",
+      fields: [{ id: "language", label: "Language", type: "text", default: "ja" }],
+    },
+  ];
+}
+
+function makeCatalog(settingsSections: SettingsSection[] = [], settingsValues: Record<string, Record<string, unknown>> = {}): UICatalog {
+  return {
+    sidebar: { filters: [], items: [] },
+    settings: { sections: settingsSections, values: settingsValues },
+    chat_rendering: { renderers: [] },
+    extension_points: [],
+    parts: [],
   };
 }
 
@@ -148,6 +187,54 @@ test("cleartext mobile QR flag only enables on explicit opt-in", () => {
   assert.equal(allowCleartextMobileQr({}), false);
   assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "0" }), false);
   assert.equal(allowCleartextMobileQr({ VITE_RUMI_MOBILE_ALLOW_CLEARTEXT_QR: "1" }), true);
+});
+
+test("SettingsModalRenderer keeps catalog settings visible when backend registered info is empty", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "models",
+      catalog: makeCatalog(coreSettingsSections(), {
+        models: { preferred_model: "local/default" },
+        apis: { api_keys: "configured" },
+      }),
+      health: { status: "ok", pack: "defaultspack", ts: "2026-07-04T00:00:00Z" },
+      previewsCount: 0,
+      settingsSections: [],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /バックエンド登録情報: 拡張ポイント 0件、パーツ 0件、defaultspack/);
+  assert.doesNotMatch(html, /一致する設定がありません/);
+  assert.match(html, /Models &amp; API/);
+  assert.match(html, /Tools &amp; MCP/);
+  assert.match(html, /Preferred Model/);
+  assert.match(html, /API Tokens/);
+});
+
+test("SettingsModalRenderer empty search shows core control center categories with no settings payload", () => {
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: null,
+      catalog: makeCatalog(),
+      health: null,
+      previewsCount: 0,
+      settingsSections: [],
+      settingsValues: {},
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.doesNotMatch(html, /一致する設定がありません/);
+  assert.match(html, /Quick Setup/);
+  assert.match(html, /Models &amp; API/);
+  assert.match(html, /Tools &amp; MCP/);
+  assert.match(html, /Workspace &amp; UI/);
 });
 
 test("SettingsModalRenderer renders template model_select with searchable model selector surface", () => {

@@ -55,6 +55,7 @@ import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
 import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
+import { resolveSettingsState } from "./lib/settingsState";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -3039,9 +3040,10 @@ function ChatApp() {
       console.error(profilesResult.reason);
       setModelProfiles([]);
     }
-    if (nextSettings) {
-      setSettingsSections(nextSettings.sections);
-      setSettingsValues(withCalendarSettingsValues(nextSettings.values));
+    if (nextSettings || nextCatalog?.settings) {
+      const resolvedSettings = resolveSettingsState(nextSettings, nextCatalog);
+      setSettingsSections(resolvedSettings.sections);
+      setSettingsValues(withCalendarSettingsValues(resolvedSettings.values));
     } else {
       if (settingsResult.status === "rejected") console.error(settingsResult.reason);
     }
