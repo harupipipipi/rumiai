@@ -26,6 +26,7 @@ from core_runtime.pack_api_server import (
     SAFE_ID_RE,
     MAX_REQUEST_BODY_BYTES,
     THREAD_JOIN_TIMEOUT_SECONDS,
+    _PACK_APPLY_ROUTE_AUTHORITY,
     _rate_limiter,
 )
 from core_runtime.api.api_response import APIResponse
@@ -483,6 +484,132 @@ class TestCheckAuth:
         response, status = packs_handler._send_response.call_args.args
         assert response.success is False
         assert status == 403
+
+    def test_post_pack_apply_denies_scoped_principal_without_pack_manage(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("p" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
+        handler = _make_handler(
+            path="/api/packs/apply",
+            headers=_make_headers(Content_Length=str(len(payload))),
+            rfile=io.BytesIO(payload),
+        )
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._dispatch_api_route = MagicMock(return_value=False)
+        handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
+        handler._pack_apply = MagicMock(return_value={"success": True})
+
+        def _check_auth(_method, _path):
+            handler._authenticated_principal = principal
+            return True
+
+        handler._check_auth = MagicMock(side_effect=_check_auth)
+
+        handler.do_POST()
+
+        handler._pack_apply.assert_not_called()
+        response, status = handler._send_response.call_args.args
+        assert response.success is False
+        assert status == 403
+
+    def test_post_pack_apply_allows_pack_manage_and_passes_actor(
+        self,
+        tmp_path,
+        monkeypatch,
+    ) -> None:
+        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime import capability_grant_manager as cgm
+
+        grants = cgm.CapabilityGrantManager(
+            grants_dir=str(tmp_path / "capabilities"),
+            secret_key="capability-test-key-" + ("q" * 32),
+        )
+        monkeypatch.setattr(cgm, "_global_grant_manager", grants)
+        for principal_id in (
+            "profile:work",
+            "profile:work__surface:mobile",
+            "profile:work__pack:core_runtime",
+        ):
+            grants.grant_permission(principal_id, "pack.manage", {})
+        principal = AuthenticatedPrincipal(
+            token_id="tok",
+            profile_id="work",
+            surface_id="mobile",
+            device_id="",
+            role="mobile_client",
+            audiences=("kernel_api",),
+            issued_at="",
+            expires_at=None,
+        )
+        payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
+        handler = _make_handler(
+            path="/api/packs/apply",
+            headers=_make_headers(Content_Length=str(len(payload))),
+            rfile=io.BytesIO(payload),
+        )
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._dispatch_api_route = MagicMock(return_value=False)
+        handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
+        handler._pack_apply = MagicMock(return_value={"success": True})
+
+        def _check_auth(_method, _path):
+            handler._authenticated_principal = principal
+            return True
+
+        handler._check_auth = MagicMock(side_effect=_check_auth)
+
+        handler.do_POST()
+
+        handler._pack_apply.assert_called_once_with(
+            "aaaaaaaaaaaaaaaa",
+            "replace",
+            actor="profile:work__surface:mobile",
+        )
+        response = handler._send_response.call_args.args[0]
+        assert response.success is True
+
+    def test_post_pack_apply_uses_explicit_authority_metadata(self) -> None:
+        payload = b'{"staging_id":"stage_123","mode":"replace"}'
+        handler = _make_handler(
+            path="/api/packs/apply",
+            headers=_make_headers(Content_Length=str(len(payload))),
+            rfile=io.BytesIO(payload),
+        )
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._check_auth = MagicMock(return_value=True)
+        handler._dispatch_api_route = MagicMock(return_value=False)
+        handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
+        handler._authorize_authenticated_route = MagicMock(return_value=False)
+        handler._pack_apply = MagicMock(return_value={"success": True})
+
+        handler.do_POST()
+
+        handler._authorize_authenticated_route.assert_called_once_with(
+            "POST",
+            "/api/packs/apply",
+            _PACK_APPLY_ROUTE_AUTHORITY,
+        )
+        handler._pack_apply.assert_not_called()
 
     def test_mobile_approver_challenge_handler_passes_scoped_principal(self, monkeypatch) -> None:
         from core_runtime.access_tokens import AuthenticatedPrincipal

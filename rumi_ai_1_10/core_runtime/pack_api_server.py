@@ -82,6 +82,17 @@ from .api._helpers import _log_internal_error, _SAFE_ERROR_MSG
 
 logger = logging.getLogger(__name__)
 
+_PACK_APPLY_ROUTE_AUTHORITY: dict[str, Any] = {
+    "owner_pack_id": "core_runtime",
+    "permission_id": "pack.manage",
+    "audience": "kernel_api",
+    "resource_template": {"operation": "pack.apply"},
+}
+
+_HARDCODED_ROUTE_AUTHORITY: dict[tuple[str, str], dict[str, Any]] = {
+    ("POST", "/api/packs/apply"): _PACK_APPLY_ROUTE_AUTHORITY,
+}
+
 
 def _persist_desktop_api_token(api_token: str) -> None:
     """Persist the current localhost API token for Viewer-launched pack apps."""
@@ -1878,7 +1889,8 @@ class PackAPIHandler(
                 return
             if self._dispatch_defaultspack_http_route("POST", path, body):
                 return
-            if not self._authorize_authenticated_route("POST", path):
+            route_authority = _HARDCODED_ROUTE_AUTHORITY.get(("POST", path))
+            if not self._authorize_authenticated_route("POST", path, route_authority):
                 return
 
             if path == "/api/authority/check":
@@ -2004,7 +2016,11 @@ class PackAPIHandler(
                 elif not _v_is_safe_staging_id(staging_id):
                     self._send_response(APIResponse(False, error="Invalid staging_id"), 400)
                 else:
-                    result = self._pack_apply(staging_id, mode)
+                    result = self._pack_apply(
+                        staging_id,
+                        mode,
+                        actor=self._pack_apply_actor(),
+                    )
                     if result.get("success"):
                         self._send_response(APIResponse(True, result))
                     else:
