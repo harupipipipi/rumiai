@@ -490,7 +490,10 @@ class TestCheckAuth:
         tmp_path,
         monkeypatch,
     ) -> None:
-        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.access_tokens import (
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
         from core_runtime import capability_grant_manager as cgm
 
         grants = cgm.CapabilityGrantManager(
@@ -498,20 +501,25 @@ class TestCheckAuth:
             secret_key="capability-test-key-" + ("p" * 32),
         )
         monkeypatch.setattr(cgm, "_global_grant_manager", grants)
-        principal = AuthenticatedPrincipal(
-            token_id="tok",
+        token_manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="scoped-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(token_manager)
+        issued = token_manager.issue_token(
             profile_id="work",
             surface_id="mobile",
-            device_id="",
+            device_id="phone-1",
             role="mobile_client",
-            audiences=("kernel_api",),
-            issued_at="",
-            expires_at=None,
+            audiences=["kernel_api"],
         )
         payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
         handler = _make_handler(
             path="/api/packs/apply",
-            headers=_make_headers(Content_Length=str(len(payload))),
+            headers=_make_headers(
+                Authorization=f"Bearer {issued.access_token}",
+                Content_Length=str(len(payload)),
+            ),
             rfile=io.BytesIO(payload),
         )
         handler._check_rate_limit = MagicMock(return_value=True)
@@ -519,13 +527,10 @@ class TestCheckAuth:
         handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
         handler._pack_apply = MagicMock(return_value={"success": True})
 
-        def _check_auth(_method, _path):
-            handler._authenticated_principal = principal
-            return True
-
-        handler._check_auth = MagicMock(side_effect=_check_auth)
-
-        handler.do_POST()
+        try:
+            handler.do_POST()
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
 
         handler._pack_apply.assert_not_called()
         response, status = handler._send_response.call_args.args
@@ -537,7 +542,10 @@ class TestCheckAuth:
         tmp_path,
         monkeypatch,
     ) -> None:
-        from core_runtime.access_tokens import AuthenticatedPrincipal
+        from core_runtime.access_tokens import (
+            ScopedAccessTokenManager,
+            reset_scoped_access_token_manager_for_tests,
+        )
         from core_runtime import capability_grant_manager as cgm
 
         grants = cgm.CapabilityGrantManager(
@@ -548,23 +556,29 @@ class TestCheckAuth:
         for principal_id in (
             "profile:work",
             "profile:work__surface:mobile",
+            "profile:work__surface:mobile__device:phone-1",
             "profile:work__pack:core_runtime",
         ):
             grants.grant_permission(principal_id, "pack.manage", {})
-        principal = AuthenticatedPrincipal(
-            token_id="tok",
+        token_manager = ScopedAccessTokenManager(
+            tokens_dir=tmp_path / "access_tokens",
+            secret_key="scoped-token-test-secret",
+        )
+        reset_scoped_access_token_manager_for_tests(token_manager)
+        issued = token_manager.issue_token(
             profile_id="work",
             surface_id="mobile",
-            device_id="",
+            device_id="phone-1",
             role="mobile_client",
-            audiences=("kernel_api",),
-            issued_at="",
-            expires_at=None,
+            audiences=["kernel_api"],
         )
         payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
         handler = _make_handler(
             path="/api/packs/apply",
-            headers=_make_headers(Content_Length=str(len(payload))),
+            headers=_make_headers(
+                Authorization=f"Bearer {issued.access_token}",
+                Content_Length=str(len(payload)),
+            ),
             rfile=io.BytesIO(payload),
         )
         handler._check_rate_limit = MagicMock(return_value=True)
@@ -572,21 +586,80 @@ class TestCheckAuth:
         handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
         handler._pack_apply = MagicMock(return_value={"success": True})
 
-        def _check_auth(_method, _path):
-            handler._authenticated_principal = principal
-            return True
+        try:
+            handler.do_POST()
+        finally:
+            reset_scoped_access_token_manager_for_tests(None)
 
-        handler._check_auth = MagicMock(side_effect=_check_auth)
+        handler._pack_apply.assert_called_once_with(
+            "aaaaaaaaaaaaaaaa",
+            "replace",
+            actor="profile:work__surface:mobile__device:phone-1",
+        )
+        response = handler._send_response.call_args.args[0]
+        assert response.success is True
+
+    def test_post_pack_apply_legacy_bearer_sets_core_actor(self) -> None:
+        payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
+        mock_mgr = MagicMock()
+        mock_mgr.verify_token.return_value = True
+        handler = _make_handler(
+            path="/api/packs/apply",
+            headers=_make_headers(
+                Authorization="Bearer legacy-root-token",
+                Content_Length=str(len(payload)),
+            ),
+            rfile=io.BytesIO(payload),
+            _hmac_key_manager=mock_mgr,
+        )
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._dispatch_api_route = MagicMock(return_value=False)
+        handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
+        handler._pack_apply = MagicMock(return_value={"success": True})
 
         handler.do_POST()
 
         handler._pack_apply.assert_called_once_with(
             "aaaaaaaaaaaaaaaa",
             "replace",
-            actor="profile:work__surface:mobile",
+            actor="profile:root__surface:desktop",
         )
-        response = handler._send_response.call_args.args[0]
-        assert response.success is True
+        assert handler._authenticated_principal.core_role is True
+        assert handler._authenticated_principal.auth_mode == "legacy_bearer"
+
+    def test_post_pack_apply_panel_session_sets_panel_actor(self) -> None:
+        panel_mgr = PanelAuthManager(bootstrap_secret="bootstrap")
+        reset_panel_auth_manager_for_tests(panel_mgr)
+        issue = panel_mgr.issue_login_code()
+        exchange = panel_mgr.exchange_code(issue["code"])
+        assert exchange is not None
+
+        payload = b'{"staging_id":"aaaaaaaaaaaaaaaa","mode":"replace"}'
+        handler = _make_handler(
+            path="/api/packs/apply",
+            headers=_make_headers(
+                Cookie=f"rumi_panel_session={exchange['session_id']}",
+                Origin="http://127.0.0.1:8765",
+                X_Rumi_Csrf=exchange["csrf_token"],
+                Content_Length=str(len(payload)),
+            ),
+            rfile=io.BytesIO(payload),
+            _panel_auth_manager=panel_mgr,
+        )
+        handler._check_rate_limit = MagicMock(return_value=True)
+        handler._dispatch_api_route = MagicMock(return_value=False)
+        handler._dispatch_defaultspack_http_route = MagicMock(return_value=False)
+        handler._pack_apply = MagicMock(return_value={"success": True})
+
+        handler.do_POST()
+
+        handler._pack_apply.assert_called_once_with(
+            "aaaaaaaaaaaaaaaa",
+            "replace",
+            actor="profile:main__surface:desktop",
+        )
+        assert handler._authenticated_principal.core_role is True
+        assert handler._authenticated_principal.auth_mode == "panel_session"
 
     def test_post_pack_apply_uses_explicit_authority_metadata(self) -> None:
         payload = b'{"staging_id":"stage_123","mode":"replace"}'
