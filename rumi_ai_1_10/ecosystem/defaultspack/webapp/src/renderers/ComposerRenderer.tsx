@@ -2249,7 +2249,7 @@ export function ComposerRenderer({
       homeSlot: "editor-trailing",
       order: 30,
       visible: templateAllowsVoiceInput,
-      mobile: "hide",
+      mobile: "show",
       width: COMPOSER_CHROME_WIDTHS.icon,
       render: () => (
         <button
