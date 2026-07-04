@@ -15,6 +15,55 @@ function desktopResponse(status: "running" | "stopped") {
   };
 }
 
+test("ensureRuntime uses Defaultspack local auth and CSRF headers", async () => {
+  let requestUrl = "";
+  let requestInit: RequestInit | undefined;
+  const originalFetch = globalThis.fetch;
+  const previousSessionStorage = Object.getOwnPropertyDescriptor(globalThis, "sessionStorage");
+  const values = new Map<string, string>([
+    ["rumi-defaultspack-local-auth", "local-token-1"],
+    ["rumi-panel-csrf", "panel-csrf-1"],
+  ]);
+
+  Object.defineProperty(globalThis, "sessionStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    },
+  });
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    requestUrl = String(input);
+    requestInit = init;
+    return new Response(JSON.stringify({
+      status: "ok",
+      data: {
+        operation_id: "op-1",
+        provider_id: "windows_wsl",
+        status: "running",
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    const result = await sandboxesApi.ensureRuntime("windows_wsl");
+    assert.equal(result.provider_id, "windows_wsl");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (previousSessionStorage) Object.defineProperty(globalThis, "sessionStorage", previousSessionStorage);
+    else Reflect.deleteProperty(globalThis, "sessionStorage");
+  }
+
+  const headers = new Headers(requestInit?.headers);
+  const body = JSON.parse(String(requestInit?.body));
+  assert.equal(requestUrl, "/api/runtime/ensure");
+  assert.equal(requestInit?.method, "POST");
+  assert.equal(headers.get("Authorization"), "Bearer local-token-1");
+  assert.equal(headers.get("X-Rumi-CSRF"), "panel-csrf-1");
+  assert.equal(body.provider_id, "windows_wsl");
+  assert.match(body.request_id, /^ensure-/);
+});
+
 test("createDesktop does not accept client-supplied owner authority", async () => {
   let requestUrl = "";
   let requestInit: RequestInit | undefined;

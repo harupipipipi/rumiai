@@ -521,11 +521,18 @@ def test_runtime_and_desktop_mutations_can_use_local_ui_approval_context(monkeyp
     for method, path in (
         ("POST", "/api/runtime/ensure"),
         ("POST", "/api/runtime/update"),
+        ("POST", "/api/runtime/uninstall"),
         ("POST", "/api/runtime/operations/op-1/cancel"),
         ("POST", "/api/desktops"),
         ("POST", "/api/desktops/seat-1/start"),
+        ("POST", "/api/desktops/seat-1/stop"),
+        ("POST", "/api/desktops/seat-1/restart"),
         ("POST", "/api/desktops/seat-1/input"),
+        ("POST", "/api/desktops/seat-1/ai-input"),
+        ("POST", "/api/desktops/seat-1/rules"),
         ("POST", "/api/desktops/seat-1/control/acquire"),
+        ("POST", "/api/desktops/seat-1/control/renew"),
+        ("POST", "/api/desktops/seat-1/control/release"),
         ("POST", "/api/desktops/seat-1/access-requests/request-1/grant"),
         ("DELETE", "/api/desktops/seat-1"),
     ):
