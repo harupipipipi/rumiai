@@ -8,7 +8,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import ok
-from domain.mobile.contract import iter_mobile_route_contracts, mobile_capability_flags
+from domain.mobile.contract import (
+    iter_mobile_route_contracts,
+    mobile_capability_flags,
+    mobile_feature_enabled,
+)
 
 
 def _route_entry(route) -> dict:

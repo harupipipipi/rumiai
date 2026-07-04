@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import sys
 from pathlib import Path
@@ -88,6 +89,30 @@ def test_mobile_contract_port_registers_minimal_pairing_and_chat_routes():
     }
     assert {("GET", "/api/mobile/v1/bootstrap"), ("POST", "/api/mobile/v1/pairings/{id}/claim")} <= registry_patterns
     assert len(registry_patterns) == len(manifest)
+
+
+def test_mobile_manifest_route_handler_smoke(monkeypatch):
+    from ecosystem.defaultspack.domain.mobile.contract import mobile_route_manifest
+
+    monkeypatch.delenv("RUMI_MOBILE_CREDENTIAL_TRANSFER", raising=False)
+    route = next(
+        item
+        for item in mobile_route_manifest()
+        if item["method"] == "GET" and item["pattern"] == "/api/mobile/v1/manifest"
+    )
+
+    module = importlib.import_module(route["block_module"])
+    result = module.run({}, None)
+
+    assert result["status"] == "ok"
+    data = result["data"]
+    assert data["kind"] == "rumi_mobile_manifest_v1"
+    assert data["capabilities"]["credential_transfer"] is False
+    assert "credentials.request" not in data["token_roles"]["mobile_client"]["scopes"]
+    assert any(
+        item["method"] == "GET" and item["path"] == "/api/mobile/v1/manifest"
+        for item in data["routes"]
+    )
 
 
 def test_mobile_pairing_approve_delivers_tokens_only_inside_encrypted_pickup(tmp_path):
