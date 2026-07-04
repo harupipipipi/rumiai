@@ -28,6 +28,31 @@ test("approval queue renders cockpit approval decisions", () => {
   assert.match(html, /Deny/);
 });
 
+test("approval queue separates expired pending approvals from active approvals", () => {
+  const html = renderToStaticMarkup(
+    createElement(ApprovalQueue, {
+      initialApprovals: [
+        {
+          request_id: "apr_expired",
+          operation: "terminal.exec",
+          risk_level: "medium",
+          status: "pending",
+          display_summary: "terminal.exec: old command",
+          expires_at: 1,
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /Active pending approvals/);
+  assert.match(html, />0<\/span>/);
+  assert.match(html, /No active approvals/);
+  assert.match(html, /Recent approval history/);
+  assert.match(html, /expired/);
+  assert.doesNotMatch(html, /Approve/);
+  assert.doesNotMatch(html, /Deny/);
+});
+
 test("diff panel renders status and diff content", () => {
   const html = renderToStaticMarkup(
     createElement(DiffPanel, {
