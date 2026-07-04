@@ -49,6 +49,7 @@ class FakeManagedUbuntuCli:
         self.imported_rootfs_path: str | None = None
         self.imported_install_dir: str | None = None
         self.port_probe_returncode = 0
+        self.wsl_list_stdout: str | None = None
 
     def __call__(
         self,
@@ -93,6 +94,8 @@ class FakeManagedUbuntuCli:
         if cmd[1:] == ["--version"]:
             return GuestCommandResult(returncode=0, stdout="WSL version: 2.0\n")
         if cmd[1:] == ["-l", "-q"]:
+            if self.wsl_list_stdout is not None:
+                return GuestCommandResult(returncode=0, stdout=self.wsl_list_stdout)
             return GuestCommandResult(returncode=0, stdout=f"{self.runtime_name}\n" if self.guest_exists else "")
         if len(cmd) >= 7 and cmd[1:3] == ["--import", self.runtime_name]:
             self.guest_exists = True
@@ -629,6 +632,24 @@ def test_windows_wsl_provider_does_not_claim_existing_user_ubuntu_distribution(m
 
     assert status.ready is False
     assert "managed_guest" in status.missing_requirements
+
+
+def test_windows_wsl_provider_detects_nul_separated_rumi_distribution(monkeypatch) -> None:
+    monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Windows")
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.guest_exists = True
+    fake.deps_installed = True
+    fake.wsl_list_stdout = (
+        "\ufeffd\x00o\x00c\x00k\x00e\x00r\x00-\x00d\x00e\x00s\x00k\x00t\x00o\x00p\x00\n\x00"
+        "R\x00u\x00m\x00i\x00U\x00b\x00u\x00n\x00t\x00u\x00\n\x00"
+    )
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    status = provider.doctor(RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})))
+
+    assert status.ready is True
+    assert "managed_guest" not in status.missing_requirements
+    assert not any("--import" in command for command, _input_text, _timeout in fake.calls)
 
 
 def test_windows_wsl_provider_downloads_rumi_rootfs_when_not_configured(monkeypatch, tmp_path) -> None:
