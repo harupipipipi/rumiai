@@ -89,6 +89,56 @@ def test_openai_compatible_provider_can_be_added_by_manifest_and_models(monkeypa
     assert getattr(available["acme"], "provider_id", "") == "acme"
 
 
+def test_provider_catalog_reads_do_not_force_extension_registry_reload(monkeypatch):
+    from domain.ai_client import providers
+
+    calls: list[bool] = []
+
+    class FakeLlmRegistry:
+        def providers(self, enabled_only=True):
+            return [
+                {
+                    "id": "stub",
+                    "provider_id": "stub",
+                    "default_model": "default",
+                    "default_model_for": {"chat": "default"},
+                }
+            ]
+
+        def models(self, provider_id="", enabled_only=True):
+            return [
+                {
+                    "id": "stub/default",
+                    "provider_id": "stub",
+                    "model_id": "default",
+                    "type": "chat",
+                }
+            ]
+
+        def best_model(self, name, use_case="chat"):
+            return {"model_id": "default"} if name == "stub" else None
+
+    class FakeRegistry:
+        def llm(self):
+            return FakeLlmRegistry()
+
+        def get(self, category, name):
+            return {"default_model": "default"} if category == "llm_provider" and name == "stub" else None
+
+    def fake_get_extension_registry(*, force_reload=False):
+        calls.append(force_reload)
+        return FakeRegistry()
+
+    monkeypatch.setattr(providers, "get_extension_registry", fake_get_extension_registry)
+
+    assert providers._list_provider_manifests()[0]["id"] == "stub"
+    assert providers._load_model_manifests("stub")[0]["id"] == "stub/default"
+    assert providers.get_best_model_for_provider("stub") == "default"
+    assert providers.validate_provider_catalog_coverage() == []
+    assert calls
+    assert all(force_reload is False for force_reload in calls)
+
+
 def test_ai_blocks_guard_prevents_new_direct_aiclient_imports():
     allowed = {
         "blocks/ai/embed.py",
