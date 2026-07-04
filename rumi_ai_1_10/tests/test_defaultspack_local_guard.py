@@ -558,6 +558,109 @@ def test_provider_key_save_accepts_viewer_persisted_token_when_launch_token_diff
     ) is True
 
 
+def test_managed_runtime_desktop_ui_routes_require_local_auth_and_mark_context(monkeypatch):
+    from transport.http import _RequestHandler, _local_ui_approval_route_authorized
+
+    request_handler = _RequestHandler.__new__(_RequestHandler)
+    request_handler.client_address = ("127.0.0.1", 54321)
+    request_handler.server_ref = SimpleNamespace(_routes=[])
+    monkeypatch.setenv("RUMI_API_TOKEN", "local-secret")
+
+    local_mutations = [
+        ("POST", "/api/runtime/ensure"),
+        ("POST", "/api/runtime/operations/op-1/cancel"),
+        ("POST", "/api/desktops"),
+        ("POST", "/api/desktops/seat-1/start"),
+        ("POST", "/api/desktops/seat-1/input"),
+        ("POST", "/api/desktops/seat-1/control/acquire"),
+        ("DELETE", "/api/desktops/seat-1"),
+    ]
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "X-Rumi-CSRF": "1",
+    }
+    for method, path in local_mutations:
+        assert request_handler._sensitive_request_error(method, path) == (
+            401,
+            "local auth token required",
+            "AUTH_REQUIRED",
+        )
+        assert _local_ui_approval_route_authorized(method, path, request_handler.headers) is False
+
+    request_handler.headers = {
+        "Origin": "http://localhost:8766",
+        "Authorization": "Bearer local-secret",
+        "X-Rumi-CSRF": "1",
+    }
+    for method, path in local_mutations:
+        assert request_handler._sensitive_request_error(method, path) is None
+        assert _local_ui_approval_route_authorized(method, path, request_handler.headers) is True
+
+    assert _local_ui_approval_route_authorized(
+        "POST",
+        "/api/desktops/seat-1/access-requests",
+        request_handler.headers,
+    ) is False
+
+    request_handler.client_address = ("203.0.113.10", 54321)
+    assert request_handler._sensitive_request_error("POST", "/api/runtime/ensure") == (
+        403,
+        "sensitive local route requires a loopback client",
+        "LOCAL_ONLY_REQUIRED",
+    )
+
+
+def test_managed_runtime_desktop_local_ui_context_reaches_function_routes(monkeypatch):
+    from domain.function_runtime import bridge
+    from transport.http import DefaultsHttpServer, _LOCAL_UI_APPROVAL_CONTEXT_FLAG
+
+    captured = []
+
+    def fake_invoke_function(function_name, args, context, **kwargs):
+        captured.append(
+            {
+                "function_name": function_name,
+                "args": dict(args),
+                "context": dict(context),
+                "kwargs": dict(kwargs),
+            }
+        )
+        return {"status": "ok", "data": {"ok": True}}
+
+    monkeypatch.setattr(bridge, "invoke_function", fake_invoke_function)
+    server = DefaultsHttpServer.__new__(DefaultsHttpServer)
+
+    ensure_result = server._invoke_function_route(
+        "managed_runtime_ensure",
+        {
+            _LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+            "request_id": "ensure-1",
+            "provider_id": "windows_wsl",
+        },
+        {},
+    )
+    desktop_result = server._invoke_function_route(
+        "managed_runtime_desktop_control_acquire",
+        {
+            _LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+            "request_id": "lease-1",
+        },
+        {"seat_id": "seat-1"},
+        {"seat_id": "seat_id"},
+    )
+
+    assert ensure_result["status"] == "ok"
+    assert desktop_result["status"] == "ok"
+    assert captured[0]["function_name"] == "managed_runtime_ensure"
+    assert captured[0]["args"] == {"request_id": "ensure-1", "provider_id": "windows_wsl"}
+    assert captured[0]["context"]["_tool_server_approved"] is True
+    assert captured[0]["context"]["source"] == "defaultspack_local_ui"
+    assert captured[1]["function_name"] == "managed_runtime_desktop_control_acquire"
+    assert captured[1]["args"] == {"request_id": "lease-1", "seat_id": "seat-1"}
+    assert captured[1]["context"]["_tool_server_approved"] is True
+
+
 def test_self_improvement_routes_are_guarded_as_sensitive_local_routes():
     from domain.safety.local_guard import require_local_guard
     from transport.http import _RequestHandler, _is_sensitive_http_path

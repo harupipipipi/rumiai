@@ -1423,7 +1423,18 @@ _LOCAL_UI_APPROVAL_METHOD_PATHS = {
     "/api/ambient/events": {"POST"},
     "/api/ambient/monitor/start": {"POST"},
     "/api/onboarding/apply": {"POST"},
+    "/api/runtime/ensure": {"POST"},
+    "/api/runtime/update": {"POST"},
+    "/api/runtime/uninstall": {"POST"},
+    "/api/desktops": {"POST"},
 }
+_LOCAL_UI_APPROVAL_METHOD_PATTERNS = (
+    (re.compile(r"^/api/runtime/operations/[^/]+/cancel$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+$"), {"DELETE"}),
+    (re.compile(r"^/api/desktops/[^/]+/(?:start|stop|restart|input|ai-input|rules)$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/access-requests/[^/]+/grant$"), {"POST"}),
+    (re.compile(r"^/api/desktops/[^/]+/control/(?:acquire|renew|release)$"), {"POST"}),
+)
 
 _LOCAL_ORIGIN_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -1603,10 +1614,20 @@ def _browser_qa_token_from_payload(payload):
 
 
 def _local_ui_approval_route_authorized(method, path, headers, request_data=None):
-    allowed_methods = _LOCAL_UI_APPROVAL_METHOD_PATHS.get(str(path or ""), set())
-    if str(method or "").upper() not in allowed_methods:
+    if not _local_ui_approval_route_matches(method, path):
         return False
     return _local_auth_token_authorized(headers) or _browser_qa_token_authorized(method, path, headers, request_data)
+
+
+def _local_ui_approval_route_matches(method, path):
+    method = str(method or "").upper()
+    path = str(path or "")
+    if method in _LOCAL_UI_APPROVAL_METHOD_PATHS.get(path, set()):
+        return True
+    return any(
+        method in allowed_methods and pattern.match(path) is not None
+        for pattern, allowed_methods in _LOCAL_UI_APPROVAL_METHOD_PATTERNS
+    )
 
 
 def _browser_qa_token_authorized(method, path, headers, request_data=None):
@@ -1976,6 +1997,11 @@ class _RequestHandler(http.server.BaseHTTPRequestHandler):
         if coding_error:
             return coding_error
         if _is_sensitive_coding_path(path):
+            if _local_ui_approval_route_matches(method, path):
+                if not _configured_local_auth_tokens():
+                    return (403, "local auth token is not configured", "AUTH_REQUIRED")
+                if not _local_auth_token_authorized(self.headers):
+                    return (401, "local auth token required", "AUTH_REQUIRED")
             return None
         if not (route_sensitive or _requires_sensitive_http_auth(method, path)):
             return None
