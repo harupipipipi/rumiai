@@ -1344,7 +1344,7 @@ export function popoverAnchorRectIsUsable(rect: Pick<DOMRect, "width" | "height"
 
 function usablePopoverAnchorRect(rect: DOMRect | undefined): DOMRect | null {
   if (!popoverAnchorRectIsUsable(rect)) return null;
-  return rect;
+  return rect ?? null;
 }
 
 function ModelCommandCandidatePopup({
