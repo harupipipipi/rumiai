@@ -373,6 +373,137 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_status_surfaces_scheduler_and_subagent_blockers(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+    from domain.agent.schedule_store import append_history
+    from domain.agent.scheduler import Scheduler
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from domain.company.task_store import CompanyTaskStore
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    bootstrapped = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    heartbeat_schedule = next(
+        schedule
+        for schedule in bootstrapped["schedules"]
+        if schedule["task"]["metadata"]["loop_key"] == "heartbeat"
+    )
+    append_history(
+        heartbeat_schedule["id"],
+        {
+            "execution_id": "sexec_scheduler_failed",
+            "schedule_id": heartbeat_schedule["id"],
+            "started_at": "2026-05-27T00:00:00Z",
+            "completed_at": "2026-05-27T00:00:01Z",
+            "status": "error",
+            "trigger": "scheduled",
+            "result": None,
+            "error": "rumi_api handler execution failed",
+        },
+    )
+
+    chat_store = ChatStore()
+    parent = chat_store.get_conversation(bootstrapped["conversation_id"])
+    child = chat_store.create_conversation(
+        model="stub/default",
+        parent_conversation_id=bootstrapped["conversation_id"],
+        conversation_kind="subagent",
+        agent_id="coding_engineer",
+        group_id=parent["group_id"],
+        metadata={
+            "profile_id": "defaultspack.mimo_coding_company",
+            "company_id": "mimo-coding-company",
+            "subagent": {
+                "task": "Simple test: List 3 things you can do as a subagent.",
+                "source": "subagent_tool",
+            },
+        },
+    )
+    chat_store.update_conversation(child["id"], {"title": "Simple subagent test"})
+    chat_store.add_message(
+        child["id"],
+        {
+            "role": "user",
+            "content": "Simple test: List 3 things you can do as a subagent.",
+            "created_at": 0,
+            "metadata": {"source": "subagent_tool"},
+        },
+    )
+
+    status = runtime.status()
+    signals = status["harness"]["blocker_signals"]
+    signal_types = {signal["signal_type"] for signal in signals}
+    runtime_store = CompanyRuntimeStore()
+    messages, message_total = runtime_store.list_messages("mimo-coding-company", limit=80, offset=0)
+    blocked_tasks = CompanyTaskStore().list("mimo-coding-company", status="blocked", limit=20, offset=0)
+
+    assert signal_types == {"scheduler_failure", "subagent_unanswered"}
+    assert status["company"]["metadata"]["blocker_signals"]
+    assert message_total == 2
+    assert any("scheduler_failure" in message["content"] for message in messages)
+    assert any(child["id"] in message["content"] for message in messages)
+    assert blocked_tasks is not None and blocked_tasks[1] == 2
+    assert {task["metadata"]["signal_type"] for task in blocked_tasks[0]} == signal_types
+    assert all(task["source"] == "mimo_blocker_signal" for task in blocked_tasks[0])
+
+    repeated = runtime.status()
+    repeated_messages, repeated_message_total = runtime_store.list_messages("mimo-coding-company", limit=80, offset=0)
+    repeated_blocked_tasks = CompanyTaskStore().list("mimo-coding-company", status="blocked", limit=20, offset=0)
+
+    assert {signal["signal_type"] for signal in repeated["harness"]["blocker_signals"]} == signal_types
+    assert repeated_message_total == message_total
+    assert {message["id"] for message in repeated_messages} == {message["id"] for message in messages}
+    assert repeated_blocked_tasks is not None and repeated_blocked_tasks[1] == 2
+
+    append_history(
+        heartbeat_schedule["id"],
+        {
+            "execution_id": "sexec_scheduler_recovered",
+            "schedule_id": heartbeat_schedule["id"],
+            "started_at": "2026-05-27T00:01:00Z",
+            "completed_at": "2026-05-27T00:01:01Z",
+            "status": "completed",
+            "trigger": "manual",
+            "result": "heartbeat ok",
+            "error": None,
+        },
+    )
+    chat_store.add_message(
+        child["id"],
+        {
+            "role": "assistant",
+            "content": "I can inspect, summarize, and report back.",
+            "metadata": {"source": "subagent_tool"},
+        },
+    )
+
+    recovered = runtime.status()
+    recovered_blocked_tasks = CompanyTaskStore().list("mimo-coding-company", status="blocked", limit=20, offset=0)
+
+    assert recovered["harness"]["blocker_signals"] == []
+    assert recovered_blocked_tasks is not None and recovered_blocked_tasks[1] == 0
+
+    for schedule in recovered["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_static_knowledge_and_docker_bundles_exist():
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
 

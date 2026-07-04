@@ -13,8 +13,9 @@ from typing import Any
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    if _path in sys.path:
+        sys.path.remove(_path)
+    sys.path.insert(0, _path)
 
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager
@@ -25,6 +26,8 @@ from domain.ai_client.providers import get_all_known_models
 from domain.company.service import CompanyService
 from domain.company.task_store import CompanyTaskStore
 from domain.knowledge.store import KnowledgeStore
+
+from .mimo_blocker_signals import sync_mimo_blocker_signals
 
 
 PROFILE_ID = "defaultspack.mimo_coding_company"
@@ -455,6 +458,10 @@ class MimoCodingCompanyRuntime:
         org_id = state.get("org_id")
         org = OrgManager().get_org(org_id) if org_id else None
         company = self._sync_company_record(state)
+        blocker_signals = self._sync_blocker_signals(state)
+        state["blocker_signals"] = blocker_signals
+        if company is not None:
+            company = self._sync_company_record(state)
         open_tasks = 0
         try:
             task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
@@ -506,6 +513,7 @@ class MimoCodingCompanyRuntime:
                 "knowledge_entry_count": knowledge_total,
                 "autonomy_board": autonomy_board,
                 "qa_swarm_plan": qa_swarm_plan,
+                "blocker_signals": blocker_signals,
             },
             "state": state,
             "manifest": self.manifest(),
@@ -1196,6 +1204,7 @@ class MimoCodingCompanyRuntime:
                 "autonomy_board": deepcopy(state.get("autonomy_board") if isinstance(state.get("autonomy_board"), dict) else self._autonomy_board(state)),
                 "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),
                 "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
+                "blocker_signals": deepcopy(state.get("blocker_signals") if isinstance(state.get("blocker_signals"), list) else []),
             }
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
@@ -1211,6 +1220,16 @@ class MimoCodingCompanyRuntime:
             )
         except Exception:
             return None
+
+    def _sync_blocker_signals(self, state: dict[str, Any]) -> list[dict[str, Any]]:
+        try:
+            return sync_mimo_blocker_signals(
+                state,
+                company_id=COMPANY_ID,
+                profile_id=PROFILE_ID,
+            )
+        except Exception:
+            return []
 
     def _knowledge_seed_documents(self) -> list[tuple[str, str, str]]:
         docs: list[tuple[str, str, str]] = []
