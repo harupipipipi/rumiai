@@ -338,6 +338,34 @@ test("prompt usage disclosure can be hidden from chat messages", () => {
   assert.doesNotMatch(hidden, /Prompt used/);
 });
 
+test("assistant reasoning trace metadata is hidden from normal chat UI", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "assistant-with-trace",
+      rawText: "ミトコンドリアは細胞のエネルギー工場です。",
+      content: [{ type: "text", text: "ミトコンドリアは細胞のエネルギー工場です。" }],
+      metadata: {
+        thinkingLabel: "completed",
+        thinkingTranscript: "I will plan the answer and expose internal reasoning.",
+      },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /ミトコンドリアは細胞のエネルギー工場です。/);
+  assert.doesNotMatch(html, />Trace</);
+  assert.doesNotMatch(html, /I will plan the answer/);
+});
+
 test("long terminal-style output is detected for compact display", () => {
   const logText = JSON.stringify({
     tool_name: "coding_terminal_exec",

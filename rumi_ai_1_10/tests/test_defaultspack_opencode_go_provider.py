@@ -483,6 +483,7 @@ def test_opencode_go_stream_parses_openai_sse(monkeypatch):
     response = _FakeSseResponse(
         [
             b'data: {"choices":[{"delta":{"content":"O"},"finish_reason":null}]}\n\n'
+            b'data: {"choices":[{"delta":{"trace":"internal plan"},"finish_reason":null}]}\n\n'
             b'data: {"choices":[{"delta":{"content":"K"},"finish_reason":null}]}\n\n'
             b'data: {"choices":[{"delta":{},"finish_reason":"stop"}],'
             b'"usage":{"prompt_tokens":1,"completion_tokens":2,"total_tokens":3}}\n\n'
@@ -503,7 +504,8 @@ def test_opencode_go_stream_parses_openai_sse(monkeypatch):
     assert captured["body"]["model"] == "kimi-k2.6"
     assert captured["body"]["stream_options"] == {"include_usage": True}
     assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "O"}}
-    assert events[1] == {"type": "content_delta", "delta": {"type": "text", "text": "K"}}
+    assert events[1] == {"type": "reasoning_delta", "delta": {"type": "text", "text": "internal plan"}}
+    assert events[2] == {"type": "content_delta", "delta": {"type": "text", "text": "K"}}
     assert events[-1]["type"] == "stream_end"
     assert events[-1]["usage"]["total_tokens"] == 3
     assert response.closed is True

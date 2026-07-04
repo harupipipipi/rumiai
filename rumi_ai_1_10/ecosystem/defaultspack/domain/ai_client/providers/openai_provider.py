@@ -213,6 +213,7 @@ class OpenAIProvider(BaseProvider):
             message.get("reasoning_content")
             or message.get("reasoning")
             or message.get("thinking")
+            or message.get("trace")
             or ""
         )
         reasoning_content = str(reasoning_content) if reasoning_content else ""
@@ -349,7 +350,12 @@ class OpenAIProvider(BaseProvider):
                     text = delta.get("content")
                     if text:
                         yield {"type": "content_delta", "delta": {"type": "text", "text": text}}
-                    reasoning_text = delta.get("reasoning_content") or delta.get("reasoning") or delta.get("thinking")
+                    reasoning_text = (
+                        delta.get("reasoning_content")
+                        or delta.get("reasoning")
+                        or delta.get("thinking")
+                        or delta.get("trace")
+                    )
                     if reasoning_text:
                         yield {"type": "reasoning_delta", "delta": {"type": "text", "text": str(reasoning_text)}}
                     yield from self._stream_tool_call_events(delta, tool_call_state)

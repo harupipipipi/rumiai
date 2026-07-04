@@ -1381,17 +1381,6 @@ export function ChatMessagesRenderer({
                           : "w-full text-zinc-200 bg-transparent",
                       )}
                     >
-                      {message.role === "agent" && message.metadata?.thinkingTranscript && (
-                        <details className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-xs text-zinc-400">
-                          <summary className="cursor-pointer select-none text-[11px] font-medium text-zinc-300">
-                            Trace
-                          </summary>
-                          <pre className="mt-2 max-h-40 overflow-x-auto overflow-y-auto whitespace-pre font-mono text-[11px] leading-relaxed text-zinc-400">
-                            {message.metadata.thinkingTranscript}
-                          </pre>
-                        </details>
-                      )}
-
                       <div className="rumi-message-content markdown-body min-w-0 max-w-full select-text space-y-4 leading-relaxed">
                         {isAuthorityPending
                           ? (
