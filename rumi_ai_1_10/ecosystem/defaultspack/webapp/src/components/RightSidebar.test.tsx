@@ -3,7 +3,13 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { getRailFloatingMenuPosition, RightSidebar, sidebarActionDisabledReason } from "./RightSidebar";
+import {
+  getRailFloatingMenuPosition,
+  RightSidebar,
+  shouldShowToolManagerEmptyState,
+  sidebarActionDisabledReason,
+  toolManagerBaseItemsForNameSearch,
+} from "./RightSidebar";
 import { PromptSidebarWidget } from "./prompts/PromptSidebarWidget";
 
 const noop = () => undefined;
@@ -112,6 +118,43 @@ test("right sidebar keeps initial tool groups compact", () => {
 
   assert.match(html, /title="その他の機能 \(4 groups\)"/);
   assert.doesNotMatch(html, /title="Group 11 \(1\)"/);
+});
+
+test("tool manager name search no-match does not keep stale tool cards", () => {
+  const allItems = [
+    { id: "browser_companion", label: "Browser Companion", category: "tool" as const },
+    { id: "terminal", label: "Terminal", category: "tool" as const },
+    { id: "prompt_usage", label: "Prompt Usage", category: "widget" as const },
+  ];
+
+  const visibleTools = toolManagerBaseItemsForNameSearch(allItems, [], "zzzz-no-tool-qa");
+
+  assert.equal(visibleTools.length, 0);
+  assert.equal(visibleTools.some((item) => item.label === "Browser Companion"), false);
+});
+
+test("tool manager name search no-match shows the empty state", () => {
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 0,
+    sidebarSearchQuery: "zzzz-no-tool-qa",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), true);
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 1,
+    sidebarSearchQuery: "browser",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), false);
+  assert.equal(shouldShowToolManagerEmptyState({
+    toolCount: 0,
+    sidebarSearchQuery: "",
+    toolManagerSearchQuery: "",
+    activeTagFilter: null,
+    showStarredOnly: false,
+  }), false);
 });
 
 test("YOLO switch and Model Manager can be pinned", () => {
