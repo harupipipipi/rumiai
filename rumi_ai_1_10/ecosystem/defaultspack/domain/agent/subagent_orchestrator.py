@@ -4,6 +4,11 @@ import json
 from typing import Any
 
 from domain.ai_client.model_call import call_model
+from domain.agent.subagent_delegation import (
+    classify_delegation_result,
+    classify_exception,
+    delegation_status,
+)
 from domain.agent.subagent_roles import get_subagent_role
 
 
@@ -169,33 +174,48 @@ def _delegate_via_input(
     task = str(payload.get("task") or payload.get("prompt") or "").strip()
     if not task:
         raise ValueError("task is required for delegated compatibility alias")
-    result = dispatch_input(
-        RumiInputEnvelope(
-            role="user",
-            input=task,
-            chat={},
-            source={"type": "compatibility", "provider": "subagent"},
-            target=_delegate_target(payload, context or {}),
-            delivery={"action_id": "agent.delegate"},
-            attachments=list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else []),
-            metadata={"compatibility_alias": "subagent", "role_id": role_id},
-            params={
-                "task": task,
-                "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
-                "model": str(payload.get("model") or model or ""),
-                "system_prompt": payload.get("system_prompt"),
-                "runtime_profile_key": payload.get("runtime_profile_key"),
-                "capability_profile": payload.get("capability_profile"),
-                "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
-                "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
-            },
-            tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
-        ),
-        context or {},
-    )
+    route = "agent.delegate"
+    target = _delegate_target(payload, context or {})
+    target_agent_id = str(payload.get("agent_id") or target.get("agent_id") or "").strip()
+    try:
+        result = dispatch_input(
+            RumiInputEnvelope(
+                role="user",
+                input=task,
+                chat={},
+                source={"type": "compatibility", "provider": "subagent"},
+                target=target,
+                delivery={"action_id": route},
+                attachments=list(payload.get("attachments") if isinstance(payload.get("attachments"), list) else []),
+                metadata={"compatibility_alias": "subagent", "role_id": role_id},
+                params={
+                    "task": task,
+                    "tools": list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+                    "model": str(payload.get("model") or model or ""),
+                    "system_prompt": payload.get("system_prompt"),
+                    "runtime_profile_key": payload.get("runtime_profile_key"),
+                    "capability_profile": payload.get("capability_profile"),
+                    "required_capabilities": payload.get("required_capabilities") or payload.get("capability"),
+                    "params": dict(payload.get("params") if isinstance(payload.get("params"), dict) else {}),
+                },
+                tools=list(payload.get("tools") if isinstance(payload.get("tools"), list) else []),
+            ),
+            context or {},
+        )
+    except Exception as exc:
+        return classify_exception(exc, route=route, target_agent_id=target_agent_id).to_result()
     if isinstance(result, dict):
         result.setdefault("compatibility_alias", "subagent")
-        result.setdefault("route_kind", "agent.delegate")
+        result.setdefault("route_kind", route)
+        if result.get("status") == "error":
+            result.setdefault(
+                "delegation_error",
+                classify_delegation_result(result, route=route, target_agent_id=target_agent_id).to_error(),
+            )
+        else:
+            status = delegation_status(result, route=route, target_agent_id=target_agent_id)
+            if status is not None:
+                result.setdefault("delegation_status", status)
     return result
 
 
@@ -209,4 +229,7 @@ def _delegate_target(payload: dict[str, Any], context: dict[str, Any]) -> dict[s
     ).strip()
     if conversation_id:
         target["conversation_id"] = conversation_id
+    agent_id = str(payload.get("agent_id") or payload.get("target_agent_id") or context.get("agent_id") or "").strip()
+    if agent_id:
+        target["agent_id"] = agent_id
     return target

@@ -1146,7 +1146,7 @@ class CapabilityExecutor:
 
         args = request.get("args", {})
         request_context = request.get("context") if isinstance(request.get("context"), dict) else None
-        timeout_seconds = min(float(request.get("timeout_seconds", DEFAULT_TIMEOUT)), MAX_TIMEOUT)
+        timeout_seconds = self._request_timeout_seconds(request, entry, default=DEFAULT_TIMEOUT)
         request_id = request.get("request_id", "")
         handler_id = entry.qualified_name
 
@@ -1826,6 +1826,7 @@ class CapabilityExecutor:
             or pack_id in self._core_function_handlers
         ):
             allow_manifest_calling_convention = False
+        timeout_seconds = self._request_timeout_seconds(request, entry, default=DEFAULT_FUNCTION_TIMEOUT)
         if (
             allow_manifest_calling_convention
             and calling_convention
@@ -1838,7 +1839,7 @@ class CapabilityExecutor:
                 effective_permission_id="function.call",
                 grant_config=dispatch_grant_config,
                 args=args,
-                timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT),
+                timeout_seconds=timeout_seconds,
                 request_id=request_id,
                 start_time=start_time,
                 request_context=request_context,
@@ -1848,7 +1849,7 @@ class CapabilityExecutor:
                                                  request_id=request_id, start_time=start_time,
                                                  effective_permission_id="function.call",
                                                  grant_config=dispatch_grant_config,
-                                                 timeout_seconds=request.get("timeout_seconds", DEFAULT_FUNCTION_TIMEOUT))
+                                                 timeout_seconds=timeout_seconds)
         elif entry.host_execution:
             resp = self._execute_host_function(
                 principal_id=principal_id,
@@ -1858,6 +1859,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=dispatch_grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         else:
             resp = self._execute_user_function(
@@ -1868,6 +1870,7 @@ class CapabilityExecutor:
                 start_time=start_time,
                 grant_config=dispatch_grant_config,
                 request_context=request_context,
+                timeout_seconds=timeout_seconds,
             )
         resp = self._response_after_host_intent_handling(
             resp,
@@ -2670,13 +2673,32 @@ class CapabilityExecutor:
 
     def _get_function_timeout(self, entry):
         manifest = getattr(entry, "manifest", None)
-        grant_config = manifest.get("grant_config", {}) if isinstance(manifest, dict) else {}
-        t = grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)
+        manifest = manifest if isinstance(manifest, dict) else {}
+        grant_config = manifest.get("grant_config", {}) if isinstance(manifest.get("grant_config"), dict) else {}
+        t = manifest.get("timeout_seconds", manifest.get("timeout", grant_config.get("timeout", DEFAULT_FUNCTION_TIMEOUT)))
         try:
             t = float(t)
         except (TypeError, ValueError):
             t = DEFAULT_FUNCTION_TIMEOUT
         return min(max(t, 1.0), MAX_TIMEOUT)
+
+    def _request_timeout_seconds(self, request, entry, *, default=DEFAULT_FUNCTION_TIMEOUT):
+        if isinstance(request, dict) and request.get("timeout_seconds") not in (None, ""):
+            raw_timeout = request.get("timeout_seconds")
+        elif isinstance(request, dict) and request.get("timeout") not in (None, ""):
+            raw_timeout = request.get("timeout")
+        else:
+            manifest = getattr(entry, "manifest", None)
+            if isinstance(manifest, dict) and any(key in manifest for key in ("timeout_seconds", "timeout")):
+                raw_timeout = manifest.get("timeout_seconds", manifest.get("timeout"))
+            else:
+                grant_config = self._entry_grant_config(entry)
+                raw_timeout = grant_config.get("timeout") if isinstance(grant_config, dict) and "timeout" in grant_config else default
+        try:
+            parsed = float(raw_timeout)
+        except (TypeError, ValueError):
+            parsed = float(default)
+        return min(max(parsed, 1.0), MAX_TIMEOUT)
 
     def _host_runtime_guard(self, entry, runtime, start_time):
         if not getattr(entry, "host_execution", False):

@@ -15,6 +15,11 @@ from .security import (
     unsupported_execution_reason,
 )
 from domain.adaptive.guard import guard_tool_execution, tool_guard_response
+from domain.agent.subagent_delegation import (
+    SubagentDelegationError,
+    error_from_capability_response,
+    tool_error_result,
+)
 from domain.tool_policy.audit import audit_tool_policy
 from domain.tool_policy.internal_context import (
     internal_tool_decision_allows,
@@ -119,6 +124,28 @@ def json_dumps(value):
     return json.dumps(value, ensure_ascii=False)
 
 
+def _attach_delegation_error(response, output):
+    if not isinstance(response, dict) or not isinstance(output, dict):
+        return response
+    delegation_error = output.get("delegation_error")
+    widget = output.get("widget") if isinstance(output.get("widget"), dict) else {}
+    if not isinstance(delegation_error, dict):
+        delegation_error = widget.get("delegation_error") if isinstance(widget.get("delegation_error"), dict) else None
+    if isinstance(delegation_error, dict):
+        response["delegation_error"] = delegation_error
+    return response
+
+
+def _numeric_timeout_seconds(value):
+    if value in (None, ""):
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return max(1.0, min(parsed, 300.0))
+
+
 def _approval_module():
     from domain.safety import approval
 
@@ -170,6 +197,17 @@ class ToolExecutor:
             return tool_guard_response(adaptive_decision, tool_name)
         policy = policy_from_context(context if isinstance(context, dict) else {})
         if is_tool_rejected_by_policy(tool_def, policy):
+            if tool_name == "subagent":
+                result = tool_error_result(
+                    SubagentDelegationError(
+                        "Tool 'subagent' rejected by runtime policy",
+                        category="policy",
+                        code="SUBAGENT_POLICY_REJECTED",
+                        details={"tool_name": tool_name},
+                    )
+                )
+                result["rejected_by_policy"] = True
+                return result
             return {
                 "result": "Tool '{}' rejected by runtime policy".format(tool_name),
                 "is_error": True,
@@ -283,6 +321,9 @@ class ToolExecutor:
             "qualified_name": qualified_name,
             "args": arguments or {},
         }
+        timeout_seconds = _numeric_timeout_seconds(execution.get("timeout_seconds"))
+        if timeout_seconds is not None:
+            request["timeout_seconds"] = timeout_seconds
         if isinstance(context, dict) and context.get("request_id"):
             request["request_id"] = context.get("request_id")
         approved_context, approval_error = _context_with_tool_approval_token(context, tool_def, arguments)
@@ -621,19 +662,25 @@ class ToolExecutor:
                     message = error_payload.get("message") or error_payload.get("code")
                 else:
                     message = error_payload
-                return {
-                    "result": str(message or "Pack function failed"),
-                    "is_error": True,
-                    "widget": None,
-                }
+                return _attach_delegation_error(
+                    {
+                        "result": str(message or "Pack function failed"),
+                        "is_error": True,
+                        "widget": None,
+                    },
+                    output,
+                )
             output = output.get("data")
         if isinstance(output, dict):
             if "result" in output or "is_error" in output or "widget" in output:
-                return {
-                    "result": output.get("result", output.get("summary", "")),
-                    "is_error": bool(output.get("is_error", False)),
-                    "widget": output.get("widget"),
-                }
+                return _attach_delegation_error(
+                    {
+                        "result": output.get("result", output.get("summary", "")),
+                        "is_error": bool(output.get("is_error", False)),
+                        "widget": output.get("widget"),
+                    },
+                    output,
+                )
             return {
                 "result": json_dumps(output),
                 "is_error": False,
@@ -735,6 +782,8 @@ class ToolExecutor:
         output = getattr(response, "output", None)
         error = getattr(response, "error", None)
         if not success:
+            if _tool_approval_tool_name(tool_def) == "subagent":
+                return tool_error_result(error_from_capability_response(response))
             if isinstance(output, dict) and output.get("approval_required"):
                 summary = output.get("display_summary") or output.get("message") or output.get("reason") or "Authority approval required"
                 return {
@@ -795,11 +844,14 @@ class ToolExecutor:
             return ToolExecutor._tool_response_from_pack_function_output(output)
         if isinstance(output, dict):
             if "result" in output or "is_error" in output or "widget" in output:
-                return {
-                    "result": output.get("result", output.get("summary", "")),
-                    "is_error": bool(output.get("is_error", False)),
-                    "widget": output.get("widget"),
-                }
+                return _attach_delegation_error(
+                    {
+                        "result": output.get("result", output.get("summary", "")),
+                        "is_error": bool(output.get("is_error", False)),
+                        "widget": output.get("widget"),
+                    },
+                    output,
+                )
             return {
                 "result": json_dumps(output),
                 "is_error": False,
@@ -1158,7 +1210,10 @@ class ToolExecutor:
         elif tool_name == "subagent":
             from ecosystem.rumi_default_tools_pack.domain.tool.subagent import SubagentController
 
-            result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
+            try:
+                result = SubagentController().run(arguments, context if isinstance(context, dict) else {})
+            except SubagentDelegationError as exc:
+                return tool_error_result(exc)
             return {
                 "result": result.get("summary", "subagent completed"),
                 "is_error": False,

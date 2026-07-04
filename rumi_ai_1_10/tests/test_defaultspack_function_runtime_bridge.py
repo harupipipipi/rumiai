@@ -103,6 +103,49 @@ def test_bridge_forwards_timeout_seconds_to_capability_executor():
     assert request["timeout_seconds"] == 120
 
 
+def test_capability_executor_uses_manifest_timeout_when_request_omits_timeout():
+    from core_runtime.capability_executor import CapabilityExecutor, CapabilityResponse
+    from core_runtime.function_registry import FunctionRegistry
+    from domain.function_runtime.bridge import ensure_defaultspack_functions_registered
+
+    class PermissionManager:
+        def has_permission(self, principal_id, permission):
+            return True
+
+        def check_caller_requires(self, principal_id, caller_requires):
+            return True
+
+    executor = CapabilityExecutor()
+    executor._initialized = True
+    executor._function_registry = FunctionRegistry()
+    executor._approval_manager = MagicMock()
+    executor._approval_manager.is_pack_approved_and_verified.return_value = True
+    executor._permission_manager = PermissionManager()
+    executor._trust_store = MagicMock()
+    executor._grant_manager = MagicMock()
+    captured = {}
+
+    def fake_subprocess_dispatch(**kwargs):
+        captured["timeout_seconds"] = kwargs.get("timeout_seconds")
+        return CapabilityResponse(success=True, output={"status": "ok", "data": {"result": "ok"}})
+
+    executor._execute_handler_subprocess = fake_subprocess_dispatch
+    ensure_defaultspack_functions_registered(_FakeContainer(executor, executor._function_registry))
+
+    response = executor.execute(
+        "defaultspack",
+        {
+            "type": "function.call",
+            "qualified_name": "defaultspack:tool_subagent",
+            "args": {"task": "hello"},
+            "request_id": "req-manifest-timeout",
+        },
+    )
+
+    assert response.success is True
+    assert captured["timeout_seconds"] == 240
+
+
 def test_bridge_forwards_sanitized_request_context_to_capability_executor():
     from domain.function_runtime.bridge import invoke_function
 
