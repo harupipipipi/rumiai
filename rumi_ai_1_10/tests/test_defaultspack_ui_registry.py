@@ -26,6 +26,18 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         return f"{encode({'alg': 'none'})}.{encode(payload)}."
 
+    def test_frontend_registry_accepts_lightweight_route_keyword(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = FrontendRegistry(pack_root=Path(tmpdir))
+            catalog = registry.build_catalog(lightweight=True)
+            settings = registry.get_settings(lightweight=True)
+
+        self.assertIn("sidebar", catalog)
+        self.assertIn("sections", settings)
+        self.assertIn("values", settings)
+
     def test_catalog_merges_tool_registry_and_extension_manifest(self):
         from domain.frontend.registry import FrontendRegistry
 
