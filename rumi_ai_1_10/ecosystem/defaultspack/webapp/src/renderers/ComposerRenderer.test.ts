@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
+  atMentionMenuKeyAction,
   filterAtMentionFiles,
   insertAtMentionText,
   composerChromeWidgetStyle,
@@ -63,6 +64,7 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
   ];
 
   assert.deepEqual(filterComposerToolMentions(tools, "workspace").map((tool) => tool.id), ["coding_file_read"]);
+  assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
   assert.deepEqual(toolMentionIdsFromText("Use @web_search then @Read_File.", tools), ["web_search", "coding_file_read"]);
   assert.deepEqual(composerToolMentionWidget(tools[0]), {
     id: "web_search",
@@ -89,6 +91,67 @@ test("composer tool mentions resolve searchable tools and JSON metadata", () => 
         ui: { composer_label: "Web Search" },
       },
     },
+  });
+});
+
+test("composer mention filters retain known tools and files while typing", () => {
+  const tools = [
+    {
+      id: "web_search",
+      label: "Web Search",
+      category: "tool",
+      description: "Search the web.",
+      tags: ["research"],
+      ui: { composer_label: "Web Search" },
+    },
+    {
+      id: "calculator",
+      label: "Calculator",
+      category: "tool",
+      description: "Compute arithmetic.",
+      tags: ["math"],
+    },
+    {
+      id: "browser_computer",
+      label: "Browser Computer",
+      category: "tool",
+      description: "Control the browser and computer.",
+      tags: ["browser", "computer"],
+    },
+  ];
+
+  assert.deepEqual(filterComposerToolMentions(tools, "web").map((tool) => tool.id), ["web_search"]);
+  assert.deepEqual(filterComposerToolMentions(tools, "calculator").map((tool) => tool.id), ["calculator"]);
+  assert.deepEqual(filterComposerToolMentions(tools, "browser").map((tool) => tool.id), ["browser_computer"]);
+  assert.deepEqual(filterAtMentionFiles(["src/App.tsx", "README.md"], "README"), ["README.md"]);
+});
+
+test("composer mention Enter selects candidates and does not submit raw unmatched text", () => {
+  assert.deepEqual(atMentionMenuKeyAction("Enter", false, 0, 2), {
+    handled: true,
+    type: "select",
+    index: 0,
+  });
+  assert.deepEqual(atMentionMenuKeyAction("Tab", false, 9, 2), {
+    handled: true,
+    type: "select",
+    index: 1,
+  });
+  assert.deepEqual(atMentionMenuKeyAction("Enter", false, 0, 0), {
+    handled: true,
+    type: "block",
+  });
+  assert.deepEqual(atMentionMenuKeyAction("Tab", false, 0, 0), {
+    handled: true,
+    type: "block",
+  });
+  assert.deepEqual(atMentionMenuKeyAction("Escape", false, 0, 0), {
+    handled: true,
+    type: "close",
+  });
+  assert.deepEqual(insertAtMentionText("Use @web", 8, "web_search"), {
+    value: "Use @web_search ",
+    cursor: 16,
   });
 });
 
