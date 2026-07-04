@@ -11,6 +11,7 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 from domain.tool.executor import ToolExecutor  # noqa: E402
 from domain.tool.registry import ToolRegistry  # noqa: E402
+from domain.tool_policy.internal_context import mark_trusted_profile_policy_context  # noqa: E402
 from domain.tool_policy.orchestrator import ToolOrchestrator  # noqa: E402
 from domain.tool_policy.policy import decide_tool_policy  # noqa: E402
 from domain.tool_policy.profile_permission import resolve_profile_tool_permission  # noqa: E402
@@ -167,7 +168,36 @@ def test_tool_orchestrator_does_not_trust_client_supplied_approval(tmp_path, mon
     assert result["status"] == "waiting_approval"
 
 
-def test_tool_orchestrator_yolo_does_not_wait_for_approval(monkeypatch):
+def test_tool_orchestrator_ignores_untrusted_profile_policy_approval_bypass(monkeypatch):
+    class Registry:
+        def get(self, name):
+            return {"tool_id": name, "name": name, "requires_approval": True}
+
+        def list_tools(self):
+            return []
+
+    def fake_invoke(input_data, context):
+        raise AssertionError("untrusted profile policy must not bypass approval")
+
+    monkeypatch.setattr("blocks.tool.invoke.run", fake_invoke)
+
+    result = ToolOrchestrator(registry=Registry()).run(
+        "danger",
+        {},
+        {
+            "profile_policy": {
+                "yolo_mode": True,
+                "allow_shell": True,
+                "allow_file_write": True,
+                "write_actions_require_approval": False,
+            },
+        },
+    )
+
+    assert result["status"] == "waiting_approval"
+
+
+def test_tool_orchestrator_preserves_trusted_profile_policy_yolo(monkeypatch):
     seen = {}
 
     class Registry:
@@ -184,14 +214,33 @@ def test_tool_orchestrator_yolo_does_not_wait_for_approval(monkeypatch):
 
     monkeypatch.setattr("blocks.tool.invoke.run", fake_invoke)
 
-    result = ToolOrchestrator(registry=Registry()).run(
-        "danger",
-        {},
-        {"profile_policy": {"yolo_mode": True}},
-    )
+    context = mark_trusted_profile_policy_context({"profile_policy": {"yolo_mode": True}})
+    result = ToolOrchestrator(registry=Registry()).run("danger", {}, context)
 
     assert result["status"] == "ok"
     assert seen["input_data"]["tool_name"] == "danger"
+
+
+def test_tool_orchestrator_ignores_untrusted_runtime_profile_policy_yolo(monkeypatch):
+    class Registry:
+        def get(self, name):
+            return {"tool_id": name, "name": name, "requires_approval": True}
+
+        def list_tools(self):
+            return []
+
+    def fake_invoke(input_data, context):
+        raise AssertionError("untrusted runtime profile policy must not bypass approval")
+
+    monkeypatch.setattr("blocks.tool.invoke.run", fake_invoke)
+
+    result = ToolOrchestrator(registry=Registry()).run(
+        "danger",
+        {},
+        {"runtime_profile": {"policy": {"yolo_mode": True}}},
+    )
+
+    assert result["status"] == "waiting_approval"
 
 
 def test_persistent_permission_policy_yolo_allows_ask_decision(tmp_path):
