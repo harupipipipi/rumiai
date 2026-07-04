@@ -80,7 +80,19 @@ class PackLifecycleHandlersMixin:
             _log_internal_error("pack_import", e)
             return {"success": False, "error": _SAFE_ERROR_MSG}
 
-    def _pack_apply(self, staging_id: str, mode: str = "replace") -> dict:
+    def _pack_apply_actor(self, actor: str | None = None) -> str:
+        if actor:
+            return str(actor)
+        principal = getattr(self, "_authenticated_principal", None)
+        principal_id = getattr(principal, "principal_id", None)
+        return str(principal_id or "api_user")
+
+    def _pack_apply(
+        self,
+        staging_id: str,
+        mode: str = "replace",
+        actor: str | None = None,
+    ) -> dict:
         try:
             from ...pack_importer import get_pack_importer
             importer = get_pack_importer()
@@ -90,7 +102,11 @@ class PackLifecycleHandlersMixin:
 
             from ...pack_applier import get_pack_applier
             applier = get_pack_applier()
-            result = applier.apply(staging_id, mode=mode)
+            result = applier.apply(
+                staging_id,
+                mode=mode,
+                actor=self._pack_apply_actor(actor),
+            )
             return result.to_dict() if hasattr(result, "to_dict") else result
         except Exception as e:
             _log_internal_error("pack_apply", e)
