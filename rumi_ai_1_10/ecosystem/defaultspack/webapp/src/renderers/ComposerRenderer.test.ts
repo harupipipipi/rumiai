@@ -21,6 +21,7 @@ import {
   filterComposerToolMentions,
   filterModelProfilesBySearch,
   resolveComposerWidgetDrop,
+  shouldCloseTransientPopoverForTarget,
   shouldFocusComposerForSlashKey,
   toolMentionIdsFromText,
 } from "./ComposerRenderer";
@@ -132,6 +133,19 @@ test("model candidate menu keyboard helpers cycle and select", () => {
   assert.deepEqual(modelCandidateMenuKeyAction("Tab", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Enter", false, 0, 0), { handled: false });
   assert.deepEqual(modelCandidateMenuKeyAction("Escape", false, 0, 0), { handled: false });
+});
+
+test("transient model popovers close only for outside click targets", () => {
+  const inside = {} as Node;
+  const trigger = {} as Node;
+  const outside = {} as Node;
+  const popupNode = { contains: (target: Node) => target === inside };
+  const triggerNode = { contains: (target: Node) => target === trigger };
+
+  assert.equal(shouldCloseTransientPopoverForTarget(inside, [popupNode, triggerNode]), false);
+  assert.equal(shouldCloseTransientPopoverForTarget(trigger, [popupNode, triggerNode]), false);
+  assert.equal(shouldCloseTransientPopoverForTarget(outside, [popupNode, triggerNode]), true);
+  assert.equal(shouldCloseTransientPopoverForTarget(null, [popupNode, triggerNode]), false);
 });
 
 test("new conversation model dropdown opens below and offset to the right", () => {
@@ -313,6 +327,47 @@ test("composer renders template-provided slash command suggestions", () => {
   assert.match(html, /Commands/);
   assert.match(html, /\/context-txt/);
   assert.match(html, /Write a context handoff file/);
+});
+
+test("composer suppresses model candidates while settings overlay is active", () => {
+  const props = {
+    input: "",
+    placeholder: "メッセージを入力...",
+    isGenerating: false,
+    selectedProfile: {
+      profile_id: "stub/default",
+      display_name: "Stub Default",
+      provider_id: "stub",
+      model_id: "default",
+    },
+    favoriteProfiles: [],
+    inlineExtensions: [],
+    belowExtensions: [],
+    thinkingLevel: null,
+    contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+    modelCommandCandidates: [
+      {
+        profile_id: "google/gemini-2.5-flash",
+        display_name: "Gemini 2.5 Flash",
+        provider_id: "google",
+        provider_display_name: "Google",
+        model_id: "gemini-2.5-flash",
+      },
+    ],
+    onInputChange: () => undefined,
+    onSubmit: () => undefined,
+    onModelProfileSelect: () => undefined,
+    onThinkingLevelChange: () => undefined,
+    onModelCommandCandidatesClose: () => undefined,
+  };
+
+  const openHtml = renderToStaticMarkup(createElement(ComposerRenderer, props));
+  const suppressedHtml = renderToStaticMarkup(createElement(ComposerRenderer, { ...props, suppressPopovers: true }));
+
+  assert.match(openHtml, /aria-label="Model candidates"/);
+  assert.match(openHtml, /Gemini 2\.5 Flash/);
+  assert.doesNotMatch(suppressedHtml, /aria-label="Model candidates"/);
+  assert.doesNotMatch(suppressedHtml, /Gemini 2\.5 Flash/);
 });
 
 test("composer suppresses slash command suggestions when template disables slash commands", () => {
