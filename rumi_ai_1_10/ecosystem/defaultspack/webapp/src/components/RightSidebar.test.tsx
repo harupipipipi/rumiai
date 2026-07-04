@@ -53,6 +53,46 @@ test("left sidebar default does not render every tool detail panel", () => {
   assert.doesNotMatch(html, /Detail panel text/);
 });
 
+test("risky tool detail keeps a prominent needs approval affordance", () => {
+  const html = renderToStaticMarkup(
+    createElement(RightSidebar, {
+      activeItemId: "node_exec",
+      items: [
+        {
+          id: "node_exec",
+          label: "Node Exec",
+          category: "tool",
+          description: "Execute sandboxed Node code.",
+          risk: "high",
+          tags: ["sandbox", "agent_os", "artifact_workspace"],
+          tool_info: {
+            requires_approval: true,
+            approval_policy: "runtime",
+          },
+          panel: {
+            kind: "tool",
+            notes: ["Requires approval."],
+          },
+        },
+      ],
+      settingsValues: {
+        sidebar: { pinned_item_ids: [], starred_item_ids: [], custom_tool_tags: {}, ui_placements: [] },
+        tools: { disabled_tool_ids: [], hidden_tool_ids: [] },
+      },
+      settingsSections: [],
+      selectedToolIds: [],
+      onSettingChange: noop,
+      onOpenSettings: noop,
+    }),
+  );
+
+  assert.match(html, /data-testid="tool-detail-needs-approval"/);
+  assert.match(html, />Needs approval</);
+  assert.match(html, /Approval policy: runtime/);
+  assert.match(html, />danger</);
+  assert.match(html, />risk:high</);
+});
+
 test("right sidebar initially focuses the rail on tools", () => {
   const html = renderToStaticMarkup(
     createElement(RightSidebar, {
