@@ -878,7 +878,7 @@ test("composer at mention selects tools and skills and sends mention metadata", 
   await expect(mentions).toContainText("@Web Search");
   await expect(mentions).toContainText("web_search");
 
-  await page.getByRole("option", { name: /web_search|@web search/i }).click();
+  await composer.press("Enter");
   await expect(composer).toHaveValue("Use @web_search ");
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
 
