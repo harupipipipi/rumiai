@@ -131,6 +131,12 @@ const MODEL_STATUS_POPOVER_WIDTH = 240;
 const MODEL_STATUS_POPOVER_HEIGHT = 176;
 const MODEL_STATUS_POPOVER_GAP = 10;
 const MODEL_STATUS_POPOVER_VIEWPORT_MARGIN = 16;
+const COMPOSER_CANDIDATE_VIEWPORT_MARGIN = 16;
+const COMPOSER_CANDIDATE_GAP = 8;
+const COMPOSER_CANDIDATE_MIN_WIDTH = 260;
+const COMPOSER_CANDIDATE_MAX_HEIGHT = 288;
+const COMPOSER_CANDIDATE_HEADER_HEIGHT = 38;
+const COMPOSER_CANDIDATE_MIN_LIST_HEIGHT = 64;
 const TEMPLATE_COMPOSER_TEXT_MAX = 180;
 const TEMPLATE_COMPOSER_MODALITY_LABELS: Record<string, string> = {
   text: "Text",
@@ -293,6 +299,76 @@ function inlineSvgMarkup(markup: string): string {
 function clampPopoverOffset(value: number, min: number, max: number): number {
   if (max < min) return min;
   return Math.min(Math.max(value, min), max);
+}
+
+type ComposerCandidatePopupAnchorRect = Pick<DOMRect, "bottom" | "height" | "left" | "right" | "top" | "width">;
+type ComposerCandidatePopupAlign = "left" | "right";
+type ComposerCandidatePopupStyle = CSSProperties & {
+  "--rumi-composer-candidate-list-max-height"?: string;
+};
+
+function usableComposerPopupAnchorRect(
+  rect: ComposerCandidatePopupAnchorRect | null | undefined,
+  viewportWidth: number,
+  viewportHeight: number,
+  viewportLeft = 0,
+  viewportTop = 0,
+): rect is ComposerCandidatePopupAnchorRect {
+  if (!rect) return false;
+  if (rect.width <= 0 || rect.height <= 0) return false;
+  const viewportRight = viewportLeft + viewportWidth;
+  const viewportBottom = viewportTop + viewportHeight;
+  return rect.right > viewportLeft && rect.left < viewportRight && rect.bottom > viewportTop && rect.top < viewportBottom;
+}
+
+export function composerCandidatePopupStyleForAnchor(
+  anchorRect: ComposerCandidatePopupAnchorRect | null,
+  viewportWidth: number,
+  viewportHeight: number,
+  options: {
+    align?: ComposerCandidatePopupAlign;
+    headerHeight?: number;
+    maxHeight?: number;
+    minWidth?: number;
+    preferredWidth?: number;
+    viewportLeft?: number;
+    viewportTop?: number;
+  } = {},
+): ComposerCandidatePopupStyle | undefined {
+  if (!anchorRect || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
+  const viewportLeft = options.viewportLeft ?? 0;
+  const viewportTop = options.viewportTop ?? 0;
+  const viewportRight = viewportLeft + viewportWidth;
+  const viewportBottom = viewportTop + viewportHeight;
+  const margin = COMPOSER_CANDIDATE_VIEWPORT_MARGIN;
+  const gap = COMPOSER_CANDIDATE_GAP;
+  const minLeft = viewportLeft + margin;
+  const maxWidth = Math.max(options.minWidth ?? COMPOSER_CANDIDATE_MIN_WIDTH, viewportWidth - margin * 2);
+  const width = Math.min(options.preferredWidth ?? 420, maxWidth);
+  const maxLeft = viewportRight - width - margin;
+  const alignedLeft = options.align === "right" ? anchorRect.right - width : anchorRect.left;
+  const left = clampPopoverOffset(alignedLeft, minLeft, maxLeft);
+  const headerHeight = options.headerHeight ?? COMPOSER_CANDIDATE_HEADER_HEIGHT;
+  const requestedMaxHeight = Math.min(options.maxHeight ?? COMPOSER_CANDIDATE_MAX_HEIGHT, viewportHeight - margin * 2);
+  const maxPanelHeight = Math.max(headerHeight + COMPOSER_CANDIDATE_MIN_LIST_HEIGHT, requestedMaxHeight);
+  const availableAbove = Math.max(0, anchorRect.top - viewportTop - margin - gap);
+  const availableBelow = Math.max(0, viewportBottom - anchorRect.bottom - margin - gap);
+  const placeAbove = availableAbove >= Math.min(maxPanelHeight, 160) || availableAbove >= availableBelow;
+  const available = placeAbove ? availableAbove : availableBelow;
+  const panelMaxHeight = Math.max(
+    headerHeight + COMPOSER_CANDIDATE_MIN_LIST_HEIGHT,
+    Math.min(maxPanelHeight, available || maxPanelHeight),
+  );
+  const listMaxHeight = Math.max(COMPOSER_CANDIDATE_MIN_LIST_HEIGHT, panelMaxHeight - headerHeight);
+
+  return {
+    left,
+    top: placeAbove ? anchorRect.top - gap : anchorRect.bottom + gap,
+    width,
+    maxHeight: panelMaxHeight,
+    transform: placeAbove ? "translateY(-100%)" : undefined,
+    "--rumi-composer-candidate-list-max-height": `${listMaxHeight}px`,
+  };
 }
 
 function ModelStatusIndicatorButton({
@@ -1126,12 +1202,12 @@ function ModeSelector({
   );
 }
 
-type ComposerAtMentionCandidate =
+export type ComposerAtMentionCandidate =
   | { kind: "tool"; id: string; label: string; description?: string; item: ComposerExtensionItem }
   | { kind: "skill"; id: string; label: string; description?: string; skill: ComposerSkillItem }
   | { kind: "file"; id: string; label: string; description?: string; file: string };
 
-function AtMentionMenu({
+export function AtMentionMenu({
   candidates,
   activeIndex,
   onActiveIndexChange,
@@ -1165,7 +1241,7 @@ function AtMentionMenu({
           </span>
           <span className="text-[10px] text-zinc-600">{candidates.length}</span>
         </div>
-        <div className="max-h-56 overflow-y-auto py-1">
+        <div className="overflow-y-auto py-1" style={{ maxHeight: "var(--rumi-composer-candidate-list-max-height,14rem)" }}>
           {candidates.map((candidate, index) => {
             const Icon = candidate.kind === "tool" ? Wrench : candidate.kind === "skill" ? BrainCircuit : FileText;
             return (
@@ -1344,7 +1420,7 @@ function ModelCommandCandidatePopup({
           </button>
         )}
       </div>
-      <div className="max-h-64 overflow-y-auto py-1">
+      <div className="overflow-y-auto py-1" style={{ maxHeight: "var(--rumi-composer-candidate-list-max-height,16rem)" }}>
         {candidates.map((candidate, index) => {
           const badge = modelCandidateApiKeyBadge(candidate);
           return (
@@ -1664,12 +1740,37 @@ export function ComposerRenderer({
     [locallyConfiguredProviders],
   );
 
-  const updateComposerPopoverAnchor = useCallback(() => {
+  const updateComposerPopoverAnchor = useCallback((anchorKind: "input" | "model" = "input") => {
     if (typeof window === "undefined") return;
+    const visualViewport = window.visualViewport;
+    const viewportWidth = visualViewport?.width ?? window.innerWidth;
+    const viewportHeight = visualViewport?.height ?? window.innerHeight;
+    const viewportLeft = visualViewport?.offsetLeft ?? 0;
+    const viewportTop = visualViewport?.offsetTop ?? 0;
     const modelPickerNode = chromeWidgetNodeMapRef.current.get("model-picker");
-    const anchorRect = modelPickerNode?.getBoundingClientRect() ?? textareaRef.current?.getBoundingClientRect() ?? null;
-    setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
+    const modelPickerRect = modelPickerNode?.getBoundingClientRect() ?? null;
+    const inputRect = textareaRef.current?.getBoundingClientRect() ?? null;
+    const preferredRect = anchorKind === "model" ? modelPickerRect : inputRect;
+    const fallbackRect = anchorKind === "model" ? inputRect : modelPickerRect;
+    const anchorRect = usableComposerPopupAnchorRect(preferredRect, viewportWidth, viewportHeight, viewportLeft, viewportTop)
+      ? preferredRect
+      : usableComposerPopupAnchorRect(fallbackRect, viewportWidth, viewportHeight, viewportLeft, viewportTop)
+        ? fallbackRect
+        : null;
+    setComposerPopoverStyle(
+      composerCandidatePopupStyleForAnchor(anchorRect, viewportWidth, viewportHeight, {
+        align: anchorKind === "model" ? "right" : "left",
+        preferredWidth: anchorKind === "model" ? 460 : 420,
+        viewportLeft,
+        viewportTop,
+      }),
+    );
   }, []);
+  const activeComposerPopoverAnchor: "input" | "model" | null = hasModelCommandCandidates
+    ? "model"
+    : atMentionOpen || showCommandSuggestions
+      ? "input"
+      : null;
 
   const resizeNewConversationTextarea = useCallback(
     (textarea: HTMLTextAreaElement | null = textareaRef.current) => {
@@ -1769,6 +1870,36 @@ export function ComposerRenderer({
     resizeNewConversationTextarea();
   }, [input, resizeNewConversationTextarea]);
 
+  useIsomorphicLayoutEffect(() => {
+    if (!activeComposerPopoverAnchor) {
+      setComposerPopoverStyle(undefined);
+      return;
+    }
+    updateComposerPopoverAnchor(activeComposerPopoverAnchor);
+  }, [
+    activeComposerPopoverAnchor,
+    atMentionCandidates.length,
+    input,
+    matchedCommands.length,
+    modelCommandCandidates.length,
+    updateComposerPopoverAnchor,
+  ]);
+
+  useEffect(() => {
+    if (!activeComposerPopoverAnchor) return;
+    const update = () => updateComposerPopoverAnchor(activeComposerPopoverAnchor);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+    };
+  }, [activeComposerPopoverAnchor, updateComposerPopoverAnchor]);
+
   useEffect(() => {
     setSelectedModelCandidateIndex((current) => {
       if (modelCommandCandidates.length === 0) return 0;
@@ -1802,17 +1933,6 @@ export function ComposerRenderer({
     if (templateAllowsSlashCommands || openFolder !== "commands") return;
     setOpenFolder("tools");
   }, [openFolder, templateAllowsSlashCommands]);
-
-  useEffect(() => {
-    if (!hasModelCommandCandidates) return;
-    updateComposerPopoverAnchor();
-    window.addEventListener("resize", updateComposerPopoverAnchor);
-    window.addEventListener("scroll", updateComposerPopoverAnchor, true);
-    return () => {
-      window.removeEventListener("resize", updateComposerPopoverAnchor);
-      window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
-    };
-  }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -1900,7 +2020,7 @@ export function ComposerRenderer({
       if (atMatch && !isSteerMode && hasMentionTargets) {
         setAtMentionOpen(true);
         setAtMentionQuery(atMatch[1]);
-        updateComposerPopoverAnchor();
+        updateComposerPopoverAnchor("input");
       } else {
         setAtMentionOpen(false);
         setAtMentionQuery("");
@@ -2508,6 +2628,105 @@ export function ComposerRenderer({
         ["tools", "Tools", Wrench],
         ["models", "Models", SlidersHorizontal],
       ] as const);
+  const candidateScrollStyle = { maxHeight: "var(--rumi-composer-candidate-list-max-height,14rem)" } satisfies CSSProperties;
+  const composerCandidateLayer = (
+    <>
+      {hasModelCommandCandidates && (
+        <ModelCommandCandidatePopup
+          candidates={modelCommandCandidates}
+          activeIndex={selectedModelCandidateIndex}
+          onActiveIndexChange={setSelectedModelCandidateIndex}
+          onSelect={chooseModelCommandCandidate}
+          onClose={onModelCommandCandidatesClose}
+          style={composerPopoverStyle}
+        />
+      )}
+      {showCommandSuggestions && (
+        showThinkingLevelChips ? (
+          <div
+            data-testid="composer-slash-command-candidates"
+            style={composerPopoverStyle}
+            className="fixed rumi-layer-global-overlay flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 overflow-y-auto rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl"
+          >
+            <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
+            {matchedCommands.map((command, index) => {
+              const level = command.id.replace(/^think:/, "");
+              return (
+                <button
+                  key={command.id}
+                  type="button"
+                  tabIndex={chromeButtonTabIndex}
+                  onMouseEnter={() => setSelectedCommandIndex(index)}
+                  onClick={() => chooseCommand(command.id)}
+                  className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${
+                    index === selectedCommandIndex
+                      ? "border-zinc-400 bg-zinc-100 text-zinc-950"
+                      : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
+                  }`}
+                >
+                  {THINKING_LABELS[level] ?? level}
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div
+            data-testid="composer-slash-command-candidates"
+            style={composerPopoverStyle}
+            className="fixed rumi-layer-global-overlay w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+          >
+            <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
+              Commands
+            </div>
+            <div className="overflow-y-auto py-1" style={candidateScrollStyle}>
+              {matchedCommands.map((command, index) => (
+                <button
+                  key={command.id}
+                  type="button"
+                  tabIndex={chromeButtonTabIndex}
+                  onMouseEnter={() => setSelectedCommandIndex(index)}
+                  onClick={() => chooseCommand(command.id)}
+                  className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
+                    index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
+                  }`}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
+                    {command.description && (
+                      <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
+                    )}
+                  </span>
+                  <span className="flex flex-shrink-0 items-center gap-1">
+                    {command.risk && (
+                      <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
+                        {command.risk}
+                      </span>
+                    )}
+                    {(command.enabled || command.active) && (
+                      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
+                    )}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )
+      )}
+      {atMentionOpen && (
+        <AtMentionMenu
+          candidates={atMentionCandidates}
+          activeIndex={selectedAtMentionIndex}
+          onActiveIndexChange={setSelectedAtMentionIndex}
+          onSelect={handleAtMentionSelect}
+          onClose={() => setAtMentionOpen(false)}
+          style={composerPopoverStyle}
+        />
+      )}
+    </>
+  );
+  const composerCandidateLayerNode = typeof document !== "undefined"
+    ? createPortal(composerCandidateLayer, document.body)
+    : composerCandidateLayer;
 
   return (
     <div
@@ -2537,89 +2756,7 @@ export function ComposerRenderer({
               onSave={saveProviderApiKey}
             />
           )}
-          {hasModelCommandCandidates && (
-            <ModelCommandCandidatePopup
-              candidates={modelCommandCandidates}
-              activeIndex={selectedModelCandidateIndex}
-              onActiveIndexChange={setSelectedModelCandidateIndex}
-              onSelect={chooseModelCommandCandidate}
-              onClose={onModelCommandCandidatesClose}
-              style={composerPopoverStyle}
-            />
-          )}
-          {showCommandSuggestions && (
-            showThinkingLevelChips ? (
-              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
-                <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
-                {matchedCommands.map((command, index) => {
-                  const level = command.id.replace(/^think:/, "");
-                          return (
-                            <button
-                              key={command.id}
-                              type="button"
-                              tabIndex={chromeButtonTabIndex}
-                              onMouseEnter={() => setSelectedCommandIndex(index)}
-                              onClick={() => chooseCommand(command.id)}
-                      className={`h-8 rounded-lg border px-3 text-xs font-medium transition-colors ${
-                        index === selectedCommandIndex
-                          ? "border-zinc-400 bg-zinc-100 text-zinc-950"
-                          : "border-zinc-700 bg-zinc-900 text-zinc-300 hover:border-zinc-500 hover:text-zinc-100"
-                      }`}
-                    >
-                      {THINKING_LABELS[level] ?? level}
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
-                <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
-                  Commands
-                </div>
-                <div className="max-h-56 overflow-y-auto py-1">
-                          {matchedCommands.map((command, index) => (
-                            <button
-                              key={command.id}
-                              type="button"
-                              tabIndex={chromeButtonTabIndex}
-                              onMouseEnter={() => setSelectedCommandIndex(index)}
-                              onClick={() => chooseCommand(command.id)}
-                      className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left ${
-                        index === selectedCommandIndex ? "bg-zinc-800 text-zinc-100" : "hover:bg-zinc-900"
-                      }`}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm text-zinc-100">/{command.name ?? command.id}</span>
-                        {command.description && (
-                          <span className="block truncate text-[11px] text-zinc-500">{command.description}</span>
-                        )}
-                      </span>
-                      <span className="flex flex-shrink-0 items-center gap-1">
-                        {command.risk && (
-                          <span className={`rounded-full border px-2 py-0.5 text-[10px] ${RISK_BADGE_STYLES[command.risk] ?? "border-zinc-700 text-zinc-400"}`}>
-                            {command.risk}
-                          </span>
-                        )}
-                        {(command.enabled || command.active) && (
-                          <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">on</span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )
-          )}
-
-          {atMentionOpen && (
-            <AtMentionMenu
-              candidates={atMentionCandidates}
-              activeIndex={selectedAtMentionIndex}
-              onActiveIndexChange={setSelectedAtMentionIndex}
-              onSelect={handleAtMentionSelect}
-              onClose={() => setAtMentionOpen(false)}
-            />
-          )}
+          {composerCandidateLayerNode}
 
           {menuOpen && (
             <>

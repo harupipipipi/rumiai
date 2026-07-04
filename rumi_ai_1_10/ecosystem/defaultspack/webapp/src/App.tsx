@@ -3019,39 +3019,68 @@ function ChatApp() {
   }
 
   async function refreshCatalog() {
-    const [catalogResult, settingsResult, profilesResult, commandsResult] = await Promise.allSettled([
-      api.uiCatalog(),
-      api.uiSettings(),
-      api.listModelProfiles(),
-      api.uiCommands(),
-    ]);
-    const nextCatalog = catalogResult.status === "fulfilled" ? catalogResult.value : null;
-    const nextSettings = settingsResult.status === "fulfilled" ? settingsResult.value : null;
-    if (nextCatalog) {
-      setCatalog(nextCatalog);
-    } else {
-      if (catalogResult.status === "rejected") console.error(catalogResult.reason);
-      setCatalog(null);
-    }
-    if (profilesResult.status === "fulfilled") {
-      setModelProfiles(profilesResult.value.profiles);
-    } else {
-      console.error(profilesResult.reason);
-      setModelProfiles([]);
-    }
-    if (nextSettings) {
-      setSettingsSections(nextSettings.sections);
-      setSettingsValues(withCalendarSettingsValues(nextSettings.values));
-    } else {
-      if (settingsResult.status === "rejected") console.error(settingsResult.reason);
-    }
-    if (commandsResult.status === "rejected") {
-      console.error(commandsResult.reason);
-    }
-    setCommandCatalog(mergeComposerCommands(
-      commandsResult.status === "fulfilled" ? commandsResult.value.commands ?? [] : [],
-      nextCatalog?.commands ?? [],
-    ));
+    const catalogPromise = api.uiCatalog();
+    const settingsPromise = api.uiSettings();
+    const profilesPromise = api.listModelProfiles();
+    const commandsPromise = api.uiCommands();
+    let backendCommands: ComposerCommandItem[] = [];
+    let catalogCommands: ComposerCommandItem[] = [];
+    const publishCommandCatalog = () => {
+      setCommandCatalog(mergeComposerCommands(backendCommands, catalogCommands));
+    };
+
+    void commandsPromise.then(
+      (result) => {
+        backendCommands = result.commands ?? [];
+        publishCommandCatalog();
+      },
+      (reason) => {
+        console.error(reason);
+        backendCommands = [];
+        publishCommandCatalog();
+      },
+    );
+
+    const settingsResult = settingsPromise.then(
+      (nextSettings) => {
+        setSettingsSections(nextSettings.sections);
+        setSettingsValues(withCalendarSettingsValues(nextSettings.values));
+        return nextSettings;
+      },
+      (reason) => {
+        console.error(reason);
+        return null;
+      },
+    );
+
+    const profilesResult = profilesPromise.then(
+      (nextProfiles) => {
+        setModelProfiles(nextProfiles.profiles);
+        return nextProfiles;
+      },
+      (reason) => {
+        console.error(reason);
+        setModelProfiles([]);
+        return null;
+      },
+    );
+
+    const nextCatalog = await catalogPromise.then(
+      (value) => {
+        setCatalog(value);
+        return value;
+      },
+      (reason) => {
+        console.error(reason);
+        setCatalog(null);
+        return null;
+      },
+    );
+    catalogCommands = nextCatalog?.commands ?? [];
+    publishCommandCatalog();
+
+    const nextSettings = await settingsResult;
+    await profilesResult;
     const defaultMode = nextSettings?.values.preview?.default_mode;
     if (defaultMode === "auto" || defaultMode === "manual") {
       setPreviewMode(defaultMode);

@@ -5,8 +5,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import { CodingWorkspacePicker } from "../components/coding/CodingWorkspacePicker";
 import {
+  AtMentionMenu,
+  type ComposerAtMentionCandidate,
   filterAtMentionFiles,
   insertAtMentionText,
+  composerCandidatePopupStyleForAnchor,
   composerChromeWidgetStyle,
   composerHelperCopy,
   composerModelControlWidth,
@@ -179,6 +182,94 @@ test("model candidate popup stays inside the viewport when anchored near the lef
   );
 });
 
+test("composer candidate popup anchors above a mobile composer and stays inside viewport", () => {
+  assert.deepEqual(
+    composerCandidatePopupStyleForAnchor(
+      { left: 24, right: 366, top: 704, bottom: 752, width: 342, height: 48 },
+      390,
+      844,
+    ),
+    {
+      left: 16,
+      top: 696,
+      width: 358,
+      maxHeight: 288,
+      transform: "translateY(-100%)",
+      "--rumi-composer-candidate-list-max-height": "250px",
+    },
+  );
+});
+
+test("composer candidate popup can move below the input when mobile space is above the composer", () => {
+  const style = composerCandidatePopupStyleForAnchor(
+    { left: 24, right: 366, top: 80, bottom: 128, width: 342, height: 48 },
+    390,
+    720,
+  );
+
+  assert.equal(style?.left, 16);
+  assert.equal(style?.top, 136);
+  assert.equal(style?.width, 358);
+  assert.equal(style?.transform, undefined);
+});
+
+test("composer @ mention menu renders with mobile viewport-safe fixed placement", () => {
+  const candidates: ComposerAtMentionCandidate[] = [
+    {
+      kind: "tool",
+      id: "tool:web_search",
+      label: "Web Search",
+      description: "Search the web.",
+      item: {
+        id: "web_search",
+        label: "Web Search",
+        category: "tool",
+        description: "Search the web.",
+      },
+    },
+    {
+      kind: "skill",
+      id: "skill:desktop_operator",
+      label: "Desktop Operator",
+      description: "Operate the desktop.",
+      skill: {
+        id: "desktop_operator",
+        label: "Desktop Operator",
+        description: "Operate the desktop.",
+      },
+    },
+    {
+      kind: "file",
+      id: "file:src/App.tsx",
+      label: "src/App.tsx",
+      description: "workspace file",
+      file: "src/App.tsx",
+    },
+  ];
+  const style = composerCandidatePopupStyleForAnchor(
+    { left: 24, right: 366, top: 704, bottom: 752, width: 342, height: 48 },
+    390,
+    844,
+  );
+  const html = renderToStaticMarkup(
+    createElement(AtMentionMenu, {
+      candidates,
+      activeIndex: 0,
+      onActiveIndexChange: () => undefined,
+      onSelect: () => undefined,
+      onClose: () => undefined,
+      style,
+    }),
+  );
+
+  assert.match(html, /data-testid="composer-at-mention-candidates"/);
+  assert.match(html, /class="[^"]*fixed[^"]*rumi-layer-modal/);
+  assert.match(html, /--rumi-composer-candidate-list-max-height:250px/);
+  assert.match(html, /@Web Search/);
+  assert.match(html, /@Desktop Operator/);
+  assert.match(html, /@src\/App\.tsx/);
+});
+
 test("model dropdown search supports @provider filters", () => {
   const profiles = [
     {
@@ -311,8 +402,54 @@ test("composer renders template-provided slash command suggestions", () => {
   );
 
   assert.match(html, /Commands/);
+  assert.match(html, /data-testid="composer-slash-command-candidates"/);
+  assert.match(html, /class="[^"]*fixed[^"]*rumi-layer-global-overlay/);
   assert.match(html, /\/context-txt/);
   assert.match(html, /Write a context handoff file/);
+});
+
+test("new conversation composer renders slash command suggestions on the mobile-safe candidate surface", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "context_txt",
+      name: "context-txt",
+      label: "Context TXT",
+      description: "Write a context handoff file.",
+      category: "tools",
+      visibility: "default",
+      risk: "low",
+      execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "/",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      isNewConversation: true,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      commands,
+      thinkingLevel: null,
+      contextUsage: { ratio: 0, usedTokens: 0, maxContext: 0, label: "0%" },
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onCommandSelect: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /data-testid="composer-slash-command-candidates"/);
+  assert.match(html, /class="[^"]*fixed[^"]*rumi-layer-global-overlay/);
+  assert.match(html, /\/context-txt/);
 });
 
 test("composer suppresses slash command suggestions when template disables slash commands", () => {
