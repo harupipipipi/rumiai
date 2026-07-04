@@ -5,7 +5,7 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs, shouldSuppressComposerPopovers } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -858,6 +858,12 @@ test("selected tools are cleared after send unless settings opt in", () => {
   assert.equal(keepSelectedToolsAfterSend({}), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: "false" } }), false);
   assert.equal(keepSelectedToolsAfterSend({ tools: { keep_selected_tools_after_send: true } }), true);
+});
+
+test("settings overlay suppresses transient composer popovers", () => {
+  assert.equal(shouldSuppressComposerPopovers({}), false);
+  assert.equal(shouldSuppressComposerPopovers({ isSettingsOpen: true }), true);
+  assert.equal(shouldSuppressComposerPopovers({ visibleBrowserApproval: { id: "approval" } }), true);
 });
 
 test("sendMessage serializes attachments and selected tools", async () => {

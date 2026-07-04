@@ -2209,6 +2209,22 @@ export function keepSelectedToolsAfterSend(settingsValues: Record<string, Record
   return parseCommandBoolean(settingsValues.tools?.keep_selected_tools_after_send, false);
 }
 
+export function shouldSuppressComposerPopovers({
+  isSettingsOpen = false,
+  visibleBrowserApproval,
+  authorityApproval,
+  runtimeApproval,
+  staleRuntimeApprovalNotice,
+}: {
+  isSettingsOpen?: boolean;
+  visibleBrowserApproval?: unknown;
+  authorityApproval?: unknown;
+  runtimeApproval?: unknown;
+  staleRuntimeApprovalNotice?: unknown;
+}): boolean {
+  return Boolean(isSettingsOpen || visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice);
+}
+
 function commandSearchText(command: ComposerCommandItem): string {
   return [
     command.id,
@@ -5425,6 +5441,13 @@ function ChatApp() {
     if (modelProfileId) url.searchParams.set("model_profile_id", modelProfileId);
     window.location.href = `${url.pathname}${url.search}${url.hash}`;
   };
+  const suppressComposerPopovers = shouldSuppressComposerPopovers({
+    isSettingsOpen,
+    visibleBrowserApproval,
+    authorityApproval,
+    runtimeApproval,
+    staleRuntimeApprovalNotice,
+  });
   const renderComposer = (isCentered = false) => (
     <Renderers.composer
       input={input}
@@ -5462,7 +5485,7 @@ function ChatApp() {
       steerBusy={modelSteerBusy}
       steerQueuedCount={steerItems.filter((item) => item.status === "queued").length}
       steerPreviewItems={isCentered ? [] : activeComposerSteerItems(steerItems, isGenerating || isConversationPending)}
-      suppressPopovers={Boolean(visibleBrowserApproval || authorityApproval || runtimeApproval || staleRuntimeApprovalNotice)}
+      suppressPopovers={suppressComposerPopovers}
       onOpenModelManager={() => openSettingsSection("models")}
       onOpenToolSettings={() => openSettingsSection("tools")}
       onActionApprovalModeChange={handleActionApprovalModeChange}

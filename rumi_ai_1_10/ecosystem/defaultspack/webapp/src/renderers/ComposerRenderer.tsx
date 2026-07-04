@@ -19,7 +19,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import type {
@@ -926,11 +926,20 @@ export function modelDropdownPlacementClassName(placement: "above" | "below"): s
   return placement === "below" ? "top-full -right-44 mt-2 max-[900px]:right-0" : "bottom-full right-0 mb-2";
 }
 
+export function shouldCloseTransientPopoverForTarget(
+  target: Node | null,
+  protectedNodes: Array<{ contains: (target: Node) => boolean } | null | undefined>,
+): boolean {
+  if (!target) return false;
+  return !protectedNodes.some((node) => node?.contains(target));
+}
+
 function ModelDropdown({
   profiles,
   selectedProfile,
   isGenerating,
   placement = "above",
+  triggerRef,
   onSelect,
   onClose,
 }: {
@@ -938,14 +947,33 @@ function ModelDropdown({
   selectedProfile: ModelProfile | null;
   isGenerating: boolean;
   placement?: "above" | "below";
+  triggerRef?: RefObject<HTMLButtonElement | null>;
   onSelect: (profile: ModelProfile) => void;
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [remoteProfiles, setRemoteProfiles] = useState<ModelProfile[]>([]);
+  const dropdownRef = useRef<HTMLDivElement | null>(null);
   const searchRequestSeqRef = useRef(0);
   const trimmedSearch = search.trim();
   const filtered = useMemo(() => filterModelProfilesBySearch(profiles, search), [profiles, search]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      if (shouldCloseTransientPopoverForTarget(event.target as Node | null, [dropdownRef.current, triggerRef?.current])) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose, triggerRef]);
 
   useEffect(() => {
     searchRequestSeqRef.current += 1;
@@ -997,6 +1025,7 @@ function ModelDropdown({
     <>
       <button type="button" aria-label="close model dropdown" className="fixed inset-0 rumi-layer-local-popover cursor-default" onClick={onClose} />
       <div
+        ref={dropdownRef}
         className={`absolute rumi-layer-command-palette w-[min(360px,calc(100vw-88px))] max-w-[calc(100vw-88px)] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl ${
           modelDropdownPlacementClassName(placement)
         }`}
@@ -1310,6 +1339,7 @@ export function modelCandidatePopupStyleForAnchor(
 function ModelCommandCandidatePopup({
   candidates,
   activeIndex,
+  popupRef,
   onActiveIndexChange,
   onSelect,
   onClose,
@@ -1317,6 +1347,7 @@ function ModelCommandCandidatePopup({
 }: {
   candidates: ModelCommandCandidate[];
   activeIndex: number;
+  popupRef?: RefObject<HTMLDivElement | null>;
   onActiveIndexChange: (index: number) => void;
   onSelect: (candidate: ModelCommandCandidate) => void;
   onClose?: () => void;
@@ -1326,6 +1357,7 @@ function ModelCommandCandidatePopup({
 
   return (
     <div
+      ref={popupRef}
       role="listbox"
       aria-label="Model candidates"
       style={style}
@@ -1473,6 +1505,8 @@ export function ComposerRenderer({
   const menuButtonRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const modelDropdownTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const modelCommandCandidatePopupRef = useRef<HTMLDivElement | null>(null);
   const recognitionRef = useRef<{ stop: () => void } | null>(null);
   const chromeWidgetNodeMapRef = useRef<Map<string, HTMLDivElement>>(new Map());
   const submitPointerHandledRef = useRef(false);
@@ -1613,8 +1647,12 @@ export function ComposerRenderer({
         })
     : [];
   const showThinkingLevelChips = Boolean(thinkingMatch && thinkingCommand && levels.length > 0);
-  const hasModelCommandCandidates = !isSteerMode && modelCommandCandidates.length > 0;
-  const showCommandSuggestions = templateAllowsSlashCommands && !hasModelCommandCandidates && matchedCommands.length > 0;
+  const hasModelCommandCandidates = !suppressPopovers && !isSteerMode && modelCommandCandidates.length > 0;
+  const showModelDropdown = !suppressPopovers && modelDropdownOpen;
+  const showCommandSuggestions = !suppressPopovers && templateAllowsSlashCommands && !hasModelCommandCandidates && matchedCommands.length > 0;
+  const showModeSelector = !suppressPopovers && modeSelectorOpen;
+  const showAtMention = !suppressPopovers && atMentionOpen;
+  const showMenu = !suppressPopovers && menuOpen;
   const visibleSteerPreviewItems = steerPreviewItems.filter((item) => (
     item.visible !== false && String(item.prompt ?? "").trim()
   ));
@@ -1813,6 +1851,24 @@ export function ComposerRenderer({
       window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
     };
   }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
+
+  useEffect(() => {
+    if (!hasModelCommandCandidates || !onModelCommandCandidatesClose) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (shouldCloseTransientPopoverForTarget(event.target as Node | null, [modelCommandCandidatePopupRef.current])) {
+        onModelCommandCandidatesClose();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onModelCommandCandidatesClose();
+    };
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [hasModelCommandCandidates, onModelCommandCandidatesClose]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -2284,7 +2340,7 @@ export function ComposerRenderer({
               <X size={10} />
             </button>
           )}
-          {modeSelectorOpen && (
+          {showModeSelector && (
             <ModeSelector
               mode={mode}
               onModeChange={(m) => onModeChange?.(m)}
@@ -2377,6 +2433,7 @@ export function ComposerRenderer({
           </div>
           <div className="relative min-w-0 max-w-full flex-1">
             <button
+              ref={modelDropdownTriggerRef}
               type="button"
               tabIndex={chromeButtonTabIndex}
               disabled={isGenerating}
@@ -2384,14 +2441,15 @@ export function ComposerRenderer({
               className="flex w-full min-w-0 items-center gap-1 text-[12px] font-medium text-zinc-300 hover:text-zinc-100 transition-colors disabled:opacity-50"
             >
               <span className="min-w-0 flex-1 truncate" title={profileName}>モデル: {compactSelectedProfileName}</span>
-              <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${modelDropdownOpen ? "rotate-180" : ""}`} />
+              <ChevronDown size={12} className={`flex-shrink-0 transition-transform ${showModelDropdown ? "rotate-180" : ""}`} />
             </button>
-            {modelDropdownOpen && (
+            {showModelDropdown && (
               <ModelDropdown
                 profiles={selectableProfiles}
                 selectedProfile={selectedProfile}
                 isGenerating={isGenerating}
                 placement={isNewConversation ? "below" : "above"}
+                triggerRef={modelDropdownTriggerRef}
                 onSelect={(profile) => {
                   requestModelProfileSelect(profile.profile_id);
                   setModelDropdownOpen(false);
@@ -2541,6 +2599,7 @@ export function ComposerRenderer({
             <ModelCommandCandidatePopup
               candidates={modelCommandCandidates}
               activeIndex={selectedModelCandidateIndex}
+              popupRef={modelCommandCandidatePopupRef}
               onActiveIndexChange={setSelectedModelCandidateIndex}
               onSelect={chooseModelCommandCandidate}
               onClose={onModelCommandCandidatesClose}
@@ -2611,7 +2670,7 @@ export function ComposerRenderer({
             )
           )}
 
-          {atMentionOpen && (
+          {showAtMention && (
             <AtMentionMenu
               candidates={atMentionCandidates}
               activeIndex={selectedAtMentionIndex}
@@ -2621,7 +2680,7 @@ export function ComposerRenderer({
             />
           )}
 
-          {menuOpen && (
+          {showMenu && (
             <>
                       <button
                         type="button"

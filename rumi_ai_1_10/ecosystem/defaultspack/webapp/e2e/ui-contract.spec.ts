@@ -497,6 +497,31 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       return fulfill(route, {
         commands: [
           {
+            id: "model",
+            name: "model",
+            aliases: ["models"],
+            label: "Model Picker",
+            description: "Open the model picker.",
+            category: "model",
+            visibility: "default",
+            risk: "low",
+            modes: ["chat", "coding", "agent"],
+            args: [{ name: "query", type: "string", required: false }],
+            execution: { type: "frontend", action: "open_model_picker" },
+          },
+          {
+            id: "settings",
+            name: "settings",
+            label: "Settings",
+            description: "Open settings.",
+            category: "settings",
+            visibility: "default",
+            risk: "low",
+            modes: ["chat", "coding", "agent"],
+            args: [{ name: "section", type: "string", required: false }],
+            execution: { type: "frontend", action: "open_settings" },
+          },
+          {
             id: "coding",
             name: "coding",
             label: "Coding Mode",
@@ -515,7 +540,13 @@ async function installDefaultspackApiMocks(page: Page, options: ApiMockOptions =
       const payload = request.postDataJSON() as Record<string, unknown>;
       return fulfill(route, {
         executed: true,
-        action: payload.command === "coding" ? "set_mode_coding" : "",
+        action: payload.command === "coding"
+          ? "set_mode_coding"
+          : payload.command === "model"
+            ? "open_model_picker"
+            : payload.command === "settings"
+              ? "open_settings"
+              : "",
       });
     }
 
@@ -1056,6 +1087,31 @@ test("model picker keeps unconfigured opencode zen visible for first-run setup",
   const search = page.getByPlaceholder("モデルを検索... @google");
   await search.fill("minimax");
   await expect(page.getByText("MiniMax M3 Free via OpenCode Zen")).toBeVisible();
+});
+
+test("model picker opened from slash command closes outside and cannot survive settings", async ({ page }) => {
+  await openDefaultspack(page);
+
+  const composer = page.locator("textarea.rumi-composer-textarea");
+  const modelSearch = page.getByPlaceholder("モデルを検索... @google");
+
+  await composer.fill("/model");
+  await composer.press("Enter");
+  await expect(modelSearch).toBeVisible();
+  await expect(page.getByText("Gemini 2.5 Flash")).toBeVisible();
+
+  await page.mouse.click(24, 24);
+  await expect(modelSearch).toBeHidden();
+
+  await composer.fill("/model");
+  await composer.press("Enter");
+  await expect(modelSearch).toBeVisible();
+
+  await composer.fill("/settings");
+  await composer.press("Enter");
+  await expect(page.getByRole("heading", { name: "Rumi Control Center" })).toBeVisible();
+  await expect(modelSearch).toBeHidden();
+  await expect(page.getByLabel("close model dropdown")).toHaveCount(0);
 });
 
 test("preview pane opens from the chat canvas peek", async ({ page }) => {
