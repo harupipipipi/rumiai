@@ -396,7 +396,10 @@ class AgentEngine:
 
     def _execute_tool(self, tool_name, tool_args, context):
         from domain.tool_policy.orchestrator import ToolOrchestrator
-        return ToolOrchestrator().run(tool_name, tool_args, context)
+        from domain.tool_policy.internal_context import mark_trusted_profile_policy_context
+
+        trusted_context = mark_trusted_profile_policy_context(dict(context or {}))
+        return ToolOrchestrator().run(tool_name, tool_args, trusted_context)
 
     def _tool_name_from_definition(self, tool):
         return tool_name_from_definition(tool)

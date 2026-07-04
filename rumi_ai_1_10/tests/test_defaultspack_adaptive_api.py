@@ -16,6 +16,12 @@ if str(DEFAULTSPACK_ROOT) not in sys.path:
 pytestmark = pytest.mark.contract
 
 
+def _approved_tool_context(**values):
+    from domain.tool_policy.internal_context import mark_tool_server_approval_context
+
+    return mark_tool_server_approval_context(dict(values))
+
+
 def test_adaptive_dispatch_compile_apply_and_activity(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUMI_USER_DATA", str(tmp_path))
     from domain.adaptive.service import AdaptiveRuntimeService, dispatch
@@ -533,7 +539,7 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
 
     blocked = file_write_run(
         {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "blocked"},
-        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+        _approved_tool_context(profile_id="coding", principal_id="agent-b"),
     )
     assert blocked["status"] == "error"
     assert blocked["error"]["code"] == "ADAPTIVE_LEASE_HELD"
@@ -541,14 +547,14 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
 
     allowed = file_write_run(
         {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "ok"},
-        {"profile_id": "coding", "principal_id": "agent-a", "_tool_server_approved": True},
+        _approved_tool_context(profile_id="coding", principal_id="agent-a"),
     )
     assert allowed["status"] == "ok"
     assert (workspace / "src" / "App.tsx").read_text(encoding="utf-8") == "ok"
 
     blocked_commit = git_commit_run(
         {"profile_id": "coding", "workspace_id": "ws1", "message": "try locked file", "paths": ["src/App.tsx"]},
-        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+        _approved_tool_context(profile_id="coding", principal_id="agent-b"),
     )
     assert blocked_commit["status"] == "error"
     assert blocked_commit["error"]["code"] == "ADAPTIVE_LEASE_HELD"
@@ -565,7 +571,7 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     store.update_json("orchestration/leases.json", {"version": 1, "leases": []}, expire_src_app)
     after_expiry = file_write_run(
         {"profile_id": "coding", "workspace_id": "ws1", "path": "src/App.tsx", "content": "agent b ok"},
-        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+        _approved_tool_context(profile_id="coding", principal_id="agent-b"),
     )
     assert after_expiry["status"] == "ok"
 
@@ -577,7 +583,7 @@ def test_adaptive_leases_gate_coding_file_and_worktree_mutations(
     assert worktree_lease["status"] == "ok"
     blocked_by_worktree = file_write_run(
         {"profile_id": "coding", "workspace_id": "ws1", "path": "docs/notes.txt", "content": "blocked"},
-        {"profile_id": "coding", "principal_id": "agent-b", "_tool_server_approved": True},
+        _approved_tool_context(profile_id="coding", principal_id="agent-b"),
     )
     assert blocked_by_worktree["status"] == "error"
     assert blocked_by_worktree["error"]["code"] == "ADAPTIVE_LEASE_HELD"
