@@ -23,4 +23,4 @@ def run(input_data, context=None):
         allowed_company_ids=input_data.get("allowed_company_ids") if isinstance(input_data.get("allowed_company_ids"), list) else None,
         settings=settings,
     )
-    return ok({"pairing": session.as_dict()})
+    return ok({"pairing": session.start_response_dict()})
