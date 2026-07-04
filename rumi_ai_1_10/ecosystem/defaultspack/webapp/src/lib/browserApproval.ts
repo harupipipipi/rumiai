@@ -2,6 +2,7 @@ import type { ChatUiMessage } from "../renderers/types";
 
 export type BrowserApproval = {
   action: string;
+  expiresAt?: number;
   payload: Record<string, unknown>;
   token?: string;
   requestId?: string;
@@ -13,6 +14,7 @@ export type BrowserApproval = {
 
 export type RuntimeApproval = {
   action: string;
+  expiresAt?: number;
   operation: string;
   payload: Record<string, unknown>;
   requestId: string;
@@ -32,6 +34,19 @@ export type StaleRuntimeApproval = {
   toolName: string;
 };
 
+export type ExpiredRuntimeApproval = {
+  action: string;
+  expiresAt?: number;
+  operation: string;
+  payload: Record<string, unknown>;
+  reason: "expired";
+  requestId?: string;
+  riskLevel?: string;
+  summary?: string;
+  toolCallId?: string;
+  toolName: string;
+};
+
 const BROWSER_COMPUTER_TOOL_NAMES = new Set([
   "browser_computer",
   "browser_companion",
@@ -43,6 +58,7 @@ const BROWSER_COMPUTER_TOOL_NAMES = new Set([
 
 const BROWSER_OPEN_TOOL_ALIASES = new Set(["browser_open_url", "open_browser"]);
 const BROWSER_OPEN_ACTION_ALIASES = new Set(["browser_open_url", "open_browser", "open_url"]);
+const TERMINAL_APPROVAL_STATUSES = new Set(["approved", "consumed", "denied", "rejected", "cancelled", "canceled"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -74,15 +90,30 @@ function numericTimestamp(value: unknown): number | null {
   return null;
 }
 
-function approvalExpired(candidate: Record<string, unknown>, observedAt: unknown, now: number): boolean {
+function approvalStatus(candidate: Record<string, unknown>): string {
+  return String(candidate.status ?? candidate.approval_status ?? "").trim().toLowerCase();
+}
+
+function approvalIsTerminal(candidate: Record<string, unknown>): boolean {
+  return TERMINAL_APPROVAL_STATUSES.has(approvalStatus(candidate));
+}
+
+function approvalExpiresAt(candidate: Record<string, unknown>, observedAt: unknown): number | null {
   const expiresAt = numericTimestamp(candidate.expires_at);
-  if (expiresAt !== null) return expiresAt <= now;
+  if (expiresAt !== null) return expiresAt;
 
   const expiresInSeconds = Number(candidate.approval_expires_in_seconds);
   const timestamp = numericTimestamp(candidate.timestamp ?? observedAt);
   if (Number.isFinite(expiresInSeconds) && expiresInSeconds > 0 && timestamp !== null) {
-    return timestamp + expiresInSeconds * 1000 <= now;
+    return timestamp + expiresInSeconds * 1000;
   }
+  return null;
+}
+
+function approvalExpired(candidate: Record<string, unknown>, observedAt: unknown, now: number): boolean {
+  if (approvalStatus(candidate) === "expired") return true;
+  const expiresAt = approvalExpiresAt(candidate, observedAt);
+  if (expiresAt !== null) return expiresAt <= now;
   return false;
 }
 
@@ -96,11 +127,13 @@ function approvalFromCandidate(
 ): BrowserApproval | null {
   if (!candidate || isAuthorityApprovalCandidate(candidate)) return null;
   if (!candidate?.requires_approval && !candidate?.approval_required) return null;
+  if (approvalIsTerminal(candidate)) return null;
   const requestId = requestIdFromCandidate(candidate);
   const rawToken = typeof candidate.approval_token === "string" ? candidate.approval_token.trim() : "";
   const token = rawToken && rawToken !== "[redacted]" ? rawToken : "";
   if (!token && !requestId) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
+  const expiresAt = approvalExpiresAt(candidate, observedAt);
   const rawPayload = isRecord(candidate.payload)
     ? candidate.payload
     : isRecord(candidate.arguments)
@@ -113,6 +146,7 @@ function approvalFromCandidate(
     payload: isRecord(rawPayload) ? rawPayload : {},
     toolName: BROWSER_OPEN_TOOL_ALIASES.has(rawToolName) ? "browser_computer" : rawToolName,
   };
+  if (expiresAt !== null) approval.expiresAt = expiresAt;
   if (token) approval.token = token;
   if (requestId) approval.requestId = requestId;
   if (typeof candidate.risk_level === "string") approval.riskLevel = candidate.risk_level;
@@ -141,7 +175,9 @@ function runtimeApprovalFromCandidate(
   if (!candidate || !requestId) return null;
   if (isAuthorityApprovalCandidate(candidate)) return null;
   if (!candidate.requires_approval && !candidate.approval_required) return null;
+  if (approvalIsTerminal(candidate)) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
+  const expiresAt = approvalExpiresAt(candidate, observedAt);
   const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
   const payload = isRecord(candidate.payload)
     ? candidate.payload
@@ -150,7 +186,7 @@ function runtimeApprovalFromCandidate(
       : fallbackPayload
         ? fallbackPayload
       : {};
-  return {
+  const approval: RuntimeApproval = {
     action: String(candidate.action ?? candidate.operation ?? toolName),
     operation: String(candidate.operation ?? candidate.action ?? toolName),
     payload,
@@ -164,6 +200,8 @@ function runtimeApprovalFromCandidate(
     toolCallId: typeof candidate.tool_call_id === "string" ? candidate.tool_call_id : fallbackToolCallId,
     toolName,
   };
+  if (expiresAt !== null) approval.expiresAt = expiresAt;
+  return approval;
 }
 
 function staleRuntimeApprovalFromCandidate(
@@ -176,6 +214,7 @@ function staleRuntimeApprovalFromCandidate(
 ): StaleRuntimeApproval | null {
   if (!candidate || isAuthorityApprovalCandidate(candidate)) return null;
   if (!candidate.requires_approval && !candidate.approval_required) return null;
+  if (approvalIsTerminal(candidate)) return null;
   if (requestIdFromCandidate(candidate)) return null;
   if (approvalExpired(candidate, observedAt, now)) return null;
   const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
@@ -201,6 +240,81 @@ function staleRuntimeApprovalFromCandidate(
   };
 }
 
+function expiredRuntimeApprovalFromCandidate(
+  candidate: Record<string, unknown> | undefined,
+  fallbackToolName = "tool",
+  fallbackToolCallId?: string,
+  fallbackPayload?: Record<string, unknown>,
+  observedAt?: unknown,
+  now = Date.now(),
+): ExpiredRuntimeApproval | null {
+  if (!candidate || isAuthorityApprovalCandidate(candidate)) return null;
+  if (!candidate.requires_approval && !candidate.approval_required) return null;
+  if (approvalIsTerminal(candidate)) return null;
+  if (!approvalExpired(candidate, observedAt, now)) return null;
+  const toolName = String(candidate.tool_name ?? fallbackToolName).trim() || fallbackToolName;
+  const payload = isRecord(candidate.payload)
+    ? candidate.payload
+    : isRecord(candidate.arguments)
+      ? candidate.arguments
+      : fallbackPayload
+        ? fallbackPayload
+        : {};
+  const requestId = requestIdFromCandidate(candidate);
+  const expiresAt = approvalExpiresAt(candidate, observedAt);
+  const approval: ExpiredRuntimeApproval = {
+    action: String(candidate.action ?? candidate.operation ?? toolName),
+    operation: String(candidate.operation ?? candidate.action ?? toolName),
+    payload,
+    reason: "expired",
+    requestId: requestId || undefined,
+    riskLevel: typeof candidate.risk_level === "string" ? candidate.risk_level : undefined,
+    summary: typeof candidate.display_summary === "string"
+      ? candidate.display_summary
+      : typeof candidate.message === "string"
+        ? candidate.message
+        : undefined,
+    toolCallId: typeof candidate.tool_call_id === "string" ? candidate.tool_call_id : fallbackToolCallId,
+    toolName,
+  };
+  if (expiresAt !== null) approval.expiresAt = expiresAt;
+  return approval;
+}
+
+function candidateFromToolLog(log: NonNullable<ChatUiMessage["toolLogs"]>[number]): {
+  candidate: Record<string, unknown> | undefined;
+  fallbackPayload: Record<string, unknown> | undefined;
+} {
+  const result = isRecord(log.result) ? log.result : undefined;
+  const data = isRecord(result?.data) ? result.data : result;
+  const widget = isRecord(data?.widget) ? data.widget : undefined;
+  const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+  return {
+    candidate,
+    fallbackPayload: isRecord(log.arguments) ? log.arguments : undefined,
+  };
+}
+
+export function hasApprovalCandidate(messages: ChatUiMessage[]): boolean {
+  for (const message of messages) {
+    if (message.role !== "agent") continue;
+    const metadataApproval = message.metadata?.pendingApproval;
+    if (isRecord(metadataApproval) && !isAuthorityApprovalCandidate(metadataApproval) && (metadataApproval.requires_approval || metadataApproval.approval_required)) {
+      return true;
+    }
+    for (const event of message.events ?? []) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const candidate = event as Record<string, unknown>;
+      if (!isAuthorityApprovalCandidate(candidate) && (candidate.requires_approval || candidate.approval_required)) return true;
+    }
+    for (const log of message.toolLogs ?? []) {
+      const { candidate } = candidateFromToolLog(log);
+      if (candidate && !isAuthorityApprovalCandidate(candidate) && (candidate.requires_approval || candidate.approval_required)) return true;
+    }
+  }
+  return false;
+}
+
 export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now()): BrowserApproval | null {
   for (const message of [...messages].reverse()) {
     if (message.role === "user") return null;
@@ -219,15 +333,12 @@ export function pendingBrowserApproval(messages: ChatUiMessage[], now = Date.now
     }
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
       if (!BROWSER_COMPUTER_TOOL_NAMES.has(String(log.tool_name))) continue;
-      const result = isRecord(log.result) ? log.result : undefined;
-      const data = isRecord(result?.data) ? result.data : result;
-      const widget = isRecord(data?.widget) ? data.widget : undefined;
-      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
+      const { candidate, fallbackPayload } = candidateFromToolLog(log);
       const approval = approvalFromCandidate(
         candidate,
         String(log.tool_name),
         typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
-        isRecord(log.arguments) ? log.arguments : undefined,
+        fallbackPayload,
         log.timestamp,
         now,
       );
@@ -295,11 +406,7 @@ export function pendingRuntimeApproval(messages: ChatUiMessage[], now = Date.now
       if (approval) return approval;
     }
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      const result = isRecord(log.result) ? log.result : undefined;
-      const data = isRecord(result?.data) ? result.data : result;
-      const widget = isRecord(data?.widget) ? data.widget : undefined;
-      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
-      const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
+      const { candidate, fallbackPayload } = candidateFromToolLog(log);
       const approval = runtimeApprovalFromCandidate(
         candidate,
         String(log.tool_name ?? "tool"),
@@ -341,11 +448,7 @@ export function staleRuntimeApproval(messages: ChatUiMessage[], now = Date.now()
       if (stale) return stale;
     }
     for (const log of [...(message.toolLogs ?? [])].reverse()) {
-      const result = isRecord(log.result) ? log.result : undefined;
-      const data = isRecord(result?.data) ? result.data : result;
-      const widget = isRecord(data?.widget) ? data.widget : undefined;
-      const candidate = (widget?.requires_approval || widget?.approval_required ? widget : data) as Record<string, unknown> | undefined;
-      const fallbackPayload = isRecord(log.arguments) ? log.arguments : undefined;
+      const { candidate, fallbackPayload } = candidateFromToolLog(log);
       const stale = staleRuntimeApprovalFromCandidate(
         candidate,
         String(log.tool_name ?? "tool"),
@@ -355,6 +458,48 @@ export function staleRuntimeApproval(messages: ChatUiMessage[], now = Date.now()
         now,
       );
       if (stale) return stale;
+    }
+  }
+  return null;
+}
+
+export function expiredRuntimeApproval(messages: ChatUiMessage[], now = Date.now()): ExpiredRuntimeApproval | null {
+  for (const message of [...messages].reverse()) {
+    if (message.role === "user") return null;
+    if (message.role !== "agent") continue;
+    const metadataApproval = message.metadata?.pendingApproval;
+    const metadataExpired = expiredRuntimeApprovalFromCandidate(
+      metadataApproval,
+      String(metadataApproval?.tool_name ?? "tool"),
+      typeof metadataApproval?.tool_call_id === "string" ? metadataApproval.tool_call_id : undefined,
+      undefined,
+      metadataApproval?.timestamp,
+      now,
+    );
+    if (metadataExpired) return metadataExpired;
+    for (const event of [...(message.events ?? [])].reverse()) {
+      if (event.type !== "approval_requested" && event.phase !== "approval_requested") continue;
+      const expired = expiredRuntimeApprovalFromCandidate(
+        event as Record<string, unknown>,
+        String(event.tool_name ?? "tool"),
+        typeof event.tool_call_id === "string" ? event.tool_call_id : undefined,
+        undefined,
+        event.timestamp,
+        now,
+      );
+      if (expired) return expired;
+    }
+    for (const log of [...(message.toolLogs ?? [])].reverse()) {
+      const { candidate, fallbackPayload } = candidateFromToolLog(log);
+      const expired = expiredRuntimeApprovalFromCandidate(
+        candidate,
+        String(log.tool_name ?? "tool"),
+        typeof log.tool_call_id === "string" ? log.tool_call_id : undefined,
+        fallbackPayload,
+        log.timestamp,
+        now,
+      );
+      if (expired) return expired;
     }
   }
   return null;

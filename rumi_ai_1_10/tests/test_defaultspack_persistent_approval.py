@@ -98,6 +98,35 @@ def test_empty_approval_args_hash_empty_payload_not_details(tmp_path, monkeypatc
     ).valid is True
 
 
+def test_expired_approval_lists_expired_and_approve_endpoint_refuses(tmp_path, monkeypatch):
+    approval = _fresh_approval_module(monkeypatch, tmp_path / "approval.sqlite3")
+    approval.reset_approval_state_for_tests()
+
+    current = 10_000
+    monkeypatch.setattr(approval, "_now", lambda: current)
+    request = approval.create_approval_request(
+        "tool.browser_companion",
+        "high",
+        {"action": "session"},
+        expires_in=1,
+        details={"action": "session", "function_id": "browser_companion"},
+    )
+
+    current = request["expires_at"] + 1
+    listed = approval.list_approval_requests(status="expired", include_expired=True)
+    assert [item["request_id"] for item in listed] == [request["request_id"]]
+    assert listed[0]["status"] == "expired"
+
+    sys.modules.pop("blocks.coding.approval_approve", None)
+    import blocks.coding.approval_approve as approval_approve
+
+    result = approval_approve.run({"approval_request_id": request["request_id"]})
+    assert result["status"] == "error"
+    assert result["_http_status"] == 403
+    assert result["error"]["code"] == "APPROVAL_FAILED"
+    assert result["error"]["message"] == "approval request expired"
+
+
 def test_json_only_pending_is_listed_for_recovery_and_sqlite_wins_conflicts(tmp_path, monkeypatch):
     approval = _fresh_approval_module(monkeypatch, tmp_path / "approval.sqlite3")
     approval.reset_approval_state_for_tests()

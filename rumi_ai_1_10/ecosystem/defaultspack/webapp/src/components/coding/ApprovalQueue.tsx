@@ -12,6 +12,17 @@ function formatApprovalTime(value?: number): string {
   return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+function approvalTimestampMs(value?: number): number | null {
+  if (!value || !Number.isFinite(value)) return null;
+  return value > 1_000_000_000_000 ? value : value * 1000;
+}
+
+function isApprovalExpired(request: CodingApprovalRequest, now = Date.now()): boolean {
+  if (request.status === "expired") return true;
+  const expiresAt = approvalTimestampMs(request.expires_at);
+  return request.status === "pending" && expiresAt !== null && expiresAt <= now;
+}
+
 function riskTone(riskLevel?: string): string {
   if (riskLevel === "high" || riskLevel === "blocked") return "text-red-300 border-red-500/30 bg-red-500/10";
   if (riskLevel === "medium") return "text-amber-300 border-amber-500/30 bg-amber-500/10";
@@ -30,6 +41,7 @@ export function ApprovalQueue({
   const [requests, setRequests] = useState<CodingApprovalRequest[]>(initialApprovals ?? []);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     if (initialApprovals) return;
@@ -46,8 +58,23 @@ export function ApprovalQueue({
     void load();
   }, [load]);
 
+  useEffect(() => {
+    if (!requests.some((request) => request.status === "pending" && approvalTimestampMs(request.expires_at) !== null)) {
+      return undefined;
+    }
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [requests]);
+
   const decide = async (requestId: string, decision: "approve" | "deny") => {
     const request = requests.find((item) => item.request_id === requestId);
+    if (request && isApprovalExpired(request)) {
+      setRequests((items) => items.map((item) => (
+        item.request_id === requestId ? { ...item, status: "expired" } : item
+      )));
+      setError("Approval request expired. Refresh or rerun the command.");
+      return;
+    }
     setBusyId(requestId);
     setError(null);
     try {
@@ -70,7 +97,7 @@ export function ApprovalQueue({
     }
   };
 
-  const pendingCount = requests.filter((request) => request.status === "pending").length;
+  const pendingCount = requests.filter((request) => request.status === "pending" && !isApprovalExpired(request, now)).length;
 
   return (
     <section className="border-b border-zinc-800/60 p-3" aria-label="Approval queue">
@@ -93,48 +120,52 @@ export function ApprovalQueue({
       {error && <p className="mb-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1 text-[11px] text-red-200">{error}</p>}
 
       <div className="space-y-2">
-        {requests.slice(0, limit).map((request) => (
-          <div key={request.request_id} className="rounded-md border border-zinc-800/80 bg-zinc-950/40 p-2">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", riskTone(request.risk_level))}>
-                    {request.risk_level}
-                  </span>
-                  <span className="truncate font-mono text-[11px] text-zinc-200">{request.operation}</span>
+        {requests.slice(0, limit).map((request) => {
+          const expired = isApprovalExpired(request, now);
+          const displayStatus = expired ? "expired" : request.status;
+          return (
+            <div key={request.request_id} className={cn("rounded-md border p-2", expired ? "border-zinc-800 bg-zinc-950/30 opacity-75" : "border-zinc-800/80 bg-zinc-950/40")}>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <span className={cn("rounded border px-1.5 py-0.5 text-[10px]", riskTone(request.risk_level))}>
+                      {request.risk_level}
+                    </span>
+                    <span className="truncate font-mono text-[11px] text-zinc-200">{request.operation}</span>
+                  </div>
+                  <p className="mt-1 truncate text-[11px] text-zinc-500">
+                    {request.display_summary || request.request_id}
+                  </p>
                 </div>
-                <p className="mt-1 truncate text-[11px] text-zinc-500">
-                  {request.display_summary || request.request_id}
-                </p>
+                <span className="flex-shrink-0 text-[10px] text-zinc-600">{formatApprovalTime(request.created_at)}</span>
               </div>
-              <span className="flex-shrink-0 text-[10px] text-zinc-600">{formatApprovalTime(request.created_at)}</span>
+              {displayStatus === "pending" ? (
+                <div className="mt-2 flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    disabled={busyId === request.request_id}
+                    onClick={() => void decide(request.request_id, "deny")}
+                    className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"
+                    title="Deny"
+                  >
+                    <X size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === request.request_id}
+                    onClick={() => void decide(request.request_id, "approve")}
+                    className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100 text-zinc-950 hover:bg-white disabled:opacity-40"
+                    title="Approve"
+                  >
+                    <Check size={13} />
+                  </button>
+                </div>
+              ) : (
+                <p className="mt-2 text-right text-[10px] uppercase tracking-wide text-zinc-600">{displayStatus}</p>
+              )}
             </div>
-            {request.status === "pending" ? (
-              <div className="mt-2 flex items-center justify-end gap-1">
-                <button
-                  type="button"
-                  disabled={busyId === request.request_id}
-                  onClick={() => void decide(request.request_id, "deny")}
-                  className="flex h-7 w-7 items-center justify-center rounded-md text-zinc-500 hover:bg-red-500/10 hover:text-red-200 disabled:opacity-40"
-                  title="Deny"
-                >
-                  <X size={13} />
-                </button>
-                <button
-                  type="button"
-                  disabled={busyId === request.request_id}
-                  onClick={() => void decide(request.request_id, "approve")}
-                  className="flex h-7 w-7 items-center justify-center rounded-md bg-zinc-100 text-zinc-950 hover:bg-white disabled:opacity-40"
-                  title="Approve"
-                >
-                  <Check size={13} />
-                </button>
-              </div>
-            ) : (
-              <p className="mt-2 text-right text-[10px] uppercase tracking-wide text-zinc-600">{request.status}</p>
-            )}
-          </div>
-        ))}
+          );
+        })}
         {requests.length === 0 && <p className="py-3 text-center text-[11px] text-zinc-600">No approvals</p>}
       </div>
     </section>
