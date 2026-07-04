@@ -944,8 +944,27 @@ function ModelDropdown({
   const [search, setSearch] = useState("");
   const [remoteProfiles, setRemoteProfiles] = useState<ModelProfile[]>([]);
   const searchRequestSeqRef = useRef(0);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const trimmedSearch = search.trim();
   const filtered = useMemo(() => filterModelProfilesBySearch(profiles, search), [profiles, search]);
+
+  useIsomorphicLayoutEffect(() => {
+    const focusSearch = () => searchInputRef.current?.focus({ preventScroll: true });
+    focusSearch();
+    const focusTimer = window.setTimeout(focusSearch, 0);
+    return () => window.clearTimeout(focusTimer);
+  }, []);
+
+  useEffect(() => {
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      onClose();
+    };
+
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => document.removeEventListener("keydown", handleDocumentKeyDown);
+  }, [onClose]);
 
   useEffect(() => {
     searchRequestSeqRef.current += 1;
@@ -1005,9 +1024,17 @@ function ModelDropdown({
           <div className="relative">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
             <input
+              ref={searchInputRef}
               type="text"
+              aria-label="モデルを検索"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  onClose();
+                }
+              }}
               placeholder="モデルを検索... @google"
               className="w-full rounded-lg bg-zinc-900 border border-zinc-800 pl-8 pr-3 py-1.5 text-sm text-zinc-200 outline-none focus:border-zinc-600 placeholder:text-zinc-600"
               autoFocus
@@ -1786,7 +1813,6 @@ export function ComposerRenderer({
     if (modelPickerRequestId <= 0) return;
     setMenuOpen(false);
     setModelDropdownOpen(true);
-    window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [modelPickerRequestId]);
 
   useEffect(() => {

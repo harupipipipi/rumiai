@@ -205,10 +205,31 @@ test("model dropdown search supports @provider filters", () => {
       provider_display_name: "OpenAI",
       model_id: "gpt-4.1",
     },
+    {
+      profile_id: "opencode-zen/gpt-5.5-pro",
+      qualified_model_id: "opencode-zen/gpt-5.5-pro",
+      display_name: "GPT-5.5 Pro via OpenCode Zen",
+      provider_id: "opencode-zen",
+      provider_display_name: "OpenCode Zen",
+      model_id: "gpt-5.5-pro",
+    },
+    {
+      profile_id: "opencode-zen/minimax-m3-free",
+      qualified_model_id: "opencode-zen/minimax-m3-free",
+      display_name: "MiniMax M3 Free via OpenCode Zen",
+      provider_id: "opencode-zen",
+      provider_display_name: "OpenCode Zen",
+      model_id: "minimax-m3-free",
+    },
   ];
 
   assert.deepEqual(filterModelProfilesBySearch(profiles, "@google").map((profile) => profile.profile_id), ["google/gemini-2.5-flash"]);
   assert.deepEqual(filterModelProfilesBySearch(profiles, "@opencode qwen").map((profile) => profile.profile_id), ["opencode-go/qwen3.5-plus"]);
+  assert.deepEqual(filterModelProfilesBySearch(profiles, "opencode zen").map((profile) => profile.profile_id), [
+    "opencode-zen/gpt-5.5-pro",
+    "opencode-zen/minimax-m3-free",
+  ]);
+  assert.deepEqual(filterModelProfilesBySearch(profiles, "gpt-5.5-pro").map((profile) => profile.profile_id), ["opencode-zen/gpt-5.5-pro"]);
   assert.deepEqual(filterModelProfilesBySearch(profiles, "@openai 4.1").map((profile) => profile.profile_id), ["openai/gpt-4.1"]);
 });
 
