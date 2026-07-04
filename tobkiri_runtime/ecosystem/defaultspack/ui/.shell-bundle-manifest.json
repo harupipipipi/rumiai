@@ -1,7 +1,7 @@
 {
   "schema": "io.tobkiri.defaultspack-shell-bundle-manifest.v1",
   "source": {
-    "digest": "b1a6a71f8570ada13835c7eb2626eb2baa2f54f79bd99199c8f5c245a08b311b",
+    "digest": "78c929bb0f517fc26b58dfd20dd3e32547ef813c74ed560cd0faddefbe222c78",
     "entries": [
       {
         "path": "index.html",
@@ -1620,13 +1620,13 @@
       },
       {
         "path": "src/renderers/SettingsModalRenderer.test.tsx",
-        "size": 64043,
-        "sha256": "4f70cf8f756623ea91c136ae1e555f2493c4a62f020e34569c542a63fe4c63b0"
+        "size": 66996,
+        "sha256": "7c8a2425d4f99934a860dd557ea45ea1fa6b351855fdd0cf15d9255799fde422"
       },
       {
         "path": "src/renderers/SettingsModalRenderer.tsx",
-        "size": 277454,
-        "sha256": "c12a50c7f7ac1aa54d5bf30a4f0e4bc31f4f02299c8671d830edab53c7add96d"
+        "size": 277906,
+        "sha256": "f3fd55bac080166e40a1bf7f04b5c29f6b09297f3860c7be1f39d514d61a9e66"
       },
       {
         "path": "src/renderers/TitleBarRenderer.tsx",
@@ -1806,7 +1806,7 @@
     ]
   },
   "bundle": {
-    "digest": "9cd085f42faba6ad8779b2e2b4182b247b74b00acf07912cc1cfb403abd6794f",
+    "digest": "020ebdaf1fd125d692c3e6b918639f45e1c1bdbab9f3102609d262393e2a3212",
     "entries": [
       {
         "path": "shell-app.css",
@@ -1820,8 +1820,8 @@
       },
       {
         "path": "shell-defaultspack-app.js",
-        "size": 2195531,
-        "sha256": "bb3b0526fbd28a17f12989930d01607192f4c6bb84816e359e8735988abbbb96"
+        "size": 2195779,
+        "sha256": "17b43c05a94087007d2965ced28a40584eb4509442d4e7b3c31830a4205ed844"
       },
       {
         "path": "shell-rolldown-runtime.js",
