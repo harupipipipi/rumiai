@@ -253,6 +253,9 @@ class PackAPIHandler(
     _authenticated_principal: Optional[Any] = None
     _panel_session: Optional[dict[str, Any]] = None
     _panel_session_cookie: Optional[str] = None
+    _authenticated_device_id: Optional[str] = None
+    _authenticated_scopes: list[str] = []
+    _authenticated_device_scope_authorized: bool = False
     _web_mounts: list[dict[str, Any]] = []           # web_mount テーブル（テーブル駆動静的配信）
     _pre_auth_table: list[dict[str, Any]] = []       # pre_auth_routes テーブル（テーブル駆動認証バイパス）
     _api_route_exact: dict[tuple[str, str], dict[str, Any]] = {}      # api_routes 完全一致テーブル {(METHOD, path): entry}
@@ -469,6 +472,16 @@ class PackAPIHandler(
             return True
         if self._is_fixed_pre_auth_route(method_upper, path):
             return True
+        if method_upper in {"POST", "GET"} and path.startswith("/api/mobile/v1/pairings/"):
+            suffix = path[len("/api/mobile/v1/pairings/"):]
+            if method_upper == "POST" and (
+                suffix.endswith("/claim")
+                or suffix.endswith("/token/pickup")
+                or suffix.endswith("/token/ack")
+            ):
+                return True
+            if method_upper == "GET" and suffix.endswith("/status"):
+                return True
         # Provider webhooks must reach their own signature/shared-secret checks
         # before panel or bearer auth can apply.
         if method_upper == "POST":
@@ -851,6 +864,8 @@ class PackAPIHandler(
         request_data["_path"] = parsed_url.path
         request_data["_query_params"] = dict(query_params)
         request_data["_headers"] = sanitized_forwarded_headers(self.headers)
+        request_data["_authenticated_device_id"] = self._authenticated_device_id or ""
+        request_data["_authenticated_scopes"] = list(self._authenticated_scopes or [])
         if principal is not None:
             request_data["_authenticated_principal"] = principal.to_dict()
             to_subject = getattr(principal, "to_internal_subject", None)
@@ -875,6 +890,8 @@ class PackAPIHandler(
             "owner_pack": "defaultspack",
             "inputs": {},
             "_facade": facade,
+            "_authenticated_device_id": self._authenticated_device_id or "",
+            "_authenticated_scopes": list(self._authenticated_scopes or []),
             "_authenticated_principal": (
                 principal.to_dict()
                 if (principal := getattr(self, "_authenticated_principal", None)) is not None
@@ -1023,6 +1040,15 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error="Too Many Requests"), 429)
             return False
         return True
+
+    def _reset_request_auth_state(self) -> None:
+        self._request_auth_mode = None
+        self._panel_session = None
+        self._panel_session_cookie = None
+        self._authenticated_principal = None
+        self._authenticated_device_id = None
+        self._authenticated_scopes = []
+        self._authenticated_device_scope_authorized = False
 
     def _current_principal(self):
         return getattr(self, "_authenticated_principal", None)
@@ -1569,10 +1595,7 @@ class PackAPIHandler(
         path = urlparse(self.path).path
         if not self._check_rate_limit(path):
             return
-        self._request_auth_mode = None
-        self._authenticated_principal = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
 
         if self._handle_builtin_public_get(path):
             return
@@ -1703,10 +1726,7 @@ class PackAPIHandler(
         _pre_auth_path_post = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_post):
             return
-        self._request_auth_mode = None
-        self._authenticated_principal = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         result: Any = None
 
         # --- テーブル駆動: pre-auth API ルート ---
@@ -2234,10 +2254,7 @@ class PackAPIHandler(
         _pre_auth_path_put = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_put):
             return
-        self._request_auth_mode = None
-        self._authenticated_principal = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("PUT", _pre_auth_path_put) and not self._check_auth("PUT", _pre_auth_path_put):
             self._discard_request_body()
@@ -2276,16 +2293,43 @@ class PackAPIHandler(
             self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_PATCH(self) -> None:
-        return self.do_PUT()
+        _pre_auth_path_patch = urlparse(self.path).path
+        if not self._check_rate_limit(_pre_auth_path_patch):
+            return
+        self._reset_request_auth_state()
+        if not self._is_pre_auth_route("PATCH", _pre_auth_path_patch) and not self._check_auth("PATCH", _pre_auth_path_patch):
+            self._discard_request_body()
+            self._send_response(APIResponse(False, error="Unauthorized"), 401)
+            return
+
+        try:
+            body = self._parse_body()
+            if body is None:
+                return
+            parsed = urlparse(self.path)
+            path = parsed.path
+            query = {
+                key: values[-1]
+                for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+                if values
+            }
+            if self._dispatch_api_route("PATCH", path, body, query=query):
+                return
+            if self._dispatch_defaultspack_http_route("PATCH", path, body):
+                return
+            if not self._authorize_authenticated_route("PATCH", path):
+                return
+            logger.debug("Unmatched PATCH path: %s", path)
+            self._send_response(APIResponse(False, error="Not found"), 404)
+        except Exception as e:
+            _log_internal_error("do_PATCH", e)
+            self._send_response(APIResponse(False, error=_SAFE_ERROR_MSG), 500)
 
     def do_DELETE(self) -> None:
         _pre_auth_path_del = urlparse(self.path).path
         if not self._check_rate_limit(_pre_auth_path_del):
             return
-        self._request_auth_mode = None
-        self._authenticated_principal = None
-        self._panel_session = None
-        self._panel_session_cookie = None
+        self._reset_request_auth_state()
         result: Any = None
         # --- テーブル駆動: 認証チェック ---
         if not self._is_pre_auth_route("DELETE", _pre_auth_path_del) and not self._check_auth("DELETE", _pre_auth_path_del):

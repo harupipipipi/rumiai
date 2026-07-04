@@ -257,6 +257,7 @@ class AuthenticatedPrincipal:
     expires_at: str | None
     auth_mode: str = "scoped_bearer"
     core_role: bool = False
+    scopes: tuple[str, ...] = ()
 
     @classmethod
     def legacy_root(cls, *, auth_mode: str = "legacy_bearer") -> "AuthenticatedPrincipal":
@@ -333,6 +334,7 @@ class AuthenticatedPrincipal:
             "issued_at": self.issued_at,
             "expires_at": self.expires_at,
             "core_role": self.core_role,
+            "scopes": list(self.scopes),
             "principal_id": self.principal_id,
         }
 
@@ -353,6 +355,7 @@ class AuthenticatedPrincipal:
             "role": self.role,
             "audiences": list(self.audiences),
             "core_role": self.core_role,
+            "scopes": list(self.scopes),
             "principal_id": self.principal_id,
             "facet_principal_ids": list(
                 self.facet_principal_ids(
