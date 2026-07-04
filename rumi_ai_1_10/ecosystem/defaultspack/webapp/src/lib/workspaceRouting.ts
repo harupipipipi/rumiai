@@ -11,12 +11,14 @@ export function workspaceKindForPathname(pathname: string): WorkspaceTabKind | n
     return "chat";
   }
   if (normalized === "/coding") return "coding";
+  if (normalized === "/calendar") return "calendar";
   if (normalized === "/desktops") return "desktops";
   return null;
 }
 
 function workspaceRoutePath(kind: WorkspaceTabKind): string {
   if (kind === "coding") return "/coding";
+  if (kind === "calendar") return "/calendar";
   if (kind === "desktops") return "/desktops";
   return "/chat";
 }
