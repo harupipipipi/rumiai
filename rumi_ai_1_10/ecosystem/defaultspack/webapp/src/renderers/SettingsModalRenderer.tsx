@@ -3025,8 +3025,8 @@ function SettingsField({
     }
     case "readonly":
       control = (
-        <div className="group/readonly flex items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
-          <div className="whitespace-pre-wrap text-sm leading-6 text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>
+        <div className="group/readonly flex min-w-0 items-start justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+          <div className="min-w-0 flex-1 whitespace-pre-wrap break-all text-sm leading-6 text-zinc-300 select-text">{formatReadonlyValue(value, field.default)}</div>
           <button
             type="button"
             onClick={() => void copyTextToClipboard(formatReadonlyValue(value, field.default))}
@@ -3469,7 +3469,7 @@ export function SettingsModalRenderer({
     <div
       key={`${field.sourceSectionId}.${field.id}`}
       className={cn(
-        "rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
+        "min-w-0 rounded-lg border border-zinc-800 bg-zinc-950/50 p-4",
         settingsFieldTakesFullWidth(field) ? "lg:col-span-2" : "",
       )}
     >
