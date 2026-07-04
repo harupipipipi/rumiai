@@ -356,7 +356,7 @@ class DefaultsHttpServer:
         if "." in leaf:
             return False
         first_segment = request_path.strip("/").split("/", 1)[0]
-        return first_segment in {"chat", "coding", "desktops", "prompts", "defaultspack", "pack"}
+        return first_segment in {"chat", "coding", "calendar", "desktops", "prompts", "defaultspack", "pack"}
 
     def _active_profile_policy(self):
         try:
