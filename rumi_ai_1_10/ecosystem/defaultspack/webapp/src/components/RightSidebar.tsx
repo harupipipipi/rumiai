@@ -86,6 +86,7 @@ function cn(...inputs: ClassValue[]) {
 const RAIL_BUTTON_CLASS = "relative flex h-9 min-h-9 w-9 min-w-9 shrink-0 items-center justify-center overflow-visible rounded-md transition-all duration-200 ease-out hover:scale-[1.06] active:scale-[0.94]";
 const PANEL_WIDTH_STORAGE_KEY = "rumi-right-sidebar-panel-width";
 const PLACEMENT_PANEL_PREFIX = "__placement__:";
+const PIN_WIDGET_PANEL_ID = "__pin_widget_panel__";
 const DEFAULT_TOOL_GROUP_RAIL_LIMIT = 8;
 const RAIL_MENU_GAP = 8;
 
@@ -140,6 +141,10 @@ export function getRailFloatingMenuPosition(
     top: Math.max(gap, Math.min(rect.top, maxTop)),
     right: Math.max(gap, Math.min(viewportWidth - rect.left + gap, maxRight)),
   };
+}
+
+export function nextPinWidgetPanelState(current: string | null): string | null {
+  return current === PIN_WIDGET_PANEL_ID ? null : PIN_WIDGET_PANEL_ID;
 }
 
 function clampPanelWidth(value: unknown): number {
@@ -933,6 +938,7 @@ function SidebarSearchControl({
 export function RightSidebar({
   items,
   activeItemId,
+  initialActivePanel = null,
   settingsValues,
   settingsSections,
   selectedToolIds = [],
@@ -967,6 +973,7 @@ export function RightSidebar({
 }: {
   items: SidebarItem[];
   activeItemId?: string | null;
+  initialActivePanel?: string | null;
   settingsValues: Record<string, Record<string, unknown>>;
   settingsSections: SettingsSection[];
   selectedToolIds?: string[];
@@ -999,7 +1006,7 @@ export function RightSidebar({
   onToolBatchSet?: (toolIds: string[], enabled: boolean) => void;
   onPanelAction?: (item: SidebarItem, action: SidebarAction) => void;
 }) {
-  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const [activePanel, setActivePanel] = useState<string | null>(initialActivePanel);
   const [categoryFilter, setCategoryFilter] = useState<"all" | SidebarCategory>("tool");
   const [searchQuery, setSearchQuery] = useState("");
   const [toolManagerSearchQuery, setToolManagerSearchQuery] = useState("");
@@ -1009,8 +1016,6 @@ export function RightSidebar({
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
-  const [placementMenuOpen, setPlacementMenuOpen] = useState(false);
-  const [placementMenuPosition, setPlacementMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const sidebarSettings = settingsValues.sidebar ?? {};
   const toolsSettings = settingsValues.tools ?? {};
   const pinnedItemIds = useMemo(
@@ -1044,7 +1049,6 @@ export function RightSidebar({
   const toolManagerSearchRef = useRef<HTMLDivElement | null>(null);
   const toolGroupMenuRef = useRef<HTMLDivElement | null>(null);
   const toolGroupFloatingMenuRef = useRef<HTMLDivElement | null>(null);
-  const placementMenuRef = useRef<HTMLDivElement | null>(null);
   const contextMenuRef = useRef<HTMLDivElement | null>(null);
   const buttonTabIndex = keyboardButtonNavigation ? undefined : -1;
   const selectedToolIdSet = useMemo(() => new Set(selectedToolIds), [selectedToolIds]);
@@ -1129,6 +1133,7 @@ export function RightSidebar({
       "__coding_widget__",
       "__workspace_tabs__",
       "__prompt_usage__",
+      PIN_WIDGET_PANEL_ID,
     ]);
     if (requestedId && (items.some((item) => item.id === requestedId) || (requestedId !== "__prompt_usage__" && specialPanelIds.has(requestedId)) || (requestedId === "__prompt_usage__" && hasPromptWidget))) {
       setActivePanel(requestedId);
@@ -1141,6 +1146,7 @@ export function RightSidebar({
     if (activePanel === "__tool_filter_log__") return;
     if (activePanel === "__runtime_status__") return;
     if (activePanel === "__prompt_usage__" && hasPromptWidget) return;
+    if (activePanel === PIN_WIDGET_PANEL_ID) return;
     if (activePanel === "__company_workspace__" && companyPanel) return;
     if (activePanel === "__coding_widget__" && codingPanel) return;
     if (activePanel === "__workspace_tabs__" && workspaceTabs.length > 0) return;
@@ -1186,24 +1192,6 @@ export function RightSidebar({
       document.removeEventListener("keydown", handleDocumentKeyDown);
     };
   }, [openToolGroupMenu]);
-
-  useEffect(() => {
-    if (!placementMenuOpen) return;
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && placementMenuRef.current?.contains(target)) return;
-      setPlacementMenuOpen(false);
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPlacementMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [placementMenuOpen]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -1274,7 +1262,7 @@ export function RightSidebar({
     [hiddenToolIdSet, items, searchQuery, tagMap],
   );
   useEffect(() => {
-    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || !searchQuery.trim()) return;
+    if (!activePanel || activePanel === "__tool_manager__" || activePanel === "__tool_filter_log__" || activePanel === "__runtime_status__" || activePanel === "__prompt_usage__" || activePanel === "__company_workspace__" || activePanel === "__coding_widget__" || activePanel === "__workspace_tabs__" || activePanel === PIN_WIDGET_PANEL_ID || !searchQuery.trim()) return;
     if (!searchFilteredItems.some((item) => item.id === activePanel)) {
       setActivePanel(null);
     }
@@ -1373,6 +1361,7 @@ export function RightSidebar({
   const isCodingPanelActive = activePanel === "__coding_widget__" && Boolean(codingPanel);
   const isWorkspaceTabsActive = activePanel === "__workspace_tabs__" && workspaceTabs.length > 0;
   const isPlacementPanelActive = Boolean(activePlacementManifest);
+  const isPinWidgetPanelActive = activePanel === PIN_WIDGET_PANEL_ID;
   const activeToolGroupId = activeItem?.category === "tool" ? toolGroupFor(activeItem).id : null;
   const shouldCompactToolRail = categoryFilter === "tool" && !searchQuery.trim() && !activeTagFilter && !showStarredOnly;
   const railToolGroups = useMemo(() => {
@@ -1403,27 +1392,22 @@ export function RightSidebar({
     if (!manifest) return;
     if (!action) {
       setActivePanel(`${PLACEMENT_PANEL_PREFIX}${placementId}`);
-      setPlacementMenuOpen(false);
       return;
     }
     if (action.type === "open_panel" && action.target) {
       const target = action.target;
       setActivePanel((current) => current === target ? null : target);
-      setPlacementMenuOpen(false);
       return;
     }
     if (action.type === "open_settings_section" && action.target) {
-      setPlacementMenuOpen(false);
       onOpenSettingsSection?.(action.target);
       return;
     }
     if (action.type === "toggle_yolo") {
-      setPlacementMenuOpen(false);
       onToggleYolo?.();
       return;
     }
     setActivePanel(`${PLACEMENT_PANEL_PREFIX}${placementId}`);
-    setPlacementMenuOpen(false);
   };
 
   const renderPlacementPanel = (placementId: string) => {
@@ -1733,9 +1717,164 @@ export function RightSidebar({
     );
   };
 
+  const renderPinnedWidgetPanel = () => {
+    const pinnedCount = pinnedRailItems.length + pinnedRightSidebarPlacements.length;
+    const firstCandidate = rightSidebarPlacementCandidates[0] ?? null;
+    const addPlacement = (placementId: string) => {
+      updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: placementId, surface: "right_sidebar" }));
+    };
+    return (
+      <section id="right-rail-pin-widget-panel" data-testid="right-rail-pin-widget-panel" className="space-y-3">
+        <div className="rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h4 className="text-sm font-medium text-zinc-100">Pinned widgets</h4>
+              <p className="mt-1 text-xs leading-5 text-zinc-400">
+                Keep frequently used right-rail widgets one click away.
+              </p>
+            </div>
+            <span className="rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-200">
+              {pinnedCount} pinned
+            </span>
+          </div>
+          {pinnedCount === 0 && (
+            <div className="mt-3 rounded-lg border border-dashed border-zinc-700 bg-zinc-950/40 p-3">
+              <p className="text-sm font-medium text-zinc-200">No pinned widgets yet</p>
+              <p className="mt-1 text-xs leading-5 text-zinc-500">
+                Add a widget below to make this rail button visibly useful.
+              </p>
+              {firstCandidate ? (
+                <button
+                  type="button"
+                  onClick={() => addPlacement(firstCandidate.id)}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs font-medium text-sky-100 hover:bg-sky-500/15"
+                >
+                  <Plus size={13} />
+                  Add {firstCandidate.label}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={onOpenSettings}
+                  className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-950/60 px-3 py-2 text-xs font-medium text-zinc-200 hover:border-zinc-500"
+                >
+                  <Settings size={13} />
+                  Open settings
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {pinnedCount > 0 && (
+          <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Pinned on rail</p>
+              <span className="text-[10px] text-zinc-600">{pinnedCount}</span>
+            </div>
+            <div className="space-y-1.5">
+              {pinnedRailItems.map((item) => (
+                <div key={item.id} className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 p-2">
+                  <button
+                    type="button"
+                    onClick={() => setActivePanel(item.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-zinc-300 hover:text-zinc-100"
+                  >
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                      {iconForItem(item)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12px] font-medium">{item.label}</span>
+                      <span className="block truncate text-[10px] text-zinc-500">Pinned function</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => togglePin(item.id)}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    title={`Unpin ${item.label}`}
+                    aria-label={`Unpin ${item.label}`}
+                  >
+                    <PinOff size={14} />
+                  </button>
+                </div>
+              ))}
+              {pinnedRightSidebarPlacements.map((placement) => (
+                <div key={placement.id} className="flex min-w-0 items-center gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 p-2">
+                  <button
+                    type="button"
+                    onClick={() => triggerPlacement(placement.id)}
+                    className="flex min-w-0 flex-1 items-center gap-2 text-left text-zinc-300 hover:text-zinc-100"
+                  >
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                      {railIcon(placementIcon(placement.id), 15)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12px] font-medium">{placement.label}</span>
+                      <span className="block truncate text-[10px] text-zinc-500">{placement.description ?? "Pinned widget"}</span>
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => addPlacement(placement.id)}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-800 hover:text-zinc-200"
+                    title={`Unpin ${placement.label}`}
+                    aria-label={`Unpin ${placement.label}`}
+                  >
+                    <PinOff size={14} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="rounded-lg border border-zinc-800/70 bg-zinc-950/45 p-2">
+          <div className="mb-2 flex items-center justify-between gap-2 px-1">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-600">Add widgets</p>
+            <span className="text-[10px] text-zinc-600">{rightSidebarPlacementCandidates.length}</span>
+          </div>
+          {rightSidebarPlacementCandidates.length > 0 ? (
+            <div className="space-y-1.5">
+              {rightSidebarPlacementCandidates.map((manifest) => (
+                <button
+                  key={manifest.id}
+                  type="button"
+                  onClick={() => addPlacement(manifest.id)}
+                  className="flex w-full items-center justify-between gap-2 rounded-md border border-zinc-800 bg-zinc-950/55 px-2 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-900 hover:text-zinc-100"
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-500">
+                      {placementIcon(manifest.id)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12px] font-medium">{manifest.label}</span>
+                      {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
+                    </span>
+                  </span>
+                  <span className="inline-flex flex-shrink-0 items-center gap-1 rounded-md border border-sky-500/20 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-200">
+                    <Plus size={11} />
+                    Add
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-md border border-dashed border-zinc-800 bg-zinc-950/35 px-3 py-3">
+              <p className="text-[12px] text-zinc-300">No addable widgets are available.</p>
+              <p className="mt-1 text-[11px] leading-5 text-zinc-500">
+                All available right-rail widgets are already pinned, or this profile has no placement candidates.
+              </p>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  };
+
   return (
     <aside className="flex-shrink-0 border-l border-zinc-800/60 bg-[#09090b] hidden md:flex h-full transition-[width,opacity] duration-200 ease-out">
-      {(activeItem || isPlacementPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
+      {(activeItem || isPlacementPanelActive || isPinWidgetPanelActive || isToolManagerActive || isToolFilterLogActive || isRuntimeStatusActive || isPromptUsageActive || isCompanyPanelActive || isCodingPanelActive || isWorkspaceTabsActive) && (
         <div
           className="relative flex flex-col border-r border-zinc-800/40 bg-[#0a0a0c] animate-in slide-in-from-right-2 duration-200"
           style={{ width: panelWidthPx }}
@@ -1749,8 +1888,8 @@ export function RightSidebar({
           />
           <div className="h-10 flex items-center justify-between px-2.5 border-b border-zinc-800/60 flex-shrink-0">
             <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
-              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
+              <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeItem ? categoryColor(activeItem.category, "bg") : isPlacementPanelActive ? "bg-violet-300" : isPinWidgetPanelActive ? "bg-sky-300" : isCompanyPanelActive ? "bg-sky-400" : isCodingPanelActive ? "bg-zinc-300" : isWorkspaceTabsActive ? "bg-emerald-300" : isPromptUsageActive ? "bg-cyan-300" : isToolFilterLogActive ? "bg-amber-300" : isRuntimeStatusActive ? "bg-sky-300" : "bg-emerald-500")} />
+              <h3 className="text-[13px] font-medium text-zinc-100 truncate">{activeItem?.label ?? activePlacementManifest?.label ?? (isPinWidgetPanelActive ? "Pinned widgets" : isCompanyPanelActive ? "Employees" : isCodingPanelActive ? "Coding widget" : isWorkspaceTabsActive ? "Workspace tabs" : isPromptUsageActive ? "Current prompts" : isToolFilterLogActive ? "選定ログ" : isRuntimeStatusActive ? "Runtime status" : "機能")}</h3>
               {activeItem?.badge && (
                 <span className="text-[8px] bg-emerald-500/20 text-emerald-400 px-1 py-0.5 rounded-full font-bold flex-shrink-0">
                   {activeItem.badge}
@@ -1858,6 +1997,8 @@ export function RightSidebar({
                 onClose={(tabId) => onWorkspaceTabClose?.(tabId)}
                 onCreate={(kind) => onWorkspaceTabCreate?.(kind)}
               />
+            ) : isPinWidgetPanelActive ? (
+              renderPinnedWidgetPanel()
             ) : isPlacementPanelActive && activePlacementManifest ? (
               renderPlacementPanel(activePlacementManifest.id)
             ) : isPromptUsageActive && onLoadPromptActive && onTogglePromptEdge ? (
@@ -2420,69 +2561,32 @@ export function RightSidebar({
               </span>
             )}
           </button>
-          <div className="relative">
-            <button
-              type="button"
-              tabIndex={buttonTabIndex}
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={(event) => {
-                event.stopPropagation();
-                const nextOpen = !placementMenuOpen;
-                if (nextOpen) {
-                  setPlacementMenuPosition(getRailFloatingMenuPosition(event.currentTarget.getBoundingClientRect(), { width: 224, height: 320 }));
-                }
-                setPlacementMenuOpen(nextOpen);
-              }}
-              className={cn(
-                RAIL_BUTTON_CLASS,
-                placementMenuOpen
-                  ? "bg-zinc-800 text-zinc-100 ring-1 ring-zinc-600/70"
-                  : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
-              )}
-              title="ウィジェットをピン留め"
-            >
-              <Plus size={16} className="h-4 w-4 shrink-0" />
-            </button>
-            {placementMenuOpen && (
-              <LayerPortal layer="modal">
-                <div
-                  ref={placementMenuRef}
-                  className="fixed rumi-layer-modal w-56 overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 py-1 shadow-2xl"
-                  style={placementMenuPosition ? { top: `${placementMenuPosition.top}px`, right: `${placementMenuPosition.right}px` } : undefined}
-                  onPointerDown={(event) => event.stopPropagation()}
-                >
-                  <div className="border-b border-zinc-800 px-3 py-2">
-                    <p className="text-[11px] font-semibold text-zinc-200">サイドバーにピン留め</p>
-                    <p className="text-[10px] text-zinc-500">縦表示 / 設定可</p>
-                  </div>
-                  <div className="max-h-64 overflow-y-auto py-1">
-                    {rightSidebarPlacementCandidates.map((manifest) => (
-                      <button
-                        key={manifest.id}
-                        type="button"
-                        onClick={() => {
-                          updatePinnedPlacements((current) => togglePinnedPlacement(current, { id: manifest.id, surface: "right_sidebar" }));
-                          setPlacementMenuOpen(false);
-                        }}
-                        className="flex w-full items-center gap-2 px-3 py-2 text-left text-zinc-300 transition-colors hover:bg-zinc-800/80 hover:text-zinc-100"
-                      >
-                        <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md bg-zinc-900 text-zinc-400">
-                          {placementIcon(manifest.id)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate text-[12px]">{manifest.label}</span>
-                          {manifest.description && <span className="block truncate text-[10px] text-zinc-500">{manifest.description}</span>}
-                        </span>
-                      </button>
-                    ))}
-                    {rightSidebarPlacementCandidates.length === 0 && (
-                      <p className="px-3 py-3 text-[11px] text-zinc-500">追加できる候補はありません。</p>
-                    )}
-                  </div>
-                </div>
-              </LayerPortal>
+          <button
+            type="button"
+            tabIndex={buttonTabIndex}
+            onClick={() => {
+              setActivePanel((current) => nextPinWidgetPanelState(current));
+              setOpenToolGroupMenu(null);
+              setContextMenu(null);
+            }}
+            aria-label="Pin widget"
+            aria-expanded={isPinWidgetPanelActive}
+            aria-controls="right-rail-pin-widget-panel"
+            className={cn(
+              RAIL_BUTTON_CLASS,
+              isPinWidgetPanelActive
+                ? "bg-sky-500/15 text-sky-200 ring-1 ring-sky-500/30"
+                : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50",
             )}
-          </div>
+            title="Pin widget"
+          >
+            <Pin size={16} className="h-4 w-4 shrink-0" />
+            {(pinnedRailItems.length + pinnedRightSidebarPlacements.length) > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-sky-400 px-1 text-[7px] font-bold leading-none text-black">
+                {Math.min(pinnedRailItems.length + pinnedRightSidebarPlacements.length, 99)}
+              </span>
+            )}
+          </button>
           {companyPanel && (
             <button
               type="button"
