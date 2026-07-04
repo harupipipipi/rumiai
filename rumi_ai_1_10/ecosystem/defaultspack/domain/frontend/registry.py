@@ -71,7 +71,7 @@ class FrontendRegistry:
         ]
         component_bindings = self._filter_frontend_items(component_bindings, selected_frontend_ids)
         sidebar_items = [
-            *self._sidebar_items(ui_surfaces, extensions),
+            *self._sidebar_items(ui_surfaces, extensions, lightweight=lightweight),
             *template_catalog.get("sidebar_items", []),
         ]
         sidebar_items = self._filter_frontend_items(sidebar_items, selected_frontend_ids)
@@ -558,6 +558,8 @@ class FrontendRegistry:
         self,
         ui_surfaces: list[dict[str, Any]],
         extensions: list[dict[str, Any]],
+        *,
+        lightweight: bool = False,
     ) -> list[dict[str, Any]]:
         registry = ToolRegistry()
         items: list[dict[str, Any]] = []
@@ -679,7 +681,12 @@ class FrontendRegistry:
         )
 
         items.extend(self._config_list(ui_surfaces, "sidebar_items"))
-        items.extend(self._hydrate_sidebar_items(self._config_list(extensions, "sidebar_items")))
+        items.extend(
+            self._hydrate_sidebar_items(
+                self._config_list(extensions, "sidebar_items"),
+                hydrate_models=not lightweight,
+            )
+        )
 
         return sorted(self._dedupe_by_key(items, "id"), key=self._sidebar_item_sort_key)
 
@@ -2558,12 +2565,22 @@ class FrontendRegistry:
             values.extend(item for item in items if isinstance(item, dict))
         return values
 
-    def _hydrate_sidebar_items(self, items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def _hydrate_sidebar_items(
+        self,
+        items: list[dict[str, Any]],
+        *,
+        hydrate_models: bool = True,
+    ) -> list[dict[str, Any]]:
         hydrated: list[dict[str, Any]] = []
         for item in items:
             item = deepcopy(item)
             panel = item.get("panel")
-            if isinstance(panel, dict) and panel.get("kind") == "models" and "models" not in panel:
+            if (
+                hydrate_models
+                and isinstance(panel, dict)
+                and panel.get("kind") == "models"
+                and "models" not in panel
+            ):
                 panel["models"] = self._list_provider_models()
             hydrated.append(item)
         return hydrated
