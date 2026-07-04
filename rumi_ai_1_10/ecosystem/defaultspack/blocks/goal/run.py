@@ -182,7 +182,7 @@ def _call_worker(
         {
             "model_hint": model,
             "messages": [
-                {"role": "system", "content": WORKER_SYSTEM_PROMPT},
+                {"role": "developer", "content": WORKER_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": 800,
@@ -208,7 +208,7 @@ def _call_evaluator(
         {
             "model_hint": model,
             "messages": [
-                {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
+                {"role": "developer", "content": EVALUATOR_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
             "max_tokens": 400,

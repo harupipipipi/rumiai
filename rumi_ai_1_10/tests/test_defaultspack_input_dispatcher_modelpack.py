@@ -1067,6 +1067,41 @@ def test_model_call_does_not_forward_secrets(monkeypatch):
     assert "api_key" not in json.dumps(seen["messages"], ensure_ascii=False)
 
 
+def test_model_call_merges_developer_for_provider_without_developer_role(monkeypatch):
+    seen: dict[str, object] = {}
+
+    def fake_route(request, profiles=None):
+        del request, profiles
+        return _fake_route_decision("demo/text")
+
+    def fake_complete(self, request):
+        seen["messages"] = request["messages"]
+        return {"content": [{"type": "text", "text": "ok"}]}
+
+    monkeypatch.setattr("domain.ai_client.model_call.route_model_request", fake_route)
+    monkeypatch.setattr("domain.ai_client.model_call.get_model_capabilities", lambda model: {})
+    monkeypatch.setattr(
+        "domain.ai_client.model_call.get_model_provider_capabilities",
+        lambda model, profile: {"supported_roles": ["system", "user", "assistant"]},
+    )
+    monkeypatch.setattr("domain.ai_client.model_call.LLMGateway.complete", fake_complete)
+
+    result = call_model(
+        {
+            "messages": [
+                {"role": "developer", "content": "Controller prompt"},
+                {"role": "user", "content": "Normal user text"},
+            ]
+        }
+    )
+
+    assert result["status"] == "ok"
+    assert seen["messages"][0]["role"] == "system"
+    assert "[Developer instructions]" in seen["messages"][0]["content"]
+    assert "Controller prompt" in seen["messages"][0]["content"]
+    assert {"role": "user", "content": "Normal user text"} in seen["messages"]
+
+
 def test_model_switch_updates_conversation_default(monkeypatch, tmp_path):
     _configure_paths(monkeypatch, tmp_path)
     conversation = _conversation(tmp_path)

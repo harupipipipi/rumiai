@@ -10,6 +10,7 @@ from domain.ai_client.capability_tokens import (
     normalize_capability_tokens,
 )
 from domain.ai_client.gateway import LLMGateway
+from domain.ai_client.capabilities.registry import get_model_provider_capabilities
 from domain.ai_client.model_router import ModelRoutingRequest, route_model_request
 from domain.ai_client.model_runtime_settings import ModelRuntimeSettingsService
 from domain.ai_client.model_search import get_model_capabilities
@@ -72,6 +73,15 @@ def call_model(
     )
     model = decision.selected_model
     selected_capabilities = get_model_capabilities(model) or {}
+    provider_capabilities = get_model_provider_capabilities(
+        model,
+        {
+            "id": model,
+            "provider_id": model.split("/", 1)[0] if "/" in model else "",
+            "capabilities": selected_capabilities,
+            "metadata": {"capabilities": selected_capabilities},
+        },
+    )
     missing_capabilities = missing_model_capabilities(required_capabilities, selected_capabilities)
     if missing_capabilities:
         return {
@@ -94,6 +104,7 @@ def call_model(
     runtime_context.setdefault("current_datetime", temporal_context["iso"])
     runtime_context.setdefault("current_date", temporal_context["date"])
     runtime_context.setdefault("current_time_zone", temporal_context["timezone"])
+    messages = _normalize_instruction_roles_for_provider(messages, provider_capabilities)
     add_temporal_context_message(messages, runtime_context, temporal_context=temporal_context)
     sanitized_messages = _sanitize_value(messages)
     try:
@@ -163,6 +174,46 @@ def _normalized_messages(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return messages
 
 
+def _normalize_instruction_roles_for_provider(
+    messages: list[dict[str, Any]],
+    provider_capabilities: dict[str, Any],
+) -> list[dict[str, Any]]:
+    supported_roles = {
+        str(role).strip().lower()
+        for role in provider_capabilities.get("supported_roles", [])
+        if str(role or "").strip()
+    }
+    if not supported_roles or "developer" in supported_roles:
+        return messages
+
+    developer_text = "\n\n".join(
+        _message_text(message)
+        for message in messages
+        if str(message.get("role") or "").strip().lower() == "developer"
+        and _message_text(message)
+    ).strip()
+    if not developer_text:
+        return [
+            message
+            for message in messages
+            if str(message.get("role") or "").strip().lower() != "developer"
+        ]
+
+    remaining = [
+        dict(message)
+        for message in messages
+        if str(message.get("role") or "").strip().lower() != "developer"
+    ]
+    merged_text = "[Developer instructions]\n" + developer_text
+    for message in remaining:
+        if str(message.get("role") or "").strip().lower() == "system":
+            existing = _message_text(message)
+            message["content"] = (existing + "\n\n" + merged_text).strip() if existing else merged_text
+            return remaining
+
+    return [{"role": "system", "content": merged_text}, *remaining]
+
+
 def _requested_thinking_level(payload: dict[str, Any], required_capabilities: list[str]) -> str:
     explicit = str(payload.get("thinking_level") or payload.get("requested_thinking_level") or "").strip()
     if explicit:
@@ -225,14 +276,23 @@ def _response_text(response: Any) -> str:
 def _messages_text(messages: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for message in messages:
-        content = message.get("content")
-        if isinstance(content, str):
-            parts.append(content)
-        elif isinstance(content, list):
-            for block in content:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(str(block.get("text") or ""))
+        text = _message_text(message)
+        if text:
+            parts.append(text)
     return "\n".join(part for part in parts if part)
+
+
+def _message_text(message: dict[str, Any]) -> str:
+    content = message.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text") or ""))
+        return "\n".join(part for part in parts if part)
+    return str(content or "")
 
 
 def _messages_have_images(messages: list[dict[str, Any]]) -> bool:

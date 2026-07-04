@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
-import { Hand, Loader2 } from "lucide-react";
+import { Hand, Loader2, Pencil, X } from "lucide-react";
 
 import { CompanyWorkspacePanel } from "./components/company/CompanyWorkspacePanel";
 import { AmbientTriggerPanel } from "./ambient/AmbientTriggerPanel";
@@ -89,6 +89,13 @@ type PendingNewTaskContext = {
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
   rumiDataPath?: string | null;
+};
+
+type DirectiveLayerState = {
+  content: string;
+  label: string;
+  scope: string;
+  updatedAt?: number | null;
 };
 
 type CalendarItemKind = "task" | "event" | "reminder";
@@ -1261,6 +1268,20 @@ function cleanOptionalString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function directiveLayerFromMetadata(metadata: Record<string, unknown> | null | undefined): DirectiveLayerState | null {
+  const raw = metadata?.directive_layer;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const record = raw as Record<string, unknown>;
+  const content = cleanOptionalString(record.content);
+  if (!content) return null;
+  return {
+    content,
+    label: cleanOptionalString(record.label) ?? "Directive Layer",
+    scope: cleanOptionalString(record.scope) ?? "conversation",
+    updatedAt: typeof record.updated_at === "number" ? record.updated_at : null,
+  };
+}
+
 function workspaceContextFromMetadata(metadata: Record<string, unknown> | null | undefined): PendingNewTaskContext {
   return {
     groupId: cleanOptionalString(metadata?.group_id ?? metadata?.groupId) ?? undefined,
@@ -2404,6 +2425,10 @@ function ChatApp() {
     ? latestActiveMetadata.prompt_usage as PromptUsageSummary
     : null;
   const activePromptProfileId = String(activeConversation?.metadata?.profile_id ?? activePromptUsage?.profile_id ?? "").trim() || undefined;
+  const activeDirectiveLayer = useMemo(
+    () => directiveLayerFromMetadata(activeConversation?.metadata),
+    [activeConversation?.metadata],
+  );
   const placeholder = String(settingsValues.general?.composer_placeholder ?? "メッセージを入力...");
   const locale = normalizeLocale(settingsValues.general?.language);
   const keyboardButtonNavigation = parseCommandBoolean(settingsValues.general?.keyboard_button_navigation, false);
@@ -4000,6 +4025,11 @@ function ChatApp() {
           resolvedFrontendCommandArgs(parsed.command, parsed.args, result.args),
         );
       }
+      if (parsed.command.id === "directive" && activeConversationId) {
+        if (feedbackMessage) setError(feedbackMessage);
+        await refreshConversations(activeConversationId);
+        return true;
+      }
       if (parsed.command.execution.type === "rumi_function") {
         await refreshCatalog();
       }
@@ -4023,6 +4053,16 @@ function ChatApp() {
       return;
     }
     void executeComposerCommand("model", `/model ${profileId}`);
+  };
+
+  const handleDirectiveEdit = () => {
+    if (!activeDirectiveLayer) return;
+    setInput(`/directive ${activeDirectiveLayer.content}`);
+  };
+
+  const handleDirectiveClear = () => {
+    if (!activeConversationId) return;
+    void executeComposerCommand("directive", "/directive clear");
   };
 
   const handleComposerInputChange = (value: string) => {
@@ -5499,6 +5539,46 @@ function ChatApp() {
       onCodingContextRefresh={loadCodingContext}
     />
   );
+  const renderDirectiveLayerBanner = (className?: string) => activeDirectiveLayer ? (
+    <div className={cn("rounded-lg border border-cyan-500/25 bg-cyan-500/10 px-3 py-2 text-cyan-50 shadow-sm", className)}>
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-[11px] font-semibold text-cyan-100">
+              {activeDirectiveLayer.label} active
+            </span>
+            <span className="text-[11px] text-cyan-200/75">scope={activeDirectiveLayer.scope}</span>
+          </div>
+          <p className="mt-1 text-xs leading-5 text-cyan-100/85">
+            Rumi conversation directive. Not a provider-level hidden instruction.
+          </p>
+          <p className="mt-1 line-clamp-2 text-xs leading-5 text-cyan-50/95">
+            {activeDirectiveLayer.content}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <button
+            type="button"
+            title="Edit directive"
+            aria-label="Edit directive"
+            onClick={handleDirectiveEdit}
+            className="grid h-8 w-8 place-items-center rounded-md border border-cyan-400/25 text-cyan-100 transition hover:bg-cyan-400/10"
+          >
+            <Pencil className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            title="Clear directive"
+            aria-label="Clear directive"
+            onClick={handleDirectiveClear}
+            className="grid h-8 w-8 place-items-center rounded-md border border-cyan-400/25 text-cyan-100 transition hover:bg-cyan-400/10"
+          >
+            <X className="h-4 w-4" aria-hidden="true" />
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return (
     <RendererBoundary>
@@ -5701,6 +5781,7 @@ function ChatApp() {
             ) : isNewConversation && !isLoading ? (
               <div className={cn("rumi-new-chat-stage flex flex-1 items-center justify-center px-5 pb-[10vh]", isNewChatLaunching && "is-launching")}>
                 <div className="w-full">
+                  {renderDirectiveLayerBanner("mx-auto mb-4 max-w-[720px]")}
                   <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
@@ -5708,29 +5789,32 @@ function ChatApp() {
                 </div>
               </div>
             ) : (
-              <Renderers.chatMessages
-                error={error}
-                isMessagesRegionVisible={showRegion("chat_messages")}
-                isLoading={isLoading}
-                isNewConversation={isNewConversation}
-                isGenerating={isGenerating || isConversationPending}
-                pendingStatus={pendingRequest?.status ?? null}
-                pendingToolNames={pendingRequest?.toolNames ?? []}
-                pendingStartedAt={pendingRequest?.startedAt ?? null}
-                pendingToolStartedAt={pendingRequest?.toolStartedAt ?? {}}
-                messages={messages}
-                messagesEndRef={messagesEndRef}
-                unknownBlockStrategy={unknownBlockStrategy}
-                showActivityInMessages={showActivityInMessages}
-                showWidgets={showWidgets}
-                showPromptUsageInMessages={showPromptUsageInMessages}
-                onSuggestionClick={(text) => setInput(text)}
-                onOpenToolPreview={(previewId) => {
-                  setActivePreviewId(previewId);
-                  setShowPreview(true);
-                }}
-                onLoadPromptTrace={promptResources.getTraceUsage}
-              />
+              <>
+                {renderDirectiveLayerBanner("mx-3 mt-3")}
+                <Renderers.chatMessages
+                  error={error}
+                  isMessagesRegionVisible={showRegion("chat_messages")}
+                  isLoading={isLoading}
+                  isNewConversation={isNewConversation}
+                  isGenerating={isGenerating || isConversationPending}
+                  pendingStatus={pendingRequest?.status ?? null}
+                  pendingToolNames={pendingRequest?.toolNames ?? []}
+                  pendingStartedAt={pendingRequest?.startedAt ?? null}
+                  pendingToolStartedAt={pendingRequest?.toolStartedAt ?? {}}
+                  messages={messages}
+                  messagesEndRef={messagesEndRef}
+                  unknownBlockStrategy={unknownBlockStrategy}
+                  showActivityInMessages={showActivityInMessages}
+                  showWidgets={showWidgets}
+                  showPromptUsageInMessages={showPromptUsageInMessages}
+                  onSuggestionClick={(text) => setInput(text)}
+                  onOpenToolPreview={(previewId) => {
+                    setActivePreviewId(previewId);
+                    setShowPreview(true);
+                  }}
+                  onLoadPromptTrace={promptResources.getTraceUsage}
+                />
+              </>
             )}
 
             {showRegion("composer") && isChatWorkspace && !isNewConversation && !isCalendarMode && !isKanbanMode && (

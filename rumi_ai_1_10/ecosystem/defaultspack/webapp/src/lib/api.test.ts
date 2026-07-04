@@ -244,6 +244,29 @@ test("slash command parsing supports multi-word aliases without treating them as
   assert.deepEqual(explicitOff?.args, { enabled: "off" });
 });
 
+test("slash command parsing recognizes directive aliases and typo alias", () => {
+  const commands: ComposerCommandItem[] = [
+    {
+      id: "directive",
+      name: "directive",
+      aliases: ["developer", "system", "sytem"],
+      label: "Directive Layer",
+      category: "chat",
+      visibility: "default",
+      risk: "medium",
+      args: [{ name: "instruction", type: "string", required: false }],
+      execution: { type: "pack_block", qualified_name: "defaultspack:directive.run" },
+    },
+  ];
+
+  assert.deepEqual(parseSlashCommandInput("/directive Always be terse.", commands)?.args, {
+    instruction: "Always be terse.",
+  });
+  assert.equal(parseSlashCommandInput("/developer Use Japanese.", commands)?.command.id, "directive");
+  assert.deepEqual(parseSlashCommandInput("/system clear", commands)?.args, { instruction: "clear" });
+  assert.equal(parseSlashCommandInput("/sytem Same as system.", commands)?.command.id, "directive");
+});
+
 test("slash command parsing can be disabled by template feature flags", () => {
   const commands: ComposerCommandItem[] = [
     {

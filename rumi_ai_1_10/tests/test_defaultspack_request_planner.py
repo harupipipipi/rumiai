@@ -80,6 +80,36 @@ def test_request_planner_bridges_image_and_developer_role():
     assert any(action.action == "vision_bridge_required" for action in planned.bridge_actions)
 
 
+def test_request_planner_preserves_developer_role_when_supported():
+    from domain.ai_client.request_planner import plan_model_request
+    from domain.chat.ir import RumiChatIR, RumiIRMessage
+    from domain.chat.ir_blocks import RumiIRBlock
+
+    ir = RumiChatIR(
+        conversation_id="c",
+        messages=[
+            RumiIRMessage(role="developer", content=[RumiIRBlock(type="text", text="use terse answers")]),
+            RumiIRMessage(role="user", content=[RumiIRBlock(type="text", text="hello")]),
+        ],
+    )
+    planned = plan_model_request(
+        ir,
+        "local/model",
+        {
+            "provider_id": "local",
+            "api_family": "openai_compatible",
+            "supported_roles": ["system", "developer", "user", "assistant"],
+            "supported_content_blocks": ["text"],
+        },
+        [],
+        {},
+        {},
+    )
+
+    assert [message.role for message in planned.ir.messages] == ["developer", "user"]
+    assert not any(warning.code == "developer_role_merged" for warning in planned.warnings)
+
+
 def test_request_planner_marks_tool_calling_unavailable_and_aliases_invalid_names():
     from domain.ai_client.request_planner import plan_model_request
     from domain.chat.ir_blocks import RumiIRBlock

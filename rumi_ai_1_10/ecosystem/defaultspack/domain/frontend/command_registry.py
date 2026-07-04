@@ -351,7 +351,7 @@ class SlashCommandRegistry:
             )
 
         block_input: dict[str, Any] = dict(args)
-        for forwarded in ("conversation_id", "mode"):
+        for forwarded in ("conversation_id", "mode", "command"):
             value = payload.get(forwarded)
             if value not in (None, "") and forwarded not in block_input:
                 block_input[forwarded] = value
