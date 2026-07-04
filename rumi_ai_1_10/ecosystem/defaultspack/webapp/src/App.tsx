@@ -14,6 +14,7 @@ import { KanbanWorkspacePanel } from "./components/kanban/KanbanWorkspacePanel";
 import { HostPermissionsPage } from "./hostPermissions/HostPermissionsPage";
 import { ConversationSpotlight } from "./components/ConversationSpotlight";
 import { DesktopMonitorWorkspace } from "./components/desktops/DesktopMonitorWorkspace";
+import { ScheduledTasksPage } from "./features/scheduledTasks/ScheduledTasksPage";
 import { WarmActionIcon } from "./components/WarmActionIcon";
 import {
   DEFAULT_WORKSPACE_TAB_ID,
@@ -89,6 +90,11 @@ type PendingNewTaskContext = {
   workspaceLabel?: string | null;
   workspaceRoot?: string | null;
   rumiDataPath?: string | null;
+};
+
+const ROUTE_WORKSPACE_TAB_IDS: Partial<Record<WorkspaceTabKind, string>> = {
+  calendar: "workspace-tab-calendar-home",
+  scheduled: "workspace-tab-scheduled-home",
 };
 
 type CalendarItemKind = "task" | "event" | "reminder";
@@ -2242,7 +2248,29 @@ function modelCommandInputQuery(value: string): string | null {
   return String(match[1] ?? "").trim();
 }
 
-function ChatApp() {
+export function initialWorkspaceKindForPathname(pathname: string): WorkspaceTabKind {
+  if (pathname === "/calendar") return "calendar";
+  if (pathname === "/scheduled") return "scheduled";
+  return "chat";
+}
+
+function initialWorkspaceTabs(initialKind: WorkspaceTabKind): WorkspaceTab[] {
+  const chatTab = createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" });
+  if (initialKind === "chat") return [chatTab];
+  return [
+    chatTab,
+    createWorkspaceTab(initialKind, {
+      id: ROUTE_WORKSPACE_TAB_IDS[initialKind] ?? `workspace-tab-${initialKind}-home`,
+      title: WORKSPACE_TAB_CREATE_OPTIONS.find((option) => option.kind === initialKind)?.label,
+    }),
+  ];
+}
+
+function initialWorkspaceTabId(initialKind: WorkspaceTabKind): string {
+  return initialKind === "chat" ? DEFAULT_WORKSPACE_TAB_ID : ROUTE_WORKSPACE_TAB_IDS[initialKind] ?? `workspace-tab-${initialKind}-home`;
+}
+
+function ChatApp({ initialWorkspaceKind = "chat" }: { initialWorkspaceKind?: WorkspaceTabKind } = {}) {
   const [catalog, setCatalog] = useState<UICatalog | null>(null);
   const [modelProfiles, setModelProfiles] = useState<ModelProfile[]>([]);
   const [settingsSections, setSettingsSections] = useState<SettingsSection[]>([]);
@@ -2268,10 +2296,8 @@ function ChatApp() {
   const [error, setError] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
-  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => [
-    createWorkspaceTab("chat", { id: DEFAULT_WORKSPACE_TAB_ID, title: "New Conversation" }),
-  ]);
-  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(DEFAULT_WORKSPACE_TAB_ID);
+  const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabs(initialWorkspaceKind));
+  const [activeWorkspaceTabId, setActiveWorkspaceTabId] = useState(() => initialWorkspaceTabId(initialWorkspaceKind));
   const [isHistoryMinimized, setIsHistoryMinimized] = useLocalStorage("rumi-history-minimized", false);
   const [isNewChatLaunching, setIsNewChatLaunching] = useState(false);
   const [modelSteerStatus, setModelSteerStatus] = useState<string | null>(null);
@@ -4066,7 +4092,7 @@ function ChatApp() {
       return;
     }
     handleModeChange("agent");
-    if (tab.kind === "calendar" || tab.kind === "kanban") {
+    if (tab.kind === "calendar" || tab.kind === "scheduled" || tab.kind === "kanban") {
       return;
     }
     if (tab.kind === "canvas") {
@@ -5345,6 +5371,7 @@ function ChatApp() {
     />
   ) : null;
   const isCalendarMode = activeWorkspaceKind === "calendar";
+  const isScheduledMode = activeWorkspaceKind === "scheduled";
   const isKanbanMode = activeWorkspaceKind === "kanban";
   const calendarSettings = parseCalendarSettings(settingsValues.calendar);
   const activeConversationMetadata: Record<string, unknown> = activeConversation?.metadata && typeof activeConversation.metadata === "object"
@@ -5657,6 +5684,10 @@ function ChatApp() {
                   modelProfiles={selectableModelProfiles}
                   settings={calendarSettings}
                 />
+              </div>
+            ) : isScheduledMode ? (
+              <div className="flex min-h-0 flex-1 p-1.5">
+                <ScheduledTasksPage />
               </div>
             ) : isCodingWorkspace ? (
               <div className="flex min-h-0 flex-1 p-1.5">
@@ -6041,6 +6072,9 @@ export default function App() {
   }
   if (pathname === "/adaptive" || pathname === "/operating-profile") {
     return <AdaptiveRuntimePage />;
+  }
+  if (pathname === "/calendar" || pathname === "/scheduled") {
+    return <ChatApp initialWorkspaceKind={initialWorkspaceKindForPathname(pathname)} />;
   }
   if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
     return <ChatApp />;
