@@ -258,6 +258,38 @@ class TestPackAPIHandlerWebMountSecurity(unittest.TestCase):
         self.assertEqual(count, 0)
         self.assertEqual(self.Handler._web_mounts, [])
 
+    def test_desktops_runtime_fallback_serves_defaultspack_spa_shell(self):
+        handler = object.__new__(self.Handler)
+
+        with MagicMock() as approved:
+            approved.return_value = True
+            with unittest.mock.patch.object(
+                self.Handler,
+                "_is_pack_approved_for_runtime_routes",
+                approved,
+            ):
+                match = handler._match_web_mount("/desktops")
+
+        self.assertIsNotNone(match)
+        self.assertEqual(match["pack_id"], "defaultspack")
+        self.assertEqual(match["path_prefix"], "/desktops")
+        self.assertEqual(match["index_file"], "shell.html")
+        self.assertTrue(match["spa_fallback"])
+
+    def test_desktops_runtime_fallback_does_not_capture_api_desktops(self):
+        handler = object.__new__(self.Handler)
+
+        with MagicMock() as approved:
+            approved.return_value = True
+            with unittest.mock.patch.object(
+                self.Handler,
+                "_is_pack_approved_for_runtime_routes",
+                approved,
+            ):
+                match = handler._match_web_mount("/api/desktops")
+
+        self.assertIsNone(match)
+
 
 if __name__ == "__main__":
     unittest.main()
