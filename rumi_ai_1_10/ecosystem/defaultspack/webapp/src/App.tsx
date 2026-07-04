@@ -2210,6 +2210,10 @@ export function fileSearchPromptForQuery(query: unknown): string | null {
   return `Find workspace files matching ${trimmed}.`;
 }
 
+export function composerErrorAfterInputChange(currentError: string | null, nextInput: string): string | null {
+  return currentError === FILE_SEARCH_QUERY_REQUIRED_MESSAGE && nextInput.trim() ? null : currentError;
+}
+
 export function parseSlashCommandInput(
   input: string,
   commands: ComposerCommandItem[],
@@ -4180,6 +4184,7 @@ function ChatApp() {
 
   const handleComposerInputChange = (value: string) => {
     setInput(value);
+    setError((currentError) => composerErrorAfterInputChange(currentError, value));
     if (isGenerating || isConversationPending) {
       setComposerCandidateMenu(null);
       return;
@@ -5922,6 +5927,11 @@ function ChatApp() {
                   <h1 className="rumi-greeting mx-auto mb-7 max-w-[720px] px-4 text-center text-[clamp(24px,3.2vw,44px)] font-medium leading-tight text-zinc-200">
                     {getNewConversationGreeting()}
                   </h1>
+                  {error && (
+                    <div role="alert" className="mx-auto mb-4 max-w-[720px] rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                      {error}
+                    </div>
+                  )}
                   {renderComposer(true)}
                 </div>
               </div>

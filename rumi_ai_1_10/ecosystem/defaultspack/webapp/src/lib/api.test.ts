@@ -10,6 +10,7 @@ import {
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
   FILE_SEARCH_QUERY_REQUIRED_MESSAGE,
+  composerErrorAfterInputChange,
   fileSearchPromptForQuery,
   frontendCommandArgs,
   keepSelectedToolsAfterSend,
@@ -331,6 +332,9 @@ test("file search command prompts for query or actionable feedback", () => {
   assert.equal(fileSearchPromptForQuery(" README "), "Find workspace files matching README.");
   assert.equal(fileSearchPromptForQuery(""), null);
   assert.match(FILE_SEARCH_QUERY_REQUIRED_MESSAGE, /\/files README/);
+  assert.equal(composerErrorAfterInputChange(FILE_SEARCH_QUERY_REQUIRED_MESSAGE, ""), FILE_SEARCH_QUERY_REQUIRED_MESSAGE);
+  assert.equal(composerErrorAfterInputChange(FILE_SEARCH_QUERY_REQUIRED_MESSAGE, "next draft"), null);
+  assert.equal(composerErrorAfterInputChange("unrelated error", "next draft"), "unrelated error");
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {
