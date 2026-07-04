@@ -15,13 +15,19 @@ sys.path.insert(0, str(DEFAULTSPACK_ROOT))
 
 
 class _FakeSseResponse:
-    def __init__(self, chunks):
+    def __init__(self, chunks, *, fail_after_chunks=False):
         self._chunks = iter(chunks)
+        self._fail_after_chunks = fail_after_chunks
         self.closed = False
 
     def read(self, size):
         del size
-        return next(self._chunks, b"")
+        try:
+            return next(self._chunks)
+        except StopIteration:
+            if self._fail_after_chunks:
+                raise AssertionError("stream read continued after terminal SSE chunk")
+            return b""
 
     def close(self):
         self.closed = True
@@ -216,6 +222,49 @@ def test_opencode_zen_stream_omits_tools_and_applies_token_floor(monkeypatch):
     assert "tools" not in captured["body"]
     assert events[0] == {"type": "content_delta", "delta": {"type": "text", "text": "OK"}}
     assert events[-1]["type"] == "stream_end"
+    assert response.closed is True
+
+
+def test_opencode_zen_mimo_free_stream_stops_on_done_without_finish_chunk(monkeypatch):
+    provider = _provider(monkeypatch)
+    captured = {}
+    response = _FakeSseResponse(
+        [
+            b'data: {"choices":[{"delta":{"reasoning_content":"The user wants"},'
+            b'"finish_reason":null}]}\n\n',
+            b"data: [DONE]\n\n",
+        ],
+        fail_after_chunks=True,
+    )
+
+    def fake_request_openai_stream(path, body, **kwargs):
+        del kwargs
+        captured["path"] = path
+        captured["body"] = body
+        return response
+
+    with patch.object(provider, "_request_openai_stream", side_effect=fake_request_openai_stream):
+        events = list(
+            provider.stream(
+                "opencode-zen/mimo-v2.5-free",
+                [{"role": "user", "content": "Say OK"}],
+                [{"name": "noop", "input_schema": {"type": "object"}}],
+                {"max_tokens": 8},
+            )
+        )
+
+    assert captured["path"] == "/v1/chat/completions"
+    assert captured["body"]["model"] == "mimo-v2.5-free"
+    assert captured["body"]["stream_options"] == {"include_usage": True}
+    assert "tools" not in captured["body"]
+    assert events == [
+        {"type": "reasoning_delta", "delta": {"type": "text", "text": "The user wants"}},
+        {
+            "type": "stream_end",
+            "finish_reason": "stop",
+            "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0},
+        },
+    ]
     assert response.closed is True
 
 
