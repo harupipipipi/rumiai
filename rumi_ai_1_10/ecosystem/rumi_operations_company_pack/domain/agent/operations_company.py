@@ -10,8 +10,9 @@ from typing import Any
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    if _path in sys.path:
+        sys.path.remove(_path)
+    sys.path.insert(0, _path)
 
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager

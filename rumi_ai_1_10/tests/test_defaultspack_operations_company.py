@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -370,6 +371,90 @@ def test_mimo_coding_company_status_aggregates_worker_runtime_status(tmp_path, m
 
     for schedule in refreshed["schedules"]:
         Scheduler().delete_schedule(schedule["id"])
+    _reset_defaultspack_singletons()
+
+
+def test_mimo_coding_company_subagent_unanswered_monitor_uses_recent_update_grace(tmp_path, monkeypatch):
+    from domain.chat.store import ChatStore
+    from domain.company.runtime_store import CompanyRuntimeStore
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import MimoCodingCompanyRuntime
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    status = runtime.bootstrap(
+        start_nonstop=False,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    chat_store = ChatStore()
+    base_child_kwargs = {
+        "model": "stub/default",
+        "system_prompt_id": "mimo_coding_company",
+        "parent_conversation_id": status["conversation_id"],
+        "conversation_kind": "subagent",
+        "agent_id": "subagent",
+        "group_id": "company:mimo-coding-company",
+        "metadata": {"company_id": "mimo-coding-company", "profile_id": "defaultspack.mimo_coding_company"},
+    }
+    old_child = chat_store.create_conversation(**base_child_kwargs)
+    chat_store.update_conversation(old_child["id"], {"title": "Old unanswered subagent"})
+    chat_store.add_message(
+        old_child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "This child is old enough to be considered unanswered."}],
+        },
+    )
+    recent_child = chat_store.create_conversation(**base_child_kwargs)
+    chat_store.update_conversation(recent_child["id"], {"title": "Recent active subagent"})
+    chat_store.add_message(
+        recent_child["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "This child was just started and may still be running."}],
+        },
+    )
+
+    now = datetime.now(timezone.utc)
+    old_timestamp = int((now - timedelta(minutes=10)).timestamp() * 1000)
+    recent_timestamp = int((now - timedelta(seconds=60)).timestamp() * 1000)
+    chat_store._conversations[old_child["id"]]["created_at"] = old_timestamp
+    chat_store._conversations[old_child["id"]]["updated_at"] = old_timestamp
+    chat_store._conversations[recent_child["id"]]["created_at"] = recent_timestamp
+    chat_store._conversations[recent_child["id"]]["updated_at"] = recent_timestamp
+    chat_store._save_conversations()
+
+    observed = runtime.status()
+    observability = observed["harness"]["observability"]
+    messages, total = CompanyRuntimeStore().list_messages("mimo-coding-company", channel_id="ops-company")
+
+    assert observability["subagents"]["checked"] == 2
+    assert observability["subagents"]["unanswered_count"] == 1
+    assert observability["subagents"]["unanswered"][0]["child_conversation_id"] == old_child["id"]
+    assert observed["company"]["metadata"]["observability"]["subagents"]["unanswered_count"] == 1
+    assert total == 1
+    assert messages[0]["metadata"]["signal"] == "subagent_unanswered"
+    assert messages[0]["metadata"]["child_conversation_id"] == old_child["id"]
+    assert "MiMo subagent child conversation has no assistant reply" in messages[0]["content"]
+    assert recent_child["id"] not in {
+        str(message["metadata"].get("child_conversation_id") or "")
+        for message in messages
+        if isinstance(message.get("metadata"), dict)
+    }
+
+    observed_again = runtime.status()
+    _messages_again, total_again = CompanyRuntimeStore().list_messages("mimo-coding-company", channel_id="ops-company")
+    assert observed_again["harness"]["observability"]["team_workspace"]["synced_messages"] == 0
+    assert total_again == 1
     _reset_defaultspack_singletons()
 
 

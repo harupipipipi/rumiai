@@ -13,8 +13,9 @@ from typing import Any
 _PACK_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULTSPACK_ROOT = _PACK_ROOT.parent / "defaultspack"
 for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
-    if _path not in sys.path:
-        sys.path.insert(0, _path)
+    if _path in sys.path:
+        sys.path.remove(_path)
+    sys.path.insert(0, _path)
 
 from blocks._common import timestamp
 from domain.agent.org_manager import OrgManager
@@ -38,6 +39,7 @@ DEFAULT_FAST_MODEL = "xiaomi-token-plan-sgp/mimo-v2-flash"
 DEFAULT_DOCKER_WORKER_COUNT = 3
 DEFAULT_MAX_TOOL_CALLS = 80
 MAX_TOOL_CALLS_LIMIT = 200
+SUBAGENT_UNANSWERED_GRACE_SECONDS = 300
 
 DEFAULT_PERSONA_SPECS = [
     {
@@ -454,7 +456,8 @@ class MimoCodingCompanyRuntime:
         state = self._load_state()
         org_id = state.get("org_id")
         org = OrgManager().get_org(org_id) if org_id else None
-        company = self._sync_company_record(state)
+        observability = self._sync_company_observability(state)
+        company = self._sync_company_record({**state, "observability": observability})
         open_tasks = 0
         try:
             task_list = CompanyTaskStore().list(COMPANY_ID, limit=500, offset=0)
@@ -506,6 +509,7 @@ class MimoCodingCompanyRuntime:
                 "knowledge_entry_count": knowledge_total,
                 "autonomy_board": autonomy_board,
                 "qa_swarm_plan": qa_swarm_plan,
+                "observability": observability,
             },
             "state": state,
             "manifest": self.manifest(),
@@ -1197,6 +1201,8 @@ class MimoCodingCompanyRuntime:
                 "qa_swarm_plan": deepcopy(state.get("qa_swarm_plan") if isinstance(state.get("qa_swarm_plan"), dict) else self._qa_swarm_plan(state)),
                 "stream_task_ids": deepcopy(state.get("stream_task_ids") if isinstance(state.get("stream_task_ids"), dict) else {}),
             }
+            if isinstance(state.get("observability"), dict):
+                metadata["observability"] = deepcopy(state["observability"])
             return CompanyService().store.ensure_company(
                 company_id=COMPANY_ID,
                 name=COMPANY_NAME,
@@ -1211,6 +1217,195 @@ class MimoCodingCompanyRuntime:
             )
         except Exception:
             return None
+
+    def _sync_company_observability(self, state: dict[str, Any]) -> dict[str, Any]:
+        summary = {
+            "status": "ok",
+            "company_id": COMPANY_ID,
+            "channel_id": "ops-company",
+            "team_workspace": {"synced_messages": 0},
+            "subagents": {"checked": 0, "unanswered_count": 0, "unanswered": []},
+        }
+        try:
+            subagent_gaps = self._subagent_reply_gaps(state)
+            unanswered = [item for item in subagent_gaps.get("unanswered", []) if isinstance(item, dict)]
+            summary["subagents"]["checked"] = len(subagent_gaps.get("checked_ids", []))
+            summary["subagents"]["unanswered"] = unanswered[:10]
+            summary["subagents"]["unanswered_count"] = len(unanswered)
+            if not unanswered:
+                return summary
+
+            from domain.company.runtime_store import CompanyRuntimeStore
+
+            runtime_store = CompanyRuntimeStore()
+            known_sync_keys = self._company_runtime_sync_keys(runtime_store)
+            synced = 0
+            for gap in unanswered:
+                child_conversation_id = str(gap.get("child_conversation_id") or "").strip()
+                if not child_conversation_id:
+                    continue
+                sync_key = "subagent_gap:" + child_conversation_id
+                if sync_key in known_sync_keys:
+                    continue
+                runtime_store.add_message(
+                    COMPANY_ID,
+                    channel_id="ops-company",
+                    sender_id="scheduler",
+                    content=self._subagent_gap_message(gap),
+                    metadata={
+                        "sync_source": "mimo_subagent_monitor",
+                        "sync_key": sync_key,
+                        "child_conversation_id": child_conversation_id,
+                        "parent_conversation_id": state.get("conversation_id"),
+                        "signal": "subagent_unanswered",
+                    },
+                )
+                known_sync_keys.add(sync_key)
+                synced += 1
+            summary["team_workspace"]["synced_messages"] = synced
+            return summary
+        except Exception as exc:
+            summary["status"] = "error"
+            summary["error"] = str(exc)
+            return summary
+
+    @staticmethod
+    def _company_runtime_sync_keys(runtime_store: Any) -> set[str]:
+        messages, _total = runtime_store.list_messages(COMPANY_ID, channel_id="ops-company", limit=500, offset=0)
+        keys: set[str] = set()
+        for message in messages:
+            metadata = message.get("metadata") if isinstance(message.get("metadata"), dict) else {}
+            sync_key = str(metadata.get("sync_key") or "").strip()
+            if sync_key:
+                keys.add(sync_key)
+        return keys
+
+    def _subagent_reply_gaps(self, state: dict[str, Any]) -> dict[str, Any]:
+        conversation_id = str(state.get("conversation_id") or "").strip()
+        if not conversation_id:
+            return {"checked_ids": [], "unanswered": []}
+        try:
+            from domain.chat.store import ChatStore
+
+            store = ChatStore()
+            parent = store.get_conversation(conversation_id) or {}
+            child_ids = parent.get("child_conversation_ids") if isinstance(parent.get("child_conversation_ids"), list) else []
+            checked_ids: list[str] = []
+            unanswered: list[dict[str, Any]] = []
+            for raw_child_id in child_ids:
+                child_id = str(raw_child_id or "").strip()
+                if not child_id:
+                    continue
+                child = store.get_conversation(child_id) or {}
+                if str(child.get("conversation_kind") or "") != "subagent":
+                    continue
+                checked_ids.append(child_id)
+                messages = child.get("messages") if isinstance(child.get("messages"), list) else []
+                if not self._is_user_only_subagent_conversation(messages):
+                    continue
+                age_seconds = self._conversation_age_seconds(child)
+                if age_seconds is not None and age_seconds < SUBAGENT_UNANSWERED_GRACE_SECONDS:
+                    continue
+                unanswered.append(
+                    {
+                        "child_conversation_id": child_id,
+                        "title": str(child.get("title") or "Subagent"),
+                        "message_count": len(messages),
+                        "created_at": child.get("created_at"),
+                        "updated_at": child.get("updated_at"),
+                        "age_seconds": age_seconds,
+                        "last_user_prompt": next(
+                            (
+                                self._message_text(message)[:300]
+                                for message in reversed(messages)
+                                if isinstance(message, dict) and str(message.get("role") or "") == "user"
+                            ),
+                            "",
+                        ),
+                    }
+                )
+            return {"checked_ids": checked_ids, "unanswered": unanswered}
+        except Exception:
+            return {"checked_ids": [], "unanswered": []}
+
+    @staticmethod
+    def _is_user_only_subagent_conversation(messages: list[Any]) -> bool:
+        roles = [str(message.get("role") or "").strip() for message in messages if isinstance(message, dict)]
+        meaningful_roles = [role for role in roles if role]
+        return bool(meaningful_roles) and all(role == "user" for role in meaningful_roles)
+
+    @staticmethod
+    def _conversation_age_seconds(conversation: dict[str, Any]) -> float | None:
+        candidates = [
+            conversation.get("updated_at"),
+            conversation.get("created_at"),
+        ]
+        newest: float | None = None
+        for candidate in candidates:
+            timestamp_seconds = MimoCodingCompanyRuntime._coerce_epoch_seconds(candidate)
+            if timestamp_seconds is None:
+                continue
+            newest = timestamp_seconds if newest is None else max(newest, timestamp_seconds)
+        if newest is None:
+            return None
+        return max(0.0, datetime.now(timezone.utc).timestamp() - newest)
+
+    @staticmethod
+    def _coerce_epoch_seconds(value: Any) -> float | None:
+        if isinstance(value, (int, float)):
+            number = float(value)
+            if number <= 0:
+                return None
+            if number > 100000000000:
+                return number / 1000.0
+            return number
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            number = float(text)
+            if number <= 0:
+                return None
+            if number > 100000000000:
+                return number / 1000.0
+            return number
+        except ValueError:
+            pass
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+
+    @staticmethod
+    def _message_text(message: dict[str, Any]) -> str:
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for block in content:
+                if isinstance(block, dict):
+                    parts.append(str(block.get("text") or block.get("content") or ""))
+                else:
+                    parts.append(str(block))
+            return "\n".join(part for part in parts if part)
+        return str(message.get("raw_text") or "")
+
+    @staticmethod
+    def _subagent_gap_message(gap: dict[str, Any]) -> str:
+        prompt = str(gap.get("last_user_prompt") or "").strip()
+        lines = [
+            "**MiMo subagent child conversation has no assistant reply**",
+            f"- Child conversation: `{gap.get('child_conversation_id') or ''}`",
+            f"- Title: {gap.get('title') or 'Subagent'}",
+            f"- Message count: {gap.get('message_count') or 0}",
+        ]
+        if prompt:
+            lines.extend(["", "Latest user prompt:", "```text", prompt[:600], "```"])
+        return "\n".join(lines)
 
     def _knowledge_seed_documents(self) -> list[tuple[str, str, str]]:
         docs: list[tuple[str, str, str]] = []
