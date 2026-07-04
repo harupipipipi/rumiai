@@ -168,6 +168,28 @@ test("company workspace renders a visible empty state before a chat exists", () 
   assert.doesNotMatch(html, /Rumi Operations Company/);
 });
 
+test("company workspace keeps secondary tabs out of the right rail tab row", () => {
+  const html = renderToStaticMarkup(
+    createElement(CompanyWorkspacePanel, {
+      activeConversationId: null,
+      activeConversationTitle: "New Conversation",
+    }),
+  );
+
+  assert.match(html, /role="tablist"/);
+  assert.match(html, /aria-label="Employee workspace tabs"/);
+  assert.match(html, /grid min-w-0 max-w-full grid-cols-3/);
+  assert.match(html, /overflow-hidden border-b/);
+  assert.equal(html.match(/role="tab"/g)?.length, 3);
+  assert.match(html, />Tasks</);
+  assert.match(html, />Channels</);
+  assert.match(html, />Employees</);
+  assert.doesNotMatch(html, />Routes</);
+  assert.doesNotMatch(html, />Settings</);
+  assert.doesNotMatch(html, />P2P</);
+  assert.match(html, /aria-label="Employee workspace options"/);
+});
+
 test("company workspace selects and renders the first global MiMo company without a chat or hint", () => {
   const companies = [
     {

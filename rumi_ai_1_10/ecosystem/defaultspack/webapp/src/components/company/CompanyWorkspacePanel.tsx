@@ -671,7 +671,7 @@ export function CompanyWorkspacePanel({
   };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-[#0a0a0c] text-zinc-300">
+    <div className="relative flex h-full min-h-0 min-w-0 max-w-full overflow-hidden flex-col bg-[#0a0a0c] text-zinc-300">
       <div className="border-b border-zinc-800/60 px-3 py-2">
         <p className="truncate text-[13px] font-medium text-zinc-100">Employees</p>
         <p className="truncate text-[10px] text-zinc-600">
@@ -704,15 +704,21 @@ export function CompanyWorkspacePanel({
         onRefresh={() => void loadCompany(activeCompanyId)}
       />
 
-      <div className="grid grid-cols-3 gap-1 border-b border-zinc-800/60 p-2">
+      <div
+        role="tablist"
+        aria-label="Employee workspace tabs"
+        className="grid min-w-0 max-w-full grid-cols-3 gap-1 overflow-hidden border-b border-zinc-800/60 p-2"
+      >
         {PRIMARY_TABS.map((tab) => {
           const Icon = tab.icon;
           return (
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={activeTab === tab.id}
               onClick={() => selectTab(tab.id)}
-              className={`flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] transition-colors ${
+              className={`flex h-7 w-full min-w-0 items-center justify-center gap-1.5 rounded-md px-2 text-[11px] transition-colors ${
                 activeTab === tab.id ? "bg-zinc-800 text-zinc-100" : "text-zinc-500 hover:bg-zinc-900 hover:text-zinc-300"
               }`}
             >
