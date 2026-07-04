@@ -9,7 +9,12 @@ from domain.hooks.dispatcher import dispatch_hook
 from domain.tool.registry import ToolRegistry
 
 from .audit import audit_tool_policy
-from .internal_context import sanitize_tool_context, seal_tool_context
+from .internal_context import (
+    profile_policy_context_is_trusted,
+    sanitize_tool_context,
+    sanitize_untrusted_tool_context,
+    seal_tool_context,
+)
 from .policy import decide_tool_policy
 
 
@@ -32,7 +37,11 @@ class ToolOrchestrator:
         self.store = AgentRunStore()
 
     def run(self, tool_name: str, arguments: dict[str, Any] | None, context: dict[str, Any] | None) -> dict[str, Any]:
-        context = sanitize_tool_context(context)
+        profile_policy_trusted = profile_policy_context_is_trusted(context)
+        if profile_policy_trusted:
+            context = sanitize_tool_context(context)
+        else:
+            context = sanitize_untrusted_tool_context(context)
         if _is_cancelled(context):
             return error("Tool execution cancelled", "CANCELLED")
         tool_def = self._resolve_tool(tool_name)
