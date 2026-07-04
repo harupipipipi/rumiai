@@ -2608,22 +2608,20 @@ def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
-def test_cancellable_subprocess_replaces_non_utf8_output() -> None:
+def test_cancellable_subprocess_replaces_non_utf8_and_nul_output() -> None:
     from ecosystem.defaultspack.backend.sandbox.cancellation import run_cancellable_subprocess
 
     script = (
         "import sys; "
-        "sys.stdout.buffer.write(b'frame-\\\\x89png'); "
-        "sys.stderr.buffer.write(b'bad-\\\\xfc-byte')"
+        "sys.stdout.buffer.write(b'frame-\\x89png\\x00tail'); "
+        "sys.stderr.buffer.write(b'bad-\\xfc-byte\\x00err')"
     )
 
     completed = run_cancellable_subprocess((sys.executable, "-c", script), timeout=5)
 
     assert completed.returncode == 0
-    assert "frame-" in completed.stdout
-    assert "png" in completed.stdout
-    assert "bad-" in completed.stderr
-    assert "-byte" in completed.stderr
+    assert completed.stdout == "frame-\ufffdpng\x00tail"
+    assert completed.stderr == "bad-\ufffd-byte\x00err"
 
 
 def test_runtime_operations_are_single_flight_per_provider(tmp_path) -> None:
