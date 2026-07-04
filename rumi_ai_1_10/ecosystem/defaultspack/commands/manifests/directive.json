@@ -1,0 +1,20 @@
+[
+  {
+    "id": "directive",
+    "name": "directive",
+    "aliases": ["developer", "system", "sytem"],
+    "label": "Directive Layer",
+    "description": "Set or clear the conversation Directive Layer.",
+    "category": "chat",
+    "visibility": "default",
+    "risk": "medium",
+    "modes": ["chat", "coding", "agent"],
+    "args": [
+      { "name": "instruction", "type": "string", "required": false }
+    ],
+    "execution": {
+      "type": "pack_block",
+      "qualified_name": "defaultspack:directive.run"
+    }
+  }
+]

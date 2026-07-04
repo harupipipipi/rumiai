@@ -22,6 +22,17 @@ The slash command is registered in
 [`commands/manifests/goal.json`](../commands/manifests/goal.json) and the
 behavior lives in [`blocks/goal/run.py`](../blocks/goal/run.py).
 
+## Controller instruction layer
+
+The Worker and Evaluator controller prompts are app-controlled instructions,
+not ordinary user text. `/goal` sends them through the strongest
+developer/instructions-equivalent request layer available to the selected
+provider. When a provider only supports system messages, the model-call
+materializer merges those developer instructions into a system-role fallback.
+
+User goal text remains normal user content and is ordered below the controller
+prompts, so goal text cannot override the Worker or Evaluator role contract.
+
 ## Result envelope
 
 On success the command returns:

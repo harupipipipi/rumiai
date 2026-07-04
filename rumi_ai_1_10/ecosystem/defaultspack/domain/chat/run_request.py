@@ -31,6 +31,7 @@ from domain.chat.ir_legacy_adapter import (
     legacy_standard_messages_to_ir,
     stored_messages_to_ir,
 )
+from domain.chat.directive_layer import insert_conversation_directive_message
 from domain.chat.modality_detector import detect_modalities
 from domain.chat.progress_tool import assistant_progress_system_instruction, with_assistant_progress_tool
 from domain.chat.public_metadata import compact_tool_filter_entries
@@ -707,6 +708,19 @@ def prepare_chat_run(
                     trace_store.save_trace(trace_profile_id, trace)
         except Exception:
             pass
+
+    request_context["instruction_order"] = [
+        "rumi_controller_directive",
+        "conversation_directive",
+        "normal_user_content",
+    ]
+    conversation_directive = insert_conversation_directive_message(
+        standard_messages,
+        conversation,
+    )
+    if conversation_directive:
+        request_context["conversation_directive"] = dict(conversation_directive)
+        tool_context["conversation_directive_active"] = True
 
     provider_input_ir = legacy_standard_messages_to_ir(standard_messages, conversation_id)
     planned_request = plan_model_request(
