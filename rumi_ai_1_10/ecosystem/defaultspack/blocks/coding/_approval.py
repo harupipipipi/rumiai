@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from domain.safety.audit import record_approval, record_denial
+from domain.tool_policy.internal_context import tool_server_approval_context_is_internal
 
 
 def _approval_module():
@@ -27,7 +28,7 @@ def _token_from_input(input_data: dict[str, Any] | None) -> str:
 
 def is_server_approved(context=None, operation: str | None = None, input_data: dict[str, Any] | None = None):
     """Return True only for trusted server context or a valid signed approval token."""
-    if isinstance(context, dict) and bool(context.get("_tool_server_approved")):
+    if tool_server_approval_context_is_internal(context):
         return True
     if not operation:
         return False
