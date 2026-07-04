@@ -569,6 +569,69 @@ def test_company_get_and_status_include_runtime_workspace_counts(tmp_path, monke
     assert runtime_status["data"]["company"]["channels"]["ops-company"]["message_count"] == 1
 
 
+def test_company_status_counts_match_runtime_task_and_message_lists(tmp_path, monkeypatch):
+    from blocks.company import bootstrap, messages, status, tasks
+
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_RUNTIME_DB_PATH", str(tmp_path / "company_runtime.db"))
+    _reset_company_store()
+
+    company_id = bootstrap.run({}, {})["data"]["company"]["id"]
+    manual_task = tasks.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "title": "QA company task persisted 20260703",
+        },
+        {},
+    )
+    mention_task = tasks.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "title": "Mention request for project_manager",
+            "target_agent_ids": ["project_manager"],
+            "source": "mention",
+        },
+        {},
+    )
+    created_message = messages.run(
+        {
+            "action": "create",
+            "company_id": company_id,
+            "channel_id": "ops-company",
+            "sender_id": "user",
+            "content": "QA persisted message 20260703",
+        },
+        {},
+    )
+
+    listed_tasks = tasks.run({"company_id": company_id}, {})
+    listed_messages = messages.run({"company_id": company_id}, {})
+    runtime_status = status.run({"company_id": company_id}, {})
+
+    assert manual_task["status"] == "ok"
+    assert mention_task["status"] == "ok"
+    assert created_message["status"] == "ok"
+    assert listed_tasks["data"]["total"] == 2
+    assert listed_messages["data"]["total"] == 1
+
+    company = runtime_status["data"]["company"]
+    assert runtime_status["data"]["runtime"]["tasks"] == listed_tasks["data"]["total"]
+    assert (
+        runtime_status["data"]["runtime"]["messages"]
+        == listed_messages["data"]["total"]
+    )
+    assert company["tasks"] == {}
+    assert company["messages"] == {}
+    assert company["task_count"] == listed_tasks["data"]["total"]
+    assert company["message_count"] == listed_messages["data"]["total"]
+    assert (
+        company["channels"]["ops-company"]["message_count"]
+        == listed_messages["data"]["total"]
+    )
+
+
 def test_company_get_and_status_include_runtime_only_channels(tmp_path, monkeypatch):
     from blocks.company import bootstrap, channels, get, messages, status
 
