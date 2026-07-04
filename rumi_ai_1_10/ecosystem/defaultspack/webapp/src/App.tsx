@@ -41,13 +41,13 @@ import {
 } from "./lib/authorityApproval";
 import { subscribeAuthorityApprovalSettlements } from "./lib/authorityApprovalEvents";
 import { browserApprovalTokenizedPath } from "./lib/authorityApprovalBrowserToken";
-import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
+import { browserApprovalRuntimeContent, expiredRuntimeApproval, hasApprovalCandidate, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval, type BrowserApproval, type ExpiredRuntimeApproval, type RuntimeApproval, type StaleRuntimeApproval } from "./lib/browserApproval";
 import { reduceBrowserStateFromEvents } from "./lib/browserState";
 import { deriveConversationTitle, formatRelativeTime, inspectConversationIntegrity, messageToText, orderConversationMessages } from "./lib/chat";
 import { cn } from "./lib/cn";
 import { canExecuteComposerEndpointAction, composerSkillMentionWidget, composerToolMentionWidget, isSafeLocalEndpoint, skillMentionIdsFromText, toolMentionIdsFromText, trustedComposerActionForWidget } from "./lib/composerWidgets";
 import { conversationMatchesSpotlightFilter, conversationToSearchResult, type SpotlightFilter } from "./lib/conversationSpotlight";
-import { boundedDurationLabel } from "./lib/duration";
+import { boundedDurationLabel, formatCompactDuration } from "./lib/duration";
 import { openAuthorityApprovalWindow, openFingerRecordingWindow } from "./lib/desktopApproval";
 import { fetchDesktopSystemInfo, type DesktopSystemInfo } from "./lib/desktopSystemInfo";
 import { normalizeLocale } from "./lib/i18n";
@@ -1640,6 +1640,32 @@ function staleRuntimeApprovalTitle(approval: StaleRuntimeApproval): string {
   return `${label} は再実行が必要です`;
 }
 
+function expiredRuntimeApprovalTitle(approval: ExpiredRuntimeApproval): string {
+  const label = approval.operation || approval.toolName || "tool";
+  return `${label} は期限切れです`;
+}
+
+function approvalIsExpired(expiresAt: number | undefined, now = Date.now()): boolean {
+  return typeof expiresAt === "number" && expiresAt <= now;
+}
+
+function approvalExpiryLabel(expiresAt: number | undefined, now = Date.now()): string {
+  if (typeof expiresAt !== "number") return "";
+  const remaining = expiresAt - now;
+  if (remaining <= 0) return "期限切れ";
+  return `期限まで ${formatCompactDuration(remaining)}`;
+}
+
+function useApprovalClock(enabled: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const interval = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, [enabled]);
+  return now;
+}
+
 function hasAgentServiceProfile(catalog: UICatalog | null, profileId: string): boolean {
   const profiles = catalog?.agent_service?.profiles ?? [];
   return profiles.some((profile) => String(profile.profile_id ?? profile.id ?? "") === profileId);
@@ -2522,9 +2548,10 @@ function ChatApp() {
   const isConversationPending = Boolean(
     pendingRequest && Date.now() - pendingRequest.startedAt < PENDING_CHAT_REQUEST_TTL_MS,
   );
-  const browserApproval = pendingBrowserApproval(messages);
+  const approvalClockNow = useApprovalClock(hasApprovalCandidate(messages));
+  const browserApproval = pendingBrowserApproval(messages, approvalClockNow);
   const rawAuthorityApproval = pendingAuthorityApproval(messages);
-  const rawRuntimeApproval = pendingRuntimeApproval(messages);
+  const rawRuntimeApproval = pendingRuntimeApproval(messages, approvalClockNow);
   const settledRuntimeApprovalIdSet = useMemo(() => new Set(settledRuntimeApprovalIds), [settledRuntimeApprovalIds]);
   const authorityApproval = rawAuthorityApproval && !settledRuntimeApprovalIdSet.has(rawAuthorityApproval.requestId)
     ? rawAuthorityApproval
@@ -2532,7 +2559,12 @@ function ChatApp() {
   const runtimeApproval = rawRuntimeApproval && !settledRuntimeApprovalIdSet.has(rawRuntimeApproval.requestId)
     ? rawRuntimeApproval
     : null;
-  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval ? staleRuntimeApproval(messages) : null;
+  const expiredRuntimeApprovalNotice = !ultraYoloMode
+    ? expiredRuntimeApproval(messages, approvalClockNow)
+    : null;
+  const staleRuntimeApprovalNotice = !ultraYoloMode && !rawRuntimeApproval && !expiredRuntimeApprovalNotice
+    ? staleRuntimeApproval(messages, approvalClockNow)
+    : null;
   const visibleBrowserApproval = !ultraYoloMode ? browserApproval : null;
   const latestAssistantFinal = useMemo(() => {
     if (isGenerating || isConversationPending) return null;
@@ -4292,6 +4324,10 @@ function ChatApp() {
   const approveBrowserAction = async () => {
     if (!browserApproval) return;
     if (!activeConversationId) return;
+    if (approvalIsExpired(browserApproval.expiresAt)) {
+      setError("承認の期限が切れました。もう一度リクエストしてください。");
+      return;
+    }
     setError(null);
     setIsGenerating(true);
     const approvalToolIds = selectedToolIds.length
@@ -4365,6 +4401,10 @@ function ChatApp() {
   const approveCodingAction = async () => {
     if (!runtimeApproval) return;
     if (!activeConversationId) return;
+    if (approvalIsExpired(runtimeApproval.expiresAt)) {
+      setError("承認の期限が切れました。もう一度リクエストしてください。");
+      return;
+    }
     if (activeRuntimeApprovalActionRef.current === runtimeApproval.requestId) return;
     activeRuntimeApprovalActionRef.current = runtimeApproval.requestId;
     setError(null);
@@ -5748,6 +5788,11 @@ function ChatApp() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium text-zinc-100">{visibleBrowserApproval.action} の承認が必要です</p>
+                        {visibleBrowserApproval.expiresAt && (
+                          <p className="mt-1 truncate text-[11px] text-orange-200/75">
+                            {approvalExpiryLabel(visibleBrowserApproval.expiresAt, approvalClockNow)}
+                          </p>
+                        )}
                         <details className="mt-1 text-[11px] text-zinc-500">
                           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                           <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
@@ -5790,6 +5835,11 @@ function ChatApp() {
                         {runtimeApproval.summary && (
                           <p className="mt-1 truncate text-[11px] text-zinc-500">{runtimeApproval.summary}</p>
                         )}
+                        {runtimeApproval.expiresAt && (
+                          <p className="mt-1 truncate text-[11px] text-amber-200/75">
+                            {approvalExpiryLabel(runtimeApproval.expiresAt, approvalClockNow)}
+                          </p>
+                        )}
                         <details className="mt-1 text-[11px] text-zinc-500">
                           <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
                           <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
@@ -5824,7 +5874,40 @@ function ChatApp() {
                     </div>
                   </div>
                 )}
-                {!visibleBrowserApproval && !runtimeApproval && staleRuntimeApprovalNotice && (
+                {!visibleBrowserApproval && expiredRuntimeApprovalNotice && (
+                  <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl" aria-label="期限切れの承認カード">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="shrink-0 rounded border border-zinc-700 bg-zinc-900 px-1.5 py-0.5 text-[10px] text-zinc-400">
+                            expired
+                          </span>
+                          <p className="truncate text-sm font-medium text-zinc-100">{expiredRuntimeApprovalTitle(expiredRuntimeApprovalNotice)}</p>
+                        </div>
+                        {expiredRuntimeApprovalNotice.summary && (
+                          <p className="mt-1 truncate text-[11px] text-zinc-500">{expiredRuntimeApprovalNotice.summary}</p>
+                        )}
+                        <p className="mt-1 truncate text-[11px] text-zinc-500">
+                          承認の期限が切れました。もう一度リクエストしてください。
+                        </p>
+                        <details className="mt-1 text-[11px] text-zinc-500">
+                          <summary className="cursor-pointer select-none text-zinc-500 hover:text-zinc-300">payload を表示</summary>
+                          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-800 bg-black/30 p-2 font-mono">
+                            {approvalPayloadPreview(expiredRuntimeApprovalNotice.payload)}
+                          </pre>
+                        </details>
+                      </div>
+                      <button
+                        type="button"
+                        disabled
+                        className="h-8 shrink-0 cursor-not-allowed rounded-lg border border-zinc-800 bg-zinc-900 px-3 text-xs font-semibold text-zinc-500"
+                      >
+                        期限切れ
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {!visibleBrowserApproval && !runtimeApproval && !expiredRuntimeApprovalNotice && staleRuntimeApprovalNotice && (
                   <div className="pointer-events-auto absolute bottom-full left-1/2 rumi-layer-modal mb-2 w-[min(560px,calc(100vw-32px))] -translate-x-1/2 rounded-xl border border-zinc-700 bg-zinc-950 p-3 shadow-2xl">
                     <div className="min-w-0">
                       <div className="flex min-w-0 items-center gap-2">

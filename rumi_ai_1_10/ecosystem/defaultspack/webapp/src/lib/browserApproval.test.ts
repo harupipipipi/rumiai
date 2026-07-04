@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { ChatUiMessage } from "../renderers/types";
-import { browserApprovalRuntimeContent, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval } from "./browserApproval";
+import { browserApprovalRuntimeContent, expiredRuntimeApproval, hasApprovalCandidate, pendingBrowserApproval, pendingRuntimeApproval, staleRuntimeApproval } from "./browserApproval";
 
 function agentMessage(patch: Partial<ChatUiMessage>): ChatUiMessage {
   return {
@@ -34,6 +34,7 @@ test("returns a fresh browser computer approval request", () => {
 
   assert.deepEqual(approval, {
     action: "computer.screenshot",
+    expiresAt: Date.parse("2026-05-20T08:10:40Z"),
     payload: { app: "Google Chrome" },
     token: "tok",
     toolName: "computer_use",
@@ -58,6 +59,7 @@ test("canonicalizes browser open approval aliases", () => {
 
   assert.deepEqual(approval, {
     action: "browser.open_url",
+    expiresAt: Date.parse("2026-05-20T08:10:40Z"),
     payload: { url: "https://gemini.google.com" },
     token: "tok",
     toolName: "browser_computer",
@@ -81,6 +83,41 @@ test("ignores expired browser computer approvals", () => {
   ], Date.parse("2026-05-20T08:11:00Z"));
 
   assert.equal(approval, null);
+});
+
+test("returns expired browser companion approval notice after ttl", () => {
+  const messages = [
+    agentMessage({
+      events: [{
+        type: "approval_requested",
+        tool_name: "browser_companion",
+        action: "session",
+        operation: "tool.browser_companion",
+        payload: { action: "session" },
+        requires_approval: true,
+        approval_request_id: "apr_browser_expired",
+        approval_expires_in_seconds: 10,
+        timestamp: "2026-05-20T08:05:40Z",
+        risk_level: "high",
+        display_summary: "browser_companion: session",
+      }],
+    }),
+  ];
+
+  assert.equal(hasApprovalCandidate(messages), true);
+  assert.equal(pendingBrowserApproval(messages, Date.parse("2026-05-20T08:06:00Z")), null);
+  assert.deepEqual(expiredRuntimeApproval(messages, Date.parse("2026-05-20T08:06:00Z")), {
+    action: "session",
+    expiresAt: Date.parse("2026-05-20T08:05:50Z"),
+    operation: "tool.browser_companion",
+    payload: { action: "session" },
+    reason: "expired",
+    requestId: "apr_browser_expired",
+    riskLevel: "high",
+    summary: "browser_companion: session",
+    toolCallId: undefined,
+    toolName: "browser_companion",
+  });
 });
 
 test("ignores redacted approval tokens from stored tool logs", () => {
@@ -128,6 +165,7 @@ test("accepts browser computer approvals backed by approval request ids", () => 
 
   assert.deepEqual(approval, {
     action: "computer.screenshot",
+    expiresAt: Date.parse("2026-05-20T08:10:40Z"),
     payload: { app: "Google Chrome" },
     token: "tok",
     requestId: "apr_browser",

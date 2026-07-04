@@ -28,6 +28,28 @@ test("approval queue renders cockpit approval decisions", () => {
   assert.match(html, /Deny/);
 });
 
+test("approval queue renders expired approvals without decision buttons", () => {
+  const html = renderToStaticMarkup(
+    createElement(ApprovalQueue, {
+      initialApprovals: [
+        {
+          request_id: "apr_expired",
+          operation: "tool.browser_companion",
+          risk_level: "high",
+          status: "pending",
+          expires_at: 1,
+          display_summary: "browser_companion: session",
+        },
+      ],
+    }),
+  );
+
+  assert.match(html, /tool\.browser_companion/);
+  assert.match(html, /expired/);
+  assert.doesNotMatch(html, /Approve/);
+  assert.doesNotMatch(html, /Deny/);
+});
+
 test("diff panel renders status and diff content", () => {
   const html = renderToStaticMarkup(
     createElement(DiffPanel, {
