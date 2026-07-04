@@ -452,6 +452,71 @@ class Scheduler:
         entries, total = load_history(schedule_id, limit=limit, offset=offset)
         return {"entries": entries, "total": total, "limit": limit, "offset": offset}
 
+    def _task_timeout_seconds(self, value):
+        try:
+            timeout = float(value)
+        except (TypeError, ValueError):
+            return None
+        if timeout <= 0:
+            return None
+        return timeout
+
+    def _request_chat_cancel(self, conversation_id):
+        if not conversation_id:
+            return
+        try:
+            from domain.chat.cancellation import get_chat_cancellation_registry
+
+            get_chat_cancellation_registry().request_cancel(str(conversation_id))
+        except Exception:
+            pass
+
+    def _scheduled_timeout_error(self, timeout_seconds):
+        return {
+            "status": "error",
+            "error": {
+                "code": "TIMEOUT",
+                "message": "Scheduled conversation timed out after {} seconds".format(
+                    "{:g}".format(timeout_seconds)
+                ),
+            },
+        }
+
+    def _scheduled_thread_result(self, result_box):
+        if "exc" in result_box:
+            raise result_box["exc"]
+        return result_box.get("result")
+
+    def _run_conversation_with_timeout(self, func, timeout_seconds, *, conversation_id):
+        if timeout_seconds is None:
+            return func(), False
+
+        done = threading.Event()
+        result_box = {}
+
+        def target():
+            try:
+                result_box["result"] = func()
+            except Exception as exc:
+                result_box["exc"] = exc
+            finally:
+                done.set()
+
+        worker = threading.Thread(
+            target=target,
+            name="rumi-scheduled-chat-" + str(conversation_id or "run"),
+            daemon=True,
+        )
+        worker.start()
+        if done.wait(timeout_seconds):
+            return self._scheduled_thread_result(result_box), False
+
+        self._request_chat_cancel(conversation_id)
+        grace_seconds = min(1.0, max(0.05, timeout_seconds * 0.05))
+        if done.wait(grace_seconds):
+            return self._scheduled_thread_result(result_box), True
+        return self._scheduled_timeout_error(timeout_seconds), True
+
     # ---- internal ----
 
     def _compute_next_execution(self, sched):
@@ -576,8 +641,9 @@ class Scheduler:
         task_cfg = sched.get("task", {})
         message = task_cfg.get("message", "")
         model = task_cfg.get("model", "default")
-        timeout = task_cfg.get("timeout", 300)
+        timeout = self._task_timeout_seconds(task_cfg.get("timeout", 300))
         conversation_id = task_cfg.get("conversation_id")
+        timed_out = False
 
         exec_id = "sexec_" + gen_id()
         started_at = timestamp()
@@ -604,27 +670,38 @@ class Scheduler:
                     params["tool_policy"] = task_cfg["tool_policy"]
                 if task_cfg.get("thinking_level"):
                     params["thinking_level"] = task_cfg.get("thinking_level")
+                if timeout is not None:
+                    params["request_timeout"] = timeout
+                    params["timeout"] = timeout
                 metadata = task_cfg.get("metadata") if isinstance(task_cfg.get("metadata"), dict) else {}
-                result = chat_send_run(
-                    {
-                        "conversation_id": conversation_id,
-                        "message": {
-                            "role": "user",
-                            "content": message,
-                            "metadata": {
-                                **metadata,
-                                "source": "scheduler",
-                                "schedule_id": schedule_id,
-                                "schedule_execution_id": exec_id,
-                                "trigger": "manual" if manual else "scheduled",
-                                "profile_id": task_cfg.get("profile_id"),
-                                "agent_id": task_cfg.get("agent_id"),
-                            },
+                input_payload = {
+                    "conversation_id": conversation_id,
+                    "message": {
+                        "role": "user",
+                        "content": message,
+                        "metadata": {
+                            **metadata,
+                            "source": "scheduler",
+                            "schedule_id": schedule_id,
+                            "schedule_execution_id": exec_id,
+                            "trigger": "manual" if manual else "scheduled",
+                            "profile_id": task_cfg.get("profile_id"),
+                            "agent_id": task_cfg.get("agent_id"),
                         },
-                        "params": params,
-                        "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
                     },
-                    {"profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}},
+                    "params": params,
+                    "tools": task_cfg.get("tools") if isinstance(task_cfg.get("tools"), list) else None,
+                }
+                context_payload = {
+                    "profile_policy": task_cfg.get("tool_policy") if isinstance(task_cfg.get("tool_policy"), dict) else {}
+                }
+                if timeout is not None:
+                    context_payload["schedule_timeout_seconds"] = timeout
+                    context_payload["schedule_execution_id"] = exec_id
+                result, timed_out = self._run_conversation_with_timeout(
+                    lambda: chat_send_run(input_payload, context_payload),
+                    timeout,
+                    conversation_id=conversation_id,
                 )
             else:
                 from blocks.ai.complete import run as ai_complete_run
@@ -638,9 +715,23 @@ class Scheduler:
                 messages.append({"role": "user", "content": message})
 
                 empty_context = {}
-                result = ai_complete_run({"messages": messages, "model": model}, empty_context)
+                payload = {"messages": messages, "model": model}
+                if timeout is not None:
+                    payload["params"] = {"request_timeout": timeout, "timeout": timeout}
+                result = ai_complete_run(payload, empty_context)
 
-            if result.get("status") == "ok":
+            if timed_out:
+                err = result.get("error", {}) if isinstance(result, dict) else {}
+                if isinstance(err, dict):
+                    err_msg = err.get("message") or self._scheduled_timeout_error(timeout)["error"]["message"]
+                else:
+                    err_msg = str(err or self._scheduled_timeout_error(timeout)["error"]["message"])
+                history_entry["status"] = "timeout"
+                history_entry["timed_out"] = True
+                if timeout is not None:
+                    history_entry["timeout_seconds"] = timeout
+                history_entry["error"] = err_msg
+            elif isinstance(result, dict) and result.get("status") == "ok":
                 data = result.get("data", {})
                 content = ""
                 if isinstance(data, dict):
@@ -658,12 +749,22 @@ class Scheduler:
                 history_entry["status"] = "completed"
                 history_entry["result"] = content
             else:
-                err = result.get("error", {})
+                err = result.get("error", {}) if isinstance(result, dict) else {}
                 if isinstance(err, dict):
                     err_msg = err.get("message", str(err))
+                    err_code = str(err.get("code") or "").upper()
                 else:
                     err_msg = str(err)
-                history_entry["status"] = "error"
+                    err_code = ""
+                if err_code == "TIMEOUT":
+                    history_entry["status"] = "timeout"
+                    history_entry["timed_out"] = True
+                    if timeout is not None:
+                        history_entry["timeout_seconds"] = timeout
+                elif err_code in {"CANCELLED", "CANCELED"}:
+                    history_entry["status"] = "cancelled"
+                else:
+                    history_entry["status"] = "error"
                 history_entry["error"] = err_msg
 
         except Exception as exc:
