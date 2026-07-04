@@ -356,3 +356,77 @@ def test_cloudflare_sdk_adapter_redacts_token_from_errors(monkeypatch):
 
     assert "cloudflare-secret-token" not in str(error)
     assert error["message"] == "permission denied for [redacted]"
+
+
+def test_cloudflare_sdk_adapter_routes_runner_resources_through_rest_fallback(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    calls: list[tuple[str, str, object, dict[str, object]]] = []
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def fake_rest(self, method, path, payload=None, *, params=None, headers=None):
+        del headers
+        calls.append((method, path, payload, dict(params or {})))
+        if path.endswith("/d1/database") and method == "GET":
+            return {"success": True, "result": [{"uuid": "d1-id", "name": "rumi-state"}]}
+        if path.endswith("/d1/database") and method == "POST":
+            return {"success": True, "result": {"uuid": "d1-new", "name": payload["name"]}}
+        if path.endswith("/r2/buckets") and method == "GET":
+            return {"success": True, "result": [{"name": "rumi-artifacts"}]}
+        if path.endswith("/queues") and method == "POST":
+            return {"success": True, "result": {"id": "queue-id", "queue_name": payload["queue_name"]}}
+        if "/workers/scripts/rumi-runner/secrets" in path:
+            assert payload["text"] == "runner-secret"
+            return {"success": True, "result": {"name": payload["name"]}}
+        if path.endswith("/workflows/rumi-workflow/instances"):
+            return {"success": True, "result": {"id": "instance-id"}}
+        return {"success": True, "result": {"ok": True}}
+
+    monkeypatch.setattr(sdk_client.CloudflareSDKAdapter, "_rest_request", fake_rest)
+
+    adapter = sdk_client.CloudflareSDKAdapter(api_token="cloudflare-secret-token", account_id="account-id")
+    d1 = adapter.list_d1_databases()
+    created_d1 = adapter.create_d1_database("rumi-state")
+    r2 = adapter.list_r2_buckets()
+    queue = adapter.create_queue("rumi-tasks")
+    secret = adapter.put_worker_secret("rumi-runner", "RUMI_CALLBACK_TOKEN", "runner-secret")
+    instance = adapter.create_workflow_instance("rumi-workflow", {"job": "smoke"})
+
+    assert d1 == [{"uuid": "d1-id", "name": "rumi-state"}]
+    assert created_d1["uuid"] == "d1-new"
+    assert r2 == [{"name": "rumi-artifacts"}]
+    assert queue["queue_name"] == "rumi-tasks"
+    assert secret["name"] == "RUMI_CALLBACK_TOKEN"
+    assert instance["id"] == "instance-id"
+    assert [call[0:2] for call in calls] == [
+        ("GET", "/accounts/account-id/d1/database"),
+        ("POST", "/accounts/account-id/d1/database"),
+        ("GET", "/accounts/account-id/r2/buckets"),
+        ("POST", "/accounts/account-id/queues"),
+        ("PUT", "/accounts/account-id/workers/scripts/rumi-runner/secrets"),
+        ("POST", "/accounts/account-id/workflows/rumi-workflow/instances"),
+    ]
+    assert "cloudflare-secret-token" not in str([d1, created_d1, r2, queue, secret, instance])
+
+
+def test_cloudflare_sdk_rest_errors_are_redacted(monkeypatch):
+    from core_runtime.cloudflare import sdk_client
+
+    monkeypatch.setattr(sdk_client.importlib.util, "find_spec", lambda _name: None)
+
+    def fake_rest(self, *_args, **_kwargs):
+        raise RuntimeError("token cloudflare-secret-token denied")
+
+    monkeypatch.setattr(sdk_client.CloudflareSDKAdapter, "_rest_request", fake_rest)
+
+    adapter = sdk_client.CloudflareSDKAdapter(api_token="cloudflare-secret-token", account_id="account-id")
+    try:
+        adapter.list_workers()
+    except sdk_client.CloudflareSDKOperationError as exc:
+        payload = exc.to_dict()
+    else:
+        raise AssertionError("Cloudflare REST errors should be wrapped")
+
+    assert "cloudflare-secret-token" not in str(payload)
+    assert payload["message"] == "token [redacted] denied"

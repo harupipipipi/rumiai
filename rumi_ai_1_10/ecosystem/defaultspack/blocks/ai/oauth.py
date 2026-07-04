@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from blocks._common import error, ok
 from domain.ai_client.oauth_store import (
+    cloudflare_runner_provisioning_action,
     clear_provider_oauth_client_config,
     disconnect_provider_oauth,
     finish_provider_oauth,
@@ -127,7 +128,7 @@ def _callback_page(provider_id: str, *, success: bool, title: str, message: str,
 
 
 def run(input_data, context):
-    del context
+    context = context if isinstance(context, dict) else {}
     method = str((input_data or {}).get("_method", "GET")).upper()
     provider_id = str((input_data or {}).get("provider_id", "")).strip()
     headers = (input_data or {}).get("_headers")
@@ -193,6 +194,25 @@ def run(input_data, context):
                 "provider_id": provider_id or "cloudflare",
                 "provider": provider_oauth_status(provider_id or "cloudflare", active_diagnostics=True),
             }
+        elif action in {
+            "cloudflare_status",
+            "cloudflare_plan",
+            "cloudflare_dry_run",
+            "cloudflare_deploy",
+            "cloudflare_delete",
+        }:
+            normalized_action = action.removeprefix("cloudflare_")
+            approved_capabilities = (
+                ["cloudflare.runner.deploy"]
+                if context.get("_tool_server_approved") is True
+                or context.get("_tool_permission_policy_approved") is True
+                or context.get("_frontend_tool_permission_approved") is True
+                else []
+            )
+            result = cloudflare_runner_provisioning_action(
+                normalized_action,
+                approved_capabilities=approved_capabilities,
+            )
         else:
             result = {
                 "success": True,

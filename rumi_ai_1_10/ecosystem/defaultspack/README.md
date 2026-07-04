@@ -26,6 +26,44 @@ defaultspack is local-first by default:
 - Cloudflare, Supabase, login, account creation, and user management are out of
   scope for defaultspack local operation protection.
 
+## Cloudflare runner provisioning
+
+Cloudflare is an optional Accounts & Connections provider. Status and dry-run
+planning are safe to render without creating resources. Deploy and teardown
+require a saved/imported Cloudflare token, account id, the
+`cloudflare.runner.deploy` capability, and a local runtime approval context.
+Client-supplied `approved` flags are ignored.
+
+Install the optional SDK when using SDK-backed operations:
+
+```sh
+python -m pip install cloudflare
+```
+
+Token import and self-host OAuth can use:
+
+```env
+CLOUDFLARE_API_TOKEN=
+CF_API_TOKEN=
+RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN=
+RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN=
+RUMI_CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_ACCOUNT_ID=
+RUMI_CLOUDFLARE_ZONE_ID=
+CLOUDFLARE_ZONE_ID=
+RUMI_CLOUDFLARE_RUNNER_PREFIX=
+RUMI_CLOUDFLARE_RUNNER_ENV=production
+```
+
+Read-only status needs account metadata/read permissions for the resources that
+will be inspected. Runner deployment needs least-privilege API-token/OAuth
+permissions for Workers Scripts, D1, R2, Queues, and Workflows writes. Rumi
+creates Rumi-owned, prefix-scoped resources: one Worker, one D1 database, one R2
+bucket, one Queue, and one Workflow when Workflows are available. Teardown only
+targets stored resources or names with the configured `rumi-*` prefix. Tokens and
+Worker secret values are redacted from status payloads, errors, docs output, and
+tests.
+
 rumiai のデフォルトパック。
 
 rumiai 本体はドメイン知識を持たない汎用カーネルである。defaults は rumiai ecosystem に「AI サービスとして動作するための全ての仕組み」を提供する。チャット、エージェント、ツール、プロンプト、AI クライアント、コーディング支援、マルチモーダル処理、フロントエンド通信の全てが defaults の handler と domain コードによって動作する。

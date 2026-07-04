@@ -93,6 +93,49 @@ Use cases:
 - Show cloud continuation readiness.
 - Support official broker and self-host OAuth.
 
+Status payloads include `provisioning.status`, `resources`,
+`last_deployed_at`, and redacted `last_error`. Expected states are:
+
+```txt
+sdk_missing
+missing_token
+missing_account_id
+insufficient_capabilities
+ready
+deployed
+degraded
+error
+```
+
+`cloudflare_plan` and `cloudflare_dry_run` return the resource plan without
+writes. `cloudflare_deploy` and `cloudflare_delete` require the
+`cloudflare.runner.deploy` capability plus a local approval context; client
+payload flags are not treated as authorization. Created resources are one
+prefix-scoped Worker, D1 database, R2 bucket, Queue, and Workflow when
+Workflows are available. Teardown only removes stored or prefix-owned resources.
+
+Self-host setup may import a token or use env:
+
+```env
+CLOUDFLARE_API_TOKEN=
+CF_API_TOKEN=
+RUMI_CLOUDFLARE_OAUTH_ACCESS_TOKEN=
+RUMI_CLOUDFLARE_OAUTH_REFRESH_TOKEN=
+RUMI_CLOUDFLARE_ACCOUNT_ID=
+CLOUDFLARE_ACCOUNT_ID=
+RUMI_CLOUDFLARE_ZONE_ID=
+CLOUDFLARE_ZONE_ID=
+RUMI_CLOUDFLARE_RUNNER_PREFIX=
+RUMI_CLOUDFLARE_RUNNER_ENV=production
+```
+
+Install the optional Python SDK with `python -m pip install cloudflare` for SDK
+paths. The adapter falls back to Cloudflare REST routes for runner resources
+when generated SDK paths are unavailable. Recommended token permissions are
+read-only account/resource permissions for status, and least-privilege Workers
+Scripts, D1, R2, Queues, and Workflows write permissions for runner deployment.
+Tokens and Worker secret values must never appear in Settings payloads.
+
 ## Google
 
 Use cases:
