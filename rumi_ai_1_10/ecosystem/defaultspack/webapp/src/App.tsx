@@ -4061,7 +4061,7 @@ function ChatApp() {
       if (isRegisteredSlashCommand(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
-        if (frontendAction === "open_file_search" && fileSearchPromptForQuery(parsed.args.query)) {
+        if (frontendAction === "open_file_search" && fileSearchPromptForQuery(recordValue(parsed.args).query)) {
           return false;
         }
         return true;
