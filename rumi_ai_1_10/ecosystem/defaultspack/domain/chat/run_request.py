@@ -39,6 +39,7 @@ from domain.chat.tool_selection_schema import (
     TOOL_SELECTION_MODES,
     TOOL_SELECTION_SCOPES,
     TOOL_SELECTION_STRATEGIES,
+    canonical_tool_selection_strategy,
     normalize_tool_target,
     normalize_tool_targets,
 )
@@ -929,7 +930,7 @@ def _tool_discovery_fallback_prompt(tools: list[dict[str, Any]]) -> str:
             '- To find tools related to a word or task, call tool_search with {"query":"coding","phase":"overview"}; use phase="schema" or include_schema=true only after choosing a concrete tool.'
         )
     lines.append(
-        "Use these discovery tools when semantic/vector tool selection seems incomplete before deciding that no suitable tool exists."
+        "Use these discovery tools when vector tool selection seems incomplete before deciding that no suitable tool exists."
     )
     return "\n".join(lines)
 
@@ -2329,7 +2330,7 @@ def _validate_tool_selection_input(input_data: dict[str, Any]) -> str | None:
         return "params.tool_selection.scope must be one of turn, conversation"
     raw_strategy = str(raw_selection.get("strategy") or "").strip().lower()
     if raw_strategy and raw_strategy not in TOOL_SELECTION_STRATEGIES:
-        return "params.tool_selection.strategy must be one of hybrid, semantic, catalog_ai, all_with_hints, all_schemas, lexical"
+        return "params.tool_selection.strategy must be one of hybrid, vector, catalog_ai, all_with_hints, all_schemas, manual_only"
     for field_name in ("include", "exclude"):
         invalid_reason = _invalid_tool_selection_items_reason(raw_selection.get(field_name))
         if invalid_reason:
@@ -2415,8 +2416,7 @@ def _coerce_tool_id_list(value: Any) -> list[str]:
 
 
 def _normalize_tool_selection_strategy(value: Any) -> str | None:
-    strategy = str(value or "").strip().lower()
-    return strategy if strategy in TOOL_SELECTION_STRATEGIES else None
+    return canonical_tool_selection_strategy(value)
 
 
 def _merge_tool_items(*groups: list[Any]) -> list[Any]:
@@ -2884,11 +2884,11 @@ def _available_tools(
                     if isinstance(fallback_settings.get("tools"), dict)
                     else {}
                 )
-                fallback_tools_settings["selection_strategy"] = "lexical"
+                fallback_tools_settings["selection_strategy"] = "vector"
                 fallback_settings["tools"] = fallback_tools_settings
                 fallback_selection = NormalizedToolSelection(
                     mode=selection.mode if selection.mode in {"auto", "review"} else "auto",
-                    strategy="lexical",
+                    strategy="vector",
                     include=selection.include,
                     exclude=selection.exclude,
                     scope=selection.scope,
@@ -2911,7 +2911,7 @@ def _available_tools(
                 resolved_context["tool_selection"] = {
                     **resolved_context["tool_selection"],
                     **fallback_trace,
-                    "stage": "selection_failed_lexical_fallback",
+                    "stage": "selection_failed_vector_fallback",
                     "fallbacks": [
                         {"stage": "tool_selection_service", "reason": str(exc)},
                         *list(fallback_trace.get("fallbacks") or []),

@@ -10,13 +10,14 @@ from typing import Any
 
 from domain.ai_client.client import AIClient
 from domain.chat.tool_recommender import search_tools
+from domain.tool.service_catalog import ToolServiceCatalog
 
 
 CATALOG_FORMAT_VERSION = 1
 
 
 class ToolEmbeddingIndex:
-    """Semantic-search facade with an explicit lexical fallback."""
+    """Vector-search facade with an explicit lexical fallback."""
 
     def __init__(self, *, pack_root: Path | None = None) -> None:
         self._pack_root = pack_root or Path(__file__).resolve().parents[2]
@@ -135,6 +136,15 @@ class ToolEmbeddingIndex:
         for tool_id, vector in items.items():
             if not _valid_vector(vector):
                 continue
+            if len(vector) != len(query_vector):
+                return {
+                    "tool_ids": [],
+                    "results": [],
+                    "stage": "lexical_fallback",
+                    "cache_hit": cache_hit,
+                    "catalog_hash": catalog_hash,
+                    "fallback_reason": "embedding_dimension_mismatch",
+                }
             score = _cosine(query_vector, vector)
             if not math.isfinite(score):
                 continue
@@ -152,7 +162,7 @@ class ToolEmbeddingIndex:
         return {
             "tool_ids": [str(item["tool_id"]) for item in selected],
             "results": selected,
-            "stage": "semantic",
+            "stage": "vector",
             "cache_hit": cache_hit,
             "catalog_hash": catalog_hash,
             "fallback_reason": "",
@@ -180,19 +190,15 @@ class ToolEmbeddingIndex:
         path = self._cache_file(model, catalog_hash)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(
-                    {
-                        "version": CATALOG_FORMAT_VERSION,
-                        "model": model,
-                        "catalog_hash": catalog_hash,
-                        "dimensions": dimensions,
-                        "items": items,
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
+            _atomic_write_json(
+                path,
+                {
+                    "version": CATALOG_FORMAT_VERSION,
+                    "model": model,
+                    "catalog_hash": catalog_hash,
+                    "dimensions": dimensions,
+                    "items": items,
+                },
             )
         except OSError as exc:
             return {"fallback_reason": "embedding_cache_write_failed: {}".format(exc)}
@@ -219,19 +225,15 @@ class ToolEmbeddingIndex:
         path = self._cache_file(model, catalog_hash)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(
-                json.dumps(
-                    {
-                        "version": CATALOG_FORMAT_VERSION,
-                        "model": model,
-                        "catalog_hash": catalog_hash,
-                        "dimensions": 0,
-                        "items": {str(tool.get("tool_id") or tool.get("name") or ""): [] for tool in tools},
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
+            _atomic_write_json(
+                path,
+                {
+                    "version": CATALOG_FORMAT_VERSION,
+                    "model": model,
+                    "catalog_hash": catalog_hash,
+                    "dimensions": 0,
+                    "items": {str(tool.get("tool_id") or tool.get("name") or ""): [] for tool in tools},
+                },
             )
         except OSError:
             pass
@@ -249,11 +251,19 @@ def _catalog_hash(tools: list[dict[str, Any]]) -> str:
     records = []
     for tool in tools:
         metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
+        record = ToolServiceCatalog.compact_record(tool)
         records.append(
             {
                 "tool_id": str(tool.get("tool_id") or tool.get("name") or ""),
                 "summary": str(tool.get("summary") or tool.get("description") or ""),
                 "tags": [str(tag) for tag in (tool.get("tags") or []) if str(tag).strip()],
+                "service": {
+                    "id": record.get("service_id"),
+                    "label": record.get("service_label"),
+                    "description": record.get("service_description"),
+                    "aliases": record.get("service_aliases"),
+                },
+                "action_class": record.get("action_class"),
                 "schema": _schema_summary(tool.get("schema")),
                 "docs": str(metadata.get("docs") or metadata.get("documentation") or metadata.get("help") or ""),
                 "format": CATALOG_FORMAT_VERSION,
@@ -270,12 +280,16 @@ def _tool_id(tool: dict[str, Any]) -> str:
 def _tool_text(tool: dict[str, Any]) -> str:
     metadata = tool.get("metadata") if isinstance(tool.get("metadata"), dict) else {}
     schema = _schema_summary(tool.get("schema"))
+    record = ToolServiceCatalog.compact_record(tool)
     return "\n".join(
         part
         for part in [
             "id: {}".format(_tool_id(tool)),
             "name: {}".format(tool.get("display_name") or tool.get("name") or ""),
             "summary: {}".format(tool.get("summary") or tool.get("description") or ""),
+            "service: {} {} {}".format(record.get("service_id"), record.get("service_label"), record.get("service_description")),
+            "service aliases: {}".format(", ".join(record.get("service_aliases") or [])),
+            "action class: {}".format(record.get("action_class")),
             "tags: {}".format(", ".join(str(tag) for tag in (tool.get("tags") or []) if str(tag).strip())),
             "metadata: {}".format(" ".join(str(metadata.get(key) or "") for key in ("category", "service_id", "docs", "documentation", "help"))),
             "schema properties: {}".format(", ".join(schema.get("properties", []))),
@@ -338,3 +352,9 @@ def _schema_summary(schema: Any) -> dict[str, Any]:
         "properties": sorted(str(key) for key in properties.keys()) if isinstance(properties, dict) else [],
         "required": sorted(str(item) for item in (params.get("required") if isinstance(params, dict) and isinstance(params.get("required"), list) else [])),
     }
+
+
+def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
+    tmp.replace(path)

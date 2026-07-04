@@ -24,6 +24,16 @@ type PreviewReviewInput = {
   model?: string | null;
 };
 
+type BuildToolSelectionRequestInput = {
+  effectiveMode: ToolSelectionMode;
+  conversationInclude: ToolTarget[];
+  conversationExclude: ToolTarget[];
+  conversationMode?: ToolSelectionMode;
+  turnTargets: ToolTarget[];
+  turnExclude: ToolTarget[];
+  turnModeOverride: ToolSelectionMode | null;
+};
+
 const MODES = new Set<ToolSelectionMode>(["auto", "review", "manual", "none"]);
 
 export function useToolSelectionController({
@@ -104,35 +114,15 @@ export function useToolSelectionController({
   const buildRequest = ({ toolIds, mentionedToolIds = [] }: BuildRequestInput): ToolSelectionRequest => {
     const uniqueToolIds = [...new Set([...toolIds, ...mentionedToolIds].filter(Boolean))];
     const turnTargets = uniqueToolIds.map((id) => ({ kind: "tool" as const, id }));
-    const include = mergeTargets(conversationInclude, turnTargets);
-    const exclude = mergeTargets(conversationExclude, turnExclude);
-    const hasTurnOverrides = turnTargets.length > 0 || turnExclude.length > 0 || Boolean(turnModeOverride);
-    const scope = hasTurnOverrides ? "turn" : (conversationInclude.length || conversationExclude.length || conversationMode ? "conversation" : "turn");
-    if (effectiveMode === "none") {
-      return {
-        mode: "none",
-        include: [],
-        exclude,
-        scope,
-        must_use: false,
-      };
-    }
-    if (effectiveMode === "manual" || (effectiveMode === "auto" && uniqueToolIds.length > 0)) {
-      return {
-        mode: "manual",
-        include,
-        exclude,
-        scope,
-        must_use: false,
-      };
-    }
-    return {
-      mode: effectiveMode,
-      include,
-      exclude,
-      scope,
-      must_use: false,
-    };
+    return buildToolSelectionRequest({
+      effectiveMode,
+      conversationInclude,
+      conversationExclude,
+      conversationMode,
+      turnTargets,
+      turnExclude,
+      turnModeOverride,
+    });
   };
 
   const previewReview = async ({
@@ -166,30 +156,14 @@ export function useToolSelectionController({
 
   const approveReview = (): ToolSelectionRequest | null => {
     if (!pendingReview) return null;
-    const reviewedToolIds = selectedToolIds.length ? selectedToolIds : pendingReview.decision.selected_tools;
-    const include = reviewedToolIds.map((id) => ({ kind: "tool" as const, id }));
-    const request: ToolSelectionRequest = {
-      mode: include.length ? "manual" : "none",
-      include,
-      exclude: pendingReview.request.exclude ?? [],
-      scope: pendingReview.request.scope ?? "turn",
-      must_use: false,
-      preview_id: pendingReview.previewId,
-    };
+    const request = approvedToolSelectionReviewRequest(pendingReview);
     setPendingReview(null);
     return request;
   };
 
   const continueWithoutTools = (): ToolSelectionRequest | null => {
     if (!pendingReview) return null;
-    const request: ToolSelectionRequest = {
-      mode: "none",
-      include: [],
-      exclude: [],
-      scope: pendingReview.request.scope ?? "turn",
-      must_use: false,
-      preview_id: pendingReview.previewId,
-    };
+    const request = continueWithoutToolSelectionReviewRequest(pendingReview);
     setPendingReview(null);
     return request;
   };
@@ -198,10 +172,10 @@ export function useToolSelectionController({
     setPendingReview(null);
   };
 
-  const clearTurnStateAfterSend = ({ keepSelectedTools }: { keepSelectedTools: boolean }) => {
+  const clearTurnStateAfterSend = (_options?: { keepSelectedTools?: boolean }) => {
     setTurnModeOverride(null);
     setTurnExclude([]);
-    if (!keepSelectedTools) setSelectedToolIds([]);
+    setSelectedToolIds([]);
   };
 
   return {
@@ -224,6 +198,67 @@ export function useToolSelectionController({
     continueWithoutTools,
     cancelReview,
     clearTurnStateAfterSend,
+  };
+}
+
+export function buildToolSelectionRequest({
+  effectiveMode,
+  conversationInclude,
+  conversationExclude,
+  conversationMode,
+  turnTargets,
+  turnExclude,
+  turnModeOverride,
+}: BuildToolSelectionRequestInput): ToolSelectionRequest {
+  const include = mergeTargets(conversationInclude, turnTargets);
+  const exclude = mergeTargets(conversationExclude, turnExclude);
+  const hasTurnOverrides = turnTargets.length > 0 || turnExclude.length > 0 || Boolean(turnModeOverride);
+  const scope = hasTurnOverrides ? "turn" : (conversationInclude.length || conversationExclude.length || conversationMode ? "conversation" : "turn");
+  if (effectiveMode === "none") {
+    return {
+      mode: "none",
+      include: [],
+      exclude,
+      scope,
+      must_use: false,
+    };
+  }
+  if (effectiveMode === "manual") {
+    return {
+      mode: "manual",
+      include,
+      exclude,
+      scope,
+      must_use: false,
+    };
+  }
+  return {
+    mode: effectiveMode,
+    include,
+    exclude,
+    scope,
+    must_use: false,
+  };
+}
+
+export function approvedToolSelectionReviewRequest(pendingReview: PendingToolReview): ToolSelectionRequest {
+  return {
+    mode: "review",
+    include: [],
+    exclude: pendingReview.request.exclude ?? [],
+    scope: pendingReview.request.scope ?? "turn",
+    must_use: false,
+    preview_id: pendingReview.previewId,
+  };
+}
+
+export function continueWithoutToolSelectionReviewRequest(pendingReview: PendingToolReview): ToolSelectionRequest {
+  return {
+    mode: "none",
+    include: [],
+    exclude: [],
+    scope: pendingReview.request.scope ?? "turn",
+    must_use: false,
   };
 }
 

@@ -67,6 +67,7 @@ import type {
   SidebarCategory,
   SidebarField,
   SidebarItem,
+  ToolCatalogResponse,
 } from "../lib/api";
 import { toolResources } from "../features/tools/resources/toolResources";
 import type { RuntimeCapabilitySnapshot, ToolFilterEntry } from "../lib/toolStatus";
@@ -96,6 +97,9 @@ type ToolServiceCard = {
   label: string;
   description: string;
   items: SidebarItem[];
+  connectionStatus?: string;
+  actionClasses?: string[];
+  toolCount?: number;
 };
 
 const TOOL_SERVICE_LABELS: Record<string, { label: string; description: string }> = {
@@ -405,6 +409,38 @@ function toolServiceCards(items: SidebarItem[]): ToolServiceCard[] {
       description: TOOL_SERVICE_LABELS[id]?.description ?? "追加機能",
       items: sortedToolUiItems(groupItems),
     }))
+    .sort((left, right) => right.items.length - left.items.length || compareText(left.label, right.label));
+}
+
+export function toolServiceCardsFromCatalog(items: SidebarItem[], catalog: ToolCatalogResponse | null): ToolServiceCard[] {
+  if (!catalog?.services?.length || !catalog.tools?.length) return toolServiceCards(items);
+  const itemById = new Map(items.map((item) => [item.id, item]));
+  const catalogToolsByService = new Map<string, string[]>();
+  for (const tool of catalog.tools) {
+    const serviceId = String(tool.service_id || "").trim();
+    const toolId = String(tool.tool_id || "").trim();
+    if (!serviceId || !toolId) continue;
+    catalogToolsByService.set(serviceId, [...(catalogToolsByService.get(serviceId) ?? []), toolId]);
+  }
+  return catalog.services
+    .map((service) => {
+      const serviceId = String(service.service_id || service.id || "").trim();
+      const toolIds = (Array.isArray(service.tool_ids) && service.tool_ids.length
+        ? service.tool_ids
+        : catalogToolsByService.get(serviceId) ?? []
+      ).map((id) => String(id)).filter(Boolean);
+      const serviceItems = sortedToolUiItems(toolIds.map((toolId) => itemById.get(toolId)).filter((item): item is SidebarItem => Boolean(item)));
+      return {
+        id: serviceId,
+        label: String(service.label || serviceId || "機能"),
+        description: String(service.description || service.summary || "追加機能"),
+        items: serviceItems,
+        connectionStatus: service.connection_status,
+        actionClasses: Array.isArray(service.action_classes) ? service.action_classes.map((item) => String(item)) : [],
+        toolCount: Number(service.tool_count ?? serviceItems.length),
+      };
+    })
+    .filter((service) => service.id && service.items.length > 0)
     .sort((left, right) => right.items.length - left.items.length || compareText(left.label, right.label));
 }
 
@@ -953,6 +989,7 @@ export function RightSidebar({
   const [isToolManagerSearchOpen, setIsToolManagerSearchOpen] = useState(false);
   const [toolSelectionScope, setToolSelectionScope] = useState<ToolSelectionScope>("turn");
   const [conversationToolPreferences, setConversationToolPreferences] = useState<Record<string, unknown>>({});
+  const [toolCatalog, setToolCatalog] = useState<ToolCatalogResponse | null>(null);
   const [openToolGroupMenu, setOpenToolGroupMenu] = useState<string | null>(null);
   const [toolGroupMenuPosition, setToolGroupMenuPosition] = useState<{ top: number; right: number } | null>(null);
   const [panelWidth, setPanelWidth] = useState(readStoredPanelWidth);
@@ -1002,6 +1039,19 @@ export function RightSidebar({
   const promptRailCount = Number(promptUsage?.active_count ?? promptUsage?.segments?.filter((segment) => segment.status === "active").length ?? promptUsage?.active_segments?.length ?? 0);
   const disabledToolIdSet = useMemo(() => new Set(disabledToolIds), [disabledToolIds]);
   const hiddenToolIdSet = useMemo(() => new Set(hiddenToolIds), [hiddenToolIds]);
+  useEffect(() => {
+    let cancelled = false;
+    toolResources.toolCatalog()
+      .then((catalog) => {
+        if (!cancelled) setToolCatalog(catalog);
+      })
+      .catch(() => {
+        if (!cancelled) setToolCatalog(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const placementManifestMap = useMemo(
     () => new Map(buildBuiltinPlacementManifests(settingsSections).map((manifest) => [manifest.id, manifest])),
     [settingsSections],
@@ -1246,7 +1296,7 @@ export function RightSidebar({
     (!showStarredOnly || starredItemIdSet.has(item.id))
     && (!activeTagFilter || tagMap.get(item.id)?.includes(activeTagFilter))
   ))), [activeTagFilter, showStarredOnly, starredItemIdSet, tagMap, toolManagerSearchItems]);
-  const serviceCards = useMemo(() => toolServiceCards(toolManagerItems).slice(0, 10), [toolManagerItems]);
+  const serviceCards = useMemo(() => toolServiceCardsFromCatalog(toolManagerItems, toolCatalog).slice(0, 10), [toolCatalog, toolManagerItems]);
   const conversationServiceTargets = useMemo(() => new Set(
     targetList(conversationToolPreferences.include)
       .filter((target) => target.kind === "service")
@@ -2000,7 +2050,11 @@ export function RightSidebar({
                                           </div>
                                           <p className="mt-0.5 truncate text-[10px] text-zinc-500">{service.description}</p>
                                           <div className="mt-1 flex flex-wrap gap-1 text-[9px] text-zinc-500">
-                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.items.length} 機能</span>
+                                            <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.toolCount ?? service.items.length} 機能</span>
+                                            {service.connectionStatus && <span className="rounded bg-zinc-900 px-1.5 py-0.5">{service.connectionStatus === "connected" ? "接続済み" : service.connectionStatus === "setup_required" ? "設定が必要" : "利用不可"}</span>}
+                                            {service.actionClasses?.slice(0, 2).map((actionClass) => (
+                                              <span key={actionClass} className="rounded bg-zinc-900 px-1.5 py-0.5">{actionClass}</span>
+                                            ))}
                                             {pinnedCount > 0 && <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-amber-200">{pinnedCount} ピン留め</span>}
                                             {conversationSelected && <span className="rounded bg-sky-500/10 px-1.5 py-0.5 text-sky-200">会話固定</span>}
                                           </div>

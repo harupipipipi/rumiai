@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from domain.tool.service_catalog import (
+    ACTION_ALIASES,
     infer_action_class,
     infer_service_id,
     minimum_requires_confirm,
@@ -15,17 +16,15 @@ from domain.tool.schema_adapter import tool_name_from_definition
 
 
 PERMISSION_MODES = {"auto", "confirm", "block"}
-WRITE_APPROVAL_ACTION_CLASSES = {"create", "update", "send", "execute", "computer", "delete"}
+WRITE_APPROVAL_ACTION_CLASSES = {"write", "send", "shell", "computer", "destructive"}
 HIGH_RISK_LEVELS = {"high", "critical"}
 DEFAULT_ACTION_PERMISSIONS: dict[str, str] = {
     "read": "auto",
-    "search": "auto",
-    "create": "confirm",
-    "update": "confirm",
+    "write": "confirm",
     "send": "confirm",
-    "execute": "confirm",
+    "shell": "confirm",
     "computer": "confirm",
-    "delete": "confirm",
+    "destructive": "confirm",
 }
 
 
@@ -50,12 +49,28 @@ class ToolPermissionResolver:
         steps.append({"source": f"action:{action_class}", "value": action_default})
         effective = _apply_hard_minimum(action_default, hard_minimum)
 
-        service_override = _override_value(self._tool_settings.get("service_permission_overrides"), service_id, action_class)
+        service_override = _override_value(
+            self._tool_settings.get("service_permissions"),
+            service_id,
+            action_class,
+        ) or _override_value(
+            self._tool_settings.get("service_permission_overrides"),
+            service_id,
+            action_class,
+        )
         if service_override:
             steps.append({"source": f"service:{service_id}", "value": service_override})
             effective = _apply_hard_minimum(service_override, hard_minimum)
 
-        tool_override = _override_value(self._tool_settings.get("tool_permission_overrides"), tool_id, action_class)
+        tool_override = _override_value(
+            self._tool_settings.get("tool_permissions"),
+            tool_id,
+            action_class,
+        ) or _override_value(
+            self._tool_settings.get("tool_permission_overrides"),
+            tool_id,
+            action_class,
+        )
         legacy_disabled = tool_id in _string_set(self._tool_settings.get("disabled_tool_ids"))
         if legacy_disabled and not tool_override:
             tool_override = "block"
@@ -93,13 +108,16 @@ class ToolPermissionResolver:
         return allowed, entries
 
     def _action_permission(self, action_class: str) -> str:
-        overrides = self._tool_settings.get("standard_permissions")
+        action_class = _canonical_action(action_class)
+        overrides = self._tool_settings.get("permission_defaults")
+        if not isinstance(overrides, dict):
+            overrides = self._tool_settings.get("standard_permissions")
         if not isinstance(overrides, dict):
             overrides = self._tool_settings.get("action_permissions")
         if not isinstance(overrides, dict):
             overrides = {}
-        value = str(overrides.get(action_class) or DEFAULT_ACTION_PERMISSIONS.get(action_class, "confirm")).strip().lower()
-        if action_class == "delete" and value == "auto":
+        value = str(_value_for_action(overrides, action_class) or DEFAULT_ACTION_PERMISSIONS.get(action_class, "confirm")).strip().lower()
+        if action_class == "destructive" and value == "auto":
             value = "confirm"
         return value if value in PERMISSION_MODES else DEFAULT_ACTION_PERMISSIONS.get(action_class, "confirm")
 
@@ -126,7 +144,7 @@ def _override_value(container: Any, target_id: str, action_class: str) -> str:
         value = raw.strip().lower()
         return value if value in PERMISSION_MODES else ""
     if isinstance(raw, dict):
-        value = str(raw.get(action_class) or raw.get("*") or raw.get("default") or "").strip().lower()
+        value = str(_value_for_action(raw, action_class) or raw.get("*") or raw.get("default") or "").strip().lower()
         return value if value in PERMISSION_MODES else ""
     return ""
 
@@ -138,7 +156,7 @@ def _hard_minimum_permission(tool: dict[str, Any], action_class: str) -> str:
         return "confirm"
     if risk in HIGH_RISK_LEVELS:
         return "confirm"
-    if action_class == "delete":
+    if action_class == "destructive":
         return "confirm"
     return "auto"
 
@@ -188,7 +206,7 @@ def _write_approval_policy_applies(tool: dict[str, Any], action_class: str) -> b
     if bool(tool.get("write_action") or metadata.get("write_action")):
         return True
     action_type = str(tool.get("action_type") or metadata.get("action_type") or "").strip().lower()
-    return action_type in {"write", "file_write", "delete", "create", "update", "patch", "commit", "push"}
+    return action_type in {"write", "file_write", "delete", "create", "update", "patch", "commit", "push", "shell", "exec"}
 
 
 def _high_risk_policy_applies(tool: dict[str, Any]) -> bool:
@@ -209,3 +227,36 @@ def _string_set(value: Any) -> set[str]:
     else:
         values = []
     return {item for item in values if item}
+
+
+def _canonical_action(action_class: str) -> str:
+    value = str(action_class or "").strip().lower()
+    return ACTION_ALIASES.get(value, value)
+
+
+def _legacy_action_aliases(action_class: str) -> tuple[str, ...]:
+    canonical = _canonical_action(action_class)
+    aliases = [canonical]
+    aliases.extend(alias for alias, target in ACTION_ALIASES.items() if target == canonical)
+    if canonical == "read":
+        aliases.extend(["search"])
+    elif canonical == "write":
+        aliases.extend(["create", "update"])
+    elif canonical == "shell":
+        aliases.extend(["execute"])
+    elif canonical == "destructive":
+        aliases.extend(["delete", "dangerous"])
+    seen: set[str] = set()
+    result: list[str] = []
+    for alias in aliases:
+        if alias and alias not in seen:
+            seen.add(alias)
+            result.append(alias)
+    return tuple(result)
+
+
+def _value_for_action(container: dict[str, Any], action_class: str) -> Any:
+    for key in _legacy_action_aliases(action_class):
+        if key in container:
+            return container.get(key)
+    return None

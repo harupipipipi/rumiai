@@ -9,11 +9,19 @@ TOOL_SELECTION_MODES = {"auto", "review", "manual", "none"}
 TOOL_SELECTION_SCOPES = {"turn", "conversation"}
 TOOL_SELECTION_STRATEGIES = {
     "hybrid",
-    "semantic",
+    "vector",
     "catalog_ai",
     "all_with_hints",
     "all_schemas",
+    "manual_only",
+    # Legacy aliases accepted at API boundaries and normalized before use.
+    "semantic",
     "lexical",
+}
+
+LEGACY_TOOL_SELECTION_STRATEGY_ALIASES = {
+    "semantic": "vector",
+    "lexical": "vector",
 }
 
 
@@ -161,3 +169,13 @@ def normalize_tool_targets(value: Any) -> list[ToolTarget]:
         seen.add(key)
         targets.append(target)
     return targets
+
+
+def canonical_tool_selection_strategy(value: Any, *, default: str | None = None) -> str | None:
+    strategy = str(value or "").strip().lower()
+    if not strategy:
+        return default
+    strategy = LEGACY_TOOL_SELECTION_STRATEGY_ALIASES.get(strategy, strategy)
+    if strategy in {"hybrid", "vector", "catalog_ai", "all_with_hints", "all_schemas", "manual_only"}:
+        return strategy
+    return default

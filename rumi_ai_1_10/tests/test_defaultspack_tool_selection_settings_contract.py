@@ -22,14 +22,14 @@ def _tools():
             "name": "Web Search",
             "summary": "Search the web.",
             "tags": ["web", "search"],
-            "action_class": "search",
+            "action_class": "read",
         },
         {
             "tool_id": "github_issue_search",
             "name": "GitHub Issues",
             "summary": "Search GitHub issues and pull requests.",
             "tags": ["github", "issue"],
-            "action_class": "search",
+            "action_class": "read",
             "metadata": {"service_id": "github"},
             "schema": {
                 "parameters": {
@@ -92,7 +92,7 @@ def test_all_with_hints_exposes_every_schema_and_keeps_recommendations(monkeypat
             return {
                 "tool_ids": ["github_issue_search"],
                 "results": [],
-                "stage": "semantic",
+                "stage": "vector",
                 "cache_hit": False,
                 "catalog_hash": "fake",
                 "duration_ms": 1,
@@ -145,7 +145,7 @@ def test_catalog_ai_direct_sends_every_compact_candidate_to_selector(monkeypatch
             return {
                 "tool_ids": ["web_search"],
                 "results": [],
-                "stage": "semantic",
+                "stage": "vector",
                 "cache_hit": False,
                 "catalog_hash": "fake",
                 "duration_ms": 1,
@@ -170,7 +170,7 @@ def test_catalog_ai_direct_sends_every_compact_candidate_to_selector(monkeypatch
     assert "properties" not in question
 
 
-def test_catalog_ai_uses_full_catalog_even_above_direct_limit(monkeypatch):
+def test_catalog_ai_prefilters_large_catalog_and_rejects_outside_candidate_ids(monkeypatch):
     from domain.chat import tool_selection_orchestrator
     from domain.chat.tool_selection_schema import ToolSelectionRequest
     from domain.chat.tool_selection_service import ToolSelectionService
@@ -191,7 +191,7 @@ def test_catalog_ai_uses_full_catalog_even_above_direct_limit(monkeypatch):
             return {
                 "tool_ids": ["web_search"],
                 "results": [],
-                "stage": "semantic",
+                "stage": "vector",
                 "cache_hit": False,
                 "catalog_hash": "fake",
                 "duration_ms": 1,
@@ -200,19 +200,33 @@ def test_catalog_ai_uses_full_catalog_even_above_direct_limit(monkeypatch):
     monkeypatch.setattr(tool_selection_orchestrator, "call_model", fake_call_model)
     monkeypatch.setattr("domain.chat.tool_selection_service.ToolEmbeddingIndex", lambda: FakeEmbeddingIndex())
 
+    large_catalog = [
+        *_tools(),
+        *[
+            {
+                "tool_id": f"extra_tool_{index}",
+                "name": f"Extra Tool {index}",
+                "summary": "Additional read-only catalog tool.",
+                "tags": ["extra"],
+                "action_class": "read",
+            }
+            for index in range(25)
+        ],
+    ]
     decision = ToolSelectionService(
-        settings={"tools": {"selection_strategy": "catalog_ai", "catalog_ai_direct_limit": 1}}
+        settings={"tools": {"selection_strategy": "catalog_ai", "catalog_ai_direct_limit": 20}}
     ).select(
         "read project files",
-        _tools(),
+        large_catalog,
         selection=ToolSelectionRequest(mode="auto", strategy="catalog_ai"),
     )
 
-    assert decision.candidate_count == 3
-    assert [tool["tool_id"] for tool in decision.selected_tools] == ["coding_file_read"]
+    assert decision.eligible_count == len(large_catalog)
+    assert decision.candidate_count == 1
+    assert [tool["tool_id"] for tool in decision.selected_tools] == ["web_search"]
     assert "web_search" in captured["question"]
-    assert "github_issue_search" in captured["question"]
-    assert "coding_file_read" in captured["question"]
+    assert "github_issue_search" not in captured["question"]
+    assert "coding_file_read" not in captured["question"]
 
 
 def test_explicit_tool_helper_model_does_not_force_fast_route(monkeypatch):
@@ -242,7 +256,7 @@ def test_explicit_tool_helper_model_does_not_force_fast_route(monkeypatch):
             return {
                 "tool_ids": ["web_search"],
                 "results": [],
-                "stage": "semantic",
+                "stage": "vector",
                 "cache_hit": False,
                 "catalog_hash": "fake",
                 "duration_ms": 1,
@@ -288,7 +302,7 @@ def test_all_with_hints_prompt_includes_selector_recommendations():
     assert "GitHub context" in prompt
 
 
-def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
+def test_vector_auto_resolves_configured_embedding_model(monkeypatch):
     from domain.chat import tool_selection_service as service_module
     from domain.chat.tool_selection_schema import ToolSelectionRequest
 
@@ -301,7 +315,7 @@ def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
             return {
                 "tool_ids": ["web_search"],
                 "results": [],
-                "stage": "semantic",
+                "stage": "vector",
                 "cache_hit": False,
                 "catalog_hash": "fake",
                 "duration_ms": 1,
@@ -325,13 +339,14 @@ def test_semantic_auto_resolves_configured_embedding_model(monkeypatch):
     )
 
     decision = service_module.ToolSelectionService(
-        settings={"tools": {"selection_strategy": "semantic", "embedding_model": ""}}
+        settings={"tools": {"selection_strategy": "vector", "embedding_model": ""}}
     ).select(
         "search the web",
         _tools(),
-        selection=ToolSelectionRequest(mode="auto", strategy="semantic"),
+        selection=ToolSelectionRequest(mode="auto", strategy="vector"),
     )
 
+    assert decision.strategy == "vector"
     assert captured["model"] == "google/text-embedding-004"
     assert [tool["tool_id"] for tool in decision.selected_tools] == ["web_search"]
 
@@ -357,7 +372,7 @@ def test_embedding_index_calls_ai_client_embed_with_selected_model(tmp_path, mon
         model="google/text-embedding-004",
     )
 
-    assert result["stage"] == "semantic"
+    assert result["stage"] == "vector"
     assert result["tool_ids"] == ["web_search"]
     assert calls[0][0] == "google/text-embedding-004"
     assert calls[1][0] == "google/text-embedding-004"
@@ -385,23 +400,39 @@ def test_settings_permissions_auto_confirm_block_and_service_overrides():
     resolver = ToolPermissionResolver(
         {
             "tools": {
-                "standard_permissions": {
-                    "create": "auto",
-                    "update": "confirm",
-                    "delete": "auto",
+                "permission_defaults": {
+                    "read": "auto",
+                    "write": "confirm",
+                    "send": "confirm",
+                    "shell": "confirm",
+                    "computer": "confirm",
+                    "destructive": "auto",
                 },
-                "service_permission_overrides": {
-                    "github": {"update": "auto"},
+                "service_permissions": {
+                    "github": {"write": "auto"},
                 },
+                "tool_permissions": {"doc_update": "block"},
             }
         }
     )
 
-    assert resolver.resolve({"tool_id": "doc_create", "action_class": "create"})["permission"] == "auto"
-    assert resolver.resolve({"tool_id": "doc_update", "action_class": "update"})["permission"] == "confirm"
-    assert resolver.resolve({"tool_id": "github_update_issue", "action_class": "update", "metadata": {"service_id": "github"}})["permission"] == "auto"
-    assert resolver.resolve({"tool_id": "file_delete", "action_class": "delete"})["permission"] == "confirm"
+    assert resolver.resolve({"tool_id": "doc_create", "action_class": "write"})["permission"] == "confirm"
+    assert resolver.resolve({"tool_id": "doc_update", "action_class": "write"})["permission"] == "block"
+    assert resolver.resolve({"tool_id": "github_update_issue", "action_class": "write", "metadata": {"service_id": "github"}})["permission"] == "auto"
+    assert resolver.resolve({"tool_id": "file_delete", "action_class": "destructive"})["permission"] == "confirm"
     assert resolver.resolve({"tool_id": "external_send", "action_class": "send", "requires_approval": True})["permission"] == "confirm"
+
+    legacy = ToolPermissionResolver(
+        {
+            "tools": {
+                "standard_permissions": {"update": "auto", "delete": "auto"},
+                "service_permission_overrides": {"github": {"update": "block"}},
+            }
+        }
+    )
+    assert legacy.resolve({"tool_id": "doc_update", "action_class": "update"})["permission"] == "auto"
+    assert legacy.resolve({"tool_id": "github_update_issue", "action_class": "update", "metadata": {"service_id": "github"}})["permission"] == "block"
+    assert legacy.resolve({"tool_id": "file_delete", "action_class": "delete"})["permission"] == "confirm"
 
 
 def test_browser_computer_is_computer_service_for_overrides():
@@ -417,8 +448,8 @@ def test_browser_computer_is_computer_service_for_overrides():
     resolver = ToolPermissionResolver(
         {
             "tools": {
-                "standard_permissions": {"computer": "confirm"},
-                "service_permission_overrides": {"computer": {"computer": "block"}},
+                "permission_defaults": {"computer": "confirm"},
+                "service_permissions": {"computer": {"computer": "block"}},
             }
         }
     )
@@ -435,10 +466,9 @@ def test_profile_write_and_high_risk_flags_do_not_escalate_read_tools():
     resolver = ToolPermissionResolver(
         {
             "tools": {
-                "standard_permissions": {
+                "permission_defaults": {
                     "read": "auto",
-                    "search": "auto",
-                    "update": "auto",
+                    "write": "auto",
                 }
             }
         }
@@ -449,8 +479,8 @@ def test_profile_write_and_high_risk_flags_do_not_escalate_read_tools():
     }
 
     assert resolver.resolve({"tool_id": "coding_file_read", "action_class": "read"}, context={"profile_policy": policy})["permission"] == "auto"
-    assert resolver.resolve({"tool_id": "web_search", "action_class": "search"}, context={"profile_policy": policy})["permission"] == "auto"
-    assert resolver.resolve({"tool_id": "coding_file_write", "action_class": "update"}, context={"profile_policy": policy})["permission"] == "confirm"
+    assert resolver.resolve({"tool_id": "web_search", "action_class": "read"}, context={"profile_policy": policy})["permission"] == "auto"
+    assert resolver.resolve({"tool_id": "coding_file_write", "action_class": "write"}, context={"profile_policy": policy})["permission"] == "confirm"
     assert resolver.resolve({"tool_id": "secret_scan", "action_class": "read", "risk": "critical"}, context={"profile_policy": policy})["permission"] == "confirm"
 
 
@@ -462,7 +492,7 @@ def test_frontend_settings_block_wins_over_server_approval_full_access_and_safe_
             return {
                 "tool_id": "memo_note_upsert",
                 "service_id": "memory",
-                "action_class": "update",
+                "action_class": "write",
                 "permission": "block",
                 "minimum_permission": "auto",
                 "sources": [{"source": "tool:memo_note_upsert", "value": "block"}],
@@ -474,7 +504,7 @@ def test_frontend_settings_block_wins_over_server_approval_full_access_and_safe_
 
     _, response = executor_mod._preflight_frontend_tool_permission(
         "memo_note_upsert",
-        {"tool_id": "memo_note_upsert", "name": "memo_note_upsert", "action_class": "update"},
+        {"tool_id": "memo_note_upsert", "name": "memo_note_upsert", "action_class": "write"},
         {"note": "x"},
         {},
         {"full_access": True},
@@ -493,7 +523,7 @@ def test_frontend_settings_confirm_can_be_satisfied_by_server_approval(monkeypat
             return {
                 "tool_id": "coding_file_write",
                 "service_id": "coding",
-                "action_class": "update",
+                "action_class": "write",
                 "permission": "confirm",
                 "minimum_permission": "confirm",
                 "sources": [{"source": "tool:coding_file_write", "value": "confirm"}],
@@ -504,7 +534,7 @@ def test_frontend_settings_confirm_can_be_satisfied_by_server_approval(monkeypat
 
     _, response = executor_mod._preflight_frontend_tool_permission(
         "coding_file_write",
-        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "update"},
+        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "write"},
         {"path": "app.py", "content": "x"},
         {},
         {},
@@ -527,7 +557,7 @@ def test_frontend_settings_resolver_failure_fails_closed_for_write_tools(monkeyp
 
     _, write_response = executor_mod._preflight_frontend_tool_permission(
         "coding_file_write",
-        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "update"},
+        {"tool_id": "coding_file_write", "name": "coding_file_write", "action_class": "write"},
         {"path": "app.py", "content": "x"},
         {"conversation_id": "conv-settings-fail-closed"},
         {},
@@ -608,7 +638,7 @@ def test_summary_tool_selection_trace_does_not_persist_json(tmp_path, monkeypatc
     context = {
         "conversation_id": "conv-summary",
         "_authenticated_principal": {"profile_id": "profile-alice"},
-        "tool_selection": {"selection_id": "sel-summary", "strategy": "semantic"},
+        "tool_selection": {"selection_id": "sel-summary", "strategy": "vector"},
     }
     run_request._persist_tool_selection_trace(
         context,
@@ -616,8 +646,8 @@ def test_summary_tool_selection_trace_does_not_persist_json(tmp_path, monkeypatc
         ToolSelectionDecision(
             selection_id="sel-summary",
             mode="auto",
-            strategy="semantic",
-            stage="semantic",
+            strategy="vector",
+            stage="vector",
             selected_tools=[{"tool_id": "web_search"}],
         ),
         user_text="search the web",
@@ -783,7 +813,7 @@ def test_tool_selection_preview_snapshot_overrides_tampered_selection(tmp_path, 
     )
     selection = run_request.NormalizedToolSelection(
         mode="review",
-        strategy="semantic",
+        strategy="vector",
         include=[{"kind": "tool", "id": "coding_file_read"}],
         preview_id="preview-a",
     )
@@ -854,7 +884,7 @@ def test_tool_selection_preview_snapshot_rejects_payload_swap(tmp_path, monkeypa
             ),
             "selection": {
                 "mode": "review",
-                "strategy": "semantic",
+                "strategy": "vector",
                 "scope": "turn",
                 "include": [{"kind": "tool", "id": "web_search"}],
                 "exclude": [],
@@ -894,8 +924,8 @@ def test_tool_selection_preview_api_persists_authorized_snapshot(tmp_path, monke
             return ToolSelectionDecision(
                 selection_id="preview-from-api",
                 mode="review",
-                strategy="semantic",
-                stage="semantic",
+                strategy="vector",
+                stage="vector",
                 selected_tools=[{"tool_id": "web_search"}],
             )
 
@@ -906,7 +936,7 @@ def test_tool_selection_preview_api_persists_authorized_snapshot(tmp_path, monke
         {
             "conversation_id": "conv-a",
             "user_text": "search",
-            "tool_selection": {"mode": "review", "strategy": "semantic"},
+            "tool_selection": {"mode": "review", "strategy": "vector"},
         },
         {"_authenticated_principal": {"profile_id": "profile-alice"}},
     )
@@ -934,13 +964,13 @@ def test_available_tools_falls_back_when_selector_service_fails(monkeypatch):
 
     def fake_select(self, user_text, tools, *, selection, context=None):
         del self, user_text, context
-        if getattr(selection, "strategy", "") != "lexical":
+        if getattr(selection, "strategy", "") != "vector":
             raise RuntimeError("selector exploded")
         return ToolSelectionDecision(
             selection_id="fallback-selection",
             mode=getattr(selection, "mode", "auto"),
-            strategy="lexical",
-            stage="lexical",
+            strategy="vector",
+            stage="vector",
             selected_tools=[tool for tool in tools if tool["tool_id"] == "web_search"],
             candidate_count=len(tools),
             selected_count=1,
@@ -959,5 +989,5 @@ def test_available_tools_falls_back_when_selector_service_fails(monkeypatch):
 
     assert [tool["tool_id"] for tool in raw] == ["web_search"]
     assert [tool["function"]["name"] for tool in provider] == ["web_search"]
-    assert context["tool_selection"]["stage"] == "selection_failed_lexical_fallback"
+    assert context["tool_selection"]["stage"] == "selection_failed_vector_fallback"
     assert context["tool_selection"]["fallbacks"][0]["reason"] == "selector exploded"

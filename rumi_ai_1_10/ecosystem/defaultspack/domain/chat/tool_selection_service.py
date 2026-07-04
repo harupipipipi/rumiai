@@ -14,6 +14,7 @@ from domain.chat.tool_selection_schema import (
     ToolRecommendation,
     ToolSelectionDecision,
     ToolTarget,
+    canonical_tool_selection_strategy,
     normalize_tool_targets,
 )
 from domain.tool.permission_resolver import ToolPermissionResolver, read_frontend_settings
@@ -27,7 +28,8 @@ from domain.tool.schema_adapter import tool_name_from_definition
 
 DEFAULT_SEMANTIC_CANDIDATE_LIMIT = 32
 DEFAULT_FINAL_TOOL_LIMIT = 8
-DEFAULT_CATALOG_AI_DIRECT_LIMIT = 80
+DEFAULT_CATALOG_AI_DIRECT_LIMIT = 100
+CATALOG_AI_PREFILTER_LIMIT = 40
 
 
 class ToolSelectionService:
@@ -62,9 +64,10 @@ class ToolSelectionService:
             mode = conversation_mode
         if mode not in {"auto", "review", "manual", "none"}:
             mode = "auto"
-        strategy = str(getattr(selection, "strategy", "") or self._tool_settings.get("selection_strategy") or "hybrid").strip().lower()
-        if strategy not in TOOL_SELECTION_STRATEGIES:
-            strategy = "hybrid"
+        strategy = canonical_tool_selection_strategy(
+            getattr(selection, "strategy", "") or self._tool_settings.get("selection_strategy"),
+            default="hybrid",
+        ) or "hybrid"
         conversation_include = normalize_tool_targets(conversation_preferences.get("include"))
         conversation_exclude = normalize_tool_targets(conversation_preferences.get("exclude"))
         include = _merge_targets(conversation_include, selection_include)
@@ -94,13 +97,13 @@ class ToolSelectionService:
         included, unknown_targets = self._expand_targets(include, eligible, catalog)
         included = self._apply_excludes(included, exclude, catalog)
 
-        if mode == "manual":
+        if mode == "manual" or strategy == "manual_only":
             selected = included
             if not selected and not include:
                 selected = []
             return self._decision(
                 mode=mode,
-                strategy="manual",
+                strategy="manual_only" if strategy == "manual_only" else "manual",
                 stage="manual",
                 selected=selected,
                 eligible=eligible,
@@ -137,7 +140,7 @@ class ToolSelectionService:
             )
             if not hint_recommendations:
                 hint_recommendations = [
-                    ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="semantic hint")
+                    ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="vector hint")
                     for tool_id in list(hints.get("tool_ids") or [])[: self._final_limit()]
                 ]
             selected = self._stable_merge(included, eligible)
@@ -162,30 +165,16 @@ class ToolSelectionService:
                 cache_hit=bool(hints.get("cache_hit")),
             )
 
-        semantic = self._semantic_candidates(user_text, eligible, context=context)
+        semantic_limit = CATALOG_AI_PREFILTER_LIMIT if strategy == "catalog_ai" and len(eligible) > self._catalog_ai_direct_limit() else None
+        semantic = self._semantic_candidates(user_text, eligible, context=context, limit=semantic_limit)
         semantic_ids = list(semantic.get("tool_ids") or [])
         semantic_candidates = self._tools_by_ids(eligible, semantic_ids)
-        if strategy == "lexical":
-            lexical_ids = recommend_tool_ids(user_text, eligible, limit=self._final_limit(), threshold=0.0)
-            candidates = self._tools_by_ids(eligible, lexical_ids)
-            selected = self._stable_merge(included, candidates)[: self._final_limit()]
-            return self._decision(
-                mode=mode,
-                strategy=strategy,
-                stage="lexical",
-                selected=selected,
-                eligible=eligible,
-                candidates=candidates,
-                started=started,
-                unknown_targets=unknown_targets,
-                permission_entries=permission_entries,
-            )
-        if strategy == "semantic":
+        if strategy == "vector":
             selected = self._stable_merge(included, semantic_candidates)[: self._final_limit()]
             return self._decision(
                 mode=mode,
                 strategy=strategy,
-                stage=str(semantic.get("stage") or "semantic"),
+                stage=str(semantic.get("stage") or "vector"),
                 selected=selected,
                 eligible=eligible,
                 candidates=semantic_candidates,
@@ -194,13 +183,17 @@ class ToolSelectionService:
                 permission_entries=permission_entries,
                 fallbacks=list(semantic.get("fallbacks", [])),
                 cache_hit=bool(semantic.get("cache_hit")),
-                metrics={"semantic_search_ms": semantic.get("duration_ms", 0), "catalog_hash": semantic.get("catalog_hash", "")},
+                metrics={
+                    "vector_search_ms": semantic.get("duration_ms", 0),
+                    "semantic_search_ms": semantic.get("duration_ms", 0),
+                    "catalog_hash": semantic.get("catalog_hash", ""),
+                },
             )
 
         if strategy == "catalog_ai":
-            candidates = eligible
+            candidates = eligible if len(eligible) <= self._catalog_ai_direct_limit() else self._stable_merge(included, semantic_candidates)
             selector_prefilter = False
-            selector_fallback_ids = [_tool_id(tool) for tool in eligible]
+            selector_fallback_ids = [_tool_id(tool) for tool in candidates]
         else:
             candidates = self._stable_merge(included, semantic_candidates)
             selector_prefilter = True
@@ -215,13 +208,13 @@ class ToolSelectionService:
         )
         selected = self._stable_merge(included, self._tools_by_ids(eligible, selected_ids))[: self._final_limit()]
         if not selected and semantic_candidates:
-            fallbacks.append({"stage": "semantic", "reason": "selector_returned_no_valid_tools"})
+            fallbacks.append({"stage": "vector", "reason": "selector_returned_no_valid_tools"})
             selected = self._stable_merge(included, semantic_candidates)[: self._final_limit()]
             recommendations = [
-                ToolRecommendation(tool_id=_tool_id(tool), confidence=0.5, reason="semantic fallback")
+                ToolRecommendation(tool_id=_tool_id(tool), confidence=0.5, reason="vector fallback")
                 for tool in selected
             ]
-            stage = "semantic_fallback"
+            stage = "vector_fallback"
         return self._decision(
             mode=mode,
             strategy=strategy,
@@ -236,6 +229,7 @@ class ToolSelectionService:
             recommendations=recommendations,
             cache_hit=bool(semantic.get("cache_hit")),
             metrics={
+                "vector_search_ms": semantic.get("duration_ms", 0),
                 "semantic_search_ms": semantic.get("duration_ms", 0),
                 "catalog_hash": semantic.get("catalog_hash", ""),
                 **({"selector_model": selector_model} if selector_model else {}),
@@ -300,13 +294,13 @@ class ToolSelectionService:
             output.append(tool)
         return output
 
-    def _semantic_candidates(self, user_text: str, tools: list[dict[str, Any]], *, context: dict[str, Any]) -> dict[str, Any]:
-        backend = str(self._tool_settings.get("semantic_backend") or "auto").strip().lower() or "auto"
+    def _semantic_candidates(self, user_text: str, tools: list[dict[str, Any]], *, context: dict[str, Any], limit: int | None = None) -> dict[str, Any]:
+        backend = str(self._tool_settings.get("vector_backend") or self._tool_settings.get("semantic_backend") or "auto").strip().lower() or "auto"
         embedding_model = self._embedding_model()
         result = ToolEmbeddingIndex().search(
             user_text,
             tools,
-            limit=self._semantic_limit(),
+            limit=limit or self._semantic_limit(),
             backend=backend,
             model=embedding_model,
         )
@@ -353,7 +347,7 @@ class ToolSelectionService:
                 prefilter=prefilter,
             )
         except Exception as exc:
-            return fallback_ids[:limit], "semantic_fallback", [{"stage": "utility_model", "reason": str(exc)}], [
+            return fallback_ids[:limit], "vector_fallback", [{"stage": "utility_model", "reason": str(exc)}], [
                 ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="fallback after selector error")
                 for tool_id in fallback_ids[:limit]
             ], ""
@@ -369,15 +363,16 @@ class ToolSelectionService:
                 continue
             selected_ids.append(tool_id)
             try:
-                confidence = float(item.get("confidence", 0.6))
+                confidence = max(0.0, min(1.0, float(item.get("confidence", 0.6))))
             except (TypeError, ValueError):
                 confidence = 0.6
+            reason = str(item.get("reason") or "selected by tool selector").strip()
             recommendations.append(
-                ToolRecommendation(tool_id=tool_id, confidence=confidence, reason=str(item.get("reason") or "selected by tool selector"))
+                ToolRecommendation(tool_id=tool_id, confidence=confidence, reason=reason[:160])
             )
         stage = str(result.get("stage") or "utility_model") if isinstance(result, dict) else "utility_model"
         if not selected_ids:
-            return fallback_ids[:limit], "semantic_fallback", [{"stage": stage, "reason": "selector_returned_no_valid_tools"}], [
+            return fallback_ids[:limit], "vector_fallback", [{"stage": stage, "reason": "selector_returned_no_valid_tools"}], [
                 ToolRecommendation(tool_id=tool_id, confidence=0.5, reason="fallback after invalid selector output")
                 for tool_id in fallback_ids[:limit]
             ], selector_model
@@ -436,13 +431,13 @@ class ToolSelectionService:
 
     def _semantic_limit(self) -> int:
         try:
-            return max(8, min(64, int(self._tool_settings.get("semantic_candidate_limit", DEFAULT_SEMANTIC_CANDIDATE_LIMIT))))
+            return max(8, min(64, int(self._tool_settings.get("vector_candidate_limit", self._tool_settings.get("semantic_candidate_limit", DEFAULT_SEMANTIC_CANDIDATE_LIMIT)))))
         except (TypeError, ValueError):
             return DEFAULT_SEMANTIC_CANDIDATE_LIMIT
 
     def _final_limit(self) -> int:
         try:
-            return max(1, min(24, int(self._tool_settings.get("final_tool_limit", DEFAULT_FINAL_TOOL_LIMIT))))
+            return max(1, min(16, int(self._tool_settings.get("final_tool_limit", DEFAULT_FINAL_TOOL_LIMIT))))
         except (TypeError, ValueError):
             return DEFAULT_FINAL_TOOL_LIMIT
 

@@ -186,6 +186,7 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         self.assertIn("selection_strategy", tools_field_ids)
         default_mode_field = next(field for field in tools_section["fields"] if field["id"] == "default_mode")
         strategy_field = next(field for field in tools_section["fields"] if field["id"] == "selection_strategy")
+        final_limit_field = next(field for field in tools_section["fields"] if field["id"] == "final_tool_limit")
         self.assertEqual(catalog["settings"]["values"]["tools"]["settings_version"], 3)
         self.assertEqual(catalog["settings"]["values"]["tools"]["default_mode"], "auto")
         self.assertEqual(catalog["settings"]["values"]["tools"]["selection_strategy"], "hybrid")
@@ -193,7 +194,10 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
         strategy_options = {option["value"] for option in strategy_field["options"]}
         self.assertIn("auto", default_mode_options)
         self.assertIn("manual", default_mode_options)
+        self.assertIn("vector", strategy_options)
         self.assertIn("all_schemas", strategy_options)
+        self.assertIn("manual_only", strategy_options)
+        self.assertEqual(final_limit_field["max"], 16)
         general_section = next(section for section in catalog["settings"]["sections"] if section["id"] == "general")
         general_field_ids = {field["id"] for field in general_section["fields"]}
         self.assertIn("language", general_field_ids)
@@ -1101,6 +1105,53 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         self.assertEqual(values["tools"]["settings_version"], 3)
         self.assertFalse(values["tools"]["keep_selected_tools_after_send"])
+
+    def test_settings_migrates_tool_experience_v3_aliases_and_permissions(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pack_root = Path(tmpdir)
+            settings_path = pack_root / "user_data" / "shared" / "frontend_settings.json"
+            settings_path.parent.mkdir(parents=True, exist_ok=True)
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "tools": {
+                            "selection_strategy": "semantic",
+                            "semantic_backend": "embedding",
+                            "semantic_candidate_limit": 128,
+                            "final_tool_limit": 99,
+                            "standard_permissions": {"search": "auto", "update": "auto", "delete": "auto"},
+                            "service_permission_overrides": {"github": {"update": "block"}},
+                            "tool_permission_overrides": {"web_search": "block"},
+                            "disabled_tool_ids": ["legacy_disabled_tool"],
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with patch("domain.frontend.registry.AIClient") as mock_client:
+                mock_client.return_value.list_models.return_value = [{"id": "stub/default"}]
+                values = FrontendRegistry(pack_root=pack_root).get_settings()["values"]
+
+        tools = values["tools"]
+        self.assertEqual(tools["settings_version"], 3)
+        self.assertEqual(tools["selection_strategy"], "vector")
+        self.assertEqual(tools["vector_backend"], "embedding")
+        self.assertEqual(tools["semantic_backend"], "embedding")
+        self.assertEqual(tools["vector_candidate_limit"], 64)
+        self.assertEqual(tools["semantic_candidate_limit"], 64)
+        self.assertEqual(tools["final_tool_limit"], 16)
+        self.assertEqual(tools["permission_defaults"]["read"], "auto")
+        self.assertEqual(tools["permission_defaults"]["write"], "auto")
+        self.assertEqual(tools["permission_defaults"]["destructive"], "confirm")
+        self.assertEqual(tools["standard_permissions"]["update"], "auto")
+        self.assertEqual(tools["standard_permissions"]["delete"], "confirm")
+        self.assertEqual(tools["service_permissions"]["github"]["write"], "block")
+        self.assertEqual(tools["service_permission_overrides"]["github"]["write"], "block")
+        self.assertEqual(tools["tool_permissions"]["web_search"], "block")
+        self.assertEqual(tools["tool_permissions"]["legacy_disabled_tool"], "block")
 
     def test_settings_migrates_legacy_selector_model_without_rewriting_tools_key(self):
         from domain.frontend.registry import FrontendRegistry

@@ -6,6 +6,7 @@ from domain.ai_client.model_call import call_model
 from domain.chat.tool_recommender import recommend_tool_ids
 from domain.chat.tool_selection_schema import ToolRecommendation, ToolSelectionResult
 from domain.tool.loading import split_tools_by_loading
+from domain.tool.service_catalog import ToolServiceCatalog
 
 
 class ToolSelectionOrchestrator:
@@ -72,7 +73,7 @@ class ToolSelectionOrchestrator:
             call_handler=self._call_handler,
         )
         output = model_call.get("output") if isinstance(model_call, dict) and isinstance(model_call.get("output"), dict) else {}
-        selected_ids = _selected_ids(output, candidate_ids[:limit])
+        selected_ids = _selected_ids(output, candidate_ids)
         recommendations = [
             ToolRecommendation(tool_id=tool_id, confidence=_confidence(output, tool_id), reason=_reason(output, tool_id))
             for tool_id in selected_ids[:limit]
@@ -97,11 +98,17 @@ def _tool_id(tool: dict[str, Any]) -> str:
 
 
 def _compact_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    record = ToolServiceCatalog.compact_record(tool)
     return {
         "tool_id": _tool_id(tool),
         "name": tool.get("name"),
         "summary": tool.get("summary") or tool.get("description"),
         "tags": tool.get("tags", []),
+        "service_id": record["service_id"],
+        "action_class": record["action_class"],
+        "risk": record["risk"],
+        "requires_explicit_intent": record["requires_explicit_intent"],
+        "permission": record["minimum_permission"],
     }
 
 
@@ -117,7 +124,7 @@ def _tool_selector_model_hint(settings: dict[str, Any] | None) -> str:
 
 
 def _tool_selector_required_capabilities(model_hint: str) -> list[str]:
-    return [] if str(model_hint or "").strip() else ["model.fast"]
+    return []
 
 
 def _selector_model_from_model_call(model_call: Any) -> str:
@@ -130,7 +137,9 @@ def _selector_model_from_model_call(model_call: Any) -> str:
     return str(routing.get("selected_model") or "").strip()
 
 
-def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
+def _selected_ids(output: Any, candidates: list[str]) -> list[str]:
+    fallback = list(candidates)
+    allowed = set(fallback)
     if not isinstance(output, dict):
         return fallback
     values = output.get("selected_tools")
@@ -144,7 +153,7 @@ def _selected_ids(output: Any, fallback: list[str]) -> list[str]:
             tool_id = str(item.get("tool_id") or item.get("id") or "").strip()
         else:
             tool_id = str(item or "").strip()
-        if tool_id and tool_id not in ids:
+        if tool_id and tool_id in allowed and tool_id not in ids:
             ids.append(tool_id)
     return ids or fallback
 

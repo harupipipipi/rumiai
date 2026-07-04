@@ -1830,7 +1830,7 @@ type ApiEnvelope<T> = ApiOk<T> | ApiError;
 
 export type ToolSelectionMode = "auto" | "review" | "manual" | "none";
 export type ToolSelectionScope = "turn" | "conversation";
-export type ToolSelectionStrategy = "hybrid" | "semantic" | "catalog_ai" | "all_with_hints" | "all_schemas" | "lexical";
+export type ToolSelectionStrategy = "hybrid" | "vector" | "catalog_ai" | "all_with_hints" | "all_schemas" | "manual_only";
 export type ToolTarget = { kind: "tool" | "service"; id: string };
 
 export type ToolSelectionRequest = {
@@ -1844,9 +1844,15 @@ export type ToolSelectionRequest = {
 };
 
 export type ToolCatalogService = {
+  id?: string;
   service_id: string;
   label: string;
+  description?: string;
   summary?: string;
+  icon?: string;
+  aliases?: string[];
+  tool_ids?: string[];
+  source?: string;
   connection_status?: string;
   tool_count?: number;
   action_classes?: string[];

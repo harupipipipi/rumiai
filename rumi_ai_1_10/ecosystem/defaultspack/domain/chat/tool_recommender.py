@@ -70,7 +70,7 @@ for group in _SYNONYM_GROUPS:
 def effective_tool_assist_mode(settings: dict[str, Any] | None = None, *, pack_root: Path | None = None) -> str:
     """Return the selected tool-assist mode.
 
-    The setting defaults to lexical auto-selection. Legacy "all" is treated as
+    The setting defaults to vector-backed auto-selection. Legacy "all" is treated as
     auto so enabling omitted-tools auto selection does not suddenly expose every
     registered tool. Use "all_schemas" only for explicit debug compatibility.
     """
