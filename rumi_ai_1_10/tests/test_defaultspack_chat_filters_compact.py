@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 
@@ -55,6 +56,35 @@ def test_chat_store_reassigns_stale_append_sequence_numbers(tmp_path, monkeypatc
     assert second["sequence_number"] == 2
     assert assistant["sequence_number"] == 3
     assert [message["sequence_number"] for message in store.get_conversation(conversation["id"])["messages"]] == [1, 2, 3]
+
+
+def test_chat_store_serializes_concurrent_stale_sequence_appends(tmp_path, monkeypatch):
+    store = _reset_chat_store(monkeypatch, tmp_path)
+    conversation = store.create_conversation(model="stub/default")
+    first = store.add_message(conversation["id"], {"role": "user", "content": "first"})
+    stale_sequence = first["sequence_number"] + 1
+
+    def append_assistant(index):
+        return store.add_message(
+            conversation["id"],
+            {
+                "role": "assistant",
+                "content": "parallel reply " + str(index),
+                "parent_id": first["id"],
+                "sequence_number": stale_sequence,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        appended = list(executor.map(append_assistant, range(16)))
+
+    stored = store.get_conversation(conversation["id"])["messages"]
+    sequences = [message["sequence_number"] for message in stored]
+
+    assert all(message is not None for message in appended)
+    assert sequences == list(range(1, 18))
+    assert len(sequences) == len(set(sequences))
+    assert sorted(message["sequence_number"] for message in appended) == list(range(2, 18))
 
 
 def test_chat_store_normalizes_duplicate_sequence_numbers_on_load(tmp_path, monkeypatch):
