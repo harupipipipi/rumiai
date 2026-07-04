@@ -67,6 +67,44 @@ class ArtifactStore:
         self._save_index(items)
         return item
 
+    def create_binary(
+        self,
+        artifact_type: str,
+        title: str,
+        content: bytes,
+        *,
+        path: str,
+        mime_type: str,
+        source_task: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Persist a binary artifact and add it to the artifact index."""
+        artifact_id = "artifact_" + str(uuid.uuid4())
+        content_path = self._artifact_path(path)
+        safe_name = str(content_path.relative_to(self.root.resolve()))
+        content_path.parent.mkdir(parents=True, exist_ok=True)
+        content_path.write_bytes(bytes(content))
+        item = {
+            "artifact_id": artifact_id,
+            "type": artifact_type,
+            "title": title,
+            "path": safe_name,
+            "content_ref": content_path.relative_to(self.pack_root).as_posix(),
+            "mime_type": mime_type,
+            "size": content_path.stat().st_size,
+            "created_by": "defaultspack",
+            "source_task": source_task,
+            "version": 1,
+            "created_at": _ts(),
+            "updated_at": _ts(),
+        }
+        if metadata:
+            item["metadata"] = dict(metadata)
+        items = self._load_index()
+        items.append(item)
+        self._save_index(items)
+        return item
+
     def list(self) -> List[Dict[str, Any]]:
         return self._load_index()
 
