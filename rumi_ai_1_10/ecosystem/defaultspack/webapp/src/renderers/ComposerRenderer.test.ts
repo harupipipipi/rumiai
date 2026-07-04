@@ -16,6 +16,7 @@ import {
   modelCandidateMenuKeyAction,
   modelCandidatePopupStyleForAnchor,
   nextModelCandidateIndex,
+  popoverAnchorRectIsUsable,
   profileNeedsApiKey,
   ComposerRenderer,
   composerToolMentionWidget,
@@ -242,6 +243,12 @@ test("model candidate popup stays inside the viewport when anchored near the lef
   );
 });
 
+test("composer popover anchors ignore hidden mobile controls", () => {
+  assert.equal(popoverAnchorRectIsUsable({ width: 0, height: 0 }), false);
+  assert.equal(popoverAnchorRectIsUsable({ width: 0, height: 22 }), true);
+  assert.equal(popoverAnchorRectIsUsable({ width: 320, height: 0 }), true);
+});
+
 test("model dropdown search supports @provider filters", () => {
   const profiles = [
     {
@@ -376,6 +383,7 @@ test("composer renders template-provided slash command suggestions", () => {
   assert.match(html, /Commands/);
   assert.match(html, /\/context-txt/);
   assert.match(html, /Write a context handoff file/);
+  assert.match(html, /class="[^"]*fixed rumi-layer-global-overlay/);
 });
 
 test("composer suppresses slash command suggestions when template disables slash commands", () => {

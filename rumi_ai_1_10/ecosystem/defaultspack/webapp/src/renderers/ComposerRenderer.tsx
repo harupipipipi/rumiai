@@ -1337,6 +1337,16 @@ export function modelCandidatePopupStyleForAnchor(
   };
 }
 
+export function popoverAnchorRectIsUsable(rect: Pick<DOMRect, "width" | "height"> | null | undefined): boolean {
+  if (!rect) return false;
+  return rect.width > 0 || rect.height > 0;
+}
+
+function usablePopoverAnchorRect(rect: DOMRect | undefined): DOMRect | null {
+  if (!popoverAnchorRectIsUsable(rect)) return null;
+  return rect;
+}
+
 function ModelCommandCandidatePopup({
   candidates,
   activeIndex,
@@ -1697,7 +1707,9 @@ export function ComposerRenderer({
   const updateComposerPopoverAnchor = useCallback(() => {
     if (typeof window === "undefined") return;
     const modelPickerNode = chromeWidgetNodeMapRef.current.get("model-picker");
-    const anchorRect = modelPickerNode?.getBoundingClientRect() ?? textareaRef.current?.getBoundingClientRect() ?? null;
+    const anchorRect = usablePopoverAnchorRect(modelPickerNode?.getBoundingClientRect())
+      ?? usablePopoverAnchorRect(textareaRef.current?.getBoundingClientRect())
+      ?? null;
     setComposerPopoverStyle(modelCandidatePopupStyleForAnchor(anchorRect, window.innerWidth));
   }, []);
 
@@ -1833,8 +1845,8 @@ export function ComposerRenderer({
     setOpenFolder("tools");
   }, [openFolder, templateAllowsSlashCommands]);
 
-  useEffect(() => {
-    if (!hasModelCommandCandidates) return;
+  useIsomorphicLayoutEffect(() => {
+    if (!hasModelCommandCandidates && !showCommandSuggestions && !atMentionOpen) return;
     updateComposerPopoverAnchor();
     window.addEventListener("resize", updateComposerPopoverAnchor);
     window.addEventListener("scroll", updateComposerPopoverAnchor, true);
@@ -1842,7 +1854,7 @@ export function ComposerRenderer({
       window.removeEventListener("resize", updateComposerPopoverAnchor);
       window.removeEventListener("scroll", updateComposerPopoverAnchor, true);
     };
-  }, [hasModelCommandCandidates, updateComposerPopoverAnchor]);
+  }, [atMentionOpen, hasModelCommandCandidates, showCommandSuggestions, updateComposerPopoverAnchor]);
 
   useEffect(() => {
     textareaRef.current?.focus({ preventScroll: true });
@@ -2580,7 +2592,10 @@ export function ComposerRenderer({
           )}
           {showCommandSuggestions && (
             showThinkingLevelChips ? (
-              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl">
+              <div
+                style={composerPopoverStyle}
+                className="fixed rumi-layer-global-overlay flex w-[min(520px,calc(100vw-32px))] flex-wrap items-center gap-2 rounded-xl border border-zinc-700/70 bg-zinc-950/95 px-3 py-2 shadow-2xl"
+              >
                 <span className="mr-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Thinking</span>
                 {matchedCommands.map((command, index) => {
                   const level = command.id.replace(/^think:/, "");
@@ -2603,7 +2618,10 @@ export function ComposerRenderer({
                 })}
               </div>
             ) : (
-              <div className="absolute bottom-full left-4 rumi-layer-global-overlay mb-2 w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl">
+              <div
+                style={composerPopoverStyle}
+                className="fixed rumi-layer-global-overlay w-[min(420px,calc(100vw-32px))] overflow-hidden rounded-xl border border-zinc-700/70 bg-zinc-950 shadow-2xl"
+              >
                 <div className="border-b border-zinc-800 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">
                   Commands
                 </div>
@@ -2649,6 +2667,7 @@ export function ComposerRenderer({
               onActiveIndexChange={setSelectedAtMentionIndex}
               onSelect={handleAtMentionSelect}
               onClose={() => setAtMentionOpen(false)}
+              style={composerPopoverStyle}
             />
           )}
 
