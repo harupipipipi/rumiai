@@ -22,7 +22,9 @@ import {
   filterComposerToolMentions,
   filterModelProfilesBySearch,
   resolveComposerWidgetDrop,
+  shouldDismissModelDropdownForSlashCommand,
   shouldFocusComposerForSlashKey,
+  shouldOpenModelDropdownForSlashCommand,
   toolMentionIdsFromText,
 } from "./ComposerRenderer";
 import { COMPOSER_BUTTON_DROP, COMPOSER_PANEL_DROP, COMPOSER_SELECTOR_DROP, COMPOSER_TOGGLE_DROP } from "../lib/toolUi";
@@ -200,6 +202,17 @@ test("model candidate menu keyboard helpers cycle and select", () => {
 test("new conversation model dropdown opens below and offset to the right", () => {
   assert.equal(modelDropdownPlacementClassName("below"), "top-full -right-44 mt-2 max-[900px]:right-0");
   assert.equal(modelDropdownPlacementClassName("above"), "bottom-full right-0 mb-2");
+});
+
+test("slash commands only keep model dropdown for bare model picker command", () => {
+  assert.equal(shouldOpenModelDropdownForSlashCommand("open_model_picker", false), true);
+  assert.equal(shouldDismissModelDropdownForSlashCommand("open_model_picker", false), false);
+  assert.equal(shouldOpenModelDropdownForSlashCommand("open_model_picker", true), false);
+  assert.equal(shouldDismissModelDropdownForSlashCommand("open_model_picker", true), true);
+  assert.equal(shouldOpenModelDropdownForSlashCommand("open_settings", false), false);
+  assert.equal(shouldDismissModelDropdownForSlashCommand("open_settings", false), true);
+  assert.equal(shouldOpenModelDropdownForSlashCommand("open_tool_picker", false), false);
+  assert.equal(shouldDismissModelDropdownForSlashCommand("open_tool_picker", false), true);
 });
 
 test("model picker width follows the compact model name only", () => {

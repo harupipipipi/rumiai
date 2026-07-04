@@ -926,6 +926,14 @@ export function modelDropdownPlacementClassName(placement: "above" | "below"): s
   return placement === "below" ? "top-full -right-44 mt-2 max-[900px]:right-0" : "bottom-full right-0 mb-2";
 }
 
+export function shouldOpenModelDropdownForSlashCommand(action: string, rawHasArgs: boolean): boolean {
+  return action === "open_model_picker" && !rawHasArgs;
+}
+
+export function shouldDismissModelDropdownForSlashCommand(action: string, rawHasArgs: boolean): boolean {
+  return action !== "open_model_picker" || rawHasArgs;
+}
+
 function ModelDropdown({
   profiles,
   selectedProfile,
@@ -1782,6 +1790,36 @@ export function ComposerRenderer({
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!modelDropdownOpen) return;
+
+    const closeModelDropdown = () => {
+      setModelDropdownOpen(false);
+      setOpenModelStatusId(null);
+    };
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const modelPickerNode = chromeWidgetNodeMapRef.current.get("model-picker");
+      if (modelPickerNode?.contains(target)) return;
+      closeModelDropdown();
+    };
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        closeModelDropdown();
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [modelDropdownOpen]);
+
+  useEffect(() => {
     setSelectedCommandIndex((current) => {
       if (matchedCommands.length === 0) return 0;
       return Math.min(current, matchedCommands.length - 1);
@@ -1890,15 +1928,21 @@ export function ComposerRenderer({
       window.setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
       return;
     }
-    if (action === "open_model_picker" && !rawHasArgs) {
+    if (shouldOpenModelDropdownForSlashCommand(action, rawHasArgs)) {
       setModelDropdownOpen(true);
       setMenuOpen(false);
-    } else if (action === "open_tool_picker" && !rawHasArgs) {
+    } else {
+      if (shouldDismissModelDropdownForSlashCommand(action, rawHasArgs)) {
+        setModelDropdownOpen(false);
+        setOpenModelStatusId(null);
+      }
+      if (action === "open_tool_picker" && !rawHasArgs) {
       setOpenFolder("tools");
       setMenuOpen(true);
-    } else if (action === "open_command_help") {
-      setOpenFolder("commands");
-      setMenuOpen(true);
+      } else if (action === "open_command_help") {
+        setOpenFolder("commands");
+        setMenuOpen(true);
+      }
     }
     onCommandSelect?.(commandId, rawInput);
     if (!(command?.id === "model" && rawHasArgs)) {
