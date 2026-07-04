@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AppWindow,
+  CalendarClock,
   CalendarDays,
   Code2,
   GalleryVerticalEnd,
@@ -17,7 +18,7 @@ import {
 import type { KanbanBoardScope, SidebarItem } from "../lib/api";
 import { cn } from "../lib/cn";
 
-export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "kanban" | "desktops" | "canvas" | "tools" | "browser";
+export type WorkspaceTabKind = "chat" | "coding" | "calendar" | "scheduled" | "kanban" | "desktops" | "canvas" | "tools" | "browser";
 
 export type WorkspaceTab = {
   id: string;
@@ -58,6 +59,12 @@ export const WORKSPACE_TAB_CREATE_OPTIONS: WorkspaceTabCreateOption[] = [
     label: "Calendar",
     description: "Schedule board",
     icon: CalendarDays,
+  },
+  {
+    kind: "scheduled",
+    label: "予定済み",
+    description: "Scheduled task manager",
+    icon: CalendarClock,
   },
   {
     kind: "kanban",
