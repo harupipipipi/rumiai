@@ -549,7 +549,7 @@ _BEST_MODEL_BY_PROVIDER = {
 
 def _list_provider_manifests() -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry(force_reload=False)
         return registry.llm().providers(enabled_only=True)
     except Exception:
         return []
@@ -557,7 +557,7 @@ def _list_provider_manifests() -> List[Dict[str, Any]]:
 
 def _load_model_manifests(provider_id: str = "") -> List[Dict[str, Any]]:
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry(force_reload=False)
         return registry.llm().models(provider_id=provider_id, enabled_only=True)
     except Exception:
         return []
@@ -576,7 +576,7 @@ def _model_ref_matches(provider_id: str, model_ref: str, model: Dict[str, Any]) 
 def validate_provider_catalog_coverage(registry: Any = None) -> List[Dict[str, Any]]:
     """Validate provider/model manifest coverage for extension-backed catalogs."""
     try:
-        active_registry = registry or get_extension_registry(force_reload=True)
+        active_registry = registry or get_extension_registry(force_reload=False)
         llm_registry = active_registry.llm()
         providers = llm_registry.providers(enabled_only=True)
         models = llm_registry.models(enabled_only=True)
@@ -1417,7 +1417,7 @@ def detect_rumi_provider(client):
 def get_best_model_for_provider(name, use_case="chat"):
     """Return the preferred default model id for the provider."""
     try:
-        registry = get_extension_registry(force_reload=True)
+        registry = get_extension_registry(force_reload=False)
         best = registry.llm().best_model(name, use_case=use_case)
         if best is not None:
             return str(best.get("model_id", ""))
