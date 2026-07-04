@@ -58,6 +58,10 @@ function smokeConversation() {
         widget: null,
         model: "stub/default",
         metadata: {
+          thinking: {
+            state: "completed",
+            transcript: "internal OpenCode reasoning trace should stay hidden",
+          },
           timing: {
             thinking_started_at: now - 15_000,
             completed_at: now - 10_000,
@@ -808,6 +812,16 @@ test("tool hub search suggestions close on outside click while keeping filtered 
 
   await page.getByRole("button", { name: "表示中を今回使う" }).click();
   await expect(page.locator(".rumi-composer-frame")).toContainText("Web Search");
+});
+
+test("chat hides reasoning traces while preserving assistant text and tool output", async ({ page }) => {
+  await openDefaultspack(page);
+
+  await expect(page.getByText("Preview smoke response with tool timeline")).toBeVisible();
+  await expect(page.getByText("internal OpenCode reasoning trace should stay hidden")).toHaveCount(0);
+
+  await page.getByRole("button", { name: /作業状況/ }).click();
+  await expect(page.getByText("Listed 2 files")).toBeVisible();
 });
 
 test("composer approval menu opens action permissions while selection modes live in settings", async ({ page }) => {

@@ -366,6 +366,34 @@ test("assistant reasoning trace metadata is hidden from normal chat UI", () => {
   assert.doesNotMatch(html, /I will plan the answer/);
 });
 
+test("assistant reasoning trace metadata does not hide normal code output", () => {
+  const html = renderToStaticMarkup(createElement(ChatMessagesRenderer, {
+    error: null,
+    isMessagesRegionVisible: true,
+    isLoading: false,
+    isNewConversation: false,
+    isGenerating: false,
+    messages: [message({
+      id: "assistant-with-code-output-and-trace",
+      rawText: "",
+      content: [{ type: "code", text: "Trace: user-facing tool output\nOK" }],
+      metadata: {
+        thinkingLabel: "completed",
+        thinkingTranscript: "internal OpenCode reasoning trace",
+      },
+    })],
+    messagesEndRef: { current: null },
+    unknownBlockStrategy: "hidden",
+    showActivityInMessages: true,
+    showWidgets: true,
+    onSuggestionClick: () => undefined,
+  }));
+
+  assert.match(html, /Trace: user-facing tool output/);
+  assert.match(html, /OK/);
+  assert.doesNotMatch(html, /internal OpenCode reasoning trace/);
+});
+
 test("long terminal-style output is detected for compact display", () => {
   const logText = JSON.stringify({
     tool_name: "coding_terminal_exec",
