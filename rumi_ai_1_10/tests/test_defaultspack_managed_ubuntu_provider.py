@@ -514,6 +514,33 @@ def test_windows_wsl_guest_shell_preserves_guest_variable_expansion(monkeypatch)
     assert "\\$@" not in script
 
 
+def test_windows_wsl_provider_detects_existing_distribution_from_nul_bom_output(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system",
+        lambda: "Windows",
+    )
+    fake = FakeManagedUbuntuCli(mode="wsl", runtime_name=DEFAULT_WSL_RUNTIME_NAME)
+    fake.deps_installed = True
+    ubuntu = "\x00".join("Ubuntu") + "\x00"
+    rumi = "\x00".join(DEFAULT_WSL_RUNTIME_NAME) + "\x00"
+    fake.wsl_list_stdout = f"\ufeff{ubuntu}\r\x00\n\x00\xff\xfe{rumi}\r\x00\n\x00"
+    provider = WindowsWslProvider(command_path="C:/Windows/System32/wsl.exe", runner=fake)
+
+    ensured = provider.ensure(
+        EnsureRuntimeRequest(
+            provider_id="windows_wsl",
+            requirements=RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})),
+        ),
+        NullProgressSink(),
+    )
+    status = provider.doctor(RuntimeRequirements(required_capabilities=frozenset({"sandbox.exec"})))
+
+    assert ensured.ok is True
+    assert status.ready is True
+    assert "managed_guest" not in status.missing_requirements
+    assert fake.imported_rootfs_path is None
+
+
 def test_managed_ubuntu_exec_defaults_to_instance_workspace_and_clean_env(monkeypatch) -> None:
     monkeypatch.setattr("ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu.platform.system", lambda: "Darwin")
     fake = FakeManagedUbuntuCli(mode="lima", runtime_name="rumi-managed-runtime")
