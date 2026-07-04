@@ -10,6 +10,7 @@ import {
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
   frontendCommandArgs,
+  formatStatusSlashCommandResult,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
   parseSlashCommandInput,
@@ -283,6 +284,28 @@ test("frontend boolean command parsing handles explicit false strings", () => {
   assert.equal(parseCommandBoolean("0", true), false);
   assert.equal(parseCommandBoolean("off", true), false);
   assert.equal(parseCommandBoolean(undefined, true), true);
+});
+
+test("status slash command result includes model mode tools and context", () => {
+  const message = formatStatusSlashCommandResult({
+    mode: "coding",
+    model: "Mimo Coding",
+    thinking: "medium",
+    deepthink: false,
+    yolo: false,
+    ultraYolo: false,
+    selectedToolCount: 2,
+    availableToolCount: 12,
+    contextLabel: "5%",
+    usedTokens: 6400,
+    maxContext: 128000,
+  });
+
+  assert.match(message, /^status:/);
+  assert.match(message, /model: Mimo Coding/);
+  assert.match(message, /mode: coding/);
+  assert.match(message, /tools: 2 selected \/ 12 available/);
+  assert.match(message, /context: 6400 \/ 128000 tokens \(5%\)/);
 });
 
 test("slash command parsing supports multi-word aliases without treating them as args", () => {

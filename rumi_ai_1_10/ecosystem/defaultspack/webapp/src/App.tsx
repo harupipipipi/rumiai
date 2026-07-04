@@ -2252,6 +2252,47 @@ export function resolvedFrontendCommandArgs(
     : frontendCommandArgs(parsedArgs, backendArgs);
 }
 
+export function formatStatusSlashCommandResult({
+  mode,
+  model,
+  thinking,
+  deepthink,
+  yolo,
+  ultraYolo,
+  selectedToolCount,
+  availableToolCount,
+  contextLabel,
+  usedTokens,
+  maxContext,
+}: {
+  mode: AppMode;
+  model: string;
+  thinking: string | null;
+  deepthink: boolean;
+  yolo: boolean;
+  ultraYolo: boolean;
+  selectedToolCount: number;
+  availableToolCount: number;
+  contextLabel: string;
+  usedTokens: number;
+  maxContext: number;
+}): string {
+  const contextLimit = maxContext < 0 ? "unlimited" : maxContext > 0 ? String(maxContext) : "unknown";
+  const tools = selectedToolCount > 0
+    ? `${selectedToolCount} selected / ${availableToolCount} available`
+    : `none selected / ${availableToolCount} available`;
+  return [
+    "status:",
+    `model: ${model || "unknown"}`,
+    `mode: ${mode}`,
+    `tools: ${tools}`,
+    `context: ${usedTokens} / ${contextLimit} tokens (${contextLabel || "unknown"})`,
+    `thinking: ${thinking ?? "unsupported"}`,
+    `deepthink: ${deepthink ? "on" : "off"}`,
+    `approvals: yolo=${yolo ? "on" : "off"}, ultra_yolo=${ultraYolo ? "on" : "off"}`,
+  ].join("\n");
+}
+
 type UltraYoloModeState = {
   yoloMode: boolean;
   ultraYoloMode: boolean;
@@ -2350,6 +2391,7 @@ function ChatApp() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [composerCommandNotice, setComposerCommandNotice] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useLocalStorage("rumi-show-preview", false);
   const [showPromptUsageInMessages, setShowPromptUsageInMessages] = useLocalStorage("rumi-show-prompt-usage-in-messages", true);
   const [workspaceTabs, setWorkspaceTabs] = useState<WorkspaceTab[]>(() => initialWorkspaceTabsForPathname(window.location.pathname));
@@ -3973,9 +4015,19 @@ function ChatApp() {
         return;
       }
       case "show_status":
-        setError(
-          `status: mode=${mode}, model=${activeProfile?.display_name ?? preferredModel}, thinking=${selectedThinkingLevel}, deepthink=${deepthinkEnabled ? "on" : "off"}, yolo=${yoloMode ? "on" : "off"}, ultra_yolo=${ultraYoloMode ? "on" : "off"}, tools=${selectedTools.length}`,
-        );
+        setComposerCommandNotice(formatStatusSlashCommandResult({
+          mode,
+          model: activeProfile?.display_name ?? preferredModel,
+          thinking: activeProfile?.supports_thinking ? selectedThinkingLevel : null,
+          deepthink: deepthinkEnabled,
+          yolo: yoloMode,
+          ultraYolo: ultraYoloMode,
+          selectedToolCount: selectedTools.length,
+          availableToolCount: composerExtensions.length,
+          contextLabel: contextUsage.label,
+          usedTokens: contextUsage.usedTokens,
+          maxContext: contextUsage.maxContext,
+        }));
         return;
       case "open_settings":
       case "open_permissions":
@@ -4043,6 +4095,9 @@ function ChatApp() {
     }
     try {
       setError(null);
+      if (parsed.command.execution.type !== "frontend" || parsed.command.execution.action !== "show_status") {
+        setComposerCommandNotice(null);
+      }
       if (isRegisteredSlashCommand(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
@@ -5567,6 +5622,7 @@ function ChatApp() {
       actionApprovalMode={actionApprovalMode}
       toolSelectionTargets={toolSelectionController.state.overrideChips}
       toolSelectionReview={toolSelectionController.state.pendingReview}
+      commandNotice={composerCommandNotice}
       keyboardButtonNavigation={keyboardButtonNavigation}
       steerStatus={modelSteerStatus}
       steerBusy={modelSteerBusy}

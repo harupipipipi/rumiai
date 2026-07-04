@@ -1443,6 +1443,7 @@ export function ComposerRenderer({
   actionApprovalMode = "ask",
   toolSelectionTargets = [],
   toolSelectionReview = null,
+  commandNotice = null,
   keyboardButtonNavigation = false,
   steerStatus = null,
   steerBusy = false,
@@ -2965,6 +2966,16 @@ export function ComposerRenderer({
                   {item}
                 </span>
               ))}
+            </div>
+          )}
+
+          {!isSteerMode && commandNotice && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`${isNewConversation ? "mx-5 mt-2" : "mx-5 mt-1.5 max-[640px]:mx-3"} whitespace-pre-wrap rounded-xl border border-cyan-400/20 bg-cyan-400/10 px-3 py-2 font-mono text-[11px] leading-5 text-cyan-100 shadow-sm shadow-cyan-950/20`}
+            >
+              {commandNotice}
             </div>
           )}
 

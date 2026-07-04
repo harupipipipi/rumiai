@@ -180,6 +180,7 @@ export type ComposerRendererProps = {
   actionApprovalMode?: ActionApprovalMode;
   toolSelectionTargets?: ToolSelectionChip[];
   toolSelectionReview?: PendingToolReview | null;
+  commandNotice?: string | null;
   keyboardButtonNavigation?: boolean;
   steerStatus?: string | null;
   steerBusy?: boolean;

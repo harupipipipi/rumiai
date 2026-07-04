@@ -425,6 +425,39 @@ test("composer suppresses slash command suggestions when template disables slash
   assert.doesNotMatch(html, /Write a context handoff file/);
 });
 
+test("composer renders slash command status notice visibly", () => {
+  const html = renderToStaticMarkup(
+    createElement(ComposerRenderer, {
+      input: "",
+      placeholder: "メッセージを入力...",
+      isGenerating: false,
+      selectedProfile: {
+        profile_id: "stub/default",
+        display_name: "Stub Default",
+        provider_id: "stub",
+        model_id: "default",
+      },
+      favoriteProfiles: [],
+      inlineExtensions: [],
+      belowExtensions: [],
+      thinkingLevel: null,
+      contextUsage: { ratio: 0.05, usedTokens: 6400, maxContext: 128000, label: "5%" },
+      commandNotice: "status:\nmodel: Stub Default\nmode: coding\ntools: none selected / 0 available\ncontext: 6400 / 128000 tokens (5%)",
+      onInputChange: () => undefined,
+      onSubmit: () => undefined,
+      onModelProfileSelect: () => undefined,
+      onThinkingLevelChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /role="status"/);
+  assert.match(html, /status:/);
+  assert.match(html, /model: Stub Default/);
+  assert.match(html, /mode: coding/);
+  assert.match(html, /tools: none selected \/ 0 available/);
+  assert.match(html, /context: 6400 \/ 128000 tokens \(5%\)/);
+});
+
 test("composer input template metadata changes safe input copy without replacing the component", () => {
   const html = renderToStaticMarkup(
     createElement(ComposerRenderer, {
