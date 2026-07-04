@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import sys
 import tarfile
 from collections.abc import Sequence
 
@@ -30,9 +31,11 @@ from ecosystem.defaultspack.backend.sandbox.providers.managed_ubuntu import (
     DEFAULT_WSL_RUNTIME_NAME,
     GuestCommandResult,
     MANAGED_UBUNTU_CAPABILITIES,
+    ManagedUbuntuGuestAgent,
     MacLimaProvider,
     WSL_ROOTFS_ENV,
     WindowsWslProvider,
+    _subprocess_runner,
 )
 
 
@@ -312,6 +315,34 @@ def test_mac_lima_provider_ensure_and_guest_desktop_flow(monkeypatch) -> None:
     assert any("xterm -title 'Rumi Desktop'" in script for script in fake.guest_scripts)
     assert fake.command_containing("shell", "rumi-managed-runtime", "--", "echo", "hello")[-2:] == ["echo", "hello"]
     assert started.opaque_state["guest_workspace"].startswith("/workspace/mac_lima-")
+
+
+def test_managed_ubuntu_frame_capture_tolerates_non_utf8_guest_stderr() -> None:
+    shim = (
+        "import base64, os, sys\n"
+        "if sys.argv[1:4] != ['env', 'DISPLAY=:98', 'bash']:\n"
+        "    raise SystemExit(2)\n"
+        "os.write(2, b'import warning: \\xff\\xfe\\n')\n"
+        "os.write(1, base64.b64encode(b'png'))\n"
+    )
+    agent = ManagedUbuntuGuestAgent(
+        provider_id="windows_wsl",
+        provider_instance_id="windows_wsl-test",
+        command_path=sys.executable,
+        command_prefix=(sys.executable, "-c", shim),
+        runner=_subprocess_runner,
+        workspace_dir="/workspace/windows_wsl-test",
+        display=DEFAULT_DISPLAY,
+        width=800,
+        height=600,
+    )
+
+    frame = agent.capture_frame("sandbox-1", "seat-1")
+
+    assert frame["ok"] is True
+    assert frame["data"] == b"png"
+    assert frame["content_type"] == "image/png"
+    assert frame["source"] == "windows_wsl"
 
 
 def test_managed_ubuntu_guest_agent_rejects_exec_cwd_before_guest_command(monkeypatch) -> None:

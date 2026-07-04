@@ -2132,6 +2132,22 @@ def test_runtime_operation_cancel_preserves_cancelled_status_after_worker_finish
     assert [event["stage"] for event in final["data"]["progress_events"]] == ["packages"]
 
 
+def test_run_cancellable_subprocess_decodes_non_utf8_output_with_replacement() -> None:
+    from ecosystem.defaultspack.backend.sandbox.cancellation import run_cancellable_subprocess
+
+    script = (
+        "import os\n"
+        "os.write(1, b'frame\\xffstdout')\n"
+        "os.write(2, b'frame\\xfestderr')\n"
+    )
+
+    completed = run_cancellable_subprocess((sys.executable, "-c", script), timeout=5)
+
+    assert completed.returncode == 0
+    assert completed.stdout == "frame\ufffdstdout"
+    assert completed.stderr == "frame\ufffdstderr"
+
+
 def test_runtime_operation_cancel_terminates_active_subprocess(tmp_path) -> None:
     from ecosystem.defaultspack.blocks.sandbox import api
     from ecosystem.defaultspack.backend.sandbox.cancellation import (
