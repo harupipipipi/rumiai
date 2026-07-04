@@ -890,6 +890,12 @@
     },
     {
       "method": "GET",
+      "path": "/calendar",
+      "flow_id": "transport_direct",
+      "description": "Render the Defaultspack calendar shell route"
+    },
+    {
+      "method": "GET",
       "path": "/defaultspack",
       "flow_id": "transport_direct",
       "description": "Render the Defaultspack chat shell alias"
