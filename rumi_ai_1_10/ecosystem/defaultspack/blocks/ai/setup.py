@@ -51,6 +51,7 @@ def run(context):
         ("GET", "/api/ai/oauth", _lazy("blocks.ai.oauth"), {}),
         ("POST", "/api/ai/oauth", _lazy("blocks.ai.oauth"), {}),
         ("GET", "/api/ai/oauth/{provider_id}/callback", _lazy("blocks.ai.oauth"), {"provider_id": "provider_id"}),
+        ("GET", "/api/dashboard/health", _lazy("blocks.ai.dashboard_health"), {}),
         # --- Routing: analyze ---
         ("POST", "/api/ai/routing/analyze", _lazy("blocks.ai.routing.analyze"), {}),
         # --- Routing: route ---
