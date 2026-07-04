@@ -8,6 +8,7 @@ export type DesktopDensity = "comfortable" | "dense";
 type DesktopToolbarProps = {
   totalCount: number;
   runningCount: number;
+  countsPending?: boolean;
   filter: DesktopFilter;
   density: DesktopDensity;
   doctorLoading?: boolean;
@@ -28,6 +29,7 @@ function segmentedButtonClassName(active: boolean) {
 export function DesktopToolbar({
   totalCount,
   runningCount,
+  countsPending = false,
   filter,
   density,
   doctorLoading = false,
@@ -43,10 +45,12 @@ export function DesktopToolbar({
         <div className="flex items-center gap-2">
           <h1 className="truncate text-[15px] font-semibold text-zinc-100">Desktops</h1>
           <span className="rounded-md border border-emerald-500/20 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-200">
-            {runningCount} running
+            {countsPending ? "Checking running" : `${runningCount} running`}
           </span>
         </div>
-        <p className="mt-0.5 truncate text-[11px] text-zinc-500">{totalCount} seats · Live snapshots</p>
+        <p className="mt-0.5 truncate text-[11px] text-zinc-500">
+          {countsPending ? "Loading seats" : `${totalCount} seats`} · Live snapshots
+        </p>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">

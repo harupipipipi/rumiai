@@ -29,6 +29,16 @@ export function shouldShowDesktopList({
   return runtimeReady || desktopCount > 0 || loading || Boolean(error);
 }
 
+export function isDesktopBootstrapPending({
+  desktopCount,
+  loading,
+}: {
+  desktopCount: number;
+  loading: boolean;
+}) {
+  return loading && desktopCount === 0;
+}
+
 export function resolveVisibleSelectedDesktop(
   visibleDesktops: DesktopInstance[],
   selectedSeatId: string | null,
@@ -294,12 +304,17 @@ export function DesktopMonitorWorkspace() {
     loading: desktopInstances.loading,
     error: desktopInstances.error,
   });
+  const desktopBootstrapPending = isDesktopBootstrapPending({
+    desktopCount: desktopInstances.desktops.length,
+    loading: desktopInstances.loading,
+  });
 
   return (
     <section className="relative flex h-full min-h-0 flex-1 flex-col bg-[#09090b] text-zinc-300" aria-label="Desktops workspace">
       <DesktopToolbar
         totalCount={desktopInstances.desktops.length}
         runningCount={runningCount}
+        countsPending={desktopBootstrapPending}
         filter={filter}
         density={density}
         doctorLoading={runtime.doctorLoading}
@@ -344,6 +359,7 @@ export function DesktopMonitorWorkspace() {
               />
               <DesktopInspector
                 desktop={selectedDesktop}
+                loading={desktopBootstrapPending}
                 hasLease={Boolean(control.lease)}
                 accessKey={selectedDesktop ? accessKeys[selectedDesktop.seat_id] || "" : ""}
                 leaseError={control.error}

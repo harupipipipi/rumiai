@@ -4,8 +4,15 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import type { DesktopInstance } from "../../features/sandboxes/types";
-import { resolveVisibleSelectedDesktop, resolveVisibleSelectedSeatId, shouldShowDesktopList } from "./DesktopMonitorWorkspace";
+import {
+  isDesktopBootstrapPending,
+  resolveVisibleSelectedDesktop,
+  resolveVisibleSelectedSeatId,
+  shouldShowDesktopList,
+} from "./DesktopMonitorWorkspace";
 import { DesktopGrid } from "./DesktopGrid";
+import { DesktopInspector } from "./DesktopInspector";
+import { DesktopToolbar } from "./DesktopToolbar";
 
 const noop = () => undefined;
 
@@ -88,6 +95,47 @@ test("desktop workspace keeps existing seats visible while runtime setup is degr
     desktopCount: 0,
     loading: false,
   }), false);
+});
+
+test("desktop workspace treats initial empty loading as bootstrap pending", () => {
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 0, loading: true }), true);
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 1, loading: true }), false);
+  assert.equal(isDesktopBootstrapPending({ desktopCount: 0, loading: false }), false);
+});
+
+test("desktop toolbar avoids definitive zero counts during bootstrap", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopToolbar, {
+      totalCount: 0,
+      runningCount: 0,
+      countsPending: true,
+      filter: "all",
+      density: "comfortable",
+      canCreate: false,
+      onFilterChange: noop,
+      onDensityChange: noop,
+      onCreate: noop,
+      onDoctor: noop,
+    }),
+  );
+
+  assert.match(html, /Checking running/);
+  assert.match(html, /Loading seats/);
+  assert.doesNotMatch(html, /0 running/);
+  assert.doesNotMatch(html, /0 seats/);
+});
+
+test("desktop inspector avoids no-selection empty state during bootstrap", () => {
+  const html = renderToStaticMarkup(
+    createElement(DesktopInspector, {
+      desktop: null,
+      loading: true,
+      hasLease: false,
+    }),
+  );
+
+  assert.match(html, /Loading desktop status/);
+  assert.doesNotMatch(html, /No desktop selected/);
 });
 
 test("desktop workspace resolves selection from visible desktops", () => {

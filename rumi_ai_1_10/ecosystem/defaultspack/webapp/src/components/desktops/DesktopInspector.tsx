@@ -6,6 +6,7 @@ import type { DesktopInstance, RuntimeIsolationFacts } from "../../features/sand
 
 type DesktopInspectorProps = {
   desktop: DesktopInstance | null;
+  loading?: boolean;
   hasLease: boolean;
   accessKey?: string;
   leaseError?: string | null;
@@ -71,6 +72,7 @@ function desktopRole(desktop: DesktopInstance): string | null {
 
 export function DesktopInspector({
   desktop,
+  loading = false,
   hasLease,
   accessKey = "",
   leaseError,
@@ -102,9 +104,15 @@ export function DesktopInspector({
   if (!desktop) {
     return (
       <aside className="rounded-lg border border-zinc-800/70 bg-[#0a0a0c] p-4">
-        <Monitor size={22} className="text-zinc-600" />
-        <p className="mt-3 text-sm font-semibold text-zinc-200">No desktop selected</p>
-        <p className="mt-1 text-xs text-zinc-500">Desktop status and isolation facts appear after the backend returns a seat.</p>
+        <Monitor size={22} className={cn("text-zinc-600", loading && "animate-pulse text-emerald-300")} />
+        <p className="mt-3 text-sm font-semibold text-zinc-200">
+          {loading ? "Loading desktop status" : "No desktop selected"}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {loading
+            ? "Checking the live desktop list before showing an empty state."
+            : "Desktop status and isolation facts appear after the backend returns a seat."}
+        </p>
       </aside>
     );
   }
