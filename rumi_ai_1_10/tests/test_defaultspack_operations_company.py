@@ -1014,6 +1014,114 @@ def test_mimo_coding_company_rebootstrap_refreshes_existing_schedule_messages(tm
     _reset_defaultspack_singletons()
 
 
+def test_mimo_coding_company_rebootstrap_pauses_state_external_duplicate_loop(tmp_path, monkeypatch):
+    from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
+        SCHEDULE_LOOP_KEYS,
+        MimoCodingCompanyRuntime,
+    )
+    from domain.agent.schedule_store import append_history, load_history
+    from domain.agent.scheduler import Scheduler
+
+    _reset_defaultspack_singletons()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(tmp_path / "chat" / "conversations.json"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_COMPANY_STORE_PATH", str(tmp_path / "companies"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_AGENT_SCHEDULES_DIR", str(tmp_path / "schedules"))
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_MIMO_CODING_STATE_PATH", str(tmp_path / "mimo" / "state.json"))
+
+    runtime = MimoCodingCompanyRuntime(pack_root=tmp_path / "ops_pack")
+    first = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3000"],
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    first_by_loop = {
+        schedule["task"]["metadata"]["loop_key"]: schedule
+        for schedule in first["schedules"]
+    }
+    duplicate_qa = Scheduler().create_schedule(
+        "interval",
+        {
+            "message": "Stale duplicate QA loop should not keep firing.",
+            "model": "opencode-go/mimo-v2.5",
+            "conversation_id": first["conversation_id"],
+            "profile_id": "defaultspack.mimo_coding_company",
+            "agent_id": "browser_qa",
+            "tools": ["rumi_api", "todo", "browser_use"],
+            "metadata": {
+                "profile_id": "defaultspack.mimo_coding_company",
+                "company_id": "mimo-coding-company",
+                "conversation_id": first["conversation_id"],
+                "loop_key": "qa_loop",
+            },
+        },
+        {"value": 5, "unit": "minutes"},
+        name="MiMo Coding Company qa loop stale duplicate",
+    )
+    append_history(
+        duplicate_qa["id"],
+        {
+            "schedule_id": duplicate_qa["id"],
+            "execution_id": "exec-stale-duplicate-qa",
+            "trigger": "scheduled",
+            "status": "completed",
+            "started_at": "2026-06-28T23:50:00Z",
+            "completed_at": "2026-06-28T23:50:08Z",
+            "result": "stale duplicate history must be preserved",
+        },
+    )
+
+    second = runtime.bootstrap(
+        start_nonstop=True,
+        heartbeat_minutes=30,
+        review_interval_minutes=180,
+        qa_interval_minutes=240,
+        model="stub/default",
+        vision_model="stub/default",
+        fast_model="stub/default",
+        qa_targets=["http://127.0.0.1:3001"],
+        docker_enabled=False,
+        seed_knowledge=False,
+        run_initial_review_now=False,
+    )
+    second_by_loop = {
+        schedule["task"]["metadata"]["loop_key"]: schedule
+        for schedule in second["schedules"]
+    }
+    active_by_loop: dict[str, list[str]] = {loop_key: [] for loop_key in SCHEDULE_LOOP_KEYS}
+    for schedule in Scheduler().list_schedules():
+        task = schedule.get("task") if isinstance(schedule.get("task"), dict) else {}
+        metadata = task.get("metadata") if isinstance(task.get("metadata"), dict) else {}
+        if metadata.get("profile_id") != "defaultspack.mimo_coding_company":
+            continue
+        if metadata.get("company_id") != "mimo-coding-company":
+            continue
+        loop_key = str(metadata.get("loop_key") or "")
+        if loop_key in active_by_loop and schedule.get("status") == "active":
+            active_by_loop[loop_key].append(schedule["id"])
+
+    assert second_by_loop["qa_loop"]["id"] == first_by_loop["qa_loop"]["id"]
+    assert Scheduler().get_schedule(duplicate_qa["id"])["status"] == "paused"
+    assert active_by_loop["qa_loop"] == [second_by_loop["qa_loop"]["id"]]
+    assert all(len(schedule_ids) <= 1 for schedule_ids in active_by_loop.values())
+    entries, total = load_history(duplicate_qa["id"])
+    assert total == 1
+    assert entries[0]["execution_id"] == "exec-stale-duplicate-qa"
+
+    for schedule in second["schedules"]:
+        Scheduler().delete_schedule(schedule["id"])
+    Scheduler().delete_schedule(duplicate_qa["id"])
+    _reset_defaultspack_singletons()
+
+
 def test_mimo_coding_company_rebootstrap_recovers_running_qa_after_chat_target_refresh(tmp_path, monkeypatch):
     from ecosystem.rumi_operations_company_pack.domain.agent.mimo_coding_company import (
         MimoCodingCompanyRuntime,
