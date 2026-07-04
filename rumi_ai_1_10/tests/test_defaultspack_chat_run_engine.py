@@ -95,6 +95,66 @@ def test_chat_run_engine_has_no_default_four_tool_call_limit(tmp_path, monkeypat
     ChatStore._instance = None
 
 
+def test_chat_persist_turn_interleaved_existing_user_final_uses_current_stored_tail(tmp_path, monkeypatch):
+    import blocks.chat.persist_turn as persist_turn_module
+    from domain.chat.store import ChatStore
+
+    storage_path = tmp_path / "user_data" / "shared" / "chat" / "conversations.json"
+    monkeypatch.setenv("RUMI_DEFAULTSPACK_CHAT_STORE_PATH", str(storage_path))
+    monkeypatch.setattr(persist_turn_module, "sync_conversation_kanban", lambda *args, **kwargs: None)
+    ChatStore._instance = None
+
+    store = ChatStore()
+    conversation = store.create_conversation(model="stub/default")
+    first_user = store.add_message(
+        conversation["id"],
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "first scheduled run"}],
+        },
+    )
+
+    second_result = persist_turn_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {"role": "user", "content": "second scheduled run"},
+            "ai_response": {
+                "content": [{"type": "text", "text": "second reply"}],
+                "finish_reason": "stop",
+                "usage": {},
+            },
+        },
+        {},
+    )
+    first_result = persist_turn_module.run(
+        {
+            "conversation_id": conversation["id"],
+            "message": {
+                "id": first_user["id"],
+                "role": "user",
+                "content": "first scheduled run",
+            },
+            "ai_response": {
+                "content": [{"type": "text", "text": "first reply"}],
+                "finish_reason": "stop",
+                "usage": {},
+            },
+        },
+        {},
+    )
+
+    stored = store.get_conversation(conversation["id"])
+    sequences = [message["sequence_number"] for message in stored["messages"]]
+
+    assert second_result["status"] == "ok"
+    assert first_result["status"] == "ok"
+    assert sequences == [1, 2, 3, 4]
+    assert len(set(sequences)) == len(sequences)
+    assert second_result["data"]["assistant_message"]["sequence_number"] == 3
+    assert first_result["data"]["assistant_message"]["sequence_number"] == 4
+    ChatStore._instance = None
+
+
 def test_send_and_stream_wrappers_consume_same_engine_final_message(tmp_path, monkeypatch):
     from domain.chat.store import ChatStore
     from blocks.chat.send import run as send_run
