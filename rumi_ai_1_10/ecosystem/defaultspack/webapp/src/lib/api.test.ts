@@ -9,6 +9,8 @@ import {
   MIMO_CODING_DEFAULT_FAST_MODEL,
   MIMO_CODING_DEFAULT_MODEL,
   MIMO_CODING_DEFAULT_VISION_MODEL,
+  FILE_SEARCH_QUERY_REQUIRED_MESSAGE,
+  fileSearchPromptForQuery,
   frontendCommandArgs,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
@@ -323,6 +325,12 @@ test("slash command parsing can be disabled by template feature flags", () => {
 
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands, { enabled: false }), null);
   assert.equal(parseSlashCommandInput("/context-txt handoff", commands)?.command.id, "context_txt");
+});
+
+test("file search command prompts for query or actionable feedback", () => {
+  assert.equal(fileSearchPromptForQuery(" README "), "Find workspace files matching README.");
+  assert.equal(fileSearchPromptForQuery(""), null);
+  assert.match(FILE_SEARCH_QUERY_REQUIRED_MESSAGE, /\/files README/);
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {
