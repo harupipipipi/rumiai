@@ -421,6 +421,70 @@ def test_sandbox_api_function_route_uses_in_process_block_for_runtime_operations
     assert legacy.call_args.args[2]["_defaultspack_http_route_adapter"] is True
 
 
+def test_registry_sandbox_api_function_route_uses_in_process_block():
+    from transport import http
+    from transport.http import DefaultsHttpServer
+
+    class Facade:
+        def get_interface(self, key, strategy=None):
+            if key != "io.http.route":
+                return None
+            return [
+                {
+                    "method": "POST",
+                    "pattern": "/api/runtime/ensure",
+                    "function_id": "managed_runtime_ensure",
+                    "block_module": "blocks.sandbox.api",
+                    "default_args": {"_handler": "runtime_ensure"},
+                    "sensitive": True,
+                    "local_only": True,
+                }
+            ]
+
+    server = DefaultsHttpServer(Facade())
+    server._build_context = lambda: {"request_id": "req-1"}
+    handler, params, source, path_inject, route_pattern = server._match_route(
+        "POST",
+        "/api/runtime/ensure",
+    )
+
+    assert source == "registry"
+    assert path_inject == {}
+    assert route_pattern == "/api/runtime/ensure"
+    assert getattr(handler, "_defaultspack_flow_route_handler", False) is True
+
+    with patch("domain.function_runtime.bridge.invoke_function") as invoke, patch(
+        "transport.http.invoke_block",
+        return_value={
+            "status": "ok",
+            "data": {"operation_id": "runtime-ensure-1", "status": "running"},
+        },
+    ) as legacy:
+        result = handler(
+            {
+                http._LOCAL_UI_APPROVAL_CONTEXT_FLAG: True,
+                "provider_id": "windows_wsl",
+            },
+            params,
+        )
+
+    assert result == {
+        "status": "ok",
+        "data": {"operation_id": "runtime-ensure-1", "status": "running"},
+    }
+    invoke.assert_not_called()
+    legacy.assert_called_once()
+    assert legacy.call_args.args[0] == "blocks.sandbox.api"
+    assert legacy.call_args.args[1] == {
+        "_handler": "runtime_ensure",
+        "_method": "POST",
+        "provider_id": "windows_wsl",
+    }
+    assert legacy.call_args.args[2]["_tool_server_approved"] is True
+    assert legacy.call_args.args[2]["source"] == "defaultspack_local_ui"
+    assert legacy.call_args.args[2]["_defaultspack_http_route_adapter"] is True
+
+
 def test_fallback_http_explicit_timeout_overrides_default():
     from transport.http import DefaultsHttpServer
 
