@@ -1671,6 +1671,36 @@ function isMimoCodingConversation(conversation: Conversation | null): boolean {
   );
 }
 
+export function isCodingConversation(conversation: Pick<Conversation, "conversation_kind" | "metadata" | "tags"> | null | undefined): boolean {
+  if (!conversation) return false;
+  const metadataMode = typeof conversation.metadata?.mode === "string"
+    ? conversation.metadata.mode.trim().toLowerCase()
+    : "";
+  return (
+    conversation.conversation_kind === "coding"
+    || metadataMode === "coding"
+    || conversation.tags?.includes("coding")
+  );
+}
+
+export function resolvedChatComposerMode({
+  pathname,
+  storedMode,
+  activeConversation,
+  hasCodingWorkspaceSurface = false,
+}: {
+  pathname: string;
+  storedMode: AppMode;
+  activeConversation?: Pick<Conversation, "conversation_kind" | "metadata" | "tags"> | null;
+  hasCodingWorkspaceSurface?: boolean;
+}): AppMode {
+  if (pathname === "/coding" || hasCodingWorkspaceSurface || isCodingConversation(activeConversation)) {
+    return "coding";
+  }
+  if (storedMode === "coding" || storedMode === "chat") return "agent";
+  return storedMode;
+}
+
 function settingList(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map((item) => String(item).trim()).filter(Boolean);
@@ -2388,6 +2418,18 @@ function ChatApp() {
   const isDesktopsWorkspace = activeWorkspaceKind === "desktops";
   const isToolsWorkspace = activeWorkspaceKind === "tools";
   const isNewConversation = activeConversation === null || activeConversation.messages.length === 0;
+  const hasCodingWorkspaceSurface = activeWorkspaceKind === "coding" || Boolean(
+    pendingNewTaskContext?.workspaceId
+    || pendingNewTaskContext?.workspaceRoot
+    || pendingNewTaskContext?.rumiDataPath,
+  );
+  const effectiveComposerMode = resolvedChatComposerMode({
+    pathname: window.location.pathname,
+    storedMode: mode,
+    activeConversation,
+    hasCodingWorkspaceSurface,
+  });
+  const isCodingComposerMode = effectiveComposerMode === "coding";
   useEffect(() => {
     setWorkspaceTabs((current) => current.map((tab) => {
       if (tab.id !== activeWorkspaceTabId || tab.kind !== "chat") return tab;
@@ -2411,7 +2453,7 @@ function ChatApp() {
   const spotlightShortcutEnabled = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_enabled, true);
   const spotlightShortcutTextInput = parseCommandBoolean(settingsValues.general?.spotlight_shortcut_text_input, true);
   const spotlightShortcutLabel = spotlightShortcutEnabled ? shortcutLabel(spotlightShortcut) : "Off";
-  const composerMode = mode as ComposerCommandMode;
+  const composerMode = effectiveComposerMode as ComposerCommandMode;
   const templateAiInputMetadata = useMemo(
     () => selectTemplateAiInput(catalog, composerMode),
     [catalog, composerMode],
@@ -2687,10 +2729,10 @@ function ChatApp() {
       .filter((command) => command.id !== "think" || profileSupportsThinking(activeProfile))
       .map((command) => ({
         ...command,
-        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
-        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === mode,
+        active: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === effectiveComposerMode,
+        enabled: command.id === "yolo" ? (yoloMode || ultraYoloMode) : command.id === "ultra_yolo" ? ultraYoloMode : command.id === "deepthink" ? deepthinkEnabled : command.id === effectiveComposerMode,
       }));
-  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, mode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
+  }, [activeProfile, deepthinkEnabled, effectiveCommandCatalog, effectiveComposerMode, selectableModelProfiles, settingsValues.commands?.show_advanced_commands, slashCommandsEnabled, ultraYoloMode, yoloMode]);
   const modelCommandCandidates = composerCandidateMenu?.mode === "model" ? composerCandidateMenu.candidates : [];
   const unknownBlockStrategy = String(settingsValues.chat_rendering?.unknown_block_strategy ?? "hidden");
   const showWidgets = settingsValues.chat_rendering?.show_widgets !== false;
@@ -2883,10 +2925,10 @@ function ChatApp() {
   }, [activeConversationId]);
 
   useEffect(() => {
-    if (mode === "coding") {
+    if (isCodingComposerMode) {
       void loadCodingWorkspaces().then((result) => loadCodingContext(result.selected_workspace_id ?? null));
     }
-  }, [mode, loadCodingContext, loadCodingWorkspaces]);
+  }, [isCodingComposerMode, loadCodingContext, loadCodingWorkspaces]);
 
   useEffect(() => {
     if (window.location.pathname !== "/coding") return;
@@ -3828,7 +3870,7 @@ function ChatApp() {
         }
         return;
       case "set_mode_coding":
-        handleModeChange(mode === "coding" ? "agent" : "coding");
+        handleModeChange(isCodingComposerMode ? "agent" : "coding");
         return;
       case "set_mode_chat":
         handleModeChange("agent");
@@ -4119,7 +4161,7 @@ function ChatApp() {
   };
 
   const handleAtFileAttach = (path: string) => {
-    if (mode !== "coding") return;
+    if (!isCodingComposerMode) return;
     if (hasWorkspaceAttachment(attachedFiles, path)) return;
 
     void api.readWorkspaceFile(path, { workspace_id: effectiveWorkspaceId })
@@ -4803,7 +4845,7 @@ function ChatApp() {
     const groupIdForSubmit = pendingNewTaskContext?.groupId ?? activeContextForSubmit.groupId;
     const workspaceIdForSubmit = pendingNewTaskContext?.workspaceId
       ?? activeContextForSubmit.workspaceId
-      ?? (mode === "coding" ? selectedCodingWorkspaceId : null);
+      ?? (isCodingComposerMode ? selectedCodingWorkspaceId : null);
     const workspaceLabelForSubmit = pendingNewTaskContext?.workspaceLabel
       ?? activeContextForSubmit.workspaceLabel
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.label
@@ -4813,7 +4855,7 @@ function ChatApp() {
       ?? codingWorkspaces.find((workspace) => workspace.workspace_id === workspaceIdForSubmit)?.root_path
       ?? null;
     const rumiDataPathForSubmit = pendingNewTaskContext?.rumiDataPath ?? activeContextForSubmit.rumiDataPath ?? null;
-    const isCodingWorkspaceSubmit = mode === "coding" || Boolean(workspaceIdForSubmit);
+    const isCodingWorkspaceSubmit = isCodingComposerMode || Boolean(workspaceIdForSubmit);
     let submittedConversationRuntimeId: string | null = null;
     let markInterruptedAssistant: ((streamError: ChatStreamInterruptedError) => void) | null = null;
 
@@ -5166,7 +5208,7 @@ function ChatApp() {
         attachments: submittedAttachments,
         tools: shouldSendExplicitToolSelection ? submittedToolIds : undefined,
         metadata: {
-          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : mode,
+          mode: isOperationsMode ? "operations_company" : isMimoCodingMode ? "mimo_coding_company" : isCodingWorkspaceSubmit ? "coding" : effectiveComposerMode,
           ...(groupIdForSubmit ? { group_id: groupIdForSubmit } : {}),
           ...(rumiDataPathForSubmit ? { rumi_data_path: rumiDataPathForSubmit } : {}),
           ...(isOperationsMode ? {
@@ -5332,7 +5374,7 @@ function ChatApp() {
   };
 
   const Renderers = useMemo(() => resolveDefaultspackRenderers(catalog), [catalog]);
-  const codingSidebarPanel = mode === "coding" ? (
+  const codingSidebarPanel = isCodingComposerMode ? (
     <CodingCockpit
       variant="sidebar"
       workspaces={codingWorkspaces}
@@ -5447,7 +5489,7 @@ function ChatApp() {
       modelStatusIndicators={composerModelStatusIndicators}
       voiceInputEnabled={settingsValues.general?.voice_input_enabled !== false}
       voiceInputUseAi={settingsValues.general?.voice_input_use_ai === true}
-      mode={mode}
+      mode={effectiveComposerMode}
       codingContext={codingContext}
       codingWorkspaces={codingWorkspaces}
       selectedCodingWorkspaceId={effectiveWorkspaceId}

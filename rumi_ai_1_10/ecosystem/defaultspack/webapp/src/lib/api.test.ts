@@ -5,7 +5,7 @@ import type { ComposerCommandItem } from "./api";
 import { authorityApprovalRuntimeContent } from "./authorityApproval";
 import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicySettings } from "./templateAiInput";
-import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedFrontendCommandArgs } from "../App";
+import { frontendCommandArgs, keepSelectedToolsAfterSend, parseCommandBoolean, parseSlashCommandInput, resolveUltraYoloModeState, resolvedChatComposerMode, resolvedFrontendCommandArgs } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
 const RISKY_AUTHORITY_FOLLOWUP_PHRASES = [
@@ -669,6 +669,41 @@ test("history sidebar auto-compacts on narrow screens", () => {
   assert.equal(shouldAutoCompactHistory(390), true);
   assert.equal(shouldAutoCompactHistory(759), true);
   assert.equal(shouldAutoCompactHistory(760), false);
+});
+
+test("chat composer mode ignores stale coding storage on plain chat route", () => {
+  const plainWorkspaceChat = {
+    conversation_kind: "chat",
+    metadata: { workspace_id: "ws-main" },
+    tags: [],
+  };
+  const codingConversation = {
+    conversation_kind: "coding",
+    metadata: { workspace_id: "ws-main" },
+    tags: ["coding"],
+  };
+
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "coding",
+    activeConversation: plainWorkspaceChat,
+  }), "agent");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "agent",
+    activeConversation: codingConversation,
+  }), "coding");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/coding",
+    storedMode: "agent",
+    activeConversation: plainWorkspaceChat,
+  }), "coding");
+  assert.equal(resolvedChatComposerMode({
+    pathname: "/chat",
+    storedMode: "agent",
+    activeConversation: null,
+    hasCodingWorkspaceSurface: true,
+  }), "coding");
 });
 
 test("executeUiCommand preserves model candidate results", async () => {
