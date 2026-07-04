@@ -238,6 +238,65 @@ test("SettingsModalRenderer renders template slash command registration field", 
   assert.match(html, /YOLO/);
 });
 
+test("SettingsModalRenderer constrains long readonly paths inside settings cards", () => {
+  const longTemplatePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/templates/very/deep/path/with/no-natural-breaks/ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns";
+  const longProfilePath = "/Users/demo/Library/Application Support/Rumi/extensions/external-custom/profiles/another/very/deep/path/with/no-natural-breaks/ExternalCustomProfileExtensionThatWouldOtherwiseOverlap";
+  const html = renderToStaticMarkup(
+    createElement(SettingsModalRenderer, {
+      isOpen: true,
+      activeSectionId: "packs",
+      catalog: {
+        sidebar: { filters: [], items: [] },
+        settings: { sections: [], values: {} },
+        chat_rendering: { renderers: [] },
+        extension_points: [],
+      },
+      health: null,
+      previewsCount: 0,
+      settingsSections: [
+        {
+          id: "external_custom",
+          label: "External Custom",
+          fields: [
+            {
+              id: "custom_template_path",
+              label: "Template Extension Path",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longTemplatePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+            {
+              id: "custom_profile_paths",
+              label: "Profile Extension Paths",
+              type: "readonly",
+              control_center_section: "packs",
+              default: longProfilePath,
+            } as TemplateSettingsField & Record<string, unknown>,
+          ] as unknown as SettingsSection["fields"],
+        },
+      ],
+      settingsValues: {
+        external_custom: {
+          custom_template_path: longTemplatePath,
+          custom_profile_paths: longProfilePath,
+        },
+      },
+      onClose: () => undefined,
+      onSettingChange: () => undefined,
+    }),
+  );
+
+  assert.match(html, /External Custom/);
+  assert.match(html, /Template Extension Path/);
+  assert.match(html, /Profile Extension Paths/);
+  assert.match(html, /min-w-0 rounded-lg border border-zinc-800 bg-zinc-950\/50 p-4/);
+  assert.match(html, /group\/readonly flex min-w-0/);
+  assert.match(html, /min-w-0 flex-1 whitespace-pre-wrap break-all/);
+  assert.match(html, /ExternalCustomTemplateExtensionThatWouldOtherwiseOverflowColumns/);
+  assert.match(html, /ExternalCustomProfileExtensionThatWouldOtherwiseOverlap/);
+  assert.match(html, /title="Copy"/);
+});
+
 test("slash command settings keep unsaved empty rows with stable row ids", () => {
   let nextId = 0;
   const rows = slashCommandDraftRowsFromValue([], () => `row-${++nextId}`);
