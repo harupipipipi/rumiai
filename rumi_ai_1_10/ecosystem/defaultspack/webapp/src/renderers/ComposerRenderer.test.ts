@@ -157,24 +157,36 @@ test("model picker width follows the compact model name only", () => {
 
 test("model candidate popup anchors to the right edge of the model control", () => {
   assert.deepEqual(
-    modelCandidatePopupStyleForAnchor({ left: 820, right: 1010, top: 410 }, 1280),
+    modelCandidatePopupStyleForAnchor({ left: 820, right: 1010, top: 410, bottom: 446 }, 1280, 844),
     {
+      bottom: 442,
       left: 550,
-      top: 402,
+      maxHeight: 320,
       width: 460,
-      transform: "translateY(-100%)",
     },
   );
 });
 
 test("model candidate popup stays inside the viewport when anchored near the left edge", () => {
   assert.deepEqual(
-    modelCandidatePopupStyleForAnchor({ left: 40, right: 180, top: 210 }, 360),
+    modelCandidatePopupStyleForAnchor({ left: 40, right: 180, top: 210, bottom: 246 }, 360, 640),
+    {
+      bottom: 438,
+      left: 8,
+      maxHeight: 194,
+      width: 344,
+    },
+  );
+});
+
+test("model candidate popup can open below when there is not enough room above", () => {
+  assert.deepEqual(
+    modelCandidatePopupStyleForAnchor({ left: 56, right: 320, top: 20, bottom: 56 }, 390, 844),
     {
       left: 8,
-      top: 202,
-      width: 344,
-      transform: "translateY(-100%)",
+      maxHeight: 320,
+      top: 64,
+      width: 374,
     },
   );
 });
@@ -313,6 +325,8 @@ test("composer renders template-provided slash command suggestions", () => {
   assert.match(html, /Commands/);
   assert.match(html, /\/context-txt/);
   assert.match(html, /Write a context handoff file/);
+  assert.match(html, /class="[^"]*fixed[^"]*w-\[min\(420px,calc\(100vw-16px\)\)\][^"]*flex-col[^"]*overflow-hidden/);
+  assert.match(html, /class="[^"]*min-h-0[^"]*flex-1[^"]*overflow-y-auto/);
 });
 
 test("composer suppresses slash command suggestions when template disables slash commands", () => {
