@@ -13,6 +13,7 @@
   "host_execution": false,
   "calling_convention": "subprocess",
   "entrypoint": "main.py:run",
+  "timeout_seconds": 240,
   "vocab_aliases": [
     "defaults.tool.subagent",
     "defaultspack.tool.subagent"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULTSPACK_ROOT = ROOT / "ecosystem" / "defaultspack"
@@ -147,6 +149,158 @@ def test_rumi_default_tools_subagent_compat_uses_dispatcher(monkeypatch, tmp_pat
     assert child["metadata"]["company_id"] == "mimo-coding-company"
 
 
+def test_subagent_mentions_resolve_mimo_target_persona(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    ChatStore._instance = None
+    parent = ChatStore().create_conversation(
+        model="stub/default",
+        metadata={"profile_id": "defaultspack.mimo_coding_company"},
+    )
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input",
+        lambda _envelope, _context: {"status": "ok", "assistant_text": "coded"},
+    )
+
+    result = SubagentController().run(
+        {"task": "@coding_engineer patch the focused failing test"},
+        {"conversation_id": parent["id"], "model": "stub/default"},
+    )
+
+    assert result["summary"] == "coded"
+    assert result["target_agent_id"] == "coding_engineer"
+    child = ChatStore().get_conversation(result["child_conversation_id"])
+    assert child["agent_id"] == "coding_engineer"
+    assert child["metadata"]["subagent"]["target"]["source"] == "mention"
+
+
+def test_subagent_unknown_target_returns_structured_error(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    parent = _parent_conversation()
+
+    result = ToolExecutor()._execute_local(
+        "subagent",
+        {"task": "@ghost_worker take this"},
+        {"conversation_id": parent["id"], "model": "stub/default"},
+    )
+
+    assert result["is_error"] is True
+    assert result["delegation_error"]["category"] == "target"
+    assert result["delegation_error"]["code"] == "SUBAGENT_TARGET_UNKNOWN"
+
+
+def test_subagent_route_failure_returns_structured_error(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    parent = _parent_conversation()
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input",
+        lambda _envelope, _context: {
+            "status": "error",
+            "code": "UNKNOWN_INPUT_ACTION",
+            "error": "unknown input action",
+        },
+    )
+
+    with pytest.raises(Exception) as raised:
+        SubagentController().run({"task": "delegate this"}, {"conversation_id": parent["id"], "model": "stub/default"})
+
+    error = raised.value
+    assert getattr(error, "category") == "route"
+    assert getattr(error, "code") == "SUBAGENT_UNKNOWN_INPUT_ACTION"
+    assert error.to_error()["details"]["route"] == "chat.message"
+
+
+def test_subagent_timeout_failure_returns_structured_tool_error(monkeypatch, tmp_path):
+    _configure_paths(monkeypatch, tmp_path)
+    parent = _parent_conversation()
+
+    monkeypatch.setattr(
+        "ecosystem.rumi_default_tools_pack.domain.tool.subagent.dispatch_input",
+        lambda _envelope, _context: {
+            "status": "error",
+            "code": "TIMEOUT",
+            "error": "child route timed out",
+        },
+    )
+
+    result = ToolExecutor()._execute_local(
+        "subagent",
+        {"task": "delegate this"},
+        {"conversation_id": parent["id"], "model": "stub/default"},
+    )
+
+    assert result["is_error"] is True
+    assert result["delegation_error"]["category"] == "timeout"
+    assert result["widget"]["delegation_error"]["actionable_hint"]
+
+
+def test_subagent_function_response_preserves_structured_error():
+    class Response:
+        success = True
+        error = None
+        output = {
+            "result": "child route timed out",
+            "is_error": True,
+            "widget": {
+                "type": "subagent",
+                "delegation_error": {
+                    "type": "subagent_delegation_error",
+                    "category": "timeout",
+                    "code": "SUBAGENT_TIMEOUT",
+                    "message": "child route timed out",
+                    "details": {"route": "function.call"},
+                },
+            },
+        }
+
+    result = ToolExecutor._tool_response_from_capability(Response(), {"name": "subagent"})
+
+    assert result["is_error"] is True
+    assert result["delegation_error"]["category"] == "timeout"
+
+
+def test_agent_run_subagent_delegate_queue_status_is_structured(monkeypatch):
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "ok",
+            "delegate": {"execution_id": "agent_queued", "status": "queued"},
+            "result": {"status": "queued"},
+        }
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block(
+        {"role_id": "delegate", "payload": {"task": "delegate this", "agent_id": "coding_engineer"}},
+        {"conversation_id": "conv_1"},
+    )
+
+    assert result["status"] == "ok"
+    assert result["data"]["delegation_status"]["category"] == "queue"
+    assert result["data"]["delegation_status"]["execution_id"] == "agent_queued"
+
+
+def test_agent_run_subagent_delegate_policy_error_is_structured(monkeypatch):
+    def fake_dispatch(envelope, context):
+        return {
+            "status": "error",
+            "code": "PERMISSION_DENIED",
+            "error": "agent delegation denied by policy",
+        }
+
+    monkeypatch.setattr("domain.input.dispatcher.dispatch_input", fake_dispatch)
+
+    result = run_subagent_block(
+        {"role_id": "delegate", "payload": {"task": "delegate this", "agent_id": "coding_engineer"}},
+        {"conversation_id": "conv_1"},
+    )
+
+    assert result["status"] == "error"
+    details = result["error"]["details"]
+    assert details["delegation_error"]["category"] == "policy"
+    assert details["delegation_error"]["code"] == "SUBAGENT_PERMISSION_DENIED"
+
+
 def test_tool_selector_no_longer_depends_on_special_subagent_only_path(monkeypatch):
     seen: dict[str, object] = {}
 
@@ -193,3 +347,4 @@ def test_subagent_alias_does_not_bypass_tool_policy_or_approval():
 
     assert result["is_error"] is True
     assert result["rejected_by_policy"] is True
+    assert result["delegation_error"]["category"] == "policy"

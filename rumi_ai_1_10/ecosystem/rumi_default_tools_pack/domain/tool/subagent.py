@@ -12,6 +12,12 @@ for _path in (str(_PACK_ROOT), str(_DEFAULTSPACK_ROOT)):
 
 from domain.chat.store import ChatStore
 from domain.input import RumiInputEnvelope, dispatch_input
+from domain.agent.subagent_delegation import (
+    SubagentDelegationError,
+    classify_delegation_result,
+    classify_exception,
+    resolve_subagent_target,
+)
 
 
 class SubagentController:
@@ -22,20 +28,36 @@ class SubagentController:
         context = context or {}
         parent_id = str(context.get("conversation_id") or arguments.get("parent_conversation_id") or "").strip()
         if not parent_id:
-            raise ValueError("parent conversation is required for subagent")
+            raise SubagentDelegationError(
+                "parent conversation is required for subagent",
+                category="target",
+                code="SUBAGENT_PARENT_CONVERSATION_REQUIRED",
+                details={"route": "chat.message"},
+            )
 
         task = str(arguments.get("task") or arguments.get("prompt") or "").strip()
         if not task:
-            raise ValueError("'task' is required for subagent")
+            raise SubagentDelegationError(
+                "'task' is required for subagent",
+                category="target",
+                code="SUBAGENT_TASK_REQUIRED",
+                details={"route": "chat.message", "parent_conversation_id": parent_id},
+            )
 
         store = ChatStore()
         parent = store.get_conversation(parent_id)
         if parent is None:
-            raise ValueError("parent conversation not found")
+            raise SubagentDelegationError(
+                "parent conversation not found",
+                category="target",
+                code="SUBAGENT_PARENT_CONVERSATION_NOT_FOUND",
+                details={"route": "chat.message", "parent_conversation_id": parent_id},
+            )
 
         model = str(arguments.get("model") or context.get("model") or parent.get("model") or "stub/default")
         title = str(arguments.get("title") or task[:48] or "Subagent").strip()
-        agent_id = str(arguments.get("agent_id") or context.get("agent_id") or "subagent")
+        target = resolve_subagent_target(arguments, context, task)
+        agent_id = str(target.get("agent_id") or context.get("agent_id") or "subagent")
         parent_metadata = parent.get("metadata") if isinstance(parent.get("metadata"), dict) else {}
         if not isinstance(parent_metadata, dict):
             parent_metadata = {}
@@ -64,6 +86,12 @@ class SubagentController:
                 "subagent": {
                     "task": task,
                     "source": "subagent_tool",
+                    "target": {
+                        "agent_id": agent_id,
+                        "source": target.get("source"),
+                        "requested": target.get("requested"),
+                        "mentions": target.get("mentions", []),
+                    },
                 },
             },
         )
@@ -101,37 +129,56 @@ class SubagentController:
             message_metadata["profile_id"] = context.get("profile_id").strip()
         if agent_id:
             message_metadata["agent_id"] = agent_id
+            message_metadata["target_agent_id"] = agent_id
         effective_task = task
         if inherited_tools:
             effective_task = (
                 "Use the connected tools directly. Do not claim missing repo or file access unless a tool call fails.\n\n"
                 + task
             )
-        result = dispatch_input(
-            RumiInputEnvelope(
-                role="user",
-                input=effective_task,
-                chat={"conversation_id": child["id"], "title": title, "model": model},
-                source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
-                target={
-                    "conversation_id": child["id"],
-                    "direct": True,
-                    "model_route": {"preferred_model": model},
+        route = "chat.message"
+        try:
+            result = dispatch_input(
+                RumiInputEnvelope(
+                    role="user",
+                    input=effective_task,
+                    chat={"conversation_id": child["id"], "title": title, "model": model},
+                    source={"kind": "internal", "provider": "subagent", "event_id": "subagent:" + child["id"]},
+                    target={
+                        "conversation_id": child["id"],
+                        "direct": True,
+                        "model_route": {"preferred_model": model},
+                        "agent_id": agent_id,
+                    },
+                    delivery={"action_id": route},
+                    metadata=message_metadata,
+                    params=params,
+                    tools=inherited_tools,
+                ),
+                {
+                    **context,
+                    "agent_id": agent_id,
+                    "subagent_parent_agent_id": context.get("agent_id"),
+                    "chat_history_mode": "current_turn",
                 },
-                delivery={"action_id": "chat.message"},
-                metadata=message_metadata,
-                params=params,
-                tools=inherited_tools,
-            ),
-            {**context, "chat_history_mode": "current_turn"},
-        )
+            )
+        except Exception as exc:
+            raise classify_exception(exc, route=route, target_agent_id=agent_id) from exc
         if result.get("status") != "ok":
-            raise RuntimeError(str(result.get("error") or "failed to dispatch subagent conversation"))
+            raise classify_delegation_result(result, route=route, target_agent_id=agent_id)
         summary = str(result.get("assistant_text") or "Subagent completed.").strip()
         return {
             "action": "subagent.run",
             "parent_conversation_id": parent_id,
             "child_conversation_id": child["id"],
+            "target_agent_id": agent_id,
+            "target": {
+                "agent_id": agent_id,
+                "source": target.get("source"),
+                "requested": target.get("requested"),
+                "mentions": target.get("mentions", []),
+            },
+            "route": route,
             "title": title,
             "task": task,
             "summary": summary,
