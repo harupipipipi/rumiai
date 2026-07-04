@@ -344,6 +344,7 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/defaultspack", "_handle_static") in routes
     assert ("GET", "/pack/defaultspack", "_handle_static") in routes
     assert ("GET", "/coding", "_handle_static") in routes
+    assert ("GET", "/calendar", "_handle_static") in routes
     assert ("GET", "/approval", "_handle_static") in routes
     assert ("POST", "/api/authority/browser-ui-operator", "_handle_authority_browser_ui_operator") in routes
     assert ("GET", "/ambient", "_handle_static") in routes
@@ -353,6 +354,13 @@ def test_always_available_routes_include_ambient_shell():
     assert ("GET", "/host-permissions", "_handle_static") in routes
     assert ("GET", "/adaptive", "_handle_static") in routes
     assert ("GET", "/operating-profile", "_handle_static") in routes
+
+
+def test_calendar_route_is_spa_shell_fallback():
+    from ecosystem.defaultspack.transport.http import DefaultsHttpServer
+
+    assert DefaultsHttpServer._is_spa_shell_fallback_route("GET", "/calendar")
+    assert DefaultsHttpServer._is_spa_shell_fallback_route("GET", "/calendar/")
 
 
 def test_routes_json_transport_direct_entries_match_canonical_registry():
@@ -1480,6 +1488,7 @@ def test_routes_json_documents_new_route_groups():
     expected = {
         ("POST", "/api/authority/browser-ui-operator"),
         ("GET", "/chat"),
+        ("GET", "/calendar"),
         ("GET", "/defaultspack"),
         ("GET", "/pack/defaultspack"),
         ("GET", "/approval"),
