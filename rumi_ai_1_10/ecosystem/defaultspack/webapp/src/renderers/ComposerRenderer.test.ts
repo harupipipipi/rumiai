@@ -796,3 +796,24 @@ test("composer copy resolver suppresses internal template implementation copy", 
     templateHelp: "Template-composed composer: slash commands, mentions, files",
   }), "Enterで送信 · ファイル添付対応");
 });
+
+test("composer placeholder keeps route modes distinct from generic template copy", () => {
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: false,
+    mode: "agent",
+    placeholder: "指示を入力するか、/ でツール・コマンドを選択します...",
+    templatePlaceholder: "メッセージを入力...",
+  }), "タスクを入力...");
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: false,
+    mode: "chat",
+    placeholder: "指示を入力するか、/ でツール・コマンドを選択します...",
+    templatePlaceholder: "メッセージを入力...",
+  }), "指示を入力するか、/ でツール・コマンドを選択します...");
+  assert.equal(composerPlaceholderCopy({
+    isSteerMode: false,
+    mode: "chat",
+    placeholder: "指示を入力するか、/ でツール・コマンドを選択します...",
+    templatePlaceholder: "Ask with context.txt in mind",
+  }), "Ask with context.txt in mind");
+});

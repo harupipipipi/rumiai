@@ -11,6 +11,7 @@ import {
   MIMO_CODING_DEFAULT_VISION_MODEL,
   frontendCommandArgs,
   frontendModeForCommandAction,
+  frontendModeForPathname,
   keepSelectedToolsAfterSend,
   parseCommandBoolean,
   parseSlashCommandInput,
@@ -368,6 +369,15 @@ test("chat slash command resolves to distinct chat mode instead of agent mode", 
   assert.equal(frontendModeForCommandAction(actionFor(agent?.command), "chat"), "agent");
   assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "chat"), "coding");
   assert.equal(frontendModeForCommandAction(actionFor(coding?.command), "coding"), "agent");
+});
+
+test("direct chat agent and coding routes resolve distinct frontend modes", () => {
+  assert.equal(frontendModeForPathname("/chat"), "chat");
+  assert.equal(frontendModeForPathname("/chat/"), "chat");
+  assert.equal(frontendModeForPathname("/agent"), "agent");
+  assert.equal(frontendModeForPathname("/agent/"), "agent");
+  assert.equal(frontendModeForPathname("/coding"), "coding");
+  assert.equal(frontendModeForPathname("/defaultspack"), null);
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {

@@ -2248,6 +2248,14 @@ export function frontendModeForCommandAction(action: string, currentMode: AppMod
   }
 }
 
+export function frontendModeForPathname(pathname: string): AppMode | null {
+  const normalized = (pathname || "/").replace(/\/+$/, "") || "/";
+  if (normalized === "/coding") return "coding";
+  if (normalized === "/chat") return "chat";
+  if (normalized === "/agent") return "agent";
+  return null;
+}
+
 export function frontendCommandArgs(
   parsedArgs: Record<string, unknown>,
   backendArgs: unknown,
@@ -2984,8 +2992,9 @@ function ChatApp() {
   }, [mode, loadCodingContext, loadCodingWorkspaces]);
 
   useEffect(() => {
-    if (window.location.pathname !== "/coding") return;
-    setMode("coding");
+    const routeMode = frontendModeForPathname(window.location.pathname);
+    if (!routeMode) return;
+    setMode(routeMode);
   }, [setMode]);
 
   useEffect(() => {
@@ -3306,6 +3315,7 @@ function ChatApp() {
     const handlePopState = () => {
       setError(null);
       const routeKind = workspaceKindForPathname(window.location.pathname) ?? "chat";
+      const routeMode = frontendModeForPathname(window.location.pathname) ?? (routeKind === "coding" ? "coding" : "agent");
       if (routeKind !== "chat") {
         const routeTabId = `workspace-tab-route-${routeKind}`;
         setWorkspaceTabs((current) => (
@@ -3314,10 +3324,10 @@ function ChatApp() {
             : [...current, createWorkspaceTab(routeKind, { id: routeTabId })]
         ));
         setActiveWorkspaceTabId(routeTabId);
-        setMode(routeKind === "coding" ? "coding" : "agent");
+        setMode(routeMode);
       } else {
         setActiveWorkspaceTabId(DEFAULT_WORKSPACE_TAB_ID);
-        setMode("agent");
+        setMode(routeMode);
       }
       void loadConversation(chatIdFromLocation(), false).catch((loadError) => {
         setError(loadError instanceof Error ? loadError.message : "会話の読み込みに失敗しました。");
@@ -6172,7 +6182,7 @@ export default function App() {
   if (pathname === "/adaptive" || pathname === "/operating-profile") {
     return <AdaptiveRuntimePage />;
   }
-  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat") {
+  if (pathname === "/defaultspack" || pathname === "/pack/defaultspack" || pathname === "/chat" || pathname === "/agent") {
     return <ChatApp />;
   }
   return <ChatApp />;

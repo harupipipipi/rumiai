@@ -7,7 +7,7 @@ import {
 
 export function workspaceKindForPathname(pathname: string): WorkspaceTabKind | null {
   const normalized = (pathname || "/").replace(/\/+$/, "") || "/";
-  if (normalized === "/chat" || normalized === "/defaultspack" || normalized === "/pack/defaultspack" || normalized === "/") {
+  if (normalized === "/chat" || normalized === "/agent" || normalized === "/defaultspack" || normalized === "/pack/defaultspack" || normalized === "/") {
     return "chat";
   }
   if (normalized === "/coding") return "coding";

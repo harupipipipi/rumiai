@@ -26,6 +26,21 @@ class TestDefaultspackUiRegistry(unittest.TestCase):
 
         return f"{encode({'alg': 'none'})}.{encode(payload)}."
 
+    def test_lightweight_settings_read_skips_derived_refresh(self):
+        from domain.frontend.registry import FrontendRegistry
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            registry = FrontendRegistry(Path(tmpdir))
+            with patch.object(
+                registry,
+                "_refresh_derived_settings",
+                side_effect=AssertionError("lightweight settings must not refresh derived state"),
+            ):
+                values = registry._read_settings(lightweight=True)
+
+        self.assertIn("general", values)
+        self.assertIn("models", values)
+
     def test_catalog_merges_tool_registry_and_extension_manifest(self):
         from domain.frontend.registry import FrontendRegistry
 
