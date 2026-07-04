@@ -20,6 +20,7 @@ import {
   resolveMimoVisionModel,
   resolveUltraYoloModeState,
   resolvedFrontendCommandArgs,
+  shouldRunFrontendCommandLocally,
 } from "../App";
 import { shouldAutoCompactHistory } from "../App";
 
@@ -378,6 +379,30 @@ test("direct chat agent and coding routes resolve distinct frontend modes", () =
   assert.equal(frontendModeForPathname("/agent/"), "agent");
   assert.equal(frontendModeForPathname("/coding"), "coding");
   assert.equal(frontendModeForPathname("/defaultspack"), null);
+});
+
+test("built-in frontend slash commands run locally instead of falling through to backend execution", () => {
+  const builtInAgentCommand: ComposerCommandItem = {
+    id: "agent",
+    name: "agent",
+    label: "Agent Mode",
+    category: "mode",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "frontend", action: "set_mode_agent" },
+  };
+  const backendCommand: ComposerCommandItem = {
+    id: "context_txt",
+    name: "context-txt",
+    label: "Context TXT",
+    category: "tools",
+    visibility: "default",
+    risk: "low",
+    execution: { type: "pack_block", qualified_name: "defaultspack:context_txt.run" },
+  };
+
+  assert.equal(shouldRunFrontendCommandLocally(builtInAgentCommand), true);
+  assert.equal(shouldRunFrontendCommandLocally(backendCommand), false);
 });
 
 test("composer command merge keeps backend command definitions authoritative", () => {

@@ -67,7 +67,7 @@ import { normalizeLocale } from "./lib/i18n";
 import { shortcutLabel, shortcutSpecMatchesEvent } from "./lib/keyboardShortcuts";
 import { PENDING_CHAT_REQUEST_TTL_MS, shouldClearPendingAfterConversationRefresh, type PendingChatRequest } from "./lib/pendingChat";
 import { reportClientDiagnostic } from "./lib/clientDiagnostics";
-import { isRegisteredSlashCommand, mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
+import { mergeRegisteredSlashCommands, registeredSlashCommandsFromSettings } from "./lib/registeredSlashCommands";
 import { selectTemplateAiInput, selectTemplateComposerInput, selectTemplateToolPolicy, templateAiInputParamsPayload, templateComposerWidgetsForInput, templateFeatureFlagEnabled, templateToolPolicyReferencePayload, templateToolPolicySettings } from "./lib/templateAiInput";
 import { isHumanOperatorCanvasPreview, isRecord, toolPreviewsFromMessages, upsertStreamActivityEvent } from "./lib/toolPreviews";
 import { extractLatestToolFilterContext } from "./lib/toolStatus";
@@ -2279,6 +2279,10 @@ export function frontendModeForPathname(pathname: string): AppMode | null {
   return null;
 }
 
+export function shouldRunFrontendCommandLocally(command: ComposerCommandItem | undefined): boolean {
+  return command?.execution.type === "frontend";
+}
+
 export function frontendCommandArgs(
   parsedArgs: Record<string, unknown>,
   backendArgs: unknown,
@@ -4088,7 +4092,7 @@ function ChatApp() {
     }
     try {
       setError(null);
-      if (isRegisteredSlashCommand(parsed.command)) {
+      if (shouldRunFrontendCommandLocally(parsed.command)) {
         const frontendAction = parsed.command.execution.type === "frontend" ? parsed.command.execution.action : undefined;
         runFrontendCommandAction(frontendAction, parsed.command, parsed.args);
         return true;
