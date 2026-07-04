@@ -38,6 +38,9 @@ sys.modules.setdefault("rumi_ai_1_10.core_runtime.pack_api_server", _dummy_pack_
 _dummy_paths = types.ModuleType("rumi_ai_1_10.core_runtime.paths")
 _dummy_paths.is_path_within = MagicMock(return_value=True)
 _dummy_paths.BASE_DIR = Path("/tmp")
+_dummy_paths.USER_DATA_DIR = Path("/tmp/user_data")
+_dummy_paths.CORE_PACK_DIR = Path("/tmp/core")
+_dummy_paths.CORE_PACK_ID_PREFIX = "core."
 _dummy_paths.discover_pack_locations = MagicMock(return_value=[])
 _dummy_paths.ECOSYSTEM_DIR = "/tmp/ecosystem"
 sys.modules.setdefault("rumi_ai_1_10.core_runtime.paths", _dummy_paths)
@@ -58,6 +61,7 @@ class _PackStatus:
 
 
 _dummy_approval.PackStatus = _PackStatus
+_dummy_approval.get_approval_manager = MagicMock()
 sys.modules.setdefault("rumi_ai_1_10.core_runtime.approval_manager", _dummy_approval)
 
 # network_grant_manager
@@ -655,7 +659,36 @@ class TestPackLifecycleHandlers:
             result = handler._pack_apply("s1", mode="replace")
         assert result["success"] is True
         mock_applier.apply.assert_called_once_with(
-            "s1", mode="replace",
+            "s1", mode="replace", actor="api_user",
+        )
+
+    def test_pack_apply_propagates_authenticated_actor(self):
+        handler = _LifecycleStub()
+        handler._authenticated_principal = types.SimpleNamespace(
+            principal_id="profile:work__surface:mobile",
+        )
+        mock_importer = MagicMock()
+        mock_importer.get_staging_meta.return_value = {"id": "s1"}
+        mock_apply_result = MagicMock()
+        mock_apply_result.to_dict.return_value = {
+            "success": True,
+            "applied": True,
+        }
+        mock_applier = MagicMock()
+        mock_applier.apply.return_value = mock_apply_result
+        with patch(
+            "rumi_ai_1_10.core_runtime.pack_importer.get_pack_importer",
+            return_value=mock_importer,
+        ), patch(
+            "rumi_ai_1_10.core_runtime.pack_applier.get_pack_applier",
+            return_value=mock_applier,
+        ):
+            result = handler._pack_apply("s1", mode="replace")
+        assert result["success"] is True
+        mock_applier.apply.assert_called_once_with(
+            "s1",
+            mode="replace",
+            actor="profile:work__surface:mobile",
         )
 
     def test_pack_apply_staging_not_found(self):
